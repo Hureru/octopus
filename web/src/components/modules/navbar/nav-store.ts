@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type NavItem = 'home' | 'channel' | 'group' | 'model' | 'log' | 'setting'
+export type NavItem = 'home' | 'site' | 'channel' | 'group' | 'model' | 'log' | 'setting'
 
-const NAV_ORDER: NavItem[] = ['home', 'channel', 'group', 'model', 'log', 'setting']
+const NAV_ORDER: NavItem[] = ['home', 'site', 'channel', 'group', 'model', 'log', 'setting']
 
 interface NavState {
     activeItem: NavItem

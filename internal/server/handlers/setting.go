@@ -77,6 +77,13 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+	case model.SettingKeySiteSyncInterval, model.SettingKeySiteCheckinInterval:
+		hours, err := strconv.Atoi(setting.Value)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
 	}
 	resp.Success(c, setting)
 }
@@ -155,6 +162,12 @@ func decodeDBDump(body []byte, dump *model.DBDump) error {
 
 	if dump.Version == 0 &&
 		len(dump.Channels) == 0 &&
+		len(dump.Sites) == 0 &&
+		len(dump.SiteAccounts) == 0 &&
+		len(dump.SiteTokens) == 0 &&
+		len(dump.SiteUserGroups) == 0 &&
+		len(dump.SiteModels) == 0 &&
+		len(dump.SiteChannelBindings) == 0 &&
 		len(dump.Groups) == 0 &&
 		len(dump.GroupItems) == 0 &&
 		len(dump.Settings) == 0 &&

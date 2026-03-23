@@ -8,6 +8,7 @@ import { SettingLLMPrice } from './LLMPrice';
 import { SettingAccount } from './Account';
 import { SettingInfo } from './Info';
 import { SettingLLMSync } from './LLMSync';
+import { SettingSiteAutomation } from './SiteAutomation';
 import { SettingLog } from './Log';
 import { SettingBackup } from './Backup';
 import { SettingCircuitBreaker } from './CircuitBreaker';
@@ -24,6 +25,7 @@ export function Setting() {
                 <SettingLLMPrice key="setting-llmprice" />
                 <SettingAPIKey key="setting-apikey" />
                 <SettingLLMSync key="setting-llmsync" />
+                <SettingSiteAutomation key="setting-site-automation" />
                 <SettingCircuitBreaker key="setting-circuit-breaker" />
                 <SettingBackup key="setting-backup" />
             </PageWrapper>

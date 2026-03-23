@@ -106,6 +106,15 @@ export function AppContainer() {
                             );
                             break;
                         }
+                        case 'site': {
+                            prefetches.push(
+                                queryClient.prefetchQuery({
+                                    queryKey: ['sites', 'list'],
+                                    queryFn: async () => apiClient.get('/api/v1/site/list'),
+                                })
+                            );
+                            break;
+                        }
                         case 'channel': {
                             prefetches.push(
                                 queryClient.prefetchQuery({
@@ -269,3 +278,4 @@ export function AppContainer() {
         </motion.div>
     );
 }
+

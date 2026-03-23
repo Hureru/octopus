@@ -1,0 +1,107 @@
+{
+  "name": "Octopus",
+  "short_name": "Octopus",
+  "description": "为个人打造的简单、美观、优雅的 LLM API 聚合与负载均衡服务",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#EAE9E3",
+  "background_color": "#EAE9E3",
+  "categories": [
+    "utilities",
+    "productivity",
+    "developer tools"
+  ],
+  "icons": [
+    {
+      "src": "./web-app-manifest-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./web-app-manifest-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./web-app-manifest-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "./screenshot/desktop-home.png",
+      "sizes": "1437x918",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "首页仪表盘"
+    },
+    {
+      "src": "./screenshot/desktop-channel.png",
+      "sizes": "1437x918",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "渠道管理"
+    },
+    {
+      "src": "./screenshot/mobile-home.png",
+      "sizes": "1290x2796",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "移动端首页"
+    },
+    {
+      "src": "./screenshot/mobile-channel.png",
+      "sizes": "1290x2796",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "移动端渠道"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "渠道管理",
+      "short_name": "渠道",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./web-app-manifest-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "模型价格管理",
+      "short_name": "价格",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./web-app-manifest-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "分组管理",
+      "short_name": "分组",
+      "url": "./",
+      "icons": [
+        {
+          "src": "./web-app-manifest-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

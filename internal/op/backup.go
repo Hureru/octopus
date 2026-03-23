@@ -29,6 +29,24 @@ func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DB
 	if err := conn.Find(&d.ChannelKeys).Error; err != nil {
 		return nil, fmt.Errorf("export channel_keys: %w", err)
 	}
+	if err := conn.Find(&d.Sites).Error; err != nil {
+		return nil, fmt.Errorf("export sites: %w", err)
+	}
+	if err := conn.Find(&d.SiteAccounts).Error; err != nil {
+		return nil, fmt.Errorf("export site_accounts: %w", err)
+	}
+	if err := conn.Find(&d.SiteTokens).Error; err != nil {
+		return nil, fmt.Errorf("export site_tokens: %w", err)
+	}
+	if err := conn.Find(&d.SiteUserGroups).Error; err != nil {
+		return nil, fmt.Errorf("export site_user_groups: %w", err)
+	}
+	if err := conn.Find(&d.SiteModels).Error; err != nil {
+		return nil, fmt.Errorf("export site_models: %w", err)
+	}
+	if err := conn.Find(&d.SiteChannelBindings).Error; err != nil {
+		return nil, fmt.Errorf("export site_channel_bindings: %w", err)
+	}
 	if err := conn.Find(&d.Groups).Error; err != nil {
 		return nil, fmt.Errorf("export groups: %w", err)
 	}
@@ -98,6 +116,36 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 			return fmt.Errorf("import channel_keys: %w", err)
 		} else {
 			res.RowsAffected["channel_keys"] = n
+		}
+		if n, err := createDoNothing(tx, dump.Sites); err != nil {
+			return fmt.Errorf("import sites: %w", err)
+		} else {
+			res.RowsAffected["sites"] = n
+		}
+		if n, err := createDoNothing(tx, dump.SiteAccounts); err != nil {
+			return fmt.Errorf("import site_accounts: %w", err)
+		} else {
+			res.RowsAffected["site_accounts"] = n
+		}
+		if n, err := createDoNothing(tx, dump.SiteTokens); err != nil {
+			return fmt.Errorf("import site_tokens: %w", err)
+		} else {
+			res.RowsAffected["site_tokens"] = n
+		}
+		if n, err := createDoNothing(tx, dump.SiteUserGroups); err != nil {
+			return fmt.Errorf("import site_user_groups: %w", err)
+		} else {
+			res.RowsAffected["site_user_groups"] = n
+		}
+		if n, err := createDoNothing(tx, dump.SiteModels); err != nil {
+			return fmt.Errorf("import site_models: %w", err)
+		} else {
+			res.RowsAffected["site_models"] = n
+		}
+		if n, err := createDoNothing(tx, dump.SiteChannelBindings); err != nil {
+			return fmt.Errorf("import site_channel_bindings: %w", err)
+		} else {
+			res.RowsAffected["site_channel_bindings"] = n
 		}
 		if n, err := createDoNothing(tx, dump.Groups); err != nil {
 			return fmt.Errorf("import groups: %w", err)

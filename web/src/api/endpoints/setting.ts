@@ -16,6 +16,8 @@ export const SettingKey = {
     StatsSaveInterval: 'stats_save_interval',
     ModelInfoUpdateInterval: 'model_info_update_interval',
     SyncLLMInterval: 'sync_llm_interval',
+    SiteSyncInterval: 'site_sync_interval',
+    SiteCheckinInterval: 'site_checkin_interval',
     RelayLogKeepEnabled: 'relay_log_keep_enabled',
     RelayLogKeepPeriod: 'relay_log_keep_period',
     CORSAllowOrigins: 'cors_allow_origins',
@@ -209,4 +211,5 @@ export function useImportDB() {
         },
     });
 }
+
 

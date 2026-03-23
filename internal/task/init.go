@@ -17,6 +17,8 @@ const (
 	TaskSyncLLM      = "sync_llm"
 	TaskCleanLLM     = "clean_llm"
 	TaskBaseUrlDelay = "base_url_delay"
+	TaskSiteSync     = "site_sync"
+	TaskSiteCheckin  = "site_checkin"
 )
 
 func Init() {
@@ -44,6 +46,22 @@ func Init() {
 	}
 	syncLLMInterval := time.Duration(syncLLMIntervalHours) * time.Hour
 	Register(string(model.SettingKeySyncLLMInterval), syncLLMInterval, true, SyncModelsTask)
+
+	siteSyncIntervalHours, err := op.SettingGetInt(model.SettingKeySiteSyncInterval)
+	if err != nil {
+		log.Warnf("failed to get site sync interval: %v", err)
+		return
+	}
+	siteSyncInterval := time.Duration(siteSyncIntervalHours) * time.Hour
+	Register(string(model.SettingKeySiteSyncInterval), siteSyncInterval, true, SiteSyncTask)
+
+	siteCheckinIntervalHours, err := op.SettingGetInt(model.SettingKeySiteCheckinInterval)
+	if err != nil {
+		log.Warnf("failed to get site checkin interval: %v", err)
+		return
+	}
+	siteCheckinInterval := time.Duration(siteCheckinIntervalHours) * time.Hour
+	Register(string(model.SettingKeySiteCheckinInterval), siteCheckinInterval, true, SiteCheckinTask)
 
 	// 注册统计保存任务
 	statsSaveIntervalMinutes, err := op.SettingGetInt(model.SettingKeyStatsSaveInterval)
