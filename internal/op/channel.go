@@ -114,6 +114,11 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	if !ok {
 		return nil, fmt.Errorf("channel not found")
 	}
+	if _, managed, err := ChannelManagedBinding(req.ID, ctx); err != nil {
+		return nil, err
+	} else if managed {
+		return nil, fmt.Errorf("managed site channel is read-only; please edit it from the site account")
+	}
 
 	tx := db.GetDB().WithContext(ctx).Begin()
 	defer func() {
@@ -254,6 +259,11 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("channel not found")
 	}
+	if _, managed, err := ChannelManagedBinding(id, ctx); err != nil {
+		return err
+	} else if managed {
+		return fmt.Errorf("managed site channel is read-only; please enable or disable it from the site account")
+	}
 	if err := db.GetDB().WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", enabled).Error; err != nil {
 		return err
 	}
@@ -266,6 +276,11 @@ func ChannelDel(id int, ctx context.Context) error {
 	ch, ok := channelCache.Get(id)
 	if !ok {
 		return fmt.Errorf("channel not found")
+	}
+	if _, managed, err := ChannelManagedBinding(id, ctx); err != nil {
+		return err
+	} else if managed {
+		return fmt.Errorf("managed site channel cannot be deleted directly; delete the site account or site binding instead")
 	}
 
 	// 开启事务

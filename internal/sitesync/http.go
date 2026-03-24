@@ -14,21 +14,42 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 )
 
-func siteHTTPClient(siteRecord *model.Site) (*http.Client, error) {
+func siteHTTPClient(siteRecord *model.Site, accounts ...*model.SiteAccount) (*http.Client, error) {
 	if siteRecord == nil {
 		return nil, fmt.Errorf("site is nil")
 	}
-	if !siteRecord.Proxy {
+	useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, accounts...)
+	if !useProxy {
 		return client.GetHTTPClientSystemProxy(false)
 	}
-	if siteRecord.SiteProxy == nil || strings.TrimSpace(*siteRecord.SiteProxy) == "" {
+	if proxyURL == nil || strings.TrimSpace(*proxyURL) == "" {
 		return client.GetHTTPClientSystemProxy(true)
 	}
-	return client.GetHTTPClientCustomProxy(strings.TrimSpace(*siteRecord.SiteProxy))
+	return client.GetHTTPClientCustomProxy(strings.TrimSpace(*proxyURL))
 }
 
-func requestJSON(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string) (map[string]any, error) {
-	httpClient, err := siteHTTPClient(siteRecord)
+func resolveSiteAccountProxy(siteRecord *model.Site, accounts ...*model.SiteAccount) (bool, *string) {
+	if len(accounts) > 0 && accounts[0] != nil && accounts[0].AccountProxy != nil {
+		trimmed := strings.TrimSpace(*accounts[0].AccountProxy)
+		if trimmed != "" {
+			return true, &trimmed
+		}
+	}
+	if siteRecord == nil || !siteRecord.Proxy {
+		return false, nil
+	}
+	if siteRecord.SiteProxy == nil {
+		return true, nil
+	}
+	trimmed := strings.TrimSpace(*siteRecord.SiteProxy)
+	if trimmed == "" {
+		return true, nil
+	}
+	return true, &trimmed
+}
+
+func requestJSON(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string, accounts ...*model.SiteAccount) (map[string]any, error) {
+	httpClient, err := siteHTTPClient(siteRecord, accounts...)
 	if err != nil {
 		return nil, err
 	}

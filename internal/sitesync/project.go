@@ -84,6 +84,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	for _, groupKey := range desiredKeys {
 		group := groupMap[groupKey]
 		groupTokens := tokenGroups[groupKey]
+		useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
 		channelPayload := model.Channel{
 			Name:         buildManagedChannelName(siteRecord, account, group),
 			Type:         platformOutboundType(siteRecord.Platform),
@@ -92,11 +93,11 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			Keys:         buildChannelKeys(groupTokens),
 			Model:        strings.Join(modelNames, ","),
 			CustomModel:  "",
-			Proxy:        siteRecord.Proxy,
+			Proxy:        useProxy,
 			AutoSync:     false,
 			AutoGroup:    model.AutoGroupTypeNone,
 			CustomHeader: siteRecord.CustomHeader,
-			ChannelProxy: siteRecord.SiteProxy,
+			ChannelProxy: proxyURL,
 		}
 
 		binding, exists := bindingMap[groupKey]

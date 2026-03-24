@@ -3,7 +3,6 @@ package op
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -57,43 +56,64 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		return nil, fmt.Errorf("site not found")
 	}
 
+	merged := site
 	var selectFields []string
 	updates := model.Site{ID: req.ID}
 
 	if req.Name != nil {
+		merged.Name = *req.Name
 		selectFields = append(selectFields, "name")
-		updates.Name = strings.TrimSpace(*req.Name)
 	}
 	if req.Platform != nil {
-		if err := req.Platform.Validate(); err != nil {
-			return nil, err
-		}
+		merged.Platform = *req.Platform
 		selectFields = append(selectFields, "platform")
-		updates.Platform = *req.Platform
 	}
 	if req.BaseURL != nil {
-		baseURL := strings.TrimRight(strings.TrimSpace(*req.BaseURL), "/")
+		merged.BaseURL = *req.BaseURL
 		selectFields = append(selectFields, "base_url")
-		updates.BaseURL = baseURL
 	}
 	if req.Enabled != nil {
+		merged.Enabled = *req.Enabled
 		selectFields = append(selectFields, "enabled")
-		updates.Enabled = *req.Enabled
 	}
 	if req.Proxy != nil {
+		merged.Proxy = *req.Proxy
 		selectFields = append(selectFields, "proxy")
-		updates.Proxy = *req.Proxy
 	}
 	if req.SiteProxy != nil {
+		merged.SiteProxy = req.SiteProxy
 		selectFields = append(selectFields, "site_proxy")
-		trimmed := strings.TrimSpace(*req.SiteProxy)
-		if trimmed != "" {
-			updates.SiteProxy = &trimmed
-		}
 	}
 	if req.CustomHeader != nil {
+		merged.CustomHeader = *req.CustomHeader
 		selectFields = append(selectFields, "custom_header")
-		updates.CustomHeader = *req.CustomHeader
+	}
+
+	if len(selectFields) > 0 {
+		if err := merged.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	if req.Name != nil {
+		updates.Name = merged.Name
+	}
+	if req.Platform != nil {
+		updates.Platform = merged.Platform
+	}
+	if req.BaseURL != nil {
+		updates.BaseURL = merged.BaseURL
+	}
+	if req.Enabled != nil {
+		updates.Enabled = merged.Enabled
+	}
+	if req.Proxy != nil {
+		updates.Proxy = merged.Proxy
+	}
+	if req.SiteProxy != nil {
+		updates.SiteProxy = merged.SiteProxy
+	}
+	if req.CustomHeader != nil {
+		updates.CustomHeader = merged.CustomHeader
 	}
 
 	if len(selectFields) > 0 {
@@ -149,71 +169,106 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		return nil, fmt.Errorf("site account not found")
 	}
 
+	merged := account
 	var selectFields []string
 	updates := model.SiteAccount{ID: req.ID}
 
 	if req.Name != nil {
+		merged.Name = *req.Name
 		selectFields = append(selectFields, "name")
-		updates.Name = strings.TrimSpace(*req.Name)
 	}
 	if req.CredentialType != nil {
-		if err := req.CredentialType.Validate(); err != nil {
-			return nil, err
-		}
+		merged.CredentialType = *req.CredentialType
 		selectFields = append(selectFields, "credential_type")
-		updates.CredentialType = *req.CredentialType
 	}
 	if req.Username != nil {
+		merged.Username = *req.Username
 		selectFields = append(selectFields, "username")
-		updates.Username = strings.TrimSpace(*req.Username)
 	}
 	if req.Password != nil {
+		merged.Password = *req.Password
 		selectFields = append(selectFields, "password")
-		updates.Password = strings.TrimSpace(*req.Password)
 	}
 	if req.AccessToken != nil {
+		merged.AccessToken = *req.AccessToken
 		selectFields = append(selectFields, "access_token")
-		updates.AccessToken = strings.TrimSpace(*req.AccessToken)
 	}
 	if req.APIKey != nil {
+		merged.APIKey = *req.APIKey
 		selectFields = append(selectFields, "api_key")
-		updates.APIKey = strings.TrimSpace(*req.APIKey)
+	}
+	if req.AccountProxy != nil {
+		merged.AccountProxy = req.AccountProxy
+		selectFields = append(selectFields, "account_proxy")
 	}
 	if req.Enabled != nil {
+		merged.Enabled = *req.Enabled
 		selectFields = append(selectFields, "enabled")
-		updates.Enabled = *req.Enabled
 	}
 	if req.AutoSync != nil {
+		merged.AutoSync = *req.AutoSync
 		selectFields = append(selectFields, "auto_sync")
-		updates.AutoSync = *req.AutoSync
 	}
 	if req.AutoCheckin != nil {
+		merged.AutoCheckin = *req.AutoCheckin
 		selectFields = append(selectFields, "auto_checkin")
-		updates.AutoCheckin = *req.AutoCheckin
 	}
 	if req.RandomCheckin != nil {
+		merged.RandomCheckin = *req.RandomCheckin
 		selectFields = append(selectFields, "random_checkin")
-		updates.RandomCheckin = *req.RandomCheckin
 	}
 	if req.CheckinIntervalHours != nil {
-		if *req.CheckinIntervalHours <= 0 {
-			return nil, fmt.Errorf("checkin interval hours must be greater than 0")
-		}
-		if *req.CheckinIntervalHours > 720 {
-			return nil, fmt.Errorf("checkin interval hours must be less than or equal to 720")
-		}
+		merged.CheckinIntervalHours = *req.CheckinIntervalHours
 		selectFields = append(selectFields, "checkin_interval_hours")
-		updates.CheckinIntervalHours = *req.CheckinIntervalHours
 	}
 	if req.CheckinRandomWindowMinutes != nil {
-		if *req.CheckinRandomWindowMinutes < 0 {
-			return nil, fmt.Errorf("checkin random window minutes must be greater than or equal to 0")
-		}
-		if *req.CheckinRandomWindowMinutes > 1440 {
-			return nil, fmt.Errorf("checkin random window minutes must be less than or equal to 1440")
-		}
+		merged.CheckinRandomWindowMinutes = *req.CheckinRandomWindowMinutes
 		selectFields = append(selectFields, "checkin_random_window_minutes")
-		updates.CheckinRandomWindowMinutes = *req.CheckinRandomWindowMinutes
+	}
+
+	if len(selectFields) > 0 {
+		if err := merged.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	if req.Name != nil {
+		updates.Name = merged.Name
+	}
+	if req.CredentialType != nil {
+		updates.CredentialType = merged.CredentialType
+	}
+	if req.Username != nil {
+		updates.Username = merged.Username
+	}
+	if req.Password != nil {
+		updates.Password = merged.Password
+	}
+	if req.AccessToken != nil {
+		updates.AccessToken = merged.AccessToken
+	}
+	if req.APIKey != nil {
+		updates.APIKey = merged.APIKey
+	}
+	if req.AccountProxy != nil {
+		updates.AccountProxy = merged.AccountProxy
+	}
+	if req.Enabled != nil {
+		updates.Enabled = merged.Enabled
+	}
+	if req.AutoSync != nil {
+		updates.AutoSync = merged.AutoSync
+	}
+	if req.AutoCheckin != nil {
+		updates.AutoCheckin = merged.AutoCheckin
+	}
+	if req.RandomCheckin != nil {
+		updates.RandomCheckin = merged.RandomCheckin
+	}
+	if req.CheckinIntervalHours != nil {
+		updates.CheckinIntervalHours = merged.CheckinIntervalHours
+	}
+	if req.CheckinRandomWindowMinutes != nil {
+		updates.CheckinRandomWindowMinutes = merged.CheckinRandomWindowMinutes
 	}
 
 	if len(selectFields) > 0 {

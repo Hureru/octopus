@@ -79,6 +79,7 @@ type SiteAccountFormState = {
     password: string;
     access_token: string;
     api_key: string;
+    account_proxy: string;
     enabled: boolean;
     auto_sync: boolean;
     auto_checkin: boolean;
@@ -168,6 +169,7 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
         password: '',
         access_token: '',
         api_key: '',
+        account_proxy: '',
         enabled: true,
         auto_sync: true,
         auto_checkin: true,
@@ -186,6 +188,7 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
         password: account.password,
         access_token: account.access_token,
         api_key: account.api_key,
+        account_proxy: account.account_proxy ?? '',
         enabled: account.enabled,
         auto_sync: account.auto_sync,
         auto_checkin: account.auto_checkin,
@@ -482,6 +485,7 @@ export function Site() {
             password: accountForm.password.trim(),
             access_token: accountForm.access_token.trim(),
             api_key: accountForm.api_key.trim(),
+            account_proxy: accountForm.account_proxy.trim(),
             enabled: accountForm.enabled,
             auto_sync: accountForm.auto_sync,
             auto_checkin: accountForm.auto_checkin,
@@ -705,6 +709,7 @@ export function Site() {
                                                 {account.auto_sync ? <Badge variant="outline">自动同步</Badge> : null}
                                                 {account.auto_checkin ? <Badge variant="outline">自动签到</Badge> : null}
                                                 {account.random_checkin ? <Badge variant="outline">随机时间</Badge> : null}
+                                                {account.account_proxy ? <Badge variant="outline">{account.account_proxy}</Badge> : null}
                                             </div>
 
                                             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -943,6 +948,17 @@ export function Site() {
                                     <Input value={accountForm.api_key} onChange={(event) => setAccountForm((current) => current ? { ...current, api_key: event.target.value } : current)} placeholder="请输入 API Key" className="rounded-xl" />
                                 </label>
                             ) : null}
+
+                            <label className="grid gap-2 text-sm">
+                                <span className="font-medium">账号级代理</span>
+                                <Input
+                                    value={accountForm.account_proxy}
+                                    onChange={(event) => setAccountForm((current) => current ? { ...current, account_proxy: event.target.value } : current)}
+                                    placeholder="可选：例如 socks5://127.0.0.1:7890"
+                                    className="rounded-xl"
+                                />
+                                <span className="text-xs text-muted-foreground">用于该账号的同步、签到和模型拉取；自动投影的 channel 默认也会跟随这里的代理。</span>
+                            </label>
 
                             <div className="grid gap-4 md:grid-cols-4">
                                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">

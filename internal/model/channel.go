@@ -32,6 +32,15 @@ type Channel struct {
 	ChannelProxy  *string               `json:"channel_proxy"`
 	Stats         *StatsChannel         `json:"stats,omitempty" gorm:"foreignKey:ChannelID"`
 	MatchRegex    *string               `json:"match_regex"`
+	Managed       bool                  `json:"managed" gorm:"-"`
+	ManagedSource *ManagedChannelSource `json:"managed_source,omitempty" gorm:"-"`
+}
+
+type ManagedChannelSource struct {
+	SiteID          int    `json:"site_id"`
+	SiteAccountID   int    `json:"site_account_id"`
+	SiteUserGroupID *int   `json:"site_user_group_id,omitempty"`
+	GroupKey        string `json:"group_key"`
 }
 
 type BaseUrl struct {

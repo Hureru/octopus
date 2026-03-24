@@ -64,6 +64,7 @@ type SiteAccount struct {
 	Password                   string               `json:"password"`
 	AccessToken                string               `json:"access_token"`
 	APIKey                     string               `json:"api_key"`
+	AccountProxy               *string              `json:"account_proxy"`
 	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
 	AutoSync                   bool                 `json:"auto_sync" gorm:"default:true"`
 	AutoCheckin                bool                 `json:"auto_checkin" gorm:"default:true"`
@@ -139,6 +140,7 @@ type SiteAccountUpdateRequest struct {
 	Password                   *string             `json:"password,omitempty"`
 	AccessToken                *string             `json:"access_token,omitempty"`
 	APIKey                     *string             `json:"api_key,omitempty"`
+	AccountProxy               *string             `json:"account_proxy,omitempty"`
 	Enabled                    *bool               `json:"enabled,omitempty"`
 	AutoSync                   *bool               `json:"auto_sync,omitempty"`
 	AutoCheckin                *bool               `json:"auto_checkin,omitempty"`
@@ -247,6 +249,14 @@ func (a *SiteAccount) Normalize() {
 	a.Password = strings.TrimSpace(a.Password)
 	a.AccessToken = strings.TrimSpace(a.AccessToken)
 	a.APIKey = strings.TrimSpace(a.APIKey)
+	if a.AccountProxy != nil {
+		trimmed := strings.TrimSpace(*a.AccountProxy)
+		if trimmed == "" {
+			a.AccountProxy = nil
+		} else {
+			a.AccountProxy = &trimmed
+		}
+	}
 	if a.CheckinIntervalHours <= 0 {
 		a.CheckinIntervalHours = 24
 	}

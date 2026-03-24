@@ -41,7 +41,7 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 		if err != nil {
 			return nil, accessToken, err
 		}
-		payload, err := requestJSON(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/checkin"), nil, map[string]string{"Authorization": "Bearer " + accessToken})
+		payload, err := requestJSON(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/checkin"), nil, map[string]string{"Authorization": "Bearer " + accessToken}, account)
 		if err != nil {
 			lowered := strings.ToLower(err.Error())
 			if strings.Contains(lowered, "404") || strings.Contains(lowered, "not found") {
@@ -71,11 +71,11 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		return nil, err
 	}
 
-	tokens, err := fetchManagementTokens(ctx, siteRecord, accessToken)
+	tokens, err := fetchManagementTokens(ctx, siteRecord, account, accessToken)
 	if err != nil {
 		return nil, err
 	}
-	groups, err := fetchManagementGroups(ctx, siteRecord, accessToken)
+	groups, err := fetchManagementGroups(ctx, siteRecord, account, accessToken)
 	if err != nil {
 		groups = nil
 	}
@@ -87,7 +87,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	}
 
 	groups = mergeSiteGroups(groups, tokens)
-	models, err := fetchModelsForSiteToken(ctx, siteRecord, pickModelToken(tokens))
+	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, pickModelToken(tokens))
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 	if accessToken == "" {
 		return nil, fmt.Errorf("access token is required")
 	}
-	tokens, err := fetchSub2APITokens(ctx, siteRecord, accessToken)
+	tokens, err := fetchSub2APITokens(ctx, siteRecord, account, accessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -117,12 +117,12 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 		return nil, fmt.Errorf("no usable site token found")
 	}
 
-	groups, err := fetchSub2APIGroups(ctx, siteRecord, accessToken, tokens)
+	groups, err := fetchSub2APIGroups(ctx, siteRecord, account, accessToken, tokens)
 	if err != nil {
 		groups = nil
 	}
 	groups = mergeSiteGroups(groups, tokens)
-	models, err := fetchModelsForSiteToken(ctx, siteRecord, pickModelToken(tokens))
+	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, pickModelToken(tokens))
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 	if token == "" {
 		return nil, fmt.Errorf("direct token is required")
 	}
-	models, err := fetchModelsForSiteToken(ctx, siteRecord, model.SiteToken{Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true})
+	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, model.SiteToken{Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true})
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func resolveManagedAccessToken(ctx context.Context, siteRecord *model.Site, acco
 		return "", fmt.Errorf("managed access token is not available for credential type %s", account.CredentialType)
 	}
 
-	payload, err := requestJSON(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/login"), map[string]any{"username": account.Username, "password": account.Password}, nil)
+	payload, err := requestJSON(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/login"), map[string]any{"username": account.Username, "password": account.Password}, nil, account)
 	if err != nil {
 		return "", err
 	}

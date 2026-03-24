@@ -63,9 +63,27 @@ func listChannel(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	channelIDs := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		channelIDs = append(channelIDs, channel.ID)
+	}
+	bindingMap, err := op.SiteChannelBindingMapByChannelIDs(channelIDs, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	for i, channel := range channels {
 		stats := op.StatsChannelGet(channel.ID)
 		channels[i].Stats = &stats
+		if binding, ok := bindingMap[channel.ID]; ok {
+			channels[i].Managed = true
+			channels[i].ManagedSource = &model.ManagedChannelSource{
+				SiteID:          binding.SiteID,
+				SiteAccountID:   binding.SiteAccountID,
+				SiteUserGroupID: binding.SiteUserGroupID,
+				GroupKey:        binding.GroupKey,
+			}
+		}
 	}
 	resp.Success(c, channels)
 }

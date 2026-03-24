@@ -144,6 +144,10 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			metrics.Save(c.Request.Context(), true, nil, iter.Attempts())
 			return
 		}
+		if result.Canceled {
+			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
+			return
+		}
 		if result.Written {
 			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
 			return
@@ -190,6 +194,15 @@ func (ra *relayAttempt) attempt() attemptResult {
 	}
 
 	// ====== 失败 ======
+	if isClientCancellation(ra.c.Request.Context(), fwdErr) {
+		return attemptResult{
+			Success:  false,
+			Written:  false,
+			Canceled: true,
+			Err:      fwdErr,
+		}
+	}
+
 	op.ChannelKeyUpdate(ra.usedKey)
 	span.End(dbmodel.AttemptFailed, statusCode, fwdErr.Error())
 
@@ -314,7 +327,11 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 
 	response, err := httpClient.Do(req)
 	if err != nil {
-		log.Warnf("failed to send request: %v", err)
+		if isClientCancellation(req.Context(), err) {
+			log.Infof("request canceled before upstream response: %v", err)
+		} else {
+			log.Warnf("failed to send request: %v", err)
+		}
 		return nil, err
 	}
 

@@ -169,6 +169,11 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                     <h2 className="text-2xl font-bold text-card-foreground">
                         {isEditing ? t('title.edit') : t('title.view')}
                     </h2>
+                    {channel.managed ? (
+                        <Badge variant="outline" className="ml-3 border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                            站点投影
+                        </Badge>
+                    ) : null}
                     <MorphingDialogClose
                         className="relative top-0 right-0"
                         variants={{
@@ -185,6 +190,11 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                     <TabsContents>
                         <TabsContent value="viewing" >
                             <div className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5">
+                                {channel.managed ? (
+                                    <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+                                        这是站点账号自动投影生成的托管 channel。请到站点管理中修改账号、分组、模型、代理或启停状态；该页面不再允许直接编辑、删除或启停，避免被后续投影覆盖。
+                                    </section>
+                                ) : null}
                                 <dl className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                                     <div className="rounded-2xl border bg-linear-to-br from-chart-1/10 to-chart-1/5 p-3 sm:p-4">
                                         <dt className="flex items-center gap-2 mb-2 text-xs font-medium text-muted-foreground">
@@ -422,28 +432,30 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                             </div>
 
                             {/* 操作按钮 */}
-                            <div className="grid gap-3 sm:grid-cols-2 pt-2">
-                                <Button
-                                    onClick={() => (isConfirmingDelete ? setIsConfirmingDelete(false) : setIsEditing(true))}
-                                    variant={isConfirmingDelete ? 'secondary' : 'default'}
-                                    className="w-full rounded-2xl h-12"
-                                >
-                                    {isConfirmingDelete ? t('actions.cancel') : t('actions.edit')}
-                                </Button>
-                                <Button
-                                    onClick={handleDeleteClick}
-                                    disabled={deleteChannel.isPending}
-                                    variant="destructive"
-                                    className="w-full rounded-2xl h-12"
-                                >
-                                    <Trash2 className={`size-4 transition-transform ${isConfirmingDelete ? 'scale-110' : ''}`} />
-                                    {deleteChannel.isPending
-                                        ? t('actions.deleting')
-                                        : isConfirmingDelete
-                                            ? t('actions.confirmDelete')
-                                            : t('actions.delete')}
-                                </Button>
-                            </div>
+                            {!channel.managed ? (
+                                <div className="grid gap-3 sm:grid-cols-2 pt-2">
+                                    <Button
+                                        onClick={() => (isConfirmingDelete ? setIsConfirmingDelete(false) : setIsEditing(true))}
+                                        variant={isConfirmingDelete ? 'secondary' : 'default'}
+                                        className="w-full rounded-2xl h-12"
+                                    >
+                                        {isConfirmingDelete ? t('actions.cancel') : t('actions.edit')}
+                                    </Button>
+                                    <Button
+                                        onClick={handleDeleteClick}
+                                        disabled={deleteChannel.isPending}
+                                        variant="destructive"
+                                        className="w-full rounded-2xl h-12"
+                                    >
+                                        <Trash2 className={`size-4 transition-transform ${isConfirmingDelete ? 'scale-110' : ''}`} />
+                                        {deleteChannel.isPending
+                                            ? t('actions.deleting')
+                                            : isConfirmingDelete
+                                                ? t('actions.confirmDelete')
+                                                : t('actions.delete')}
+                                    </Button>
+                                </div>
+                            ) : null}
                         </TabsContent>
 
                         <TabsContent value="editing">

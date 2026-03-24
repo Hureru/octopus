@@ -52,16 +52,25 @@ export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; st
             <MorphingDialogTrigger className="w-full">
                 <article className="flex flex-col gap-4 rounded-3xl border border-border bg-card text-card-foreground p-4 transition-all duration-300">
                     <header className="relative flex items-center justify-between gap-2">
-                        <Tooltip side="top" sideOffset={10} align="center">
-                            <TooltipTrigger asChild>
-                                <h3 className="text-lg font-bold truncate min-w-0">{channel.name}</h3>
-                            </TooltipTrigger>
-                            <TooltipContent key={channel.name}>{channel.name}</TooltipContent>
-                        </Tooltip>
+                        <div className="min-w-0 flex-1">
+                            <Tooltip side="top" sideOffset={10} align="center">
+                                <TooltipTrigger asChild>
+                                    <h3 className="text-lg font-bold truncate min-w-0">{channel.name}</h3>
+                                </TooltipTrigger>
+                                <TooltipContent key={channel.name}>{channel.name}</TooltipContent>
+                            </Tooltip>
+                            {channel.managed ? (
+                                <div className="mt-1">
+                                    <span className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                                        站点投影
+                                    </span>
+                                </div>
+                            ) : null}
+                        </div>
                         <Switch
                             checked={channel.enabled}
                             onCheckedChange={handleEnableChange}
-                            disabled={enableChannel.isPending}
+                            disabled={enableChannel.isPending || channel.managed}
                             onClick={(e) => e.stopPropagation()}
                         />
                     </header>

@@ -12,8 +12,15 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	sitesvc "github.com/bestruirui/octopus/internal/site"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
 )
+
+func refreshAccountRandomCheckinScheduleBestEffort(ctx context.Context, accountID int) {
+	if err := sitesvc.RefreshAccountRandomCheckinSchedule(ctx, accountID); err != nil {
+		log.Warnf("failed to refresh random checkin schedule (account=%d): %v", accountID, err)
+	}
+}
 
 func init() {
 	router.NewGroupRouter("/api/v1/site").
@@ -133,10 +140,7 @@ func createSiteAccount(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := sitesvc.RefreshAccountRandomCheckinSchedule(c.Request.Context(), account.ID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+	refreshAccountRandomCheckinScheduleBestEffort(c.Request.Context(), account.ID)
 	createdAccount, err := op.SiteAccountGet(account.ID, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -163,10 +167,7 @@ func updateSiteAccount(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := sitesvc.RefreshAccountRandomCheckinSchedule(c.Request.Context(), account.ID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+	refreshAccountRandomCheckinScheduleBestEffort(c.Request.Context(), account.ID)
 	account, err = op.SiteAccountGet(account.ID, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -196,10 +197,7 @@ func enableSiteAccount(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := sitesvc.RefreshAccountRandomCheckinSchedule(c.Request.Context(), request.ID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+	refreshAccountRandomCheckinScheduleBestEffort(c.Request.Context(), request.ID)
 	go func(accountID int) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()

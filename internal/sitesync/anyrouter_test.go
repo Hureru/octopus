@@ -164,7 +164,7 @@ func TestAnyRouterCookieTokenCanProbeUserIDAndSyncTokens(t *testing.T) {
 	defer server.Close()
 
 	site := &model.Site{BaseURL: server.URL}
-	userID, err := anyRouterDiscoverUserID(context.Background(), site, cookieShieldedToken)
+	userID, err := anyRouterDiscoverUserID(context.Background(), site, nil, cookieShieldedToken)
 	if err != nil {
 		t.Fatalf("anyRouterDiscoverUserID returned error: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestAnyRouterCookieTokenCanProbeUserIDAndSyncTokens(t *testing.T) {
 		t.Fatalf("expected discovered user id 131936, got %d", userID)
 	}
 
-	tokens, err := fetchAnyRouterManagementTokens(context.Background(), site, cookieShieldedToken, userID)
+	tokens, err := fetchAnyRouterManagementTokens(context.Background(), site, nil, cookieShieldedToken, userID)
 	if err != nil {
 		t.Fatalf("fetchAnyRouterManagementTokens returned error: %v", err)
 	}

@@ -9,8 +9,8 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 )
 
-func fetchManagementTokens(ctx context.Context, siteRecord *model.Site, accessToken string) ([]model.SiteToken, error) {
-	payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100"), nil, map[string]string{"Authorization": "Bearer " + accessToken})
+func fetchManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]model.SiteToken, error) {
+	payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100"), nil, map[string]string{"Authorization": "Bearer " + accessToken}, account)
 	if err != nil {
 		return nil, err
 	}
@@ -28,11 +28,11 @@ func fetchManagementTokens(ctx context.Context, siteRecord *model.Site, accessTo
 	return tokens, nil
 }
 
-func fetchManagementGroups(ctx context.Context, siteRecord *model.Site, accessToken string) ([]model.SiteUserGroup, error) {
+func fetchManagementGroups(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]model.SiteUserGroup, error) {
 	endpoints := []string{"/api/user/self/groups", "/api/user_group_map"}
 	seen := make(map[string]model.SiteUserGroup)
 	for _, endpoint := range endpoints {
-		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": "Bearer " + accessToken})
+		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": "Bearer " + accessToken}, account)
 		if err != nil {
 			continue
 		}
@@ -54,10 +54,10 @@ func fetchManagementGroups(ctx context.Context, siteRecord *model.Site, accessTo
 	return groups, nil
 }
 
-func fetchSub2APITokens(ctx context.Context, siteRecord *model.Site, accessToken string) ([]model.SiteToken, error) {
+func fetchSub2APITokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]model.SiteToken, error) {
 	endpoints := []string{"/api/v1/keys?page=1&page_size=100", "/api/v1/api-keys?page=1&page_size=100", "/api/v1/keys", "/api/v1/api-keys"}
 	for _, endpoint := range endpoints {
-		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": ensureBearer(accessToken)})
+		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": ensureBearer(accessToken)}, account)
 		if err != nil {
 			continue
 		}
@@ -79,7 +79,7 @@ func fetchSub2APITokens(ctx context.Context, siteRecord *model.Site, accessToken
 	return nil, nil
 }
 
-func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, accessToken string, tokens []model.SiteToken) ([]model.SiteUserGroup, error) {
+func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, tokens []model.SiteToken) ([]model.SiteUserGroup, error) {
 	groups := make([]model.SiteUserGroup, 0)
 	seen := make(map[string]struct{})
 	for _, token := range tokens {
@@ -96,7 +96,7 @@ func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, accessToken
 
 	endpoints := []string{"/api/v1/groups/available", "/api/v1/groups?page=1&page_size=100", "/api/v1/groups"}
 	for _, endpoint := range endpoints {
-		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": ensureBearer(accessToken)})
+		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": ensureBearer(accessToken)}, account)
 		if err != nil {
 			continue
 		}
@@ -108,8 +108,9 @@ func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, accessToken
 	return []model.SiteUserGroup{{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}}, nil
 }
 
-func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, token model.SiteToken) ([]string, error) {
-	channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: siteRecord.BaseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, Proxy: siteRecord.Proxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: siteRecord.SiteProxy}
+func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, token model.SiteToken) ([]string, error) {
+	useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
+	channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: siteRecord.BaseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, Proxy: useProxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: proxyURL}
 	models, err := helper.FetchModels(ctx, channel)
 	if err == nil && len(models) > 0 {
 		return normalizeModelNames(models), nil
@@ -121,7 +122,7 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, token 
 		return normalizeModelNames(models), nil
 	}
 
-	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + token.Token})
+	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + token.Token}, account)
 	if fallbackErr != nil {
 		if err != nil {
 			return nil, err
