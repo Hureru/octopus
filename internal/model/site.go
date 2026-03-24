@@ -64,6 +64,7 @@ type SiteAccount struct {
 	Password                   string               `json:"password"`
 	AccessToken                string               `json:"access_token"`
 	APIKey                     string               `json:"api_key"`
+	PlatformUserID             *int                 `json:"platform_user_id"`
 	AccountProxy               *string              `json:"account_proxy"`
 	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
 	AutoSync                   bool                 `json:"auto_sync" gorm:"default:true"`
@@ -140,6 +141,7 @@ type SiteAccountUpdateRequest struct {
 	Password                   *string             `json:"password,omitempty"`
 	AccessToken                *string             `json:"access_token,omitempty"`
 	APIKey                     *string             `json:"api_key,omitempty"`
+	PlatformUserID             *int                `json:"platform_user_id,omitempty"`
 	AccountProxy               *string             `json:"account_proxy,omitempty"`
 	Enabled                    *bool               `json:"enabled,omitempty"`
 	AutoSync                   *bool               `json:"auto_sync,omitempty"`
@@ -249,6 +251,9 @@ func (a *SiteAccount) Normalize() {
 	a.Password = strings.TrimSpace(a.Password)
 	a.AccessToken = strings.TrimSpace(a.AccessToken)
 	a.APIKey = strings.TrimSpace(a.APIKey)
+	if a.PlatformUserID != nil && *a.PlatformUserID <= 0 {
+		a.PlatformUserID = nil
+	}
 	if a.AccountProxy != nil {
 		trimmed := strings.TrimSpace(*a.AccountProxy)
 		if trimmed == "" {
@@ -290,6 +295,9 @@ func (a *SiteAccount) Validate() error {
 	}
 	if a.CheckinRandomWindowMinutes > 1440 {
 		return fmt.Errorf("checkin random window minutes must be less than or equal to 1440")
+	}
+	if a.PlatformUserID != nil && *a.PlatformUserID <= 0 {
+		return fmt.Errorf("platform user id must be greater than 0")
 	}
 	switch a.CredentialType {
 	case SiteCredentialTypeUsernamePassword:

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent, type ReactNode } from 'react';
 import {
+    type AllAPIHubImportResult,
     Site as SiteRecord,
     SiteAccount,
     SiteCredentialType,
@@ -15,6 +16,7 @@ import {
     useDeleteSiteAccount,
     useEnableSite,
     useEnableSiteAccount,
+    useImportAllAPIHub,
     useSiteList,
     useSyncAllSites,
     useSyncSiteAccount,
@@ -47,6 +49,7 @@ import {
     CalendarCheck2,
     Cable,
     CircleAlert,
+    FileJson,
     FolderTree,
     Globe2,
     KeyRound,
@@ -56,6 +59,8 @@ import {
     RefreshCw,
     Sparkles,
     Trash2,
+    TriangleAlert,
+    Upload,
     UserRound,
     Waypoints,
     X,
@@ -79,6 +84,7 @@ type SiteAccountFormState = {
     password: string;
     access_token: string;
     api_key: string;
+    platform_user_id: string;
     account_proxy: string;
     enabled: boolean;
     auto_sync: boolean;
@@ -169,6 +175,7 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
         password: '',
         access_token: '',
         api_key: '',
+        platform_user_id: '',
         account_proxy: '',
         enabled: true,
         auto_sync: true,
@@ -188,6 +195,7 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
         password: account.password,
         access_token: account.access_token,
         api_key: account.api_key,
+        platform_user_id: account.platform_user_id ? String(account.platform_user_id) : '',
         account_proxy: account.account_proxy ?? '',
         enabled: account.enabled,
         auto_sync: account.auto_sync,
@@ -328,8 +336,12 @@ export function Site() {
     const checkinSiteAccount = useCheckinSiteAccount();
     const syncAllSites = useSyncAllSites();
     const checkinAllSites = useCheckinAllSites();
+    const importAllAPIHub = useImportAllAPIHub();
 
     const [siteDialogOpen, setSiteDialogOpen] = useState(false);
+    const [importPayloadText, setImportPayloadText] = useState('');
+    const [importFile, setImportFile] = useState<File | null>(null);
+    const [lastImportResult, setLastImportResult] = useState<AllAPIHubImportResult | null>(null);
     const [editingSite, setEditingSite] = useState<SiteRecord | null>(null);
     const [siteForm, setSiteForm] = useState<SiteFormState>(createEmptySiteForm());
 
@@ -417,6 +429,7 @@ export function Site() {
             return;
         }
 
+
         const payload = {
             name: siteForm.name.trim(),
             platform: siteForm.platform,
@@ -477,6 +490,12 @@ export function Site() {
             }
         }
 
+        const parsedPlatformUserID = accountForm.platform_user_id.trim() ? Number(accountForm.platform_user_id.trim()) : null;
+        if (parsedPlatformUserID !== null && (!Number.isInteger(parsedPlatformUserID) || parsedPlatformUserID <= 0)) {
+            toast.error('Platform User ID 必须是大于 0 的整数');
+            return;
+        }
+
         const payload = {
             site_id: accountForm.site_id,
             name: accountForm.name.trim(),
@@ -485,6 +504,7 @@ export function Site() {
             password: accountForm.password.trim(),
             access_token: accountForm.access_token.trim(),
             api_key: accountForm.api_key.trim(),
+            platform_user_id: parsedPlatformUserID,
             account_proxy: accountForm.account_proxy.trim(),
             enabled: accountForm.enabled,
             auto_sync: accountForm.auto_sync,
@@ -589,6 +609,28 @@ export function Site() {
         }
     }
 
+    async function handleImportAllAPIHub() {
+        const hasFile = !!importFile;
+        const hasText = !!importPayloadText.trim();
+        if (!hasFile && !hasText) {
+            toast.error('请选择 JSON 文件或粘贴 All API Hub 导出内容');
+            return;
+        }
+
+        try {
+            const result = await importAllAPIHub.mutateAsync({
+                file: importFile,
+                text: importPayloadText,
+            });
+            setLastImportResult(result);
+            setImportFile(null);
+            setImportPayloadText('');
+            toast.success(`导入完成：新增 ${result.created_sites} 个站点，新增 ${result.created_accounts} 个账号，更新 ${result.updated_accounts} 个账号`);
+        } catch (importError) {
+            toast.error(getErrorMessage(importError));
+        }
+    }
+
     return (
         <div className="h-full min-h-0 overflow-y-auto overscroll-contain rounded-t-3xl">
             <PageWrapper className="space-y-4 pb-24 md:pb-4">
@@ -610,6 +652,13 @@ export function Site() {
                             <Button onClick={openCreateSiteDialog} className="rounded-xl">
                                 <Plus className="size-4" />新增站点
                             </Button>
+                            <Button
+                                variant="outline"
+                                className="rounded-xl"
+                                onClick={() => document.getElementById('site-import-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            >
+                                <Upload className="size-4" />导入 All API Hub
+                            </Button>
                             <Button variant="outline" onClick={handleSyncAll} disabled={syncAllSites.isPending} className="rounded-xl">
                                 <RefreshCw className={cn('size-4', syncAllSites.isPending ? 'animate-spin' : '')} />
                                 {syncAllSites.isPending ? '同步中...' : '全量同步'}
@@ -627,6 +676,94 @@ export function Site() {
                         <SiteMetric label="同步到的 Key" value={tokenCount} />
                         <SiteMetric label="同步到的模型" value={modelCount} />
                     </div>
+                </section>
+
+                <section id="site-import-panel" className="rounded-3xl border border-border bg-card p-6">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="max-w-3xl space-y-2">
+                            <div className="flex items-center gap-2 text-base font-semibold">
+                                <FileJson className="size-4" />
+                                <span>导入 All API Hub 账号</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                支持直接上传 All API Hub 导出的 JSON 文件，或粘贴完整导出内容。导入后会按平台和站点地址自动创建或复用站点，并为可同步账号触发后台同步。
+                            </p>
+                        </div>
+                        <Button onClick={handleImportAllAPIHub} disabled={importAllAPIHub.isPending} className="rounded-xl">
+                            <Upload className={cn('size-4', importAllAPIHub.isPending ? 'animate-pulse' : '')} />
+                            {importAllAPIHub.isPending ? '导入中...' : '开始导入'}
+                        </Button>
+                    </div>
+
+                    <div className="mt-5 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                        <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
+                            <div className="text-sm font-medium">上传 JSON 文件</div>
+                            <Input
+                                type="file"
+                                accept=".json,application/json"
+                                onChange={(event) => {
+                                    setImportFile(event.target.files?.[0] ?? null);
+                                    setLastImportResult(null);
+                                }}
+                                className="rounded-xl"
+                            />
+                            <div className="text-xs text-muted-foreground">
+                                {importFile ? `已选择：${importFile.name}` : '支持 All API Hub 导出的 .json 文件'}
+                            </div>
+                            {importFile ? (
+                                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => setImportFile(null)}>
+                                    <X className="size-4" />清除文件
+                                </Button>
+                            ) : null}
+                        </div>
+
+                        <label className="grid gap-2 text-sm">
+                            <span className="font-medium">或粘贴导出 JSON</span>
+                            <textarea
+                                value={importPayloadText}
+                                onChange={(event) => {
+                                    setImportPayloadText(event.target.value);
+                                    setLastImportResult(null);
+                                }}
+                                placeholder='粘贴类似 {"accounts":{"accounts":[...]}} 的完整导出内容'
+                                className="min-h-48 rounded-2xl border border-input bg-background px-4 py-3 font-mono text-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                                导入会保留已存在站点的本地配置；同一分组下的多个 key 后续仍会聚合到同一个托管 channel。
+                            </span>
+                        </label>
+                    </div>
+
+                    {lastImportResult ? (
+                        <div className="mt-5 space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-4">
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+                                <SiteMetric label="新增站点" value={lastImportResult.created_sites} />
+                                <SiteMetric label="复用站点" value={lastImportResult.reused_sites} />
+                                <SiteMetric label="新增账号" value={lastImportResult.created_accounts} />
+                                <SiteMetric label="更新账号" value={lastImportResult.updated_accounts} />
+                                <SiteMetric label="跳过账号" value={lastImportResult.skipped_accounts} />
+                                <SiteMetric label="后台同步" value={lastImportResult.scheduled_sync_accounts} />
+                            </div>
+
+                            <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                <div className="flex items-center gap-2 text-sm font-medium">
+                                    <TriangleAlert className="size-4 text-muted-foreground" />
+                                    <span>导入告警</span>
+                                </div>
+                                {lastImportResult.warnings.length > 0 ? (
+                                    <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                                        {lastImportResult.warnings.map((warning) => (
+                                            <div key={warning} className="break-all rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+                                                {warning}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="mt-3 text-sm text-muted-foreground">本次导入没有告警。</div>
+                                )}
+                            </div>
+                        </div>
+                    ) : null}
                 </section>
 
                 {error ? (
@@ -949,6 +1086,19 @@ export function Site() {
                                 </label>
                             ) : null}
 
+                            {currentPlatform === SitePlatform.NewAPI ? (
+                                <label className="grid gap-2 text-sm">
+                                    <span className="font-medium">Platform User ID</span>
+                                    <Input
+                                        value={accountForm.platform_user_id}
+                                        onChange={(event) => setAccountForm((current) => current ? { ...current, platform_user_id: event.target.value } : current)}
+                                        placeholder="可选：例如 11494"
+                                        className="rounded-xl"
+                                    />
+                                    <span className="text-xs text-muted-foreground">部分 New API 站点同步 token、分组和签到时要求额外提供用户 ID。All API Hub 导入会自动填充该值。</span>
+                                </label>
+                            ) : null}
+
                             <label className="grid gap-2 text-sm">
                                 <span className="font-medium">账号级代理</span>
                                 <Input
@@ -1033,3 +1183,16 @@ export function Site() {
         </div>
     );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

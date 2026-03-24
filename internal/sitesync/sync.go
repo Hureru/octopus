@@ -41,7 +41,7 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 		if err != nil {
 			return nil, accessToken, err
 		}
-		payload, err := requestJSON(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/checkin"), nil, map[string]string{"Authorization": "Bearer " + accessToken}, account)
+		payload, err := requestJSONWithManagedAccessToken(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/checkin"), nil, accessToken, account)
 		if err != nil {
 			lowered := strings.ToLower(err.Error())
 			if strings.Contains(lowered, "404") || strings.Contains(lowered, "not found") {
@@ -87,7 +87,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	}
 
 	groups = mergeSiteGroups(groups, tokens)
-	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, pickModelToken(tokens))
+	models, err := fetchManagementModels(ctx, siteRecord, account, accessToken, pickModelToken(tokens))
 	if err != nil {
 		return nil, err
 	}

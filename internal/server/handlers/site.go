@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -26,6 +28,7 @@ func init() {
 	router.NewGroupRouter("/api/v1/site").
 		Use(middleware.Auth()).
 		AddRoute(router.NewRoute("/list", http.MethodGet).Handle(listSite)).
+		AddRoute(router.NewRoute("/import/all-api-hub", http.MethodPost).Handle(importAllAPIHub)).
 		AddRoute(router.NewRoute("/account/sync/:id", http.MethodPost).Handle(syncSiteAccount)).
 		AddRoute(router.NewRoute("/account/checkin/:id", http.MethodPost).Handle(checkinSiteAccount)).
 		AddRoute(router.NewRoute("/sync-all", http.MethodPost).Handle(syncAllSiteAccounts)).
@@ -54,6 +57,50 @@ func listSite(c *gin.Context) {
 		return
 	}
 	resp.Success(c, sites)
+}
+
+func importAllAPIHub(c *gin.Context) {
+	body, err := readImportPayload(c)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, syncAccountIDs, err := op.SiteImportAllAPIHub(c.Request.Context(), body)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	for _, accountID := range syncAccountIDs {
+		go func(accountID int) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			_, syncErr := sitesvc.SyncAccount(ctx, accountID)
+			if syncErr != nil {
+				log.Warnf("failed to sync imported all api hub account %d: %v", accountID, syncErr)
+			}
+		}(accountID)
+	}
+
+	resp.Success(c, result)
+}
+
+func readImportPayload(c *gin.Context) ([]byte, error) {
+	contentType := c.GetHeader("Content-Type")
+	if strings.Contains(contentType, "multipart/form-data") {
+		fileHeader, err := c.FormFile("file")
+		if err != nil {
+			return nil, err
+		}
+		file, err := fileHeader.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		return io.ReadAll(file)
+	}
+	return io.ReadAll(c.Request.Body)
 }
 
 func createSite(c *gin.Context) {

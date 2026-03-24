@@ -10,7 +10,7 @@ import (
 )
 
 func fetchManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]model.SiteToken, error) {
-	payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100"), nil, map[string]string{"Authorization": "Bearer " + accessToken}, account)
+	payload, err := requestJSONWithManagedAccessToken(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100"), nil, accessToken, account)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func fetchManagementGroups(ctx context.Context, siteRecord *model.Site, account 
 	endpoints := []string{"/api/user/self/groups", "/api/user_group_map"}
 	seen := make(map[string]model.SiteUserGroup)
 	for _, endpoint := range endpoints {
-		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": "Bearer " + accessToken}, account)
+		payload, err := requestJSONWithManagedAccessToken(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, accessToken, account)
 		if err != nil {
 			continue
 		}
@@ -110,22 +110,35 @@ func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, account *mo
 
 func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, token model.SiteToken) ([]string, error) {
 	useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
-	channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: siteRecord.BaseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, Proxy: useProxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: proxyURL}
-	models, err := helper.FetchModels(ctx, channel)
-	if err == nil && len(models) > 0 {
-		return normalizeModelNames(models), nil
+	var (
+		firstErr error
+		models   []string
+	)
+
+	for _, baseURL := range buildModelFetchBaseURLs(siteRecord) {
+		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, Proxy: useProxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: proxyURL}
+		fetched, err := helper.FetchModels(ctx, channel)
+		if err == nil && len(fetched) > 0 {
+			return normalizeModelNames(fetched), nil
+		}
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if len(fetched) > 0 {
+			models = fetched
+		}
 	}
 	if siteRecord.Platform != model.SitePlatformOneHub && siteRecord.Platform != model.SitePlatformDoneHub {
-		if err != nil {
-			return nil, err
+		if firstErr != nil {
+			return nil, firstErr
 		}
 		return normalizeModelNames(models), nil
 	}
 
 	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + token.Token}, account)
 	if fallbackErr != nil {
-		if err != nil {
-			return nil, err
+		if firstErr != nil {
+			return nil, firstErr
 		}
 		return nil, fallbackErr
 	}
@@ -140,8 +153,8 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		}
 	}
 	if len(modelSet) == 0 {
-		if err != nil {
-			return nil, err
+		if firstErr != nil {
+			return nil, firstErr
 		}
 		return normalizeModelNames(models), nil
 	}
@@ -150,6 +163,59 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		names = append(names, name)
 	}
 	return normalizeModelNames(names), nil
+}
+
+func fetchManagementModels(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, token model.SiteToken) ([]string, error) {
+	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
+	if len(models) > 0 || siteRecord.Platform != model.SitePlatformNewAPI {
+		return models, err
+	}
+
+	sessionModels, sessionErr := fetchManagedSessionModels(ctx, siteRecord, account, accessToken)
+	if len(sessionModels) > 0 {
+		return sessionModels, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, sessionErr
+}
+
+func fetchManagedSessionModels(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]string, error) {
+	if strings.TrimSpace(accessToken) == "" {
+		return nil, nil
+	}
+	payload, err := requestJSONWithManagedAccessToken(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/user/models"), nil, accessToken, account)
+	if err != nil {
+		return nil, err
+	}
+	return anyRouterParseModelNames(payload), nil
+}
+
+func buildModelFetchBaseURLs(siteRecord *model.Site) []string {
+	if siteRecord == nil {
+		return nil
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(siteRecord.BaseURL), "/")
+	if baseURL == "" {
+		return nil
+	}
+
+	candidates := []string{baseURL}
+	if sitePlatformUsesV1ModelEndpoint(siteRecord.Platform) && !strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
+		candidates = append(candidates, baseURL+"/v1")
+	}
+	return candidates
+}
+
+func sitePlatformUsesV1ModelEndpoint(platform model.SitePlatform) bool {
+	switch platform {
+	case model.SitePlatformClaude, model.SitePlatformGemini:
+		return false
+	default:
+		return true
+	}
 }
 
 func buildSiteModels(names []string, source string) []model.SiteModel {

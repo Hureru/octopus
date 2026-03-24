@@ -197,6 +197,10 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		merged.APIKey = *req.APIKey
 		selectFields = append(selectFields, "api_key")
 	}
+	if req.PlatformUserID != nil {
+		merged.PlatformUserID = req.PlatformUserID
+		selectFields = append(selectFields, "platform_user_id")
+	}
 	if req.AccountProxy != nil {
 		merged.AccountProxy = req.AccountProxy
 		selectFields = append(selectFields, "account_proxy")
@@ -248,6 +252,9 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 	}
 	if req.APIKey != nil {
 		updates.APIKey = merged.APIKey
+	}
+	if req.PlatformUserID != nil {
+		updates.PlatformUserID = merged.PlatformUserID
 	}
 	if req.AccountProxy != nil {
 		updates.AccountProxy = merged.AccountProxy

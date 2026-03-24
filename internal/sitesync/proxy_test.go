@@ -53,3 +53,47 @@ func TestResolveSiteAccountProxyDisablesProxyWhenNoConfigExists(t *testing.T) {
 		t.Fatalf("expected no proxy URL, got %#v", proxyURL)
 	}
 }
+
+func TestBuildManagedAuthHeadersUsesCookieThenBearerFallback(t *testing.T) {
+	headers := buildManagedAuthHeaders("sid=cookie-session")
+	if len(headers) != 2 {
+		t.Fatalf("expected two auth header candidates, got %d", len(headers))
+	}
+	if headers[0]["Cookie"] != "sid=cookie-session" {
+		t.Fatalf("expected cookie header candidate first, got %#v", headers[0])
+	}
+	if headers[1]["Authorization"] != "Bearer sid=cookie-session" {
+		t.Fatalf("expected bearer fallback candidate second, got %#v", headers[1])
+	}
+}
+
+func TestBuildManagedAuthHeadersUsesBearerOnlyForPlainToken(t *testing.T) {
+	headers := buildManagedAuthHeaders("plain-token")
+	if len(headers) != 1 {
+		t.Fatalf("expected one auth header candidate, got %d", len(headers))
+	}
+	if headers[0]["Authorization"] != "Bearer plain-token" {
+		t.Fatalf("expected bearer header for plain token, got %#v", headers[0])
+	}
+}
+
+func TestLooksLikeCookieToken(t *testing.T) {
+	cases := []struct {
+		name  string
+		token string
+		want  bool
+	}{
+		{name: "cookie-pair", token: "sid=cookie-session", want: true},
+		{name: "cookie-chain", token: "sid=a; theme=dark", want: true},
+		{name: "bearer-token", token: "Bearer plain-token", want: false},
+		{name: "plain-token", token: "plain-token", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := looksLikeCookieToken(tc.token); got != tc.want {
+				t.Fatalf("looksLikeCookieToken(%q) = %v, want %v", tc.token, got, tc.want)
+			}
+		})
+	}
+}

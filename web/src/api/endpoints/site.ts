@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '../client';
+import { apiClient, API_BASE_URL } from '../client';
 import { logger } from '@/lib/logger';
+import { useAuthStore } from './user';
 
 export enum SitePlatform {
     NewAPI = 'new-api',
@@ -71,6 +72,7 @@ export type SiteAccount = {
     password: string;
     access_token: string;
     api_key: string;
+    platform_user_id?: number | null;
     account_proxy?: string | null;
     enabled: boolean;
     auto_sync: boolean;
@@ -133,6 +135,16 @@ export type SiteCheckinResult = {
     reward?: string;
 };
 
+export type AllAPIHubImportResult = {
+    created_sites: number;
+    reused_sites: number;
+    created_accounts: number;
+    updated_accounts: number;
+    skipped_accounts: number;
+    scheduled_sync_accounts: number;
+    warnings: string[];
+};
+
 export function useSiteList() {
     return useQuery({
         queryKey: ['sites', 'list'],
@@ -142,6 +154,7 @@ export function useSiteList() {
             custom_header: site.custom_header ?? [],
             accounts: (site.accounts ?? []).map((account) => ({
                 ...account,
+                platform_user_id: account.platform_user_id ?? null,
                 account_proxy: account.account_proxy ?? null,
                 random_checkin: account.random_checkin ?? false,
                 checkin_interval_hours: typeof account.checkin_interval_hours === 'number' && account.checkin_interval_hours > 0 ? account.checkin_interval_hours : 24,
@@ -161,6 +174,26 @@ function invalidateSiteQueries(queryClient: ReturnType<typeof useQueryClient>) {
     queryClient.invalidateQueries({ queryKey: ['sites', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+}
+
+function getAuthHeader() {
+    const token = useAuthStore.getState().token;
+    if (!token) throw new Error('Not authenticated');
+    return `Bearer ${token}`;
+}
+
+function extractResponseMessage(payload: unknown, fallback: string) {
+    if (payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string') {
+        return payload.message;
+    }
+    return fallback;
+}
+
+function extractResponseData<T>(payload: unknown): T | undefined {
+    if (payload && typeof payload === 'object' && 'data' in payload) {
+        return (payload as { data?: T }).data;
+    }
+    return undefined;
 }
 
 export function useCreateSite() {
@@ -268,5 +301,52 @@ export function useCheckinAllSites() {
         mutationFn: async () => apiClient.post<null>('/api/v1/site/checkin-all', {}),
         onSuccess: () => invalidateSiteQueries(queryClient),
         onError: (error) => logger.error('站点批量签到失败:', error),
+    });
+}
+
+export function useImportAllAPIHub() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: { file?: File | null; text?: string }) => {
+            const hasFile = !!payload.file;
+            const hasText = !!payload.text?.trim();
+            if (!hasFile && !hasText) {
+                throw new Error('请选择 JSON 文件或粘贴导出内容');
+            }
+
+            const headers: HeadersInit = {
+                Authorization: getAuthHeader(),
+            };
+            let body: BodyInit;
+
+            if (payload.file) {
+                const form = new FormData();
+                form.append('file', payload.file);
+                body = form;
+            } else {
+                headers['Content-Type'] = 'application/json';
+                body = payload.text!.trim();
+            }
+
+            const response = await fetch(`${API_BASE_URL}/api/v1/site/import/all-api-hub`, {
+                method: 'POST',
+                headers,
+                body,
+            });
+            const contentType = response.headers.get('content-type') || '';
+            const data = contentType.includes('application/json') ? await response.json() : await response.text();
+
+            if (!response.ok) {
+                throw new Error(extractResponseMessage(data, typeof data === 'string' ? data : response.statusText));
+            }
+
+            const result = extractResponseData<AllAPIHubImportResult>(data) ?? (data as AllAPIHubImportResult);
+            return {
+                ...result,
+                warnings: result.warnings ?? [],
+            };
+        },
+        onSuccess: () => invalidateSiteQueries(queryClient),
+        onError: (error) => logger.error('导入 All API Hub 账号失败:', error),
     });
 }

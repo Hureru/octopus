@@ -2,6 +2,6 @@
 2:I[41259,["./_next/static/chunks/c2fb2f0e9c5b92fd.js"],"ViewportBoundary"]
 4:I[41259,["./_next/static/chunks/c2fb2f0e9c5b92fd.js"],"MetadataBoundary"]
 5:"$Sreact.suspense"
-0:{"buildId":"L6Hpnvp6wHU0JGTD0nvGr","rsc":["$","$1","h",{"children":[null,["$","$L2",null,{"children":"$@3"}],["$","div",null,{"hidden":true,"children":["$","$L4",null,{"children":["$","$5",null,{"name":"Next.Metadata","children":"$@6"}]}]}],null]}],"loading":null,"isPartial":false}
+0:{"buildId":"LPUuVPx9i1G2OCRouIGvu","rsc":["$","$1","h",{"children":[null,["$","$L2",null,{"children":"$@3"}],["$","div",null,{"hidden":true,"children":["$","$L4",null,{"children":["$","$5",null,{"name":"Next.Metadata","children":"$@6"}]}]}],null]}],"loading":null,"isPartial":false}
 3:[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]
 6:[]

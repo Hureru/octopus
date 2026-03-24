@@ -89,7 +89,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			Name:         buildManagedChannelName(siteRecord, account, group),
 			Type:         platformOutboundType(siteRecord.Platform),
 			Enabled:      siteRecord.Enabled && account.Enabled && len(groupTokens) > 0,
-			BaseUrls:     []model.BaseUrl{{URL: siteRecord.BaseURL, Delay: 0}},
+			BaseUrls:     []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}},
 			Keys:         buildChannelKeys(groupTokens),
 			Model:        strings.Join(modelNames, ","),
 			CustomModel:  "",
@@ -196,6 +196,20 @@ func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount,
 	return fmt.Sprintf("[Site] %s / %s / %s (%s)", siteRecord.Name, account.Name, model.NormalizeSiteGroupName(group.GroupKey, group.Name), model.NormalizeSiteGroupKey(group.GroupKey))
 }
 
+func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
+	if siteRecord == nil {
+		return ""
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(siteRecord.BaseURL), "/")
+	if baseURL == "" {
+		return ""
+	}
+	if strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
+		return baseURL
+	}
+	return baseURL + "/v1"
+}
 func buildChannelKeys(tokens []model.SiteToken) []model.ChannelKey {
 	keys := make([]model.ChannelKey, 0, len(tokens))
 	for _, token := range tokens {
