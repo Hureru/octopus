@@ -133,6 +133,15 @@ func createSiteAccount(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := sitesvc.RefreshAccountRandomCheckinSchedule(c.Request.Context(), account.ID); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	createdAccount, err := op.SiteAccountGet(account.ID, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if account.Enabled && account.AutoSync {
 		go func(accountID int) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -140,7 +149,7 @@ func createSiteAccount(c *gin.Context) {
 			_, _ = sitesvc.SyncAccount(ctx, accountID)
 		}(account.ID)
 	}
-	resp.Success(c, account)
+	resp.Success(c, createdAccount)
 }
 
 func updateSiteAccount(c *gin.Context) {
@@ -150,6 +159,15 @@ func updateSiteAccount(c *gin.Context) {
 		return
 	}
 	account, err := op.SiteAccountUpdate(&req, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := sitesvc.RefreshAccountRandomCheckinSchedule(c.Request.Context(), account.ID); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	account, err = op.SiteAccountGet(account.ID, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
@@ -175,6 +193,10 @@ func enableSiteAccount(c *gin.Context) {
 		return
 	}
 	if err := op.SiteAccountEnabled(request.ID, request.Enabled, c.Request.Context()); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := sitesvc.RefreshAccountRandomCheckinSchedule(c.Request.Context(), request.ID); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -82,10 +82,14 @@ type SiteAccountFormState = {
     enabled: boolean;
     auto_sync: boolean;
     auto_checkin: boolean;
+    random_checkin: boolean;
+    checkin_interval_hours: number;
+    checkin_random_window_minutes: number;
 };
 
 const PLATFORM_LABELS: Record<SitePlatform, string> = {
     [SitePlatform.NewAPI]: 'New API',
+    [SitePlatform.AnyRouter]: 'AnyRouter',
     [SitePlatform.OneAPI]: 'One API',
     [SitePlatform.OneHub]: 'One Hub',
     [SitePlatform.DoneHub]: 'Done Hub',
@@ -167,6 +171,9 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
         enabled: true,
         auto_sync: true,
         auto_checkin: true,
+        random_checkin: false,
+        checkin_interval_hours: 24,
+        checkin_random_window_minutes: 120,
     };
 }
 
@@ -182,6 +189,9 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
         enabled: account.enabled,
         auto_sync: account.auto_sync,
         auto_checkin: account.auto_checkin,
+        random_checkin: account.random_checkin,
+        checkin_interval_hours: account.checkin_interval_hours,
+        checkin_random_window_minutes: account.checkin_random_window_minutes,
     };
 }
 
@@ -453,6 +463,16 @@ export function Site() {
             toast.error('请输入 API Key');
             return;
         }
+        if (accountForm.auto_checkin && accountForm.random_checkin) {
+            if (!Number.isFinite(accountForm.checkin_interval_hours) || accountForm.checkin_interval_hours < 1 || accountForm.checkin_interval_hours > 720) {
+                toast.error('最小签到间隔必须在 1 到 720 小时之间');
+                return;
+            }
+            if (!Number.isFinite(accountForm.checkin_random_window_minutes) || accountForm.checkin_random_window_minutes < 0 || accountForm.checkin_random_window_minutes > 1440) {
+                toast.error('随机延迟窗口必须在 0 到 1440 分钟之间');
+                return;
+            }
+        }
 
         const payload = {
             site_id: accountForm.site_id,
@@ -465,6 +485,9 @@ export function Site() {
             enabled: accountForm.enabled,
             auto_sync: accountForm.auto_sync,
             auto_checkin: accountForm.auto_checkin,
+            random_checkin: accountForm.random_checkin,
+            checkin_interval_hours: Math.max(1, Math.trunc(accountForm.checkin_interval_hours || 24)),
+            checkin_random_window_minutes: Math.max(0, Math.trunc(accountForm.checkin_random_window_minutes || 0)),
         };
 
         try {
@@ -681,6 +704,7 @@ export function Site() {
                                                 </Badge>
                                                 {account.auto_sync ? <Badge variant="outline">自动同步</Badge> : null}
                                                 {account.auto_checkin ? <Badge variant="outline">自动签到</Badge> : null}
+                                                {account.random_checkin ? <Badge variant="outline">随机时间</Badge> : null}
                                             </div>
 
                                             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -710,6 +734,11 @@ export function Site() {
                                                         </Badge>
                                                     </div>
                                                     <div className="mt-2 text-xs text-muted-foreground">上次签到：{formatDateTime(account.last_checkin_at)}</div>
+                                                    {account.auto_checkin && account.random_checkin ? (
+                                                        <div className="mt-1 text-xs text-muted-foreground">
+                                                            下次自动签到：{account.next_auto_checkin_at ? formatDateTime(account.next_auto_checkin_at) : '待调度'} · 最小间隔 {account.checkin_interval_hours} 小时 · 随机延迟 0-{account.checkin_random_window_minutes} 分钟
+                                                        </div>
+                                                    ) : null}
                                                     <div className="mt-2 text-sm break-all">{account.last_checkin_message || '等待首次签到'}</div>
                                                 </div>
                                             </div>
@@ -915,7 +944,7 @@ export function Site() {
                                 </label>
                             ) : null}
 
-                            <div className="grid gap-4 md:grid-cols-3">
+                            <div className="grid gap-4 md:grid-cols-4">
                                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
                                     <div className="flex items-center gap-2"><UserRound className="size-4 text-muted-foreground" /><span className="text-sm font-medium">启用</span></div>
                                     <Switch checked={accountForm.enabled} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, enabled: checked } : current)} />
@@ -930,11 +959,49 @@ export function Site() {
                                     <div className="flex items-center gap-2"><CalendarCheck2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">自动签到</span></div>
                                     <Switch checked={accountForm.auto_checkin} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, auto_checkin: checked } : current)} />
                                 </div>
+
+                                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
+                                    <div className="flex items-center gap-2"><CalendarCheck2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">随机签到</span></div>
+                                    <Switch checked={accountForm.random_checkin} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, random_checkin: checked } : current)} />
+                                </div>
                             </div>
+
+                            {accountForm.auto_checkin && accountForm.random_checkin ? (
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <label className="grid gap-2 text-sm">
+                                        <span className="font-medium">最小签到间隔（小时）</span>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            max={720}
+                                            value={accountForm.checkin_interval_hours}
+                                            onChange={(event) => setAccountForm((current) => current ? { ...current, checkin_interval_hours: Number(event.target.value) } : current)}
+                                            placeholder="24"
+                                            className="rounded-xl"
+                                        />
+                                    </label>
+
+                                    <label className="grid gap-2 text-sm">
+                                        <span className="font-medium">随机延迟窗口（分钟）</span>
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            max={1440}
+                                            value={accountForm.checkin_random_window_minutes}
+                                            onChange={(event) => setAccountForm((current) => current ? { ...current, checkin_random_window_minutes: Number(event.target.value) } : current)}
+                                            placeholder="120"
+                                            className="rounded-xl"
+                                        />
+                                    </label>
+                                </div>
+                            ) : null}
 
                             <div className="grid gap-3 rounded-2xl border border-border/60 bg-muted/10 p-4 text-sm text-muted-foreground">
                                 <div className="flex items-center gap-2"><Waypoints className="size-4" /><span>投影规则说明</span></div>
                                 <p>同步后会以 <code>site_user_group</code> 为维度生成托管 channel；无分组时使用 <code>default</code>。同一分组下的多个 key 会聚合到同一个 channel。</p>
+                                {accountForm.auto_checkin && accountForm.random_checkin ? (
+                                    <p>随机签到会基于“上次成功签到时间 + 最小间隔 + 0 到随机延迟窗口”的规则生成下次执行时间，适合需要接近 24 小时间隔的站点。</p>
+                                ) : null}
                             </div>
 
                             <DialogFooter>

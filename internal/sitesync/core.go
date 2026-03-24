@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -74,7 +75,7 @@ func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResul
 		if strings.Contains(lowered, "not supported") || strings.Contains(lowered, "not found") {
 			status = model.SiteExecutionStatusSkipped
 		}
-		updateErr := updateAccountCheckinState(ctx, account.ID, status, err.Error(), false, resolvedAccessToken)
+		updateErr := updateAccountCheckinState(ctx, account, status, err.Error(), false, resolvedAccessToken)
 		if updateErr != nil {
 			return nil, updateErr
 		}
@@ -83,7 +84,7 @@ func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResul
 
 	result.AccountID = account.ID
 	result.SiteID = siteRecord.ID
-	if err := updateAccountCheckinState(ctx, account.ID, result.Status, result.Message, result.Status == model.SiteExecutionStatusSuccess, resolvedAccessToken); err != nil {
+	if err := updateAccountCheckinState(ctx, account, result.Status, result.Message, result.Status == model.SiteExecutionStatusSuccess, resolvedAccessToken); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -116,13 +117,25 @@ func CheckinAll(ctx context.Context) {
 		log.Warnf("failed to list sites for checkin: %v", err)
 		return
 	}
+	now := time.Now()
 	for _, siteRecord := range sites {
 		if !siteRecord.Enabled {
 			continue
 		}
-		for _, account := range siteRecord.Accounts {
+		for index := range siteRecord.Accounts {
+			account := &siteRecord.Accounts[index]
 			if !account.Enabled || !account.AutoCheckin {
 				continue
+			}
+			if account.RandomCheckin {
+				nextAt, scheduleErr := ensureRandomCheckinSchedule(ctx, account, now)
+				if scheduleErr != nil {
+					log.Warnf("failed to ensure site account checkin schedule (account=%d): %v", account.ID, scheduleErr)
+					continue
+				}
+				if nextAt != nil && now.Before(*nextAt) {
+					continue
+				}
 			}
 			if _, err := CheckinAccount(ctx, account.ID); err != nil {
 				log.Warnf("site account checkin failed (account=%d): %v", account.ID, err)

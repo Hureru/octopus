@@ -191,6 +191,30 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		selectFields = append(selectFields, "auto_checkin")
 		updates.AutoCheckin = *req.AutoCheckin
 	}
+	if req.RandomCheckin != nil {
+		selectFields = append(selectFields, "random_checkin")
+		updates.RandomCheckin = *req.RandomCheckin
+	}
+	if req.CheckinIntervalHours != nil {
+		if *req.CheckinIntervalHours <= 0 {
+			return nil, fmt.Errorf("checkin interval hours must be greater than 0")
+		}
+		if *req.CheckinIntervalHours > 720 {
+			return nil, fmt.Errorf("checkin interval hours must be less than or equal to 720")
+		}
+		selectFields = append(selectFields, "checkin_interval_hours")
+		updates.CheckinIntervalHours = *req.CheckinIntervalHours
+	}
+	if req.CheckinRandomWindowMinutes != nil {
+		if *req.CheckinRandomWindowMinutes < 0 {
+			return nil, fmt.Errorf("checkin random window minutes must be greater than or equal to 0")
+		}
+		if *req.CheckinRandomWindowMinutes > 1440 {
+			return nil, fmt.Errorf("checkin random window minutes must be less than or equal to 1440")
+		}
+		selectFields = append(selectFields, "checkin_random_window_minutes")
+		updates.CheckinRandomWindowMinutes = *req.CheckinRandomWindowMinutes
+	}
 
 	if len(selectFields) > 0 {
 		if err := db.GetDB().WithContext(ctx).

@@ -117,7 +117,10 @@ func updateAccountSyncState(ctx context.Context, accountID int, status model.Sit
 	return db.GetDB().WithContext(ctx).Model(&model.SiteAccount{}).Where("id = ?", accountID).Updates(updatePayload).Error
 }
 
-func updateAccountCheckinState(ctx context.Context, accountID int, status model.SiteExecutionStatus, message string, success bool, accessToken string) error {
+func updateAccountCheckinState(ctx context.Context, account *model.SiteAccount, status model.SiteExecutionStatus, message string, success bool, accessToken string) error {
+	if account == nil {
+		return fmt.Errorf("site account is nil")
+	}
 	now := time.Now()
 	updatePayload := map[string]any{
 		"last_checkin_status":  status,
@@ -126,8 +129,20 @@ func updateAccountCheckinState(ctx context.Context, accountID int, status model.
 	if success {
 		updatePayload["last_checkin_at"] = &now
 	}
+	if success {
+		account.LastCheckinAt = &now
+		account.LastCheckinStatus = status
+	}
+	if success {
+		nextAt := buildNextRandomCheckinAt(account, now)
+		account.NextAutoCheckinAt = nextAt
+		updatePayload["next_auto_checkin_at"] = nextAt
+	} else if !account.Enabled || !account.AutoCheckin || !account.RandomCheckin {
+		account.NextAutoCheckinAt = nil
+		updatePayload["next_auto_checkin_at"] = nil
+	}
 	if strings.TrimSpace(accessToken) != "" {
 		updatePayload["access_token"] = strings.TrimSpace(accessToken)
 	}
-	return db.GetDB().WithContext(ctx).Model(&model.SiteAccount{}).Where("id = ?", accountID).Updates(updatePayload).Error
+	return db.GetDB().WithContext(ctx).Model(&model.SiteAccount{}).Where("id = ?", account.ID).Updates(updatePayload).Error
 }

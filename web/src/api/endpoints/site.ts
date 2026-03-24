@@ -4,6 +4,7 @@ import { logger } from '@/lib/logger';
 
 export enum SitePlatform {
     NewAPI = 'new-api',
+    AnyRouter = 'anyrouter',
     OneAPI = 'one-api',
     OneHub = 'one-hub',
     DoneHub = 'done-hub',
@@ -73,6 +74,10 @@ export type SiteAccount = {
     enabled: boolean;
     auto_sync: boolean;
     auto_checkin: boolean;
+    random_checkin: boolean;
+    checkin_interval_hours: number;
+    checkin_random_window_minutes: number;
+    next_auto_checkin_at?: string | null;
     last_sync_at?: string | null;
     last_checkin_at?: string | null;
     last_sync_status: string;
@@ -136,6 +141,9 @@ export function useSiteList() {
             custom_header: site.custom_header ?? [],
             accounts: (site.accounts ?? []).map((account) => ({
                 ...account,
+                random_checkin: account.random_checkin ?? false,
+                checkin_interval_hours: typeof account.checkin_interval_hours === 'number' && account.checkin_interval_hours > 0 ? account.checkin_interval_hours : 24,
+                checkin_random_window_minutes: typeof account.checkin_random_window_minutes === 'number' && account.checkin_random_window_minutes >= 0 ? account.checkin_random_window_minutes : 120,
                 tokens: account.tokens ?? [],
                 user_groups: account.user_groups ?? [],
                 models: account.models ?? [],

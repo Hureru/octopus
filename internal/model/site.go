@@ -10,14 +10,15 @@ import (
 type SitePlatform string
 
 const (
-	SitePlatformNewAPI  SitePlatform = "new-api"
-	SitePlatformOneAPI  SitePlatform = "one-api"
-	SitePlatformOneHub  SitePlatform = "one-hub"
-	SitePlatformDoneHub SitePlatform = "done-hub"
-	SitePlatformSub2API SitePlatform = "sub2api"
-	SitePlatformOpenAI  SitePlatform = "openai"
-	SitePlatformClaude  SitePlatform = "claude"
-	SitePlatformGemini  SitePlatform = "gemini"
+	SitePlatformNewAPI    SitePlatform = "new-api"
+	SitePlatformAnyRouter SitePlatform = "anyrouter"
+	SitePlatformOneAPI    SitePlatform = "one-api"
+	SitePlatformOneHub    SitePlatform = "one-hub"
+	SitePlatformDoneHub   SitePlatform = "done-hub"
+	SitePlatformSub2API   SitePlatform = "sub2api"
+	SitePlatformOpenAI    SitePlatform = "openai"
+	SitePlatformClaude    SitePlatform = "claude"
+	SitePlatformGemini    SitePlatform = "gemini"
 )
 
 type SiteCredentialType string
@@ -55,27 +56,31 @@ type Site struct {
 }
 
 type SiteAccount struct {
-	ID                 int                  `json:"id" gorm:"primaryKey"`
-	SiteID             int                  `json:"site_id" gorm:"index;not null"`
-	Name               string               `json:"name" gorm:"not null"`
-	CredentialType     SiteCredentialType   `json:"credential_type" gorm:"type:varchar(32);not null"`
-	Username           string               `json:"username"`
-	Password           string               `json:"password"`
-	AccessToken        string               `json:"access_token"`
-	APIKey             string               `json:"api_key"`
-	Enabled            bool                 `json:"enabled" gorm:"default:true"`
-	AutoSync           bool                 `json:"auto_sync" gorm:"default:true"`
-	AutoCheckin        bool                 `json:"auto_checkin" gorm:"default:true"`
-	LastSyncAt         *time.Time           `json:"last_sync_at"`
-	LastCheckinAt      *time.Time           `json:"last_checkin_at"`
-	LastSyncStatus     SiteExecutionStatus  `json:"last_sync_status" gorm:"type:varchar(16);default:'idle'"`
-	LastCheckinStatus  SiteExecutionStatus  `json:"last_checkin_status" gorm:"type:varchar(16);default:'idle'"`
-	LastSyncMessage    string               `json:"last_sync_message"`
-	LastCheckinMessage string               `json:"last_checkin_message"`
-	Tokens             []SiteToken          `json:"tokens,omitempty" gorm:"foreignKey:SiteAccountID"`
-	UserGroups         []SiteUserGroup      `json:"user_groups,omitempty" gorm:"foreignKey:SiteAccountID"`
-	Models             []SiteModel          `json:"models,omitempty" gorm:"foreignKey:SiteAccountID"`
-	ChannelBindings    []SiteChannelBinding `json:"channel_bindings,omitempty" gorm:"foreignKey:SiteAccountID"`
+	ID                         int                  `json:"id" gorm:"primaryKey"`
+	SiteID                     int                  `json:"site_id" gorm:"index;not null"`
+	Name                       string               `json:"name" gorm:"not null"`
+	CredentialType             SiteCredentialType   `json:"credential_type" gorm:"type:varchar(32);not null"`
+	Username                   string               `json:"username"`
+	Password                   string               `json:"password"`
+	AccessToken                string               `json:"access_token"`
+	APIKey                     string               `json:"api_key"`
+	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
+	AutoSync                   bool                 `json:"auto_sync" gorm:"default:true"`
+	AutoCheckin                bool                 `json:"auto_checkin" gorm:"default:true"`
+	RandomCheckin              bool                 `json:"random_checkin" gorm:"default:false"`
+	CheckinIntervalHours       int                  `json:"checkin_interval_hours" gorm:"default:24"`
+	CheckinRandomWindowMinutes int                  `json:"checkin_random_window_minutes" gorm:"default:120"`
+	NextAutoCheckinAt          *time.Time           `json:"next_auto_checkin_at"`
+	LastSyncAt                 *time.Time           `json:"last_sync_at"`
+	LastCheckinAt              *time.Time           `json:"last_checkin_at"`
+	LastSyncStatus             SiteExecutionStatus  `json:"last_sync_status" gorm:"type:varchar(16);default:'idle'"`
+	LastCheckinStatus          SiteExecutionStatus  `json:"last_checkin_status" gorm:"type:varchar(16);default:'idle'"`
+	LastSyncMessage            string               `json:"last_sync_message"`
+	LastCheckinMessage         string               `json:"last_checkin_message"`
+	Tokens                     []SiteToken          `json:"tokens,omitempty" gorm:"foreignKey:SiteAccountID"`
+	UserGroups                 []SiteUserGroup      `json:"user_groups,omitempty" gorm:"foreignKey:SiteAccountID"`
+	Models                     []SiteModel          `json:"models,omitempty" gorm:"foreignKey:SiteAccountID"`
+	ChannelBindings            []SiteChannelBinding `json:"channel_bindings,omitempty" gorm:"foreignKey:SiteAccountID"`
 }
 
 type SiteToken struct {
@@ -127,16 +132,19 @@ type SiteUpdateRequest struct {
 }
 
 type SiteAccountUpdateRequest struct {
-	ID             int                 `json:"id" binding:"required"`
-	Name           *string             `json:"name,omitempty"`
-	CredentialType *SiteCredentialType `json:"credential_type,omitempty"`
-	Username       *string             `json:"username,omitempty"`
-	Password       *string             `json:"password,omitempty"`
-	AccessToken    *string             `json:"access_token,omitempty"`
-	APIKey         *string             `json:"api_key,omitempty"`
-	Enabled        *bool               `json:"enabled,omitempty"`
-	AutoSync       *bool               `json:"auto_sync,omitempty"`
-	AutoCheckin    *bool               `json:"auto_checkin,omitempty"`
+	ID                         int                 `json:"id" binding:"required"`
+	Name                       *string             `json:"name,omitempty"`
+	CredentialType             *SiteCredentialType `json:"credential_type,omitempty"`
+	Username                   *string             `json:"username,omitempty"`
+	Password                   *string             `json:"password,omitempty"`
+	AccessToken                *string             `json:"access_token,omitempty"`
+	APIKey                     *string             `json:"api_key,omitempty"`
+	Enabled                    *bool               `json:"enabled,omitempty"`
+	AutoSync                   *bool               `json:"auto_sync,omitempty"`
+	AutoCheckin                *bool               `json:"auto_checkin,omitempty"`
+	RandomCheckin              *bool               `json:"random_checkin,omitempty"`
+	CheckinIntervalHours       *int                `json:"checkin_interval_hours,omitempty"`
+	CheckinRandomWindowMinutes *int                `json:"checkin_random_window_minutes,omitempty"`
 }
 
 type SiteSyncResult struct {
@@ -179,7 +187,7 @@ func NormalizeSiteGroupName(groupKey string, name string) string {
 
 func (p SitePlatform) Validate() error {
 	switch p {
-	case SitePlatformNewAPI, SitePlatformOneAPI, SitePlatformOneHub, SitePlatformDoneHub,
+	case SitePlatformNewAPI, SitePlatformAnyRouter, SitePlatformOneAPI, SitePlatformOneHub, SitePlatformDoneHub,
 		SitePlatformSub2API, SitePlatformOpenAI, SitePlatformClaude, SitePlatformGemini:
 		return nil
 	default:
@@ -239,6 +247,12 @@ func (a *SiteAccount) Normalize() {
 	a.Password = strings.TrimSpace(a.Password)
 	a.AccessToken = strings.TrimSpace(a.AccessToken)
 	a.APIKey = strings.TrimSpace(a.APIKey)
+	if a.CheckinIntervalHours <= 0 {
+		a.CheckinIntervalHours = 24
+	}
+	if a.CheckinRandomWindowMinutes < 0 {
+		a.CheckinRandomWindowMinutes = 0
+	}
 }
 
 func (a *SiteAccount) Validate() error {
@@ -254,6 +268,18 @@ func (a *SiteAccount) Validate() error {
 	}
 	if err := a.CredentialType.Validate(); err != nil {
 		return err
+	}
+	if a.CheckinIntervalHours <= 0 {
+		return fmt.Errorf("checkin interval hours must be greater than 0")
+	}
+	if a.CheckinIntervalHours > 720 {
+		return fmt.Errorf("checkin interval hours must be less than or equal to 720")
+	}
+	if a.CheckinRandomWindowMinutes < 0 {
+		return fmt.Errorf("checkin random window minutes must be greater than or equal to 0")
+	}
+	if a.CheckinRandomWindowMinutes > 1440 {
+		return fmt.Errorf("checkin random window minutes must be less than or equal to 1440")
 	}
 	switch a.CredentialType {
 	case SiteCredentialTypeUsernamePassword:

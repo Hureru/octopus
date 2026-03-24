@@ -14,6 +14,8 @@ func syncAccountState(ctx context.Context, siteRecord *model.Site, account *mode
 		return nil, fmt.Errorf("site or account is nil")
 	}
 	switch siteRecord.Platform {
+	case model.SitePlatformAnyRouter:
+		return syncAnyRouter(ctx, siteRecord, account)
 	case model.SitePlatformNewAPI, model.SitePlatformOneAPI, model.SitePlatformOneHub, model.SitePlatformDoneHub:
 		return syncManagementPlatform(ctx, siteRecord, account)
 	case model.SitePlatformSub2API:
@@ -32,6 +34,8 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 	switch siteRecord.Platform {
 	case model.SitePlatformDoneHub, model.SitePlatformSub2API, model.SitePlatformOpenAI, model.SitePlatformClaude, model.SitePlatformGemini:
 		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusSkipped, Message: "checkin is not supported by this platform"}, "", nil
+	case model.SitePlatformAnyRouter:
+		return checkinAnyRouter(ctx, siteRecord, account)
 	case model.SitePlatformNewAPI, model.SitePlatformOneAPI, model.SitePlatformOneHub:
 		accessToken, err := resolveManagedAccessToken(ctx, siteRecord, account)
 		if err != nil {

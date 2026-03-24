@@ -31,6 +31,10 @@ func CheckinAll(ctx context.Context) {
 	sitesync.CheckinAll(ctx)
 }
 
+func RefreshAccountRandomCheckinSchedule(ctx context.Context, accountID int) error {
+	return sitesync.RefreshAccountRandomCheckinSchedule(ctx, accountID)
+}
+
 func DeleteSite(ctx context.Context, siteID int) error {
 	return sitesync.DeleteSite(ctx, siteID)
 }
