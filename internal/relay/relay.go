@@ -70,6 +70,13 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	}
 
 	var lastErr error
+	var lastResult attemptResult
+
+	// 同通道重试次数：启用时最多 3 次，否则 1 次（不重试）
+	maxSameChannelRetries := 1
+	if group.RetryEnabled {
+		maxSameChannelRetries = 3
+	}
 
 	for iter.Next() {
 		select {
@@ -130,16 +137,43 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			requestModel, group.Mode, channel.Name, item.ModelName,
 			iter.Index()+1, iter.Len(), iter.IsSticky())
 
-		// 构造尝试级上下文 -- 只写变化的 4 个字段
-		ra := &relayAttempt{
-			relayRequest:         req,
-			outAdapter:           outAdapter,
-			channel:              channel,
-			usedKey:              usedKey,
-			firstTokenTimeOutSec: group.FirstTokenTimeOut,
+		// 同通道重试循环
+		var result attemptResult
+		for retryNum := 0; retryNum < maxSameChannelRetries; retryNum++ {
+			// 重试前等待退避
+			if retryNum > 0 {
+				delay := computeBackoff(retryNum, result.RetryAfter)
+				log.Infof("same-channel retry %d/%d for %s, waiting %v",
+					retryNum, maxSameChannelRetries, channel.Name, delay)
+				select {
+				case <-c.Request.Context().Done():
+					log.Infof("request context canceled during retry backoff")
+					metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
+					return
+				case <-time.After(delay):
+				}
+			}
+
+			// 构造尝试级上下文
+			ra := &relayAttempt{
+				relayRequest:         req,
+				outAdapter:           outAdapter,
+				channel:              channel,
+				usedKey:              usedKey,
+				firstTokenTimeOutSec: group.FirstTokenTimeOut,
+			}
+
+			result = ra.attempt()
+			if result.Success || result.Written || result.Canceled || !isRetryableStatus(result.StatusCode) {
+				break
+			}
 		}
 
-		result := ra.attempt()
+		// 同通道重试耗尽后记录熔断器失败
+		if !result.Success && !result.Written && !result.Canceled {
+			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model)
+		}
+
 		if result.Success {
 			metrics.Save(c.Request.Context(), true, nil, iter.Attempts())
 			return
@@ -153,10 +187,20 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			return
 		}
 		lastErr = result.Err
+		lastResult = result
 	}
 
 	// 所有通道都失败
 	metrics.Save(c.Request.Context(), false, lastErr, iter.Attempts())
+
+	// 透传 429/503 状态码和 Retry-After 头，让客户端 SDK 的重试机制接管
+	if group.RetryEnabled && isPassthroughStatus(lastResult.StatusCode) {
+		if lastResult.RetryAfter > 0 {
+			c.Header("Retry-After", fmt.Sprintf("%d", int(lastResult.RetryAfter.Seconds())))
+		}
+		resp.Error(c, lastResult.StatusCode, "all channels failed")
+		return
+	}
 	resp.Error(c, http.StatusBadGateway, "all channels failed")
 }
 
@@ -212,17 +256,19 @@ func (ra *relayAttempt) attempt() attemptResult {
 		RequestFailed: 1,
 	})
 
-	// 熔断器：记录失败
-	balancer.RecordFailure(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
+	// 注意：熔断器记录已移至 Handler() 的同通道重试循环外，
+	// 避免重试期间过早触发熔断
 
 	written := ra.c.Writer.Written()
 	if written {
 		ra.collectResponse()
 	}
 	return attemptResult{
-		Success: false,
-		Written: written,
-		Err:     fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
+		Success:    false,
+		Written:    written,
+		Err:        fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
+		StatusCode: statusCode,
+		RetryAfter: ra.retryAfter,
 	}
 }
 
@@ -280,11 +326,12 @@ func (ra *relayAttempt) forward() (int, error) {
 
 	// 检查响应状态
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
-			return 0, fmt.Errorf("failed to read response body: %w", err)
+			return response.StatusCode, fmt.Errorf("failed to read response body: %w", err)
 		}
-		return 0, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+		return response.StatusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
 	}
 
 	// 处理响应

@@ -16,6 +16,7 @@ type Group struct {
 	MatchRegex        string      `json:"match_regex"`
 	FirstTokenTimeOut int         `json:"first_token_time_out"` // 单个渠道首个Token响应超时时间(秒)
 	SessionKeepTime   int         `json:"session_keep_time"`    // 会话保持时间(秒) 0 为禁用
+	RetryEnabled      bool        `json:"retry_enabled" gorm:"default:false"`       // 启用同通道重试+透传429/503
 	Items             []GroupItem `json:"items,omitempty" gorm:"foreignKey:GroupID"`
 }
 
@@ -36,6 +37,7 @@ type GroupUpdateRequest struct {
 	MatchRegex        *string                  `json:"match_regex,omitempty"`          // 仅在匹配正则变更时发送
 	FirstTokenTimeOut *int                     `json:"first_token_time_out,omitempty"` // 仅在超时变更时发送(秒)
 	SessionKeepTime   *int                     `json:"session_keep_time,omitempty"`    // 仅在会话保持时间变更时发送(秒)
+	RetryEnabled      *bool                    `json:"retry_enabled,omitempty"`        // 启用同通道重试+透传429/503
 	ItemsToAdd        []GroupItemAddRequest    `json:"items_to_add,omitempty"`         // 新增的 items
 	ItemsToUpdate     []GroupItemUpdateRequest `json:"items_to_update,omitempty"`      // 更新的 items (priority 变更)
 	ItemsToDelete     []int                    `json:"items_to_delete,omitempty"`      // 删除的 item IDs

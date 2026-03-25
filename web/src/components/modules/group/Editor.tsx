@@ -8,6 +8,7 @@ import { useModelChannelList, type LLMChannel } from '@/api/endpoints/model';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionContent, AccordionItem } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
@@ -26,6 +27,7 @@ export type GroupEditorValues = {
     mode: GroupMode;
     first_token_time_out: number;
     session_keep_time: number;
+    retry_enabled: boolean;
     members: SelectedMember[];
 };
 
@@ -257,6 +259,7 @@ export function GroupEditor({
     const [mode, setMode] = useState<GroupMode>((initial?.mode ?? 1) as GroupMode);
     const [firstTokenTimeOut, setFirstTokenTimeOut] = useState<number>(initial?.first_token_time_out ?? 0);
     const [sessionKeepTime, setSessionKeepTime] = useState<number>(initial?.session_keep_time ?? 0);
+    const [retryEnabled, setRetryEnabled] = useState<boolean>(initial?.retry_enabled ?? false);
     const [selectedMembers, setSelectedMembers] = useState<SelectedMember[]>(initial?.members ?? []);
     const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
@@ -340,6 +343,7 @@ export function GroupEditor({
             mode,
             first_token_time_out: firstTokenTimeOut,
             session_keep_time: sessionKeepTime,
+            retry_enabled: retryEnabled,
             members: selectedMembers,
         });
     };
@@ -444,21 +448,39 @@ export function GroupEditor({
                         </Field>
                     </div>
 
-                    {/* Mode */}
-                    <div className="flex gap-1">
-                        {([1, 2, 3, 4] as const).map((m) => (
-                            <button
-                                key={m}
-                                type="button"
-                                onClick={() => setMode(m)}
-                                className={cn(
-                                    'flex-1 py-1 text-xs rounded-lg transition-colors',
-                                    mode === m ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
-                                )}
-                            >
-                                {t(`mode.${MODE_LABELS[m]}`)}
-                            </button>
-                        ))}
+                    {/* Mode + Retry Toggle */}
+                    <div className="flex items-center gap-2">
+                        <div className="flex gap-1 flex-1">
+                            {([1, 2, 3, 4] as const).map((m) => (
+                                <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => setMode(m)}
+                                    className={cn(
+                                        'flex-1 py-1 text-xs rounded-lg transition-colors',
+                                        mode === m ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'
+                                    )}
+                                >
+                                    {t(`mode.${MODE_LABELS[m]}`)}
+                                </button>
+                            ))}
+                        </div>
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <label className="flex items-center gap-1.5 shrink-0 cursor-pointer">
+                                        <Switch
+                                            checked={retryEnabled}
+                                            onCheckedChange={setRetryEnabled}
+                                        />
+                                        <span className="text-xs text-muted-foreground">{t('form.retryEnabled')}</span>
+                                    </label>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {t('form.retryEnabledHint')}
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     </div>
 
                     <div className="flex-1 min-h-0">
