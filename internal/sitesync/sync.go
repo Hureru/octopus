@@ -31,6 +31,12 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 	if siteRecord == nil || account == nil {
 		return nil, "", fmt.Errorf("site or account is nil")
 	}
+
+	// External checkin URL takes priority
+	if siteRecord.ExternalCheckinURL != nil && strings.TrimSpace(*siteRecord.ExternalCheckinURL) != "" {
+		return checkinExternal(ctx, siteRecord, account)
+	}
+
 	switch siteRecord.Platform {
 	case model.SitePlatformDoneHub, model.SitePlatformSub2API, model.SitePlatformOpenAI, model.SitePlatformClaude, model.SitePlatformGemini:
 		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusSkipped, Message: "checkin is not supported by this platform"}, "", nil
@@ -91,7 +97,8 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	if err != nil {
 		return nil, err
 	}
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildSiteModels(models, "sync"), message: "site account synced"}, nil
+	balance, balanceUsed := fetchAccountBalance(ctx, siteRecord, account, accessToken)
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildSiteModels(models, "sync"), balance: balance, balanceUsed: balanceUsed, message: "site account synced"}, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -193,4 +200,36 @@ func resolveDirectToken(account *model.SiteAccount) string {
 		return strings.TrimSpace(account.APIKey)
 	}
 	return strings.TrimSpace(account.AccessToken)
+}
+
+func checkinExternal(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*model.SiteCheckinResult, string, error) {
+	checkinURL := strings.TrimSpace(*siteRecord.ExternalCheckinURL)
+	accessToken := ""
+	if account.CredentialType == model.SiteCredentialTypeAccessToken {
+		accessToken = strings.TrimSpace(account.AccessToken)
+	} else if account.CredentialType == model.SiteCredentialTypeAPIKey {
+		accessToken = strings.TrimSpace(account.APIKey)
+	}
+
+	headers := map[string]string{}
+	if accessToken != "" {
+		headers["Authorization"] = ensureBearer(accessToken)
+	}
+
+	payload, err := requestJSON(ctx, siteRecord, http.MethodPost, checkinURL, nil, headers, account)
+	if err != nil {
+		// Try GET if POST fails
+		payload, err = requestJSON(ctx, siteRecord, http.MethodGet, checkinURL, nil, headers, account)
+		if err != nil {
+			return nil, accessToken, err
+		}
+	}
+
+	success := jsonBool(payload["success"])
+	message := firstNonEmptyString(jsonString(payload["message"]), jsonString(payload["msg"]), "external checkin completed")
+	lowered := strings.ToLower(message)
+	if success || strings.Contains(lowered, "already") || strings.Contains(message, "已签到") || strings.Contains(lowered, "success") {
+		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusSuccess, Message: message, Reward: jsonString(nestedValue(payload, "data", "reward"))}, accessToken, nil
+	}
+	return &model.SiteCheckinResult{Status: model.SiteExecutionStatusFailed, Message: message}, accessToken, nil
 }

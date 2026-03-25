@@ -44,15 +44,20 @@ const (
 )
 
 type Site struct {
-	ID           int            `json:"id" gorm:"primaryKey"`
-	Name         string         `json:"name" gorm:"unique;not null"`
-	Platform     SitePlatform   `json:"platform" gorm:"type:varchar(32);not null"`
-	BaseURL      string         `json:"base_url" gorm:"not null"`
-	Enabled      bool           `json:"enabled" gorm:"default:true"`
-	Proxy        bool           `json:"proxy" gorm:"default:false"`
-	SiteProxy    *string        `json:"site_proxy"`
-	CustomHeader []CustomHeader `json:"custom_header" gorm:"serializer:json"`
-	Accounts     []SiteAccount  `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
+	ID                 int            `json:"id" gorm:"primaryKey"`
+	Name               string         `json:"name" gorm:"unique;not null"`
+	Platform           SitePlatform   `json:"platform" gorm:"type:varchar(32);not null"`
+	BaseURL            string         `json:"base_url" gorm:"not null"`
+	Enabled            bool           `json:"enabled" gorm:"default:true"`
+	Proxy              bool           `json:"proxy" gorm:"default:false"`
+	SiteProxy          *string        `json:"site_proxy"`
+	UseSystemProxy     bool           `json:"use_system_proxy" gorm:"default:false"`
+	ExternalCheckinURL *string        `json:"external_checkin_url"`
+	IsPinned           bool           `json:"is_pinned" gorm:"default:false"`
+	SortOrder          int            `json:"sort_order" gorm:"default:0"`
+	GlobalWeight       float64        `json:"global_weight" gorm:"default:1"`
+	CustomHeader       []CustomHeader `json:"custom_header" gorm:"serializer:json"`
+	Accounts           []SiteAccount  `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
 }
 
 type SiteAccount struct {
@@ -72,6 +77,8 @@ type SiteAccount struct {
 	RandomCheckin              bool                 `json:"random_checkin" gorm:"default:false"`
 	CheckinIntervalHours       int                  `json:"checkin_interval_hours" gorm:"default:24"`
 	CheckinRandomWindowMinutes int                  `json:"checkin_random_window_minutes" gorm:"default:120"`
+	Balance                    float64              `json:"balance" gorm:"default:0"`
+	BalanceUsed                float64              `json:"balance_used" gorm:"default:0"`
 	NextAutoCheckinAt          *time.Time           `json:"next_auto_checkin_at"`
 	LastSyncAt                 *time.Time           `json:"last_sync_at"`
 	LastCheckinAt              *time.Time           `json:"last_checkin_at"`
@@ -122,15 +129,26 @@ type SiteChannelBinding struct {
 	ChannelID       int    `json:"channel_id" gorm:"uniqueIndex;not null"`
 }
 
+type SiteDisabledModel struct {
+	ID        int    `json:"id" gorm:"primaryKey"`
+	SiteID    int    `json:"site_id" gorm:"uniqueIndex:idx_site_disabled_model;not null"`
+	ModelName string `json:"model_name" gorm:"uniqueIndex:idx_site_disabled_model;not null"`
+}
+
 type SiteUpdateRequest struct {
-	ID           int             `json:"id" binding:"required"`
-	Name         *string         `json:"name,omitempty"`
-	Platform     *SitePlatform   `json:"platform,omitempty"`
-	BaseURL      *string         `json:"base_url,omitempty"`
-	Enabled      *bool           `json:"enabled,omitempty"`
-	Proxy        *bool           `json:"proxy,omitempty"`
-	SiteProxy    *string         `json:"site_proxy,omitempty"`
-	CustomHeader *[]CustomHeader `json:"custom_header,omitempty"`
+	ID                 int              `json:"id" binding:"required"`
+	Name               *string          `json:"name,omitempty"`
+	Platform           *SitePlatform    `json:"platform,omitempty"`
+	BaseURL            *string          `json:"base_url,omitempty"`
+	Enabled            *bool            `json:"enabled,omitempty"`
+	Proxy              *bool            `json:"proxy,omitempty"`
+	SiteProxy          *string          `json:"site_proxy,omitempty"`
+	UseSystemProxy     *bool            `json:"use_system_proxy,omitempty"`
+	ExternalCheckinURL *string          `json:"external_checkin_url,omitempty"`
+	IsPinned           *bool            `json:"is_pinned,omitempty"`
+	SortOrder          *int             `json:"sort_order,omitempty"`
+	GlobalWeight       *float64         `json:"global_weight,omitempty"`
+	CustomHeader       *[]CustomHeader  `json:"custom_header,omitempty"`
 }
 
 type SiteAccountUpdateRequest struct {
@@ -169,6 +187,21 @@ type SiteCheckinResult struct {
 	Status    SiteExecutionStatus `json:"status"`
 	Message   string              `json:"message"`
 	Reward    string              `json:"reward,omitempty"`
+}
+
+type SiteBatchRequest struct {
+	IDs    []int  `json:"ids" binding:"required"`
+	Action string `json:"action" binding:"required"`
+}
+
+type SiteBatchResult struct {
+	SuccessIDs  []int              `json:"success_ids"`
+	FailedItems []SiteBatchFailure `json:"failed_items"`
+}
+
+type SiteBatchFailure struct {
+	ID      int    `json:"id"`
+	Message string `json:"message"`
 }
 
 func NormalizeSiteGroupKey(value string) string {
@@ -219,6 +252,20 @@ func (s *Site) Normalize() {
 			s.SiteProxy = &trimmed
 		}
 	}
+	if s.ExternalCheckinURL != nil {
+		trimmed := strings.TrimRight(strings.TrimSpace(*s.ExternalCheckinURL), "/")
+		if trimmed == "" {
+			s.ExternalCheckinURL = nil
+		} else {
+			s.ExternalCheckinURL = &trimmed
+		}
+	}
+	if s.GlobalWeight <= 0 {
+		s.GlobalWeight = 1
+	}
+	if s.SortOrder < 0 {
+		s.SortOrder = 0
+	}
 }
 
 func (s *Site) Validate() error {
@@ -241,6 +288,18 @@ func (s *Site) Validate() error {
 	}
 	if parsed.Host == "" {
 		return fmt.Errorf("site base url must have a host")
+	}
+	if s.ExternalCheckinURL != nil {
+		checkinParsed, err := url.Parse(*s.ExternalCheckinURL)
+		if err != nil {
+			return fmt.Errorf("external checkin url is invalid: %w", err)
+		}
+		if checkinParsed.Scheme != "http" && checkinParsed.Scheme != "https" {
+			return fmt.Errorf("external checkin url must use http or https")
+		}
+		if checkinParsed.Host == "" {
+			return fmt.Errorf("external checkin url must have a host")
+		}
 	}
 	return nil
 }

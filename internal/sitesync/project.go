@@ -63,6 +63,22 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	slices.Sort(modelNames)
 	modelNames = slices.Compact(modelNames)
 
+	// Filter out disabled models for this site
+	disabledModels, _ := op.SiteDisabledModelList(siteRecord.ID, ctx)
+	if len(disabledModels) > 0 {
+		disabledSet := make(map[string]struct{}, len(disabledModels))
+		for _, name := range disabledModels {
+			disabledSet[strings.TrimSpace(name)] = struct{}{}
+		}
+		filtered := make([]string, 0, len(modelNames))
+		for _, name := range modelNames {
+			if _, disabled := disabledSet[name]; !disabled {
+				filtered = append(filtered, name)
+			}
+		}
+		modelNames = filtered
+	}
+
 	existingBindings, err := listChannelBindingsByAccount(ctx, account.ID)
 	if err != nil {
 		return nil, err

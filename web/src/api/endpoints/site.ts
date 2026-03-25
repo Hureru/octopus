@@ -87,6 +87,8 @@ export type SiteAccount = {
     last_checkin_status: string;
     last_sync_message: string;
     last_checkin_message: string;
+    balance: number;
+    balance_used: number;
     tokens: SiteToken[];
     user_groups: SiteUserGroup[];
     models: SiteModel[];
@@ -101,6 +103,11 @@ export type Site = {
     enabled: boolean;
     proxy: boolean;
     site_proxy?: string | null;
+    use_system_proxy: boolean;
+    external_checkin_url?: string | null;
+    is_pinned: boolean;
+    sort_order: number;
+    global_weight: number;
     custom_header: CustomHeader[];
     accounts: SiteAccount[];
 };
@@ -152,6 +159,11 @@ export function useSiteList() {
         select: (data) => data.map((site) => ({
             ...site,
             custom_header: site.custom_header ?? [],
+            use_system_proxy: site.use_system_proxy ?? false,
+            external_checkin_url: site.external_checkin_url ?? null,
+            is_pinned: site.is_pinned ?? false,
+            sort_order: typeof site.sort_order === 'number' ? site.sort_order : 0,
+            global_weight: typeof site.global_weight === 'number' && site.global_weight > 0 ? site.global_weight : 1,
             accounts: (site.accounts ?? []).map((account) => ({
                 ...account,
                 platform_user_id: account.platform_user_id ?? null,
@@ -159,6 +171,8 @@ export function useSiteList() {
                 random_checkin: account.random_checkin ?? false,
                 checkin_interval_hours: typeof account.checkin_interval_hours === 'number' && account.checkin_interval_hours > 0 ? account.checkin_interval_hours : 24,
                 checkin_random_window_minutes: typeof account.checkin_random_window_minutes === 'number' && account.checkin_random_window_minutes >= 0 ? account.checkin_random_window_minutes : 120,
+                balance: typeof account.balance === 'number' ? account.balance : 0,
+                balance_used: typeof account.balance_used === 'number' ? account.balance_used : 0,
                 tokens: account.tokens ?? [],
                 user_groups: account.user_groups ?? [],
                 models: account.models ?? [],
@@ -235,7 +249,7 @@ export function useDeleteSite() {
 export function useCreateSiteAccount() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (data: Omit<SiteAccount, 'id' | 'tokens' | 'user_groups' | 'models' | 'channel_bindings' | 'last_sync_at' | 'last_checkin_at' | 'last_sync_status' | 'last_checkin_status' | 'last_sync_message' | 'last_checkin_message'>) => apiClient.post<SiteAccount>('/api/v1/site/account/create', data),
+        mutationFn: async (data: Omit<SiteAccount, 'id' | 'tokens' | 'user_groups' | 'models' | 'channel_bindings' | 'last_sync_at' | 'last_checkin_at' | 'last_sync_status' | 'last_checkin_status' | 'last_sync_message' | 'last_checkin_message' | 'balance' | 'balance_used'>) => apiClient.post<SiteAccount>('/api/v1/site/account/create', data),
         onSuccess: () => invalidateSiteQueries(queryClient),
         onError: (error) => logger.error('站点账号创建失败:', error),
     });
@@ -348,5 +362,48 @@ export function useImportAllAPIHub() {
         },
         onSuccess: () => invalidateSiteQueries(queryClient),
         onError: (error) => logger.error('导入 All API Hub 账号失败:', error),
+    });
+}
+
+export function useDetectSitePlatform() {
+    return useMutation({
+        mutationFn: async (url: string) => apiClient.post<{ platform: string }>('/api/v1/site/detect', { url }),
+        onError: (error) => logger.error('平台检测失败:', error),
+    });
+}
+
+export function useSiteBatchAction() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (data: { ids: number[]; action: string }) => apiClient.post<{ success_ids: number[]; failed_items: Array<{ id: number; message: string }> }>('/api/v1/site/batch', data),
+        onSuccess: () => invalidateSiteQueries(queryClient),
+        onError: (error) => logger.error('批量操作失败:', error),
+    });
+}
+
+export function useSiteDisabledModels(siteId: number | null) {
+    return useQuery({
+        queryKey: ['sites', 'disabled-models', siteId],
+        queryFn: async () => apiClient.get<{ site_id: number; models: string[] }>(`/api/v1/site/${siteId}/disabled-models`),
+        enabled: siteId != null && siteId > 0,
+    });
+}
+
+export function useUpdateSiteDisabledModels() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (data: { siteId: number; models: string[] }) => apiClient.put<{ site_id: number; models: string[] }>(`/api/v1/site/${data.siteId}/disabled-models`, { models: data.models }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['sites'] });
+        },
+        onError: (error) => logger.error('更新禁用模型失败:', error),
+    });
+}
+
+export function useSiteAvailableModels(siteId: number | null) {
+    return useQuery({
+        queryKey: ['sites', 'available-models', siteId],
+        queryFn: async () => apiClient.get<{ site_id: number; models: string[] }>(`/api/v1/site/${siteId}/available-models`),
+        enabled: siteId != null && siteId > 0,
     });
 }

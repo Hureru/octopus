@@ -16,6 +16,8 @@ type syncSnapshot struct {
 	groups      []model.SiteUserGroup
 	tokens      []model.SiteToken
 	models      []model.SiteModel
+	balance     float64
+	balanceUsed float64
 	message     string
 }
 

@@ -3,9 +3,12 @@ package op
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"gorm.io/gorm"
 )
 
 func SiteList(ctx context.Context) ([]model.Site, error) {
@@ -16,7 +19,7 @@ func SiteList(ctx context.Context) ([]model.Site, error) {
 		Preload("Accounts.UserGroups").
 		Preload("Accounts.Models").
 		Preload("Accounts.ChannelBindings").
-		Order("id ASC").
+		Order("is_pinned DESC, sort_order ASC, id ASC").
 		Find(&sites).Error; err != nil {
 		return nil, err
 	}
@@ -84,6 +87,26 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.SiteProxy = req.SiteProxy
 		selectFields = append(selectFields, "site_proxy")
 	}
+	if req.UseSystemProxy != nil {
+		merged.UseSystemProxy = *req.UseSystemProxy
+		selectFields = append(selectFields, "use_system_proxy")
+	}
+	if req.ExternalCheckinURL != nil {
+		merged.ExternalCheckinURL = req.ExternalCheckinURL
+		selectFields = append(selectFields, "external_checkin_url")
+	}
+	if req.IsPinned != nil {
+		merged.IsPinned = *req.IsPinned
+		selectFields = append(selectFields, "is_pinned")
+	}
+	if req.SortOrder != nil {
+		merged.SortOrder = *req.SortOrder
+		selectFields = append(selectFields, "sort_order")
+	}
+	if req.GlobalWeight != nil {
+		merged.GlobalWeight = *req.GlobalWeight
+		selectFields = append(selectFields, "global_weight")
+	}
 	if req.CustomHeader != nil {
 		merged.CustomHeader = *req.CustomHeader
 		selectFields = append(selectFields, "custom_header")
@@ -111,6 +134,21 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	}
 	if req.SiteProxy != nil {
 		updates.SiteProxy = merged.SiteProxy
+	}
+	if req.UseSystemProxy != nil {
+		updates.UseSystemProxy = merged.UseSystemProxy
+	}
+	if req.ExternalCheckinURL != nil {
+		updates.ExternalCheckinURL = merged.ExternalCheckinURL
+	}
+	if req.IsPinned != nil {
+		updates.IsPinned = merged.IsPinned
+	}
+	if req.SortOrder != nil {
+		updates.SortOrder = merged.SortOrder
+	}
+	if req.GlobalWeight != nil {
+		updates.GlobalWeight = merged.GlobalWeight
 	}
 	if req.CustomHeader != nil {
 		updates.CustomHeader = merged.CustomHeader
@@ -296,4 +334,73 @@ func SiteAccountEnabled(id int, enabled bool, ctx context.Context) error {
 
 func SiteAccountDel(id int, ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Delete(&model.SiteAccount{}, id).Error
+}
+
+func SiteDisabledModelList(siteID int, ctx context.Context) ([]string, error) {
+	var rows []model.SiteDisabledModel
+	if err := db.GetDB().WithContext(ctx).Where("site_id = ?", siteID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(rows))
+	for _, row := range rows {
+		models = append(models, row.ModelName)
+	}
+	return models, nil
+}
+
+func SiteDisabledModelReplace(siteID int, models []string, ctx context.Context) error {
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("site_id = ?", siteID).Delete(&model.SiteDisabledModel{}).Error; err != nil {
+			return err
+		}
+		if len(models) == 0 {
+			return nil
+		}
+		seen := make(map[string]struct{})
+		rows := make([]model.SiteDisabledModel, 0, len(models))
+		for _, name := range models {
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" {
+				continue
+			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			rows = append(rows, model.SiteDisabledModel{SiteID: siteID, ModelName: trimmed})
+		}
+		if len(rows) > 0 {
+			return tx.Create(&rows).Error
+		}
+		return nil
+	})
+}
+
+func SiteAvailableModels(siteID int, ctx context.Context) ([]string, error) {
+	var rows []model.SiteModel
+	if err := db.GetDB().WithContext(ctx).
+		Joins("JOIN site_accounts ON site_accounts.id = site_models.site_account_id").
+		Where("site_accounts.site_id = ?", siteID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	models := make([]string, 0, len(rows))
+	for _, row := range rows {
+		trimmed := strings.TrimSpace(row.ModelName)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		models = append(models, trimmed)
+	}
+	sort.Strings(models)
+	return models, nil
+}
+
+func SiteUpdateSystemProxy(id int, useSystemProxy bool, ctx context.Context) error {
+	return db.GetDB().WithContext(ctx).Model(&model.Site{}).Where("id = ?", id).Update("use_system_proxy", useSystemProxy).Error
 }

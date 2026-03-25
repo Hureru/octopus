@@ -14,14 +14,19 @@ import {
     useCreateSiteAccount,
     useDeleteSite,
     useDeleteSiteAccount,
+    useDetectSitePlatform,
     useEnableSite,
     useEnableSiteAccount,
     useImportAllAPIHub,
+    useSiteAvailableModels,
+    useSiteBatchAction,
+    useSiteDisabledModels,
     useSiteList,
     useSyncAllSites,
     useSyncSiteAccount,
     useUpdateSite,
     useUpdateSiteAccount,
+    useUpdateSiteDisabledModels,
 } from '@/api/endpoints/site';
 import { PageWrapper } from '@/components/common/PageWrapper';
 import { toast } from '@/components/common/Toast';
@@ -48,6 +53,8 @@ import { cn } from '@/lib/utils';
 import {
     CalendarCheck2,
     Cable,
+    Check,
+    CheckSquare,
     CircleAlert,
     FileJson,
     FolderTree,
@@ -55,24 +62,36 @@ import {
     KeyRound,
     Link2,
     Pencil,
+    Pin,
+    PinOff,
     Plus,
     RefreshCw,
+    Search,
+    Shield,
+    ShieldOff,
     Sparkles,
+    Square,
     Trash2,
     TriangleAlert,
     Upload,
     UserRound,
+    Wallet,
     Waypoints,
     X,
 } from 'lucide-react';
 
 type SiteFormState = {
     name: string;
-    platform: SitePlatform;
+    platform: SitePlatform | '';
     base_url: string;
     enabled: boolean;
     proxy: boolean;
     site_proxy: string;
+    use_system_proxy: boolean;
+    external_checkin_url: string;
+    is_pinned: boolean;
+    sort_order: number;
+    global_weight: number;
     custom_header: CustomHeader[];
 };
 
@@ -115,11 +134,16 @@ const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {
 function createEmptySiteForm(): SiteFormState {
     return {
         name: '',
-        platform: SitePlatform.NewAPI,
+        platform: '',
         base_url: '',
         enabled: true,
         proxy: false,
         site_proxy: '',
+        use_system_proxy: false,
+        external_checkin_url: '',
+        is_pinned: false,
+        sort_order: 0,
+        global_weight: 1,
         custom_header: [],
     };
 }
@@ -132,6 +156,11 @@ function createSiteForm(site: SiteRecord): SiteFormState {
         enabled: site.enabled,
         proxy: site.proxy,
         site_proxy: site.site_proxy ?? '',
+        use_system_proxy: site.use_system_proxy,
+        external_checkin_url: site.external_checkin_url ?? '',
+        is_pinned: site.is_pinned,
+        sort_order: site.sort_order,
+        global_weight: site.global_weight,
         custom_header: site.custom_header.map((item) => ({ ...item })),
     };
 }
@@ -337,8 +366,12 @@ export function Site() {
     const syncAllSites = useSyncAllSites();
     const checkinAllSites = useCheckinAllSites();
     const importAllAPIHub = useImportAllAPIHub();
+    const detectPlatform = useDetectSitePlatform();
+    const batchAction = useSiteBatchAction();
+    const updateDisabledModels = useUpdateSiteDisabledModels();
 
     const [siteDialogOpen, setSiteDialogOpen] = useState(false);
+    const [importDialogOpen, setImportDialogOpen] = useState(false);
     const [importPayloadText, setImportPayloadText] = useState('');
     const [importFile, setImportFile] = useState<File | null>(null);
     const [lastImportResult, setLastImportResult] = useState<AllAPIHubImportResult | null>(null);
@@ -349,6 +382,18 @@ export function Site() {
     const [accountSite, setAccountSite] = useState<SiteRecord | null>(null);
     const [editingAccount, setEditingAccount] = useState<SiteAccount | null>(null);
     const [accountForm, setAccountForm] = useState<SiteAccountFormState | null>(null);
+
+    // Batch selection
+    const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
+
+    // Delete confirmation
+    const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'site' | 'account'; id: number; name: string } | null>(null);
+
+    // Disabled models dialog
+    const [disabledModelsSiteId, setDisabledModelsSiteId] = useState<number | null>(null);
+    const disabledModelsQuery = useSiteDisabledModels(disabledModelsSiteId);
+    const availableModelsQuery = useSiteAvailableModels(disabledModelsSiteId);
+    const [disabledModelSearch, setDisabledModelSearch] = useState('');
 
     let siteCount = 0;
     let accountCount = 0;
@@ -422,6 +467,22 @@ export function Site() {
             return;
         }
 
+        let platform = siteForm.platform;
+        if (!platform && !editingSite) {
+            try {
+                const detected = await detectPlatform.mutateAsync(siteForm.base_url.trim());
+                platform = detected.platform as SitePlatform;
+                toast.success(`自动检测到平台：${PLATFORM_LABELS[platform] ?? platform}`);
+            } catch {
+                toast.error('无法自动检测平台类型，请手动选择');
+                return;
+            }
+        }
+        if (!platform) {
+            toast.error('请选择平台类型');
+            return;
+        }
+
         const customHeader = trimHeaders(siteForm.custom_header);
         const invalidHeader = customHeader.find((item) => !item.header_key || !item.header_value);
         if (invalidHeader) {
@@ -432,11 +493,16 @@ export function Site() {
 
         const payload = {
             name: siteForm.name.trim(),
-            platform: siteForm.platform,
+            platform: platform as SitePlatform,
             base_url: siteForm.base_url.trim(),
             enabled: siteForm.enabled,
             proxy: siteForm.proxy,
             site_proxy: siteForm.site_proxy.trim(),
+            use_system_proxy: siteForm.use_system_proxy,
+            external_checkin_url: siteForm.external_checkin_url.trim() || null,
+            is_pinned: siteForm.is_pinned,
+            sort_order: siteForm.sort_order,
+            global_weight: siteForm.global_weight,
             custom_header: customHeader,
         };
 
@@ -538,16 +604,7 @@ export function Site() {
     }
 
     async function handleDeleteSite(site: SiteRecord) {
-        if (!window.confirm(`确认删除站点「${site.name}」及其托管渠道吗？`)) {
-            return;
-        }
-
-        try {
-            await deleteSite.mutateAsync(site.id);
-            toast.success('站点已删除');
-        } catch (deleteError) {
-            toast.error(getErrorMessage(deleteError));
-        }
+        setDeleteConfirm({ type: 'site', id: site.id, name: site.name });
     }
 
     async function handleToggleAccount(account: SiteAccount) {
@@ -560,16 +617,7 @@ export function Site() {
     }
 
     async function handleDeleteAccount(account: SiteAccount) {
-        if (!window.confirm(`确认删除账号「${account.name}」及其托管渠道吗？`)) {
-            return;
-        }
-
-        try {
-            await deleteSiteAccount.mutateAsync(account.id);
-            toast.success('站点账号已删除');
-        } catch (deleteError) {
-            toast.error(getErrorMessage(deleteError));
-        }
+        setDeleteConfirm({ type: 'account', id: account.id, name: account.name });
     }
 
     async function handleSyncAccount(account: SiteAccount) {
@@ -631,6 +679,72 @@ export function Site() {
         }
     }
 
+    async function confirmDelete() {
+        if (!deleteConfirm) return;
+        try {
+            if (deleteConfirm.type === 'site') {
+                await deleteSite.mutateAsync(deleteConfirm.id);
+                toast.success('站点已删除');
+                setSelectedSiteIds((prev) => prev.filter((id) => id !== deleteConfirm.id));
+            } else {
+                await deleteSiteAccount.mutateAsync(deleteConfirm.id);
+                toast.success('站点账号已删除');
+            }
+        } catch (deleteError) {
+            toast.error(getErrorMessage(deleteError));
+        }
+        setDeleteConfirm(null);
+    }
+
+    function toggleSiteSelection(siteId: number) {
+        setSelectedSiteIds((prev) =>
+            prev.includes(siteId) ? prev.filter((id) => id !== siteId) : [...prev, siteId],
+        );
+    }
+
+    function toggleSelectAll() {
+        if (!sites) return;
+        if (selectedSiteIds.length === sites.length) {
+            setSelectedSiteIds([]);
+        } else {
+            setSelectedSiteIds(sites.map((s) => s.id));
+        }
+    }
+
+    async function handleBatchAction(action: string) {
+        if (selectedSiteIds.length === 0) {
+            toast.error('请先选择站点');
+            return;
+        }
+        try {
+            const result = await batchAction.mutateAsync({ ids: selectedSiteIds, action });
+            const successCount = result.success_ids.length;
+            const failedCount = result.failed_items.length;
+            toast.success(`操作完成：成功 ${successCount}，失败 ${failedCount}`);
+            if (action === 'delete') {
+                setSelectedSiteIds([]);
+            }
+        } catch (batchError) {
+            toast.error(getErrorMessage(batchError));
+        }
+    }
+
+    async function handleTogglePin(site: SiteRecord) {
+        try {
+            await updateSite.mutateAsync({ id: site.id, is_pinned: !site.is_pinned });
+            toast.success(site.is_pinned ? '已取消置顶' : '已置顶');
+        } catch (pinError) {
+            toast.error(getErrorMessage(pinError));
+        }
+    }
+
+    function formatBalance(value: number) {
+        if (value === 0) return '0';
+        if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
+        if (value >= 1000) return `${(value / 1000).toFixed(2)}K`;
+        return value.toFixed(2);
+    }
+
     return (
         <div className="h-full min-h-0 overflow-y-auto overscroll-contain rounded-t-3xl">
             <PageWrapper className="space-y-4 pb-24 md:pb-4">
@@ -655,7 +769,7 @@ export function Site() {
                             <Button
                                 variant="outline"
                                 className="rounded-xl"
-                                onClick={() => document.getElementById('site-import-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                                onClick={() => setImportDialogOpen(true)}
                             >
                                 <Upload className="size-4" />导入 All API Hub
                             </Button>
@@ -678,93 +792,19 @@ export function Site() {
                     </div>
                 </section>
 
-                <section id="site-import-panel" className="rounded-3xl border border-border bg-card p-6">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                        <div className="max-w-3xl space-y-2">
-                            <div className="flex items-center gap-2 text-base font-semibold">
-                                <FileJson className="size-4" />
-                                <span>导入 All API Hub 账号</span>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                支持直接上传 All API Hub 导出的 JSON 文件，或粘贴完整导出内容。导入后会按平台和站点地址自动创建或复用站点，并为可同步账号触发后台同步。
-                            </p>
+                {selectedSiteIds.length > 0 ? (
+                    <section className="rounded-3xl border border-primary/30 bg-primary/5 p-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <span className="text-sm font-medium">已选 {selectedSiteIds.length} 个站点</span>
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => handleBatchAction('enable')} disabled={batchAction.isPending}>批量启用</Button>
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => handleBatchAction('disable')} disabled={batchAction.isPending}>批量禁用</Button>
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => handleBatchAction('enable_system_proxy')} disabled={batchAction.isPending}>批量启用系统代理</Button>
+                            <Button variant="outline" size="sm" className="rounded-xl" onClick={() => handleBatchAction('disable_system_proxy')} disabled={batchAction.isPending}>批量禁用系统代理</Button>
+                            <Button variant="destructive" size="sm" className="rounded-xl" onClick={() => handleBatchAction('delete')} disabled={batchAction.isPending}>批量删除</Button>
+                            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => setSelectedSiteIds([])}>取消选择</Button>
                         </div>
-                        <Button onClick={handleImportAllAPIHub} disabled={importAllAPIHub.isPending} className="rounded-xl">
-                            <Upload className={cn('size-4', importAllAPIHub.isPending ? 'animate-pulse' : '')} />
-                            {importAllAPIHub.isPending ? '导入中...' : '开始导入'}
-                        </Button>
-                    </div>
-
-                    <div className="mt-5 grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-                        <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
-                            <div className="text-sm font-medium">上传 JSON 文件</div>
-                            <Input
-                                type="file"
-                                accept=".json,application/json"
-                                onChange={(event) => {
-                                    setImportFile(event.target.files?.[0] ?? null);
-                                    setLastImportResult(null);
-                                }}
-                                className="rounded-xl"
-                            />
-                            <div className="text-xs text-muted-foreground">
-                                {importFile ? `已选择：${importFile.name}` : '支持 All API Hub 导出的 .json 文件'}
-                            </div>
-                            {importFile ? (
-                                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => setImportFile(null)}>
-                                    <X className="size-4" />清除文件
-                                </Button>
-                            ) : null}
-                        </div>
-
-                        <label className="grid gap-2 text-sm">
-                            <span className="font-medium">或粘贴导出 JSON</span>
-                            <textarea
-                                value={importPayloadText}
-                                onChange={(event) => {
-                                    setImportPayloadText(event.target.value);
-                                    setLastImportResult(null);
-                                }}
-                                placeholder='粘贴类似 {"accounts":{"accounts":[...]}} 的完整导出内容'
-                                className="min-h-48 rounded-2xl border border-input bg-background px-4 py-3 font-mono text-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20"
-                            />
-                            <span className="text-xs text-muted-foreground">
-                                导入会保留已存在站点的本地配置；同一分组下的多个 key 后续仍会聚合到同一个托管 channel。
-                            </span>
-                        </label>
-                    </div>
-
-                    {lastImportResult ? (
-                        <div className="mt-5 space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-4">
-                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                                <SiteMetric label="新增站点" value={lastImportResult.created_sites} />
-                                <SiteMetric label="复用站点" value={lastImportResult.reused_sites} />
-                                <SiteMetric label="新增账号" value={lastImportResult.created_accounts} />
-                                <SiteMetric label="更新账号" value={lastImportResult.updated_accounts} />
-                                <SiteMetric label="跳过账号" value={lastImportResult.skipped_accounts} />
-                                <SiteMetric label="后台同步" value={lastImportResult.scheduled_sync_accounts} />
-                            </div>
-
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-                                <div className="flex items-center gap-2 text-sm font-medium">
-                                    <TriangleAlert className="size-4 text-muted-foreground" />
-                                    <span>导入告警</span>
-                                </div>
-                                {lastImportResult.warnings.length > 0 ? (
-                                    <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                                        {lastImportResult.warnings.map((warning) => (
-                                            <div key={warning} className="break-all rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
-                                                {warning}
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="mt-3 text-sm text-muted-foreground">本次导入没有告警。</div>
-                                )}
-                            </div>
-                        </div>
-                    ) : null}
-                </section>
+                    </section>
+                ) : null}
 
                 {error ? (
                     <section className="rounded-3xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
@@ -794,26 +834,44 @@ export function Site() {
                         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                             <div className="space-y-3">
                                 <div className="flex flex-wrap items-center gap-2">
+                                    <button type="button" className="shrink-0" onClick={() => toggleSiteSelection(site.id)}>
+                                        {selectedSiteIds.includes(site.id) ? <CheckSquare className="size-5 text-primary" /> : <Square className="size-5 text-muted-foreground" />}
+                                    </button>
                                     <h2 className="text-xl font-semibold">{site.name}</h2>
+                                    {site.is_pinned ? <Badge variant="outline" className="text-amber-600"><Pin className="mr-1 size-3" />置顶</Badge> : null}
                                     <Badge variant="outline">{PLATFORM_LABELS[site.platform]}</Badge>
                                     <Badge variant="outline" className={site.enabled ? 'text-emerald-600' : 'text-muted-foreground'}>
                                         {site.enabled ? '启用中' : '已停用'}
                                     </Badge>
                                     <Badge variant="outline">{site.accounts.length} 个账号</Badge>
+                                    {site.accounts.length > 0 ? (
+                                        <Badge variant="outline" className="gap-1">
+                                            <Wallet className="size-3" />
+                                            {formatBalance(site.accounts.reduce((sum, acc) => sum + acc.balance, 0))}
+                                        </Badge>
+                                    ) : null}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                                     <Link2 className="size-4" />
                                     <span>{site.base_url}</span>
                                 </div>
                                 <div className="flex flex-wrap gap-2 text-xs">
-                                    <Badge variant="outline">{site.proxy ? '启用代理' : '直连'}</Badge>
+                                    <Badge variant="outline">{site.proxy ? '启用代理' : site.use_system_proxy ? '系统代理' : '直连'}</Badge>
                                     {site.site_proxy ? <Badge variant="outline">{site.site_proxy}</Badge> : null}
                                     <Badge variant="outline">{site.custom_header.length} 个自定义 Header</Badge>
+                                    {site.external_checkin_url ? <Badge variant="outline">外部签到</Badge> : null}
                                 </div>
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 <Button variant="outline" size="sm" className="rounded-xl" onClick={() => openCreateAccountDialog(site)}>
                                     <Plus className="size-4" />新增账号
+                                </Button>
+                                <Button variant="outline" size="sm" className="rounded-xl" onClick={() => handleTogglePin(site)}>
+                                    {site.is_pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+                                    {site.is_pinned ? '取消置顶' : '置顶'}
+                                </Button>
+                                <Button variant="outline" size="sm" className="rounded-xl" onClick={() => { setDisabledModelsSiteId(site.id); setDisabledModelSearch(''); }}>
+                                    <ShieldOff className="size-4" />禁用模型
                                 </Button>
                                 <Button variant="outline" size="sm" className="rounded-xl" onClick={() => openEditSiteDialog(site)}>
                                     <Pencil className="size-4" />编辑
@@ -849,11 +907,12 @@ export function Site() {
                                                 {account.account_proxy ? <Badge variant="outline">{account.account_proxy}</Badge> : null}
                                             </div>
 
-                                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                                                 <SiteMetric label="分组" value={account.user_groups.length} />
                                                 <SiteMetric label="Key" value={account.tokens.length} />
                                                 <SiteMetric label="模型" value={account.models.length} />
                                                 <SiteMetric label="托管渠道" value={account.channel_bindings.length} />
+                                                <SiteMetric label="余额" value={formatBalance(account.balance)} />
                                             </div>
 
                                             <div className="grid gap-3 lg:grid-cols-2">
@@ -936,14 +995,16 @@ export function Site() {
                                 <span className="font-medium">平台类型</span>
                                 <Select value={siteForm.platform} onValueChange={(value) => setSiteForm((current) => ({ ...current, platform: value as SitePlatform }))}>
                                     <SelectTrigger className="w-full rounded-xl">
-                                        <SelectValue />
+                                        <SelectValue placeholder="自动检测" />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        <SelectItem value="">自动检测</SelectItem>
                                         {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
                                             <SelectItem key={value} value={value}>{label}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                <span className="text-xs text-muted-foreground">留空可根据站点地址自动检测平台类型</span>
                             </label>
                         </div>
 
@@ -952,7 +1013,7 @@ export function Site() {
                             <Input value={siteForm.base_url} onChange={(event) => setSiteForm((current) => ({ ...current, base_url: event.target.value }))} placeholder="https://example.com" className="rounded-xl" />
                         </label>
 
-                        <div className="grid gap-4 md:grid-cols-2">
+                        <div className="grid gap-4 md:grid-cols-3">
                             <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
                                 <div>
                                     <div className="text-sm font-medium">启用站点</div>
@@ -963,16 +1024,30 @@ export function Site() {
 
                             <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
                                 <div>
-                                    <div className="text-sm font-medium">使用代理</div>
-                                    <div className="text-xs text-muted-foreground">请求站点接口时走代理</div>
+                                    <div className="text-sm font-medium">站点代理</div>
+                                    <div className="text-xs text-muted-foreground">请求时走站点级代理</div>
                                 </div>
                                 <Switch checked={siteForm.proxy} onCheckedChange={(checked) => setSiteForm((current) => ({ ...current, proxy: checked }))} />
+                            </div>
+
+                            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
+                                <div>
+                                    <div className="text-sm font-medium">系统代理</div>
+                                    <div className="text-xs text-muted-foreground">无专用代理时用全局代理</div>
+                                </div>
+                                <Switch checked={siteForm.use_system_proxy} onCheckedChange={(checked) => setSiteForm((current) => ({ ...current, use_system_proxy: checked }))} />
                             </div>
                         </div>
 
                         <label className="grid gap-2 text-sm">
                             <span className="font-medium">站点级代理</span>
                             <Input value={siteForm.site_proxy} onChange={(event) => setSiteForm((current) => ({ ...current, site_proxy: event.target.value }))} placeholder="可选：例如 socks5://127.0.0.1:7890" className="rounded-xl" />
+                        </label>
+
+                        <label className="grid gap-2 text-sm">
+                            <span className="font-medium">外部签到 URL</span>
+                            <Input value={siteForm.external_checkin_url} onChange={(event) => setSiteForm((current) => ({ ...current, external_checkin_url: event.target.value }))} placeholder="可选：例如 https://example.com/api/checkin" className="rounded-xl" />
+                            <span className="text-xs text-muted-foreground">配置后签到将调用此 URL，而非内置平台逻辑。适用于平台不支持签到但有外部签到接口的场景。</span>
                         </label>
 
                         <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
@@ -1110,24 +1185,36 @@ export function Site() {
                                 <span className="text-xs text-muted-foreground">用于该账号的同步、签到和模型拉取；自动投影的 channel 默认也会跟随这里的代理。</span>
                             </label>
 
-                            <div className="grid gap-4 md:grid-cols-4">
+                            <div className="grid gap-4 md:grid-cols-2">
                                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                    <div className="flex items-center gap-2"><UserRound className="size-4 text-muted-foreground" /><span className="text-sm font-medium">启用</span></div>
+                                    <div>
+                                        <div className="flex items-center gap-2"><UserRound className="size-4 text-muted-foreground" /><span className="text-sm font-medium">启用账号</span></div>
+                                        <div className="text-xs text-muted-foreground">停用后不参与同步和签到</div>
+                                    </div>
                                     <Switch checked={accountForm.enabled} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, enabled: checked } : current)} />
                                 </div>
 
                                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                    <div className="flex items-center gap-2"><RefreshCw className="size-4 text-muted-foreground" /><span className="text-sm font-medium">自动同步</span></div>
+                                    <div>
+                                        <div className="flex items-center gap-2"><RefreshCw className="size-4 text-muted-foreground" /><span className="text-sm font-medium">自动同步</span></div>
+                                        <div className="text-xs text-muted-foreground">定时拉取分组、模型和 key</div>
+                                    </div>
                                     <Switch checked={accountForm.auto_sync} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, auto_sync: checked } : current)} />
                                 </div>
 
                                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                    <div className="flex items-center gap-2"><CalendarCheck2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">自动签到</span></div>
+                                    <div>
+                                        <div className="flex items-center gap-2"><CalendarCheck2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">自动签到</span></div>
+                                        <div className="text-xs text-muted-foreground">定时执行平台签到</div>
+                                    </div>
                                     <Switch checked={accountForm.auto_checkin} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, auto_checkin: checked } : current)} />
                                 </div>
 
                                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                    <div className="flex items-center gap-2"><CalendarCheck2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">随机签到</span></div>
+                                    <div>
+                                        <div className="flex items-center gap-2"><CalendarCheck2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">随机签到</span></div>
+                                        <div className="text-xs text-muted-foreground">在间隔基础上添加随机延迟</div>
+                                    </div>
                                     <Switch checked={accountForm.random_checkin} onCheckedChange={(checked) => setAccountForm((current) => current ? { ...current, random_checkin: checked } : current)} />
                                 </div>
                             </div>
@@ -1180,13 +1267,188 @@ export function Site() {
                     ) : null}
                 </DialogContent>
             </Dialog>
+
+            <Dialog open={importDialogOpen} onOpenChange={(open) => { setImportDialogOpen(open); if (!open) setLastImportResult(null); }}>
+                <DialogContent className="max-w-3xl rounded-3xl max-h-[85vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><FileJson className="size-5" />导入 All API Hub 账号</DialogTitle>
+                        <DialogDescription>
+                            支持直接上传 All API Hub 导出的 JSON 文件，或粘贴完整导出内容。导入后会按平台和站点地址自动创建或复用站点，并为可同步账号触发后台同步。
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-5">
+                        <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
+                            <div className="text-sm font-medium">上传 JSON 文件</div>
+                            <Input
+                                type="file"
+                                accept=".json,application/json"
+                                onChange={(event) => {
+                                    setImportFile(event.target.files?.[0] ?? null);
+                                    setLastImportResult(null);
+                                }}
+                                className="rounded-xl"
+                            />
+                            <div className="text-xs text-muted-foreground">
+                                {importFile ? `已选择：${importFile.name}` : '支持 All API Hub 导出的 .json 文件'}
+                            </div>
+                            {importFile ? (
+                                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => setImportFile(null)}>
+                                    <X className="size-4" />清除文件
+                                </Button>
+                            ) : null}
+                        </div>
+
+                        <label className="grid gap-2 text-sm">
+                            <span className="font-medium">或粘贴导出 JSON</span>
+                            <textarea
+                                value={importPayloadText}
+                                onChange={(event) => {
+                                    setImportPayloadText(event.target.value);
+                                    setLastImportResult(null);
+                                }}
+                                placeholder='粘贴类似 {"accounts":{"accounts":[...]}} 的完整导出内容'
+                                className="min-h-40 rounded-2xl border border-input bg-background px-4 py-3 font-mono text-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                                导入会保留已存在站点的本地配置；同一分组下的多个 key 后续仍会聚合到同一个托管 channel。
+                            </span>
+                        </label>
+
+                        {lastImportResult ? (
+                            <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-4">
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                    <SiteMetric label="新增站点" value={lastImportResult.created_sites} />
+                                    <SiteMetric label="复用站点" value={lastImportResult.reused_sites} />
+                                    <SiteMetric label="新增账号" value={lastImportResult.created_accounts} />
+                                    <SiteMetric label="更新账号" value={lastImportResult.updated_accounts} />
+                                    <SiteMetric label="跳过账号" value={lastImportResult.skipped_accounts} />
+                                    <SiteMetric label="后台同步" value={lastImportResult.scheduled_sync_accounts} />
+                                </div>
+
+                                {lastImportResult.warnings.length > 0 ? (
+                                    <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                        <div className="flex items-center gap-2 text-sm font-medium">
+                                            <TriangleAlert className="size-4 text-muted-foreground" />
+                                            <span>导入告警</span>
+                                        </div>
+                                        <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                                            {lastImportResult.warnings.map((warning) => (
+                                                <div key={warning} className="break-all rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+                                                    {warning}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" className="rounded-xl" onClick={() => setImportDialogOpen(false)}>关闭</Button>
+                        <Button onClick={handleImportAllAPIHub} disabled={importAllAPIHub.isPending} className="rounded-xl">
+                            <Upload className={cn('size-4', importAllAPIHub.isPending ? 'animate-pulse' : '')} />
+                            {importAllAPIHub.isPending ? '导入中...' : '开始导入'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!deleteConfirm} onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}>
+                <DialogContent className="max-w-md rounded-3xl">
+                    <DialogHeader>
+                        <DialogTitle>确认删除</DialogTitle>
+                        <DialogDescription>
+                            {deleteConfirm?.type === 'site'
+                                ? `确认删除站点「${deleteConfirm?.name}」及其所有账号和托管渠道？此操作不可撤销。`
+                                : `确认删除账号「${deleteConfirm?.name}」及其托管渠道？此操作不可撤销。`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" className="rounded-xl" onClick={() => setDeleteConfirm(null)}>取消</Button>
+                        <Button variant="destructive" className="rounded-xl" onClick={confirmDelete} disabled={deleteSite.isPending || deleteSiteAccount.isPending}>
+                            {deleteSite.isPending || deleteSiteAccount.isPending ? '删除中...' : '确认删除'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={disabledModelsSiteId != null} onOpenChange={(open) => { if (!open) setDisabledModelsSiteId(null); }}>
+                <DialogContent className="max-w-3xl rounded-3xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>管理禁用模型</DialogTitle>
+                        <DialogDescription>选中的模型将在投影到渠道时被排除。修改后会自动重新投影。</DialogDescription>
+                    </DialogHeader>
+
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            value={disabledModelSearch}
+                            onChange={(event) => setDisabledModelSearch(event.target.value)}
+                            placeholder="搜索模型..."
+                            className="rounded-xl pl-10"
+                        />
+                    </div>
+
+                    {disabledModelsQuery.isLoading || availableModelsQuery.isLoading ? (
+                        <div className="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+                    ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                            {(() => {
+                                const disabledSet = new Set(disabledModelsQuery.data?.models ?? []);
+                                const allModels = Array.from(new Set([...(availableModelsQuery.data?.models ?? []), ...disabledSet])).sort();
+                                const filtered = disabledModelSearch.trim()
+                                    ? allModels.filter((m) => m.toLowerCase().includes(disabledModelSearch.toLowerCase()))
+                                    : allModels;
+
+                                if (filtered.length === 0) {
+                                    return <div className="py-8 text-center text-sm text-muted-foreground">暂无可用模型</div>;
+                                }
+
+                                return filtered.map((modelName) => {
+                                    const isDisabled = disabledSet.has(modelName);
+                                    return (
+                                        <button
+                                            key={modelName}
+                                            type="button"
+                                            className={cn(
+                                                'flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm transition',
+                                                isDisabled
+                                                    ? 'border-destructive/20 bg-destructive/5 text-destructive'
+                                                    : 'border-border/60 bg-background hover:bg-muted/30',
+                                            )}
+                                            onClick={async () => {
+                                                if (!disabledModelsSiteId) return;
+                                                const current = disabledModelsQuery.data?.models ?? [];
+                                                const next = isDisabled
+                                                    ? current.filter((m) => m !== modelName)
+                                                    : [...current, modelName];
+                                                try {
+                                                    await updateDisabledModels.mutateAsync({ siteId: disabledModelsSiteId, models: next });
+                                                } catch (updateError) {
+                                                    toast.error(getErrorMessage(updateError));
+                                                }
+                                            }}
+                                        >
+                                            {isDisabled ? <ShieldOff className="size-4 shrink-0" /> : <Shield className="size-4 shrink-0 text-emerald-600" />}
+                                            <span className="truncate">{modelName}</span>
+                                            {isDisabled ? <Badge variant="outline" className="ml-auto text-xs text-destructive">已禁用</Badge> : null}
+                                        </button>
+                                    );
+                                });
+                            })()}
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" className="rounded-xl" onClick={() => setDisabledModelsSiteId(null)}>关闭</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
-
-
-
-
 
 
 

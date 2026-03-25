@@ -32,7 +32,9 @@ func init() {
 		AddRoute(router.NewRoute("/account/sync/:id", http.MethodPost).Handle(syncSiteAccount)).
 		AddRoute(router.NewRoute("/account/checkin/:id", http.MethodPost).Handle(checkinSiteAccount)).
 		AddRoute(router.NewRoute("/sync-all", http.MethodPost).Handle(syncAllSiteAccounts)).
-		AddRoute(router.NewRoute("/checkin-all", http.MethodPost).Handle(checkinAllSiteAccounts))
+		AddRoute(router.NewRoute("/checkin-all", http.MethodPost).Handle(checkinAllSiteAccounts)).
+		AddRoute(router.NewRoute("/:id/disabled-models", http.MethodGet).Handle(getSiteDisabledModels)).
+		AddRoute(router.NewRoute("/:id/available-models", http.MethodGet).Handle(getSiteAvailableModels))
 
 	router.NewGroupRouter("/api/v1/site").
 		Use(middleware.Auth()).
@@ -40,6 +42,9 @@ func init() {
 		AddRoute(router.NewRoute("/create", http.MethodPost).Handle(createSite)).
 		AddRoute(router.NewRoute("/update", http.MethodPost).Handle(updateSite)).
 		AddRoute(router.NewRoute("/enable", http.MethodPost).Handle(enableSite)).
+		AddRoute(router.NewRoute("/detect", http.MethodPost).Handle(detectSitePlatform)).
+		AddRoute(router.NewRoute("/batch", http.MethodPost).Handle(batchSite)).
+		AddRoute(router.NewRoute("/:id/disabled-models", http.MethodPut).Handle(updateSiteDisabledModels)).
 		AddRoute(router.NewRoute("/account/create", http.MethodPost).Handle(createSiteAccount)).
 		AddRoute(router.NewRoute("/account/update", http.MethodPost).Handle(updateSiteAccount)).
 		AddRoute(router.NewRoute("/account/enable", http.MethodPost).Handle(enableSiteAccount))
@@ -302,4 +307,139 @@ func syncAllSiteAccounts(c *gin.Context) {
 func checkinAllSiteAccounts(c *gin.Context) {
 	go sitesvc.CheckinAll(context.Background())
 	resp.Success(c, nil)
+}
+
+func detectSitePlatform(c *gin.Context) {
+	var request struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	platform, err := sitesvc.DetectPlatform(ctx, request.URL)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{"platform": platform})
+}
+
+func batchSite(c *gin.Context) {
+	var req model.SiteBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		return
+	}
+	validActions := map[string]bool{
+		"enable": true, "disable": true, "delete": true,
+		"enable_system_proxy": true, "disable_system_proxy": true,
+	}
+	if !validActions[req.Action] {
+		resp.Error(c, http.StatusBadRequest, "invalid action")
+		return
+	}
+	if len(req.IDs) == 0 {
+		resp.Error(c, http.StatusBadRequest, "ids is required")
+		return
+	}
+
+	result := model.SiteBatchResult{
+		SuccessIDs:  make([]int, 0),
+		FailedItems: make([]model.SiteBatchFailure, 0),
+	}
+	ctx := c.Request.Context()
+
+	for _, id := range req.IDs {
+		var batchErr error
+		switch req.Action {
+		case "enable":
+			batchErr = op.SiteEnabled(id, true, ctx)
+		case "disable":
+			batchErr = op.SiteEnabled(id, false, ctx)
+		case "delete":
+			batchErr = sitesvc.DeleteSite(ctx, id)
+		case "enable_system_proxy":
+			batchErr = op.SiteUpdateSystemProxy(id, true, ctx)
+		case "disable_system_proxy":
+			batchErr = op.SiteUpdateSystemProxy(id, false, ctx)
+		}
+		if batchErr != nil {
+			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: batchErr.Error()})
+		} else {
+			result.SuccessIDs = append(result.SuccessIDs, id)
+		}
+	}
+
+	// Project affected sites asynchronously
+	if req.Action == "enable" || req.Action == "disable" {
+		for _, id := range result.SuccessIDs {
+			go func(siteID int) {
+				projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer projCancel()
+				_ = sitesvc.ProjectSite(projCtx, siteID)
+			}(id)
+		}
+	}
+
+	resp.Success(c, result)
+}
+
+func getSiteDisabledModels(c *gin.Context) {
+	idNum, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		return
+	}
+	models, err := op.SiteDisabledModelList(idNum, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{"site_id": idNum, "models": models})
+}
+
+func updateSiteDisabledModels(c *gin.Context) {
+	idNum, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		return
+	}
+	var request struct {
+		Models []string `json:"models"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		return
+	}
+	if err := op.SiteDisabledModelReplace(idNum, request.Models, c.Request.Context()); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Re-project the site to apply model blacklist
+	go func(siteID int) {
+		projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer projCancel()
+		_ = sitesvc.ProjectSite(projCtx, siteID)
+	}(idNum)
+
+	models, _ := op.SiteDisabledModelList(idNum, c.Request.Context())
+	resp.Success(c, gin.H{"site_id": idNum, "models": models})
+}
+
+func getSiteAvailableModels(c *gin.Context) {
+	idNum, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		return
+	}
+	models, err := op.SiteAvailableModels(idNum, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, gin.H{"site_id": idNum, "models": models})
 }

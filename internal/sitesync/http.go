@@ -35,17 +35,23 @@ func resolveSiteAccountProxy(siteRecord *model.Site, accounts ...*model.SiteAcco
 			return true, &trimmed
 		}
 	}
-	if siteRecord == nil || !siteRecord.Proxy {
+	if siteRecord == nil {
 		return false, nil
 	}
-	if siteRecord.SiteProxy == nil {
+	if siteRecord.Proxy {
+		if siteRecord.SiteProxy == nil {
+			return true, nil
+		}
+		trimmed := strings.TrimSpace(*siteRecord.SiteProxy)
+		if trimmed == "" {
+			return true, nil
+		}
+		return true, &trimmed
+	}
+	if siteRecord.UseSystemProxy {
 		return true, nil
 	}
-	trimmed := strings.TrimSpace(*siteRecord.SiteProxy)
-	if trimmed == "" {
-		return true, nil
-	}
-	return true, &trimmed
+	return false, nil
 }
 
 func requestJSON(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string, accounts ...*model.SiteAccount) (map[string]any, error) {
