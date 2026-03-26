@@ -52,6 +52,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
+import { CheckinPanel } from './CheckinPanel';
 import {
     CalendarCheck2,
     Cable,
@@ -819,6 +820,8 @@ export function Site() {
                         <SiteMetric label="同步到的模型" value={modelCount} />
                     </div>
                 </section>
+
+                <CheckinPanel sites={sites} isLoading={isLoading} />
 
                 {selectedSiteIds.length > 0 ? (
                     <section className="rounded-3xl border border-primary/30 bg-primary/5 p-4">
