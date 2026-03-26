@@ -1,6 +1,6 @@
 services:
   octopus:
-    image: bestrui/octopus
+    image: hureru/octopus
     ports:
        - '8080:8080'
     volumes:      
