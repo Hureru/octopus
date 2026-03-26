@@ -378,6 +378,8 @@
             "sessionKeepTimeHint": "单位秒，会话期间保持使用同一渠道，0 表示禁用",
             "retryEnabled": "同通道重试",
             "retryEnabledHint": "启用后，遇到 429/5xx 等可重试错误时先在同通道重试，全部失败后透传状态码给客户端",
+            "maxRetries": "最大重试",
+            "maxRetriesHint": "同通道重试次数，仅在开启同通道重试时生效",
             "items": "已选模型",
             "addItem": "添加模型",
             "autoAdd": "自动添加",

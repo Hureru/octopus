@@ -378,6 +378,8 @@
             "sessionKeepTimeHint": "Unit: seconds, keeps using the same channel within a session, 0 = disabled",
             "retryEnabled": "Same-Channel Retry",
             "retryEnabledHint": "When enabled, retries on the same channel for 429/5xx errors before passing through the status code to the client",
+            "maxRetries": "Max Retries",
+            "maxRetriesHint": "Same-channel retry count, only effective when same-channel retry is enabled",
             "items": "Selected Models",
             "addItem": "Add Model",
             "autoAdd": "Auto Add",

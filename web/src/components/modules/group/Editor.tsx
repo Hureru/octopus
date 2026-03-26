@@ -28,6 +28,7 @@ export type GroupEditorValues = {
     first_token_time_out: number;
     session_keep_time: number;
     retry_enabled: boolean;
+    max_retries: number;
     members: SelectedMember[];
 };
 
@@ -260,6 +261,7 @@ export function GroupEditor({
     const [firstTokenTimeOut, setFirstTokenTimeOut] = useState<number>(initial?.first_token_time_out ?? 0);
     const [sessionKeepTime, setSessionKeepTime] = useState<number>(initial?.session_keep_time ?? 0);
     const [retryEnabled, setRetryEnabled] = useState<boolean>(initial?.retry_enabled ?? false);
+    const [maxRetries, setMaxRetries] = useState<number>(initial?.max_retries ?? 3);
     const [selectedMembers, setSelectedMembers] = useState<SelectedMember[]>(initial?.members ?? []);
     const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
@@ -344,6 +346,7 @@ export function GroupEditor({
             first_token_time_out: firstTokenTimeOut,
             session_keep_time: sessionKeepTime,
             retry_enabled: retryEnabled,
+            max_retries: maxRetries,
             members: selectedMembers,
         });
     };
@@ -481,6 +484,34 @@ export function GroupEditor({
                                 </TooltipContent>
                             </Tooltip>
                         </TooltipProvider>
+                        {retryEnabled && (
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <label className="flex items-center gap-1.5 shrink-0">
+                                            <Input
+                                                type="number"
+                                                inputMode="numeric"
+                                                min={1}
+                                                step={1}
+                                                value={String(maxRetries)}
+                                                onChange={(e) => {
+                                                    const raw = e.target.value;
+                                                    if (raw.trim() === '') { setMaxRetries(1); return; }
+                                                    const n = Number.parseInt(raw, 10);
+                                                    setMaxRetries(Number.isFinite(n) && n > 0 ? n : 1);
+                                                }}
+                                                className="w-16 h-7 rounded-lg text-xs text-center"
+                                            />
+                                            <span className="text-xs text-muted-foreground">{t('form.maxRetries')}</span>
+                                        </label>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        {t('form.maxRetriesHint')}
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        )}
                     </div>
 
                     <div className="flex-1 min-h-0">

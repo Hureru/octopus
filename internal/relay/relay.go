@@ -72,10 +72,13 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	var lastErr error
 	var lastResult attemptResult
 
-	// 同通道重试次数：启用时最多 3 次，否则 1 次（不重试）
+	// 同通道重试次数：启用时使用配置值，否则 1 次（不重试）
 	maxSameChannelRetries := 1
 	if group.RetryEnabled {
-		maxSameChannelRetries = 3
+		maxSameChannelRetries = group.MaxRetries
+		if maxSameChannelRetries <= 0 {
+			maxSameChannelRetries = 3
+		}
 	}
 
 	for iter.Next() {
@@ -172,6 +175,13 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		// 同通道重试耗尽后记录熔断器失败
 		if !result.Success && !result.Written && !result.Canceled {
 			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model)
+		}
+
+		// 429/503 不跳 channel：直接透传给客户端，让客户端 SDK 重试
+		if group.RetryEnabled && !result.Success && !result.Written && !result.Canceled && isPassthroughStatus(result.StatusCode) {
+			lastErr = result.Err
+			lastResult = result
+			break
 		}
 
 		if result.Success {
