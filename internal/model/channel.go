@@ -84,6 +84,8 @@ type ChannelUpdateRequest struct {
 	KeysToAdd    []ChannelKeyAddRequest    `json:"keys_to_add,omitempty"`
 	KeysToUpdate []ChannelKeyUpdateRequest `json:"keys_to_update,omitempty"`
 	KeysToDelete []int                     `json:"keys_to_delete,omitempty"`
+
+	BypassManagedCheck bool `json:"-"` // 内部使用：允许投影逻辑更新 managed channel
 }
 
 type ChannelKeyAddRequest struct {

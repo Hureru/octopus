@@ -15,6 +15,13 @@ export enum SitePlatform {
     Gemini = 'gemini',
 }
 
+export enum SiteOutboundFormatMode {
+    Auto = 'auto',
+    OpenAIOnly = 'openai_only',
+}
+
+export type SiteOutboundFormatModeValue = SiteOutboundFormatMode | '';
+
 export enum SiteCredentialType {
     UsernamePassword = 'username_password',
     AccessToken = 'access_token',
@@ -108,6 +115,7 @@ export type Site = {
     is_pinned: boolean;
     sort_order: number;
     global_weight: number;
+    outbound_format_mode: SiteOutboundFormatModeValue;
     custom_header: CustomHeader[];
     accounts: SiteAccount[];
 };
@@ -164,6 +172,7 @@ export function useSiteList() {
             is_pinned: site.is_pinned ?? false,
             sort_order: typeof site.sort_order === 'number' ? site.sort_order : 0,
             global_weight: typeof site.global_weight === 'number' && site.global_weight > 0 ? site.global_weight : 1,
+            outbound_format_mode: site.outbound_format_mode ?? '',
             accounts: (site.accounts ?? []).map((account) => ({
                 ...account,
                 platform_user_id: account.platform_user_id ?? null,

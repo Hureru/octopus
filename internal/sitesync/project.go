@@ -97,87 +97,104 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	slices.Sort(desiredKeys)
 
 	managedChannelIDs := make([]int, 0, len(desiredKeys))
+	shouldSplit := shouldSplitByOutboundType(siteRecord)
+	modelBuckets := partitionModelsByOutboundType(modelNames, shouldSplit, siteRecord.Platform)
+
 	for _, groupKey := range desiredKeys {
 		group := groupMap[groupKey]
 		groupTokens := tokenGroups[groupKey]
 		useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
-		channelPayload := model.Channel{
-			Name:         buildManagedChannelName(siteRecord, account, group),
-			Type:         platformOutboundType(siteRecord.Platform),
-			Enabled:      siteRecord.Enabled && account.Enabled && len(groupTokens) > 0,
-			BaseUrls:     []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}},
-			Keys:         buildChannelKeys(groupTokens),
-			Model:        strings.Join(modelNames, ","),
-			CustomModel:  "",
-			Proxy:        useProxy,
-			AutoSync:     false,
-			AutoGroup:    model.AutoGroupTypeNone,
-			CustomHeader: siteRecord.CustomHeader,
-			ChannelProxy: proxyURL,
-		}
+		baseUrls := []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}}
+		enabled := siteRecord.Enabled && account.Enabled && len(groupTokens) > 0
 
-		binding, exists := bindingMap[groupKey]
-		if !exists {
-			if err := op.ChannelCreate(&channelPayload, ctx); err != nil {
-				return nil, fmt.Errorf("failed to create managed channel: %w", err)
+		for obType, bucketModels := range modelBuckets {
+			if len(bucketModels) == 0 {
+				continue
 			}
-			binding = model.SiteChannelBinding{SiteID: siteRecord.ID, SiteAccountID: account.ID, GroupKey: groupKey, ChannelID: channelPayload.ID}
-			if group.ID != 0 {
-				binding.SiteUserGroupID = &group.ID
+			bindingKey := compositeBindingKey(groupKey, obType, shouldSplit)
+			channelPayload := model.Channel{
+				Name:         buildManagedChannelName(siteRecord, account, group, obType, shouldSplit),
+				Type:         obType,
+				Enabled:      enabled,
+				BaseUrls:     baseUrls,
+				Keys:         buildChannelKeys(groupTokens),
+				Model:        strings.Join(bucketModels, ","),
+				CustomModel:  "",
+				Proxy:        useProxy,
+				AutoSync:     false,
+				AutoGroup:    model.AutoGroupTypeNone,
+				CustomHeader: siteRecord.CustomHeader,
+				ChannelProxy: proxyURL,
 			}
-			if err := db.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
-				return nil, fmt.Errorf("failed to create site channel binding: %w", err)
-			}
-			managedChannelIDs = append(managedChannelIDs, channelPayload.ID)
-			continue
-		}
 
-		existingChannel, err := op.ChannelGet(binding.ChannelID, ctx)
-		if err != nil {
-			if err := db.GetDB().WithContext(ctx).Delete(&binding).Error; err != nil {
-				return nil, fmt.Errorf("failed to delete broken site channel binding: %w", err)
+			binding, exists := bindingMap[bindingKey]
+			if !exists {
+				if err := op.ChannelCreate(&channelPayload, ctx); err != nil {
+					return nil, fmt.Errorf("failed to create managed channel: %w", err)
+				}
+				binding = model.SiteChannelBinding{SiteID: siteRecord.ID, SiteAccountID: account.ID, GroupKey: bindingKey, ChannelID: channelPayload.ID}
+				if group.ID != 0 {
+					binding.SiteUserGroupID = &group.ID
+				}
+				if err := db.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
+					return nil, fmt.Errorf("failed to create site channel binding: %w", err)
+				}
+				managedChannelIDs = append(managedChannelIDs, channelPayload.ID)
+				continue
 			}
-			if err := op.ChannelCreate(&channelPayload, ctx); err != nil {
-				return nil, fmt.Errorf("failed to recreate managed channel: %w", err)
+
+			existingChannel, err := op.ChannelGet(binding.ChannelID, ctx)
+			if err != nil {
+				if err := db.GetDB().WithContext(ctx).Delete(&binding).Error; err != nil {
+					return nil, fmt.Errorf("failed to delete broken site channel binding: %w", err)
+				}
+				if err := op.ChannelCreate(&channelPayload, ctx); err != nil {
+					return nil, fmt.Errorf("failed to recreate managed channel: %w", err)
+				}
+				binding.ChannelID = channelPayload.ID
+				if group.ID != 0 {
+					binding.SiteUserGroupID = &group.ID
+				} else {
+					binding.SiteUserGroupID = nil
+				}
+				if err := db.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
+					return nil, fmt.Errorf("failed to recreate site channel binding: %w", err)
+				}
+				managedChannelIDs = append(managedChannelIDs, channelPayload.ID)
+				continue
 			}
-			binding.ChannelID = channelPayload.ID
+
+			updateReq := &model.ChannelUpdateRequest{ID: existingChannel.ID, Name: &channelPayload.Name, Type: &channelPayload.Type, Enabled: &channelPayload.Enabled, BaseUrls: &channelPayload.BaseUrls, Model: &channelPayload.Model, CustomModel: &channelPayload.CustomModel, Proxy: &channelPayload.Proxy, AutoSync: &channelPayload.AutoSync, AutoGroup: &channelPayload.AutoGroup, CustomHeader: &channelPayload.CustomHeader, ChannelProxy: channelPayload.ChannelProxy, BypassManagedCheck: true}
+			for _, key := range existingChannel.Keys {
+				updateReq.KeysToDelete = append(updateReq.KeysToDelete, key.ID)
+			}
+			for _, key := range channelPayload.Keys {
+				updateReq.KeysToAdd = append(updateReq.KeysToAdd, model.ChannelKeyAddRequest{Enabled: key.Enabled, ChannelKey: key.ChannelKey, Remark: key.Remark})
+			}
+			if _, err := op.ChannelUpdate(updateReq, ctx); err != nil {
+				return nil, fmt.Errorf("failed to update managed channel: %w", err)
+			}
+			updateBinding := map[string]any{"group_key": bindingKey}
 			if group.ID != 0 {
-				binding.SiteUserGroupID = &group.ID
+				updateBinding["site_user_group_id"] = group.ID
 			} else {
-				binding.SiteUserGroupID = nil
+				updateBinding["site_user_group_id"] = nil
 			}
-			if err := db.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
-				return nil, fmt.Errorf("failed to recreate site channel binding: %w", err)
+			if err := db.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{}).Where("id = ?", binding.ID).Updates(updateBinding).Error; err != nil {
+				return nil, fmt.Errorf("failed to update site channel binding: %w", err)
 			}
-			managedChannelIDs = append(managedChannelIDs, channelPayload.ID)
-			continue
+			managedChannelIDs = append(managedChannelIDs, existingChannel.ID)
 		}
-
-		updateReq := &model.ChannelUpdateRequest{ID: existingChannel.ID, Name: &channelPayload.Name, Type: &channelPayload.Type, Enabled: &channelPayload.Enabled, BaseUrls: &channelPayload.BaseUrls, Model: &channelPayload.Model, CustomModel: &channelPayload.CustomModel, Proxy: &channelPayload.Proxy, AutoSync: &channelPayload.AutoSync, AutoGroup: &channelPayload.AutoGroup, CustomHeader: &channelPayload.CustomHeader, ChannelProxy: channelPayload.ChannelProxy}
-		for _, key := range existingChannel.Keys {
-			updateReq.KeysToDelete = append(updateReq.KeysToDelete, key.ID)
-		}
-		for _, key := range channelPayload.Keys {
-			updateReq.KeysToAdd = append(updateReq.KeysToAdd, model.ChannelKeyAddRequest{Enabled: key.Enabled, ChannelKey: key.ChannelKey, Remark: key.Remark})
-		}
-		if _, err := op.ChannelUpdate(updateReq, ctx); err != nil {
-			return nil, fmt.Errorf("failed to update managed channel: %w", err)
-		}
-		updateBinding := map[string]any{"group_key": groupKey}
-		if group.ID != 0 {
-			updateBinding["site_user_group_id"] = group.ID
-		} else {
-			updateBinding["site_user_group_id"] = nil
-		}
-		if err := db.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{}).Where("id = ?", binding.ID).Updates(updateBinding).Error; err != nil {
-			return nil, fmt.Errorf("failed to update site channel binding: %w", err)
-		}
-		managedChannelIDs = append(managedChannelIDs, existingChannel.ID)
 	}
 
-	desiredSet := make(map[string]struct{}, len(desiredKeys))
+	desiredSet := make(map[string]struct{})
 	for _, groupKey := range desiredKeys {
-		desiredSet[groupKey] = struct{}{}
+		for obType, bucketModels := range modelBuckets {
+			if len(bucketModels) == 0 {
+				continue
+			}
+			desiredSet[compositeBindingKey(groupKey, obType, shouldSplit)] = struct{}{}
+		}
 	}
 	for _, binding := range existingBindings {
 		groupKey := model.NormalizeSiteGroupKey(binding.GroupKey)
@@ -208,8 +225,15 @@ func ProjectSite(ctx context.Context, siteID int) error {
 	return nil
 }
 
-func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup) string {
-	return fmt.Sprintf("[Site] %s / %s / %s (%s)", siteRecord.Name, account.Name, model.NormalizeSiteGroupName(group.GroupKey, group.Name), model.NormalizeSiteGroupKey(group.GroupKey))
+func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, obType outbound.OutboundType, split bool) string {
+	base := fmt.Sprintf("[Site] %s / %s / %s (%s)", siteRecord.Name, account.Name, model.NormalizeSiteGroupName(group.GroupKey, group.Name), model.NormalizeSiteGroupKey(group.GroupKey))
+	if !split {
+		return base
+	}
+	if suffix := outboundTypeName(obType); suffix != "" {
+		return base + " [" + suffix + "]"
+	}
+	return base
 }
 
 func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
@@ -245,5 +269,84 @@ func platformOutboundType(platform model.SitePlatform) outbound.OutboundType {
 		return outbound.OutboundTypeGemini
 	default:
 		return outbound.OutboundTypeOpenAIChat
+	}
+}
+
+// shouldSplitByOutboundType 判断是否需要按模型端点格式拆分 Channel
+func shouldSplitByOutboundType(site *model.Site) bool {
+	switch site.OutboundFormatMode {
+	case model.OutboundFormatModeOpenAI:
+		return false
+	case model.OutboundFormatModeAuto:
+		return true
+	default:
+		// 空值：单一供应商平台不拆分，多模型平台自动拆分
+		switch site.Platform {
+		case model.SitePlatformClaude, model.SitePlatformGemini, model.SitePlatformOpenAI:
+			return false
+		default:
+			return true
+		}
+	}
+}
+
+// classifyModelOutboundType 根据模型名称判断应使用的端点格式
+func classifyModelOutboundType(modelName string) outbound.OutboundType {
+	lower := strings.ToLower(modelName)
+	if strings.HasPrefix(lower, "claude") {
+		return outbound.OutboundTypeAnthropic
+	}
+	if strings.HasPrefix(lower, "gemini") {
+		return outbound.OutboundTypeGemini
+	}
+	return outbound.OutboundTypeOpenAIChat
+}
+
+// partitionModelsByOutboundType 将模型列表按端点格式分桶
+func partitionModelsByOutboundType(modelNames []string, split bool, platform model.SitePlatform) map[outbound.OutboundType][]string {
+	if !split {
+		// 不拆分时，所有模型放入平台默认的单一桶
+		obType := platformOutboundType(platform)
+		return map[outbound.OutboundType][]string{obType: modelNames}
+	}
+	buckets := make(map[outbound.OutboundType][]string)
+	for _, name := range modelNames {
+		obType := classifyModelOutboundType(name)
+		buckets[obType] = append(buckets[obType], name)
+	}
+	return buckets
+}
+
+// compositeBindingKey 生成复合绑定 key，用于区分同一 tokenGroup 的不同端点格式 Channel
+func compositeBindingKey(groupKey string, obType outbound.OutboundType, split bool) string {
+	if !split {
+		return groupKey
+	}
+	suffix := outboundTypeSuffix(obType)
+	if suffix == "" {
+		return groupKey
+	}
+	return groupKey + "::" + suffix
+}
+
+func outboundTypeSuffix(t outbound.OutboundType) string {
+	switch t {
+	case outbound.OutboundTypeAnthropic:
+		return "anthropic"
+	case outbound.OutboundTypeGemini:
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
+func outboundTypeName(t outbound.OutboundType) string {
+	switch t {
+	case outbound.OutboundTypeAnthropic:
+		return "Anthropic"
+	case outbound.OutboundTypeGemini:
+		return "Gemini"
+	default:
+		return ""
 	}
 }

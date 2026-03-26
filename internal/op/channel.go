@@ -114,10 +114,12 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	if !ok {
 		return nil, fmt.Errorf("channel not found")
 	}
-	if _, managed, err := ChannelManagedBinding(req.ID, ctx); err != nil {
-		return nil, err
-	} else if managed {
-		return nil, fmt.Errorf("managed site channel is read-only; please edit it from the site account")
+	if !req.BypassManagedCheck {
+		if _, managed, err := ChannelManagedBinding(req.ID, ctx); err != nil {
+			return nil, err
+		} else if managed {
+			return nil, fmt.Errorf("managed site channel is read-only; please edit it from the site account")
+		}
 	}
 
 	tx := db.GetDB().WithContext(ctx).Begin()

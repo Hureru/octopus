@@ -38,26 +38,34 @@ const (
 	SiteExecutionStatusSkipped SiteExecutionStatus = "skipped"
 )
 
+type OutboundFormatMode string
+
+const (
+	OutboundFormatModeAuto   OutboundFormatMode = "auto"        // 按模型名称自动拆分端点格式
+	OutboundFormatModeOpenAI OutboundFormatMode = "openai_only" // 强制所有模型使用 OpenAI 格式
+)
+
 const (
 	SiteDefaultGroupKey  = "default"
 	SiteDefaultGroupName = "default"
 )
 
 type Site struct {
-	ID                 int            `json:"id" gorm:"primaryKey"`
-	Name               string         `json:"name" gorm:"unique;not null"`
-	Platform           SitePlatform   `json:"platform" gorm:"type:varchar(32);not null"`
-	BaseURL            string         `json:"base_url" gorm:"not null"`
-	Enabled            bool           `json:"enabled" gorm:"default:true"`
-	Proxy              bool           `json:"proxy" gorm:"default:false"`
-	SiteProxy          *string        `json:"site_proxy"`
-	UseSystemProxy     bool           `json:"use_system_proxy" gorm:"default:false"`
-	ExternalCheckinURL *string        `json:"external_checkin_url"`
-	IsPinned           bool           `json:"is_pinned" gorm:"default:false"`
-	SortOrder          int            `json:"sort_order" gorm:"default:0"`
-	GlobalWeight       float64        `json:"global_weight" gorm:"default:1"`
-	CustomHeader       []CustomHeader `json:"custom_header" gorm:"serializer:json"`
-	Accounts           []SiteAccount  `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
+	ID                 int                `json:"id" gorm:"primaryKey"`
+	Name               string             `json:"name" gorm:"unique;not null"`
+	Platform           SitePlatform       `json:"platform" gorm:"type:varchar(32);not null"`
+	BaseURL            string             `json:"base_url" gorm:"not null"`
+	Enabled            bool               `json:"enabled" gorm:"default:true"`
+	Proxy              bool               `json:"proxy" gorm:"default:false"`
+	SiteProxy          *string            `json:"site_proxy"`
+	UseSystemProxy     bool               `json:"use_system_proxy" gorm:"default:false"`
+	ExternalCheckinURL *string            `json:"external_checkin_url"`
+	IsPinned           bool               `json:"is_pinned" gorm:"default:false"`
+	SortOrder          int                `json:"sort_order" gorm:"default:0"`
+	GlobalWeight       float64            `json:"global_weight" gorm:"default:1"`
+	OutboundFormatMode OutboundFormatMode `json:"outbound_format_mode" gorm:"type:varchar(16);default:''"`
+	CustomHeader       []CustomHeader     `json:"custom_header" gorm:"serializer:json"`
+	Accounts           []SiteAccount      `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
 }
 
 type SiteAccount struct {
@@ -136,19 +144,20 @@ type SiteDisabledModel struct {
 }
 
 type SiteUpdateRequest struct {
-	ID                 int              `json:"id" binding:"required"`
-	Name               *string          `json:"name,omitempty"`
-	Platform           *SitePlatform    `json:"platform,omitempty"`
-	BaseURL            *string          `json:"base_url,omitempty"`
-	Enabled            *bool            `json:"enabled,omitempty"`
-	Proxy              *bool            `json:"proxy,omitempty"`
-	SiteProxy          *string          `json:"site_proxy,omitempty"`
-	UseSystemProxy     *bool            `json:"use_system_proxy,omitempty"`
-	ExternalCheckinURL *string          `json:"external_checkin_url,omitempty"`
-	IsPinned           *bool            `json:"is_pinned,omitempty"`
-	SortOrder          *int             `json:"sort_order,omitempty"`
-	GlobalWeight       *float64         `json:"global_weight,omitempty"`
-	CustomHeader       *[]CustomHeader  `json:"custom_header,omitempty"`
+	ID                 int                 `json:"id" binding:"required"`
+	Name               *string             `json:"name,omitempty"`
+	Platform           *SitePlatform       `json:"platform,omitempty"`
+	BaseURL            *string             `json:"base_url,omitempty"`
+	Enabled            *bool               `json:"enabled,omitempty"`
+	Proxy              *bool               `json:"proxy,omitempty"`
+	SiteProxy          *string             `json:"site_proxy,omitempty"`
+	UseSystemProxy     *bool               `json:"use_system_proxy,omitempty"`
+	ExternalCheckinURL *string             `json:"external_checkin_url,omitempty"`
+	IsPinned           *bool               `json:"is_pinned,omitempty"`
+	SortOrder          *int                `json:"sort_order,omitempty"`
+	GlobalWeight       *float64            `json:"global_weight,omitempty"`
+	OutboundFormatMode *OutboundFormatMode `json:"outbound_format_mode,omitempty"`
+	CustomHeader       *[]CustomHeader     `json:"custom_header,omitempty"`
 }
 
 type SiteAccountUpdateRequest struct {
@@ -232,6 +241,15 @@ func (p SitePlatform) Validate() error {
 	}
 }
 
+func (m OutboundFormatMode) Validate() error {
+	switch m {
+	case "", OutboundFormatModeAuto, OutboundFormatModeOpenAI:
+		return nil
+	default:
+		return fmt.Errorf("unsupported outbound format mode: %s", m)
+	}
+}
+
 func (t SiteCredentialType) Validate() error {
 	switch t {
 	case SiteCredentialTypeUsernamePassword, SiteCredentialTypeAccessToken, SiteCredentialTypeAPIKey:
@@ -244,6 +262,7 @@ func (t SiteCredentialType) Validate() error {
 func (s *Site) Normalize() {
 	s.Name = strings.TrimSpace(s.Name)
 	s.BaseURL = strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
+	s.OutboundFormatMode = OutboundFormatMode(strings.TrimSpace(string(s.OutboundFormatMode)))
 	if s.SiteProxy != nil {
 		trimmed := strings.TrimSpace(*s.SiteProxy)
 		if trimmed == "" {
@@ -277,6 +296,9 @@ func (s *Site) Validate() error {
 		return fmt.Errorf("site name is required")
 	}
 	if err := s.Platform.Validate(); err != nil {
+		return err
+	}
+	if err := s.OutboundFormatMode.Validate(); err != nil {
 		return err
 	}
 	parsed, err := url.Parse(s.BaseURL)

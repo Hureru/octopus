@@ -111,6 +111,10 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.CustomHeader = *req.CustomHeader
 		selectFields = append(selectFields, "custom_header")
 	}
+	if req.OutboundFormatMode != nil {
+		merged.OutboundFormatMode = *req.OutboundFormatMode
+		selectFields = append(selectFields, "outbound_format_mode")
+	}
 
 	if len(selectFields) > 0 {
 		if err := merged.Validate(); err != nil {
@@ -152,6 +156,9 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	}
 	if req.CustomHeader != nil {
 		updates.CustomHeader = merged.CustomHeader
+	}
+	if req.OutboundFormatMode != nil {
+		updates.OutboundFormatMode = merged.OutboundFormatMode
 	}
 
 	if len(selectFields) > 0 {

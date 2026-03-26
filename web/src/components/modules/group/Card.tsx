@@ -76,8 +76,9 @@ export function GroupCard({ group }: { group: Group }) {
     const { data: modelChannels = [] } = useModelChannelList();
 
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
     const [members, setMembers] = useState<SelectedMember[]>([]);
-    const isDragging = useRef(false);
+    const [weightOverrides, setWeightOverrides] = useState<Record<string, number>>({});
     const weightTimerRef = useRef<NodeJS.Timeout | null>(null);
     const membersRef = useRef<SelectedMember[]>([]);
 
@@ -105,13 +106,22 @@ export function GroupCard({ group }: { group: Group }) {
         [group.items, channelNameByKey, enabledByKey]
     );
 
-    useEffect(() => {
-        if (!isDragging.current) setMembers([...displayMembers]);
-    }, [displayMembers]);
+    const effectiveDisplayMembers = useMemo(
+        () => displayMembers.map((member) => {
+            const nextWeight = weightOverrides[member.id];
+            return nextWeight === undefined ? member : { ...member, weight: nextWeight };
+        }),
+        [displayMembers, weightOverrides]
+    );
+
+    const renderedMembers = useMemo(
+        () => isDragging ? members : effectiveDisplayMembers,
+        [effectiveDisplayMembers, isDragging, members]
+    );
 
     useEffect(() => {
-        membersRef.current = members;
-    }, [members]);
+        membersRef.current = renderedMembers;
+    }, [renderedMembers]);
 
     useEffect(() => {
         return () => { if (weightTimerRef.current) clearTimeout(weightTimerRef.current); };
@@ -136,8 +146,23 @@ export function GroupCard({ group }: { group: Group }) {
         return map;
     }, [group.items]);
 
-    const handleDragStart = useCallback(() => { isDragging.current = true; }, []);
-    const handleDragFinish = useCallback(() => { isDragging.current = false; }, []);
+    const clearWeightOverride = useCallback((id: string) => {
+        setWeightOverrides((prev) => {
+            if (!(id in prev)) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+        });
+    }, []);
+
+    const handleDragStart = useCallback(() => {
+        setMembers([...effectiveDisplayMembers]);
+        setIsDragging(true);
+    }, [effectiveDisplayMembers]);
+
+    const handleDragFinish = useCallback(() => {
+        setIsDragging(false);
+    }, []);
 
     const handleDropReorder = useCallback((nextMembers: SelectedMember[]) => {
         const itemsToUpdate = nextMembers
@@ -152,12 +177,16 @@ export function GroupCard({ group }: { group: Group }) {
     }, [group.id, priorityByItemId, updateGroup, onSuccess, onError]);
 
     const handleRemoveMember = useCallback((id: string) => {
-        const member = members.find((m) => m.id === id);
+        const member = membersRef.current.find((m) => m.id === id);
+        clearWeightOverride(id);
         if (member?.item_id !== undefined) updateGroup.mutate({ id: group.id!, items_to_delete: [member.item_id] }, { onSuccess, onError });
-    }, [members, group.id, updateGroup, onSuccess, onError]);
+    }, [clearWeightOverride, group.id, updateGroup, onSuccess, onError]);
 
     const handleWeightChange = useCallback((id: string, weight: number) => {
-        setMembers((prev) => prev.map((m) => m.id === id ? { ...m, weight } : m));
+        setWeightOverrides((prev) => ({ ...prev, [id]: weight }));
+        if (isDragging) {
+            setMembers((prev) => prev.map((m) => m.id === id ? { ...m, weight } : m));
+        }
         if (weightTimerRef.current) clearTimeout(weightTimerRef.current);
         weightTimerRef.current = setTimeout(() => {
             const member = membersRef.current.find((m) => m.id === id);
@@ -166,10 +195,16 @@ export function GroupCard({ group }: { group: Group }) {
             if (!priority) return;
             updateGroup.mutate(
                 { id: group.id!, items_to_update: [{ id: member.item_id, priority, weight }] },
-                { onSuccess, onError }
+                {
+                    onSuccess: () => {
+                        clearWeightOverride(id);
+                        onSuccess();
+                    },
+                    onError,
+                }
             );
         }, 500);
-    }, [group.id, priorityByItemId, updateGroup, onSuccess, onError]);
+    }, [clearWeightOverride, group.id, isDragging, priorityByItemId, updateGroup, onSuccess, onError]);
 
     const handleSubmitEdit = useCallback((values: GroupEditorValues, onDone?: () => void) => {
         if (!group.id) return;
@@ -341,7 +376,7 @@ export function GroupCard({ group }: { group: Group }) {
 
             <section className="rounded-xl border border-border/50 bg-muted/30 overflow-hidden relative h-101">
                 <MemberList
-                    members={members}
+                    members={renderedMembers}
                     onReorder={setMembers}
                     onRemove={handleRemoveMember}
                     onWeightChange={handleWeightChange}

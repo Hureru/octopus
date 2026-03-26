@@ -59,6 +59,36 @@ func TestSiteUpdateRejectsInvalidMergedSite(t *testing.T) {
 	}
 }
 
+func TestSiteUpdateRejectsInvalidOutboundFormatMode(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "demo-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	invalidMode := model.OutboundFormatMode("invalid-mode")
+	if _, err := SiteUpdate(&model.SiteUpdateRequest{
+		ID:                 site.ID,
+		OutboundFormatMode: &invalidMode,
+	}, ctx); err == nil {
+		t.Fatalf("expected SiteUpdate to reject invalid outbound format mode")
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if reloaded.OutboundFormatMode != "" {
+		t.Fatalf("expected outbound format mode to remain empty, got %q", reloaded.OutboundFormatMode)
+	}
+}
+
 func TestSiteAccountUpdateRejectsInvalidMergedCredentials(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
