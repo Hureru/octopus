@@ -78,6 +78,11 @@ function ModelPickerSection({
         }, []);
     }, [channels, normalizedSearch]);
 
+    const modelSourceLabel = (model: LLMChannel) => [model.site_name, model.site_account_name, model.site_group_name]
+        .map((value) => value?.trim())
+        .filter(Boolean)
+        .join(' / ');
+
     return (
         <div className="rounded-xl border border-border/50 bg-muted/30 flex flex-col min-h-0">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-2 border-b border-border/30 bg-muted/50">
@@ -138,6 +143,8 @@ function ModelPickerSection({
                                         {channel.models.map((m) => {
                                             const isSelected = selectedKeys.has(memberKey(m));
                                             const { Avatar } = getModelIcon(m.name);
+                                            const sourceLabel = modelSourceLabel(m);
+                                            const suffix = [sourceLabel, m.endpoint_type?.trim()].filter(Boolean).join(' · ');
                                             return (
                                                 <button
                                                     key={memberKey(m)}
@@ -151,7 +158,10 @@ function ModelPickerSection({
                                                 >
                                                     <span className="flex items-center gap-2 min-w-0">
                                                         <Avatar size={16} />
-                                                        <span className="text-sm font-medium truncate">{m.name}</span>
+                                                        <span className="min-w-0 flex flex-col">
+                                                            <span className="text-sm font-medium truncate">{m.name}</span>
+                                                            {suffix && <span className="text-[10px] text-muted-foreground truncate">{suffix}</span>}
+                                                        </span>
                                                     </span>
 
                                                     <span className="shrink-0 text-muted-foreground">

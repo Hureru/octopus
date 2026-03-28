@@ -30,6 +30,7 @@ interface VirtualizedGridProps<T> {
     overscan?: number;
     getItemKey: (item: T, index: number) => string | number;
     renderItem: (item: T, index: number) => ReactNode;
+    header?: ReactNode;
     footer?: ReactNode;
     onReachEnd?: () => void;
     reachEndEnabled?: boolean;
@@ -57,6 +58,7 @@ export function VirtualizedGrid<T>({
     overscan = 4,
     getItemKey,
     renderItem,
+    header = null,
     footer = null,
     onReachEnd,
     reachEndEnabled = false,
@@ -99,21 +101,30 @@ export function VirtualizedGrid<T>({
         () => (items.length === 0 ? 0 : Math.ceil(items.length / columnCount)),
         [items.length, columnCount]
     );
+    const hasHeaderRow = header !== null;
+    const headerRowCount = hasHeaderRow ? 1 : 0;
     const hasFooterRow = footer !== null;
-    const rowCount = itemRowCount + (hasFooterRow ? 1 : 0);
+    const rowCount = headerRowCount + itemRowCount + (hasFooterRow ? 1 : 0);
+
     const getVirtualRowKey = useCallback((rowIndex: number) => {
-        if (hasFooterRow && rowIndex === itemRowCount) {
+        if (hasHeaderRow && rowIndex === 0) {
+            return '__virtual-header__';
+        }
+
+        const itemRowIndex = rowIndex - headerRowCount;
+
+        if (hasFooterRow && itemRowIndex === itemRowCount) {
             return '__virtual-footer__';
         }
 
-        const rowStartIndex = rowIndex * columnCount;
+        const rowStartIndex = itemRowIndex * columnCount;
         const firstItem = items[rowStartIndex];
         if (!firstItem) return `row-empty-${rowIndex}`;
 
         // Keep row keys stable across prepend/append updates (especially log stream updates),
         // otherwise virtualizer measurements are constantly invalidated and spacing falls back to estimates.
         return `row-${String(getItemKey(firstItem, rowStartIndex))}`;
-    }, [hasFooterRow, itemRowCount, columnCount, items, getItemKey]);
+    }, [hasHeaderRow, headerRowCount, hasFooterRow, itemRowCount, columnCount, items, getItemKey]);
 
     // eslint-disable-next-line react-hooks/incompatible-library
     const rowVirtualizer = useVirtualizer({
@@ -135,7 +146,7 @@ export function VirtualizedGrid<T>({
     useEffect(() => {
         if (!onReachEnd || !reachEndEnabled || itemRowCount === 0) return;
 
-        const lastVirtualIndex = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1]!.index : -1;
+        const lastVirtualIndex = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1]!.index - headerRowCount : -1;
         const triggerIndex = Math.max(0, itemRowCount - 1 - reachEndOffset);
         if (lastVirtualIndex < triggerIndex) {
             reachEndTriggeredRef.current = false;
@@ -145,7 +156,7 @@ export function VirtualizedGrid<T>({
 
         reachEndTriggeredRef.current = true;
         onReachEnd();
-    }, [onReachEnd, reachEndEnabled, itemRowCount, reachEndOffset, virtualRows]);
+    }, [onReachEnd, reachEndEnabled, itemRowCount, reachEndOffset, virtualRows, headerRowCount]);
 
     return (
         <div className="relative h-full min-h-0 w-full">
@@ -156,7 +167,25 @@ export function VirtualizedGrid<T>({
                 {rowCount === 0 ? null : (
                     <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
                         {virtualRows.map((virtualRow) => {
-                            if (hasFooterRow && virtualRow.index === itemRowCount) {
+                            if (hasHeaderRow && virtualRow.index === 0) {
+                                return (
+                                    <div
+                                        key={virtualRow.key}
+                                        data-index={virtualRow.index}
+                                        ref={rowVirtualizer.measureElement}
+                                        className="absolute left-0 top-0 w-full"
+                                        style={{
+                                            transform: `translateY(${virtualRow.start}px)`,
+                                        }}
+                                    >
+                                        {header}
+                                    </div>
+                                );
+                            }
+
+                            const itemRowIndex = virtualRow.index - headerRowCount;
+
+                            if (hasFooterRow && itemRowIndex === itemRowCount) {
                                 return (
                                     <div
                                         key={virtualRow.key}
@@ -172,10 +201,10 @@ export function VirtualizedGrid<T>({
                                 );
                             }
 
-                            const rowStartIndex = virtualRow.index * columnCount;
+                            const rowStartIndex = itemRowIndex * columnCount;
                             const rowEndIndex = Math.min(rowStartIndex + columnCount, items.length);
                             const rowItems = items.slice(rowStartIndex, rowEndIndex);
-                            const rowPaddingBottom = virtualRow.index === itemRowCount - 1 && !hasFooterRow ? 0 : gap;
+                            const rowPaddingBottom = itemRowIndex === itemRowCount - 1 && !hasFooterRow ? 0 : gap;
 
                             return (
                                 <div
