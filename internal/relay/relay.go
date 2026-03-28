@@ -175,13 +175,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		// 同通道重试耗尽后记录熔断器失败
 		if !result.Success && !result.Written && !result.Canceled {
 			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model)
-		}
-
-		// 429/503 不跳 channel：直接透传给客户端，让客户端 SDK 重试
-		if group.RetryEnabled && !result.Success && !result.Written && !result.Canceled && isPassthroughStatus(result.StatusCode) {
-			lastErr = result.Err
-			lastResult = result
-			break
+			maybeLearnManagedRoute(c.Request.Context(), channel.ID, internalRequest.Model, inboundType, result.Err)
 		}
 
 		if result.Success {
@@ -200,18 +194,22 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		lastResult = result
 	}
 
-	// 所有通道都失败
+	// 所有候选通道均失败
 	metrics.Save(c.Request.Context(), false, lastErr, iter.Attempts())
 
 	// 透传 429/503 状态码和 Retry-After 头，让客户端 SDK 的重试机制接管
-	if group.RetryEnabled && isPassthroughStatus(lastResult.StatusCode) {
+	if isPassthroughStatus(lastResult.StatusCode) {
 		if lastResult.RetryAfter > 0 {
 			c.Header("Retry-After", fmt.Sprintf("%d", int(lastResult.RetryAfter.Seconds())))
 		}
-		resp.Error(c, lastResult.StatusCode, "all channels failed")
+		resp.Error(c, lastResult.StatusCode, "channel failed")
 		return
 	}
-	resp.Error(c, http.StatusBadGateway, "all channels failed")
+	if lastResult.StatusCode > 0 {
+		resp.Error(c, lastResult.StatusCode, "channel failed")
+		return
+	}
+	resp.Error(c, http.StatusBadGateway, "channel failed")
 }
 
 // attempt 统一管理一次通道尝试的完整生命周期
