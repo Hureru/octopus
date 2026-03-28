@@ -63,11 +63,16 @@ func SiteChannelResetAccountRoutes(siteID int, accountID int, ctx context.Contex
 		}
 		for _, row := range rows {
 			routeType := model.InferSiteModelRouteType(row.ModelName)
+			routeRawPayload := ""
+			if metadata, ok := model.ParseSiteModelRouteMetadata(row.RouteRawPayload); ok {
+				routeType = metadata.RouteType
+				routeRawPayload = row.RouteRawPayload
+			}
 			if err := tx.Model(&model.SiteModel{}).Where("id = ?", row.ID).Updates(map[string]any{
 				"route_type":        routeType,
 				"route_source":      model.SiteModelRouteSourceSyncInferred,
 				"manual_override":   false,
-				"route_raw_payload": "",
+				"route_raw_payload": routeRawPayload,
 				"route_updated_at":  gorm.Expr("CURRENT_TIMESTAMP"),
 			}).Error; err != nil {
 				return err
@@ -218,6 +223,7 @@ func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyM
 	for _, item := range account.Models {
 		key := model.NormalizeSiteGroupKey(item.GroupKey)
 		group := ensureSiteChannelGroup(groups, key, key)
+		routeMetadata, _ := model.ParseSiteModelRouteMetadata(item.RouteRawPayload)
 		channelID, hasChannel := findProjectedChannelID(account.ChannelBindings, key, item.RouteType, split)
 		modelView := model.SiteChannelModel{
 			ModelName:      item.ModelName,
@@ -225,6 +231,7 @@ func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyM
 			RouteSource:    model.NormalizeSiteModelRouteSource(item.RouteSource, item.ManualOverride),
 			ManualOverride: item.ManualOverride,
 			Disabled:       item.Disabled,
+			RouteMetadata:  routeMetadata,
 			History:        historyMap[key+"\x00"+item.ModelName],
 		}
 		if hasChannel {
@@ -281,7 +288,7 @@ func summarizeSiteRoutes(groups []model.SiteChannelGroup) []model.SiteRouteSumma
 }
 
 func siteChannelShouldSplitByOutboundType(site model.Site) bool {
-	return model.ShouldSplitSiteChannelRoutes(site.OutboundFormatMode, site.Platform)
+	return model.ShouldSplitSiteChannelRoutes(site.Platform)
 }
 
 func siteChannelCompositeBindingKey(groupKey string, routeType model.SiteModelRouteType, split bool) string {
@@ -289,6 +296,9 @@ func siteChannelCompositeBindingKey(groupKey string, routeType model.SiteModelRo
 }
 
 func findProjectedChannelID(bindings []model.SiteChannelBinding, groupKey string, routeType model.SiteModelRouteType, split bool) (int, bool) {
+	if !model.IsProjectedSiteModelRouteType(routeType) {
+		return 0, false
+	}
 	targetKey := siteChannelCompositeBindingKey(groupKey, routeType, split)
 	for _, binding := range bindings {
 		if model.NormalizeSiteGroupKey(binding.GroupKey) == targetKey {

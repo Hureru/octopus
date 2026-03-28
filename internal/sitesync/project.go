@@ -284,7 +284,7 @@ func platformOutboundType(platform model.SitePlatform) outbound.OutboundType {
 
 // shouldSplitByOutboundType 判断是否需要按模型端点格式拆分 Channel
 func shouldSplitByOutboundType(site *model.Site) bool {
-	return model.ShouldSplitSiteChannelRoutes(site.OutboundFormatMode, site.Platform)
+	return model.ShouldSplitSiteChannelRoutes(site.Platform)
 }
 
 // classifyModelOutboundType 根据模型名称判断应使用的端点格式
@@ -321,11 +321,17 @@ func partitionModelsByOutboundType(modelNames []string, split bool, platform mod
 func partitionSiteModelsByRouteType(items []model.SiteModel, split bool, platform model.SitePlatform) map[model.SiteModelRouteType][]model.SiteModel {
 	if !split {
 		routeType := model.SiteModelRouteTypeFromOutboundType(platformOutboundType(platform))
+		if len(items) == 0 {
+			return map[model.SiteModelRouteType][]model.SiteModel{}
+		}
 		return map[model.SiteModelRouteType][]model.SiteModel{routeType: items}
 	}
 	buckets := make(map[model.SiteModelRouteType][]model.SiteModel)
 	for _, item := range items {
 		routeType := model.NormalizeSiteModelRouteType(item.RouteType)
+		if !model.IsProjectedSiteModelRouteType(routeType) {
+			continue
+		}
 		buckets[routeType] = append(buckets[routeType], item)
 	}
 	return buckets
@@ -394,14 +400,20 @@ func rewriteManagedGroupItemsForAccount(ctx context.Context, accountID int, spli
 		return nil
 	}
 	modelRouteMap := make(map[string]model.SiteModelRouteType)
+	activeModelKeys := make(map[string]struct{})
 	for _, item := range accountModels {
 		if item.Disabled {
 			continue
 		}
 		key := model.NormalizeSiteGroupKey(item.GroupKey) + "\x00" + strings.TrimSpace(item.ModelName)
-		modelRouteMap[key] = model.NormalizeSiteModelRouteType(item.RouteType)
+		activeModelKeys[key] = struct{}{}
+		routeType := model.NormalizeSiteModelRouteType(item.RouteType)
+		if !split || model.IsProjectedSiteModelRouteType(routeType) {
+			modelRouteMap[key] = routeType
+		}
 	}
 	affectedGroupIDs := make(map[int]struct{})
+	deleteItemIDs := make([]int, 0)
 	for _, item := range items {
 		var binding *model.SiteChannelBinding
 		for i := range bindings {
@@ -414,19 +426,37 @@ func rewriteManagedGroupItemsForAccount(ctx context.Context, accountID int, spli
 			continue
 		}
 		baseGroupKey, _ := parseCompositeBindingKey(binding.GroupKey)
-		routeType, ok := modelRouteMap[baseGroupKey+"\x00"+strings.TrimSpace(item.ModelName)]
+		modelKey := baseGroupKey + "\x00" + strings.TrimSpace(item.ModelName)
+		if _, ok := activeModelKeys[modelKey]; !ok {
+			deleteItemIDs = append(deleteItemIDs, item.ID)
+			affectedGroupIDs[item.GroupID] = struct{}{}
+			continue
+		}
+		routeType, ok := modelRouteMap[modelKey]
 		if !ok {
+			deleteItemIDs = append(deleteItemIDs, item.ID)
+			affectedGroupIDs[item.GroupID] = struct{}{}
 			continue
 		}
 		targetBindingKey := compositeBindingKey(baseGroupKey, routeType.ToOutboundType(), split)
 		targetChannelID, ok := bindingChannelByKey[targetBindingKey]
-		if !ok || targetChannelID == item.ChannelID {
+		if !ok {
+			deleteItemIDs = append(deleteItemIDs, item.ID)
+			affectedGroupIDs[item.GroupID] = struct{}{}
+			continue
+		}
+		if targetChannelID == item.ChannelID {
 			continue
 		}
 		if err := db.GetDB().WithContext(ctx).Model(&model.GroupItem{}).Where("id = ?", item.ID).Update("channel_id", targetChannelID).Error; err != nil {
 			return fmt.Errorf("failed to rewrite group item %d: %w", item.ID, err)
 		}
 		affectedGroupIDs[item.GroupID] = struct{}{}
+	}
+	if len(deleteItemIDs) > 0 {
+		if err := db.GetDB().WithContext(ctx).Where("id IN ?", deleteItemIDs).Delete(&model.GroupItem{}).Error; err != nil {
+			return fmt.Errorf("failed to delete stale group items: %w", err)
+		}
 	}
 	if len(affectedGroupIDs) == 0 {
 		return nil

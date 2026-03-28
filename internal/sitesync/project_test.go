@@ -60,7 +60,7 @@ func TestBuildProjectedChannelBaseURL(t *testing.T) {
 
 func TestProjectAccountSplitsManagedChannelsByOutboundType(t *testing.T) {
 	ctx := setupProjectTestDB(t)
-	site, account := createProjectionFixture(t, ctx, "")
+	_, account := createProjectionFixture(t, ctx)
 
 	channelIDs, err := ProjectAccount(ctx, account.ID)
 	if err != nil {
@@ -97,47 +97,11 @@ func TestProjectAccountSplitsManagedChannelsByOutboundType(t *testing.T) {
 			t.Fatalf("expected binding %q to reuse channel %d, got %d", groupKey, channel.ID, reloaded.ID)
 		}
 	}
-
-	if site.OutboundFormatMode != "" {
-		t.Fatalf("expected fixture to use platform default outbound mode, got %q", site.OutboundFormatMode)
-	}
-}
-
-func TestProjectAccountHonorsOpenAIOnlyMode(t *testing.T) {
-	ctx := setupProjectTestDB(t)
-	_, account := createProjectionFixture(t, ctx, model.OutboundFormatModeOpenAI)
-
-	channelIDs, err := ProjectAccount(ctx, account.ID)
-	if err != nil {
-		t.Fatalf("ProjectAccount returned error: %v", err)
-	}
-	if len(channelIDs) != 1 {
-		t.Fatalf("expected 1 managed channel in openai_only mode, got %d", len(channelIDs))
-	}
-
-	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
-	if len(channelsByGroup) != 1 {
-		t.Fatalf("expected 1 binding in openai_only mode, got %d", len(channelsByGroup))
-	}
-
-	channel, ok := channelsByGroup["default"]
-	if !ok {
-		t.Fatalf("expected default binding in openai_only mode, got %#v", channelsByGroup)
-	}
-	if channel.Type != outbound.OutboundTypeOpenAIChat {
-		t.Fatalf("expected default channel type %q, got %q", outbound.OutboundTypeOpenAIChat, channel.Type)
-	}
-	if channel.Model != "claude-3-5-sonnet,gemini-2.0-flash,gpt-4o-mini" {
-		t.Fatalf("expected mixed models to stay in one OpenAI channel, got %q", channel.Model)
-	}
-	if len(channel.Keys) != 2 {
-		t.Fatalf("expected projected OpenAI-only channel to keep both keys, got %d", len(channel.Keys))
-	}
 }
 
 func TestProjectAccountSupportsAllConfiguredRouteBuckets(t *testing.T) {
 	ctx := setupProjectTestDB(t)
-	site, account := createProjectionFixture(t, ctx, model.OutboundFormatModeAuto)
+	_, account := createProjectionFixture(t, ctx)
 
 	extraModels := []model.SiteModel{
 		{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "text-embedding-3-large", Source: "sync", RouteType: model.SiteModelRouteTypeOpenAIEmbedding},
@@ -165,15 +129,11 @@ func TestProjectAccountSupportsAllConfiguredRouteBuckets(t *testing.T) {
 	assertProjectedChannel(t, channelsByGroup, "default::gemini", outbound.OutboundTypeGemini, "gemini-2.0-flash", true)
 	assertProjectedChannel(t, channelsByGroup, "default::volcengine", outbound.OutboundTypeVolcengine, "doubao-seed-1-6", true)
 	assertProjectedChannel(t, channelsByGroup, "default::openai-embedding", outbound.OutboundTypeOpenAIEmbedding, "text-embedding-3-large", true)
-
-	if site.OutboundFormatMode != model.OutboundFormatModeAuto {
-		t.Fatalf("expected fixture to use explicit auto mode, got %q", site.OutboundFormatMode)
-	}
 }
 
 func TestProjectAccountRewritesGroupItemsBeforeRemovingStaleManagedBindings(t *testing.T) {
 	ctx := setupProjectTestDB(t)
-	_, account := createProjectionFixture(t, ctx, model.OutboundFormatModeAuto)
+	_, account := createProjectionFixture(t, ctx)
 
 	if _, err := ProjectAccount(ctx, account.ID); err != nil {
 		t.Fatalf("initial ProjectAccount returned error: %v", err)
@@ -231,6 +191,88 @@ func TestProjectAccountRewritesGroupItemsBeforeRemovingStaleManagedBindings(t *t
 	}
 }
 
+func TestProjectAccountRemovesUnsupportedModelsFromProjectedChannels(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	extraModel := model.SiteModel{
+		SiteAccountID: account.ID,
+		GroupKey:      model.SiteDefaultGroupKey,
+		ModelName:     "vendor-embedding-x",
+		Source:        "sync",
+		RouteType:     model.SiteModelRouteTypeOpenAIChat,
+		RouteSource:   model.SiteModelRouteSourceSyncInferred,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&extraModel).Error; err != nil {
+		t.Fatalf("create extra site model failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("initial ProjectAccount returned error: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	openAIChannel, ok := channelsByGroup["default"]
+	if !ok {
+		t.Fatalf("expected default projected channel to exist")
+	}
+	if openAIChannel.Model != "gpt-4o-mini,vendor-embedding-x" {
+		t.Fatalf("expected default channel to include vendor model before it becomes unsupported, got %q", openAIChannel.Model)
+	}
+
+	group := &model.Group{Name: "remove-unsupported-managed-items", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{
+		GroupID:   group.ID,
+		ChannelID: openAIChannel.ID,
+		ModelName: "vendor-embedding-x",
+		Priority:  1,
+		Weight:    1,
+	}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	unsupportedPayload := model.SiteModelRouteMetadata{
+		Source:                 "/api/pricing",
+		RouteSupported:         false,
+		SupportedEndpointTypes: []string{"/vendor/embeddings"},
+		UnsupportedReason:      "site reports endpoint types outside current supported route buckets",
+	}.Marshal()
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Model(&model.SiteModel{}).
+		Where("site_account_id = ? AND group_key = ? AND model_name = ?", account.ID, model.SiteDefaultGroupKey, "vendor-embedding-x").
+		Updates(map[string]any{
+			"route_type":        model.SiteModelRouteTypeUnknown,
+			"route_raw_payload": unsupportedPayload,
+			"route_source":      model.SiteModelRouteSourceSyncInferred,
+		}).Error; err != nil {
+		t.Fatalf("updating vendor model route_type failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("second ProjectAccount returned error: %v", err)
+	}
+
+	reloadedChannels := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	reloadedOpenAIChannel, ok := reloadedChannels["default"]
+	if !ok {
+		t.Fatalf("expected default projected channel to remain after unsupported model removal")
+	}
+	if reloadedOpenAIChannel.Model != "gpt-4o-mini" {
+		t.Fatalf("expected unsupported model to be removed from default channel, got %q", reloadedOpenAIChannel.Model)
+	}
+
+	items, err := op.GroupItemList(group.ID, ctx)
+	if err != nil {
+		t.Fatalf("GroupItemList failed: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected group items for unsupported model to be removed, got %d items", len(items))
+	}
+}
+
 func setupProjectTestDB(t *testing.T) context.Context {
 	t.Helper()
 
@@ -249,15 +291,14 @@ func setupProjectTestDB(t *testing.T) context.Context {
 	return context.Background()
 }
 
-func createProjectionFixture(t *testing.T, ctx context.Context, outboundFormatMode model.OutboundFormatMode) (*model.Site, *model.SiteAccount) {
+func createProjectionFixture(t *testing.T, ctx context.Context) (*model.Site, *model.SiteAccount) {
 	t.Helper()
 
 	site := &model.Site{
-		Name:               "Projection Site",
-		Platform:           model.SitePlatformNewAPI,
-		BaseURL:            "https://example.com",
-		Enabled:            true,
-		OutboundFormatMode: outboundFormatMode,
+		Name:     "Projection Site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
 	}
 	if err := op.SiteCreate(site, ctx); err != nil {
 		t.Fatalf("SiteCreate failed: %v", err)

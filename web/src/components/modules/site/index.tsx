@@ -6,8 +6,6 @@ import {
   Site as SiteRecord,
   SiteAccount,
   SiteCredentialType,
-  SiteOutboundFormatMode,
-  type SiteOutboundFormatModeValue,
   SitePlatform,
   type CustomHeader,
   useCheckinAllSites,
@@ -88,7 +86,6 @@ type SiteFormState = {
   is_pinned: boolean;
   sort_order: number;
   global_weight: number;
-  outbound_format_mode: SiteOutboundFormatModeValue;
   custom_header: CustomHeader[];
 };
 
@@ -111,7 +108,6 @@ type SiteAccountFormState = {
 };
 
 const AUTO_DETECT_VALUE = "__auto__";
-const PLATFORM_DEFAULT_VALUE = "__platform_default__";
 
 const PLATFORM_LABELS: Record<SitePlatform, string> = {
   [SitePlatform.NewAPI]: "New API",
@@ -131,11 +127,6 @@ const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {
   [SiteCredentialType.APIKey]: "API Key",
 };
 
-const OUTBOUND_FORMAT_LABELS: Record<SiteOutboundFormatMode, string> = {
-  [SiteOutboundFormatMode.Auto]: "自动按模型拆分",
-  [SiteOutboundFormatMode.OpenAIOnly]: "强制 OpenAI 格式",
-};
-
 function createEmptySiteForm(): SiteFormState {
   return {
     name: "",
@@ -149,7 +140,6 @@ function createEmptySiteForm(): SiteFormState {
     is_pinned: false,
     sort_order: 0,
     global_weight: 1,
-    outbound_format_mode: "",
     custom_header: [],
   };
 }
@@ -167,7 +157,6 @@ function createSiteForm(site: SiteRecord): SiteFormState {
     is_pinned: site.is_pinned,
     sort_order: site.sort_order,
     global_weight: site.global_weight,
-    outbound_format_mode: site.outbound_format_mode,
     custom_header: site.custom_header.map((item) => ({ ...item })),
   };
 }
@@ -317,17 +306,6 @@ function formatBindingGroupKey(groupKey: string) {
       return `${normalizedBaseKey} [Gemini]`;
     default:
       return normalizedBaseKey;
-  }
-}
-
-function formatOutboundFormatModeBadge(mode: SiteOutboundFormatModeValue) {
-  switch (mode) {
-    case SiteOutboundFormatMode.Auto:
-      return "端点格式: 自动拆分";
-    case SiteOutboundFormatMode.OpenAIOnly:
-      return "端点格式: OpenAI";
-    default:
-      return "端点格式: 平台默认";
   }
 }
 
@@ -558,7 +536,6 @@ export function Site() {
       is_pinned: siteForm.is_pinned,
       sort_order: siteForm.sort_order,
       global_weight: siteForm.global_weight,
-      outbound_format_mode: siteForm.outbound_format_mode,
       custom_header: customHeader,
     };
 
@@ -854,8 +831,8 @@ export function Site() {
               <div className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
                 当前方案以 <code>site_user_group</code>{" "}
                 作为主拆分维度；无分组时使用 <code>default</code>
-                。当站点启用自动端点格式拆分时，同一分组下会按模型类型继续拆分
-                Claude、Gemini 和 OpenAI 托管 channel。
+                。多端点兼容站点会按模型已归属的请求端点格式继续拆分托管
+                channel。
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1063,9 +1040,6 @@ export function Site() {
                   {site.site_proxy ? (
                     <Badge variant="outline">{site.site_proxy}</Badge>
                   ) : null}
-                  <Badge variant="outline">
-                    {formatOutboundFormatModeBadge(site.outbound_format_mode)}
-                  </Badge>
                   <Badge variant="outline">
                     {site.custom_header.length} 个自定义 Header
                   </Badge>
@@ -1412,43 +1386,6 @@ export function Site() {
                 placeholder="https://example.com"
                 className="rounded-xl"
               />
-            </label>
-
-            <label className="grid gap-2 text-sm">
-              <span className="font-medium">投影端点格式</span>
-              <Select
-                value={siteForm.outbound_format_mode || PLATFORM_DEFAULT_VALUE}
-                onValueChange={(value) =>
-                  setSiteForm((current) => ({
-                    ...current,
-                    outbound_format_mode:
-                      value === PLATFORM_DEFAULT_VALUE
-                        ? ""
-                        : (value as SiteOutboundFormatMode),
-                  }))
-                }
-              >
-                <SelectTrigger className="w-full rounded-xl">
-                  <SelectValue placeholder="平台默认" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={PLATFORM_DEFAULT_VALUE}>
-                    平台默认
-                  </SelectItem>
-                  {Object.entries(OUTBOUND_FORMAT_LABELS).map(
-                    ([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ),
-                  )}
-                </SelectContent>
-              </Select>
-              <span className="text-xs text-muted-foreground">
-                平台默认下，Claude 和 Gemini
-                站点保持原生格式，多模型兼容站点会按模型名称自动拆分；如果上游只支持{" "}
-                <code>/chat/completions</code>，可改为强制 OpenAI 格式。
-              </span>
             </label>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -1977,9 +1914,8 @@ export function Site() {
                 <p>
                   同步后会以 <code>site_user_group</code> 为主维度生成托管
                   channel；无分组时使用 <code>default</code>。同一分组下的多个
-                  key 会聚合到同一个
-                  channel；如果站点启用了自动端点格式拆分，Claude 和 Gemini
-                  模型会继续拆成独立托管 channel。
+                  key 会聚合到同一个 channel；多端点兼容站点会按模型已归属的
+                  请求端点格式继续拆成独立托管 channel。
                 </p>
                 {accountForm.auto_checkin && accountForm.random_checkin ? (
                   <p>
