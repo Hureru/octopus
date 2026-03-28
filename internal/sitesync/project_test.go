@@ -135,6 +135,102 @@ func TestProjectAccountHonorsOpenAIOnlyMode(t *testing.T) {
 	}
 }
 
+func TestProjectAccountSupportsAllConfiguredRouteBuckets(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	site, account := createProjectionFixture(t, ctx, model.OutboundFormatModeAuto)
+
+	extraModels := []model.SiteModel{
+		{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "text-embedding-3-large", Source: "sync", RouteType: model.SiteModelRouteTypeOpenAIEmbedding},
+		{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "doubao-seed-1-6", Source: "sync", RouteType: model.SiteModelRouteTypeVolcengine},
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&extraModels).Error; err != nil {
+		t.Fatalf("create extra site models failed: %v", err)
+	}
+
+	channelIDs, err := ProjectAccount(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("ProjectAccount returned error: %v", err)
+	}
+	if len(channelIDs) != 5 {
+		t.Fatalf("expected 5 managed channels for 5 route buckets, got %d", len(channelIDs))
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	if len(channelsByGroup) != 5 {
+		t.Fatalf("expected 5 bindings, got %d", len(channelsByGroup))
+	}
+
+	assertProjectedChannel(t, channelsByGroup, "default", outbound.OutboundTypeOpenAIChat, "gpt-4o-mini", false)
+	assertProjectedChannel(t, channelsByGroup, "default::anthropic", outbound.OutboundTypeAnthropic, "claude-3-5-sonnet", true)
+	assertProjectedChannel(t, channelsByGroup, "default::gemini", outbound.OutboundTypeGemini, "gemini-2.0-flash", true)
+	assertProjectedChannel(t, channelsByGroup, "default::volcengine", outbound.OutboundTypeVolcengine, "doubao-seed-1-6", true)
+	assertProjectedChannel(t, channelsByGroup, "default::openai-embedding", outbound.OutboundTypeOpenAIEmbedding, "text-embedding-3-large", true)
+
+	if site.OutboundFormatMode != model.OutboundFormatModeAuto {
+		t.Fatalf("expected fixture to use explicit auto mode, got %q", site.OutboundFormatMode)
+	}
+}
+
+func TestProjectAccountRewritesGroupItemsBeforeRemovingStaleManagedBindings(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx, model.OutboundFormatModeAuto)
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("initial ProjectAccount returned error: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	openAIChannel, ok := channelsByGroup["default"]
+	if !ok {
+		t.Fatalf("expected default projected channel to exist")
+	}
+	anthropicChannel, ok := channelsByGroup["default::anthropic"]
+	if !ok {
+		t.Fatalf("expected anthropic projected channel to exist")
+	}
+
+	group := &model.Group{Name: "rewrite-managed-items", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{
+		GroupID:   group.ID,
+		ChannelID: anthropicChannel.ID,
+		ModelName: "claude-3-5-sonnet",
+		Priority:  1,
+		Weight:    1,
+	}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Model(&model.SiteModel{}).
+		Where("site_account_id = ? AND group_key = ? AND model_name = ?", account.ID, model.SiteDefaultGroupKey, "claude-3-5-sonnet").
+		Update("route_type", model.SiteModelRouteTypeOpenAIChat).Error; err != nil {
+		t.Fatalf("updating site model route_type failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("second ProjectAccount returned error: %v", err)
+	}
+
+	items, err := op.GroupItemList(group.ID, ctx)
+	if err != nil {
+		t.Fatalf("GroupItemList failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected rewritten group item to remain, got %d items", len(items))
+	}
+	if items[0].ChannelID != openAIChannel.ID {
+		t.Fatalf("expected group item to be rewritten onto OpenAI channel %d, got %d", openAIChannel.ID, items[0].ChannelID)
+	}
+
+	bindings := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	if _, ok := bindings["default::anthropic"]; ok {
+		t.Fatalf("expected stale anthropic binding to be removed after route rewrite")
+	}
+}
+
 func setupProjectTestDB(t *testing.T) context.Context {
 	t.Helper()
 
@@ -189,9 +285,9 @@ func createProjectionFixture(t *testing.T, ctx context.Context, outboundFormatMo
 	}
 
 	models := []model.SiteModel{
-		{SiteAccountID: account.ID, ModelName: "gpt-4o-mini", Source: "sync"},
-		{SiteAccountID: account.ID, ModelName: "claude-3-5-sonnet", Source: "sync"},
-		{SiteAccountID: account.ID, ModelName: "gemini-2.0-flash", Source: "sync"},
+		{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", Source: "sync", RouteType: model.SiteModelRouteTypeOpenAIChat, RouteSource: model.SiteModelRouteSourceSyncInferred},
+		{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "claude-3-5-sonnet", Source: "sync", RouteType: model.SiteModelRouteTypeAnthropic, RouteSource: model.SiteModelRouteSourceSyncInferred},
+		{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gemini-2.0-flash", Source: "sync", RouteType: model.SiteModelRouteTypeGemini, RouteSource: model.SiteModelRouteSourceSyncInferred},
 	}
 	if err := dbpkg.GetDB().WithContext(ctx).Create(&models).Error; err != nil {
 		t.Fatalf("create site models failed: %v", err)
@@ -250,6 +346,12 @@ func assertProjectedChannel(t *testing.T, channelsByGroup map[string]model.Chann
 		}
 		if groupKey == "default::gemini" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [Gemini]" {
 			t.Fatalf("unexpected gemini channel name: %q", channel.Name)
+		}
+		if groupKey == "default::volcengine" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [Volcengine]" {
+			t.Fatalf("unexpected volcengine channel name: %q", channel.Name)
+		}
+		if groupKey == "default::openai-embedding" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [OpenAI Embedding]" {
+			t.Fatalf("unexpected embedding channel name: %q", channel.Name)
 		}
 		return
 	}

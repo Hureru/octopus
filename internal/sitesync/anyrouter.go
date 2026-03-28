@@ -83,7 +83,7 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		accessToken: accessToken,
 		groups:      groups,
 		tokens:      tokens,
-		models:      buildSiteModels(models, "sync"),
+		models:      buildGlobalSiteModels(models, groups, "sync"),
 		message:     "site account synced",
 	}, nil
 }

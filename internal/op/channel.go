@@ -7,6 +7,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	model2 "github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/cache"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xstrings"
@@ -350,18 +351,89 @@ func ChannelDel(id int, ctx context.Context) error {
 }
 
 func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
+	channelsByID := channelCache.GetAll()
+	channelIDs := make([]int, 0, len(channelsByID))
+	for channelID := range channelsByID {
+		channelIDs = append(channelIDs, channelID)
+	}
+	bindingMap, err := SiteChannelBindingMapByChannelIDs(channelIDs, ctx)
+	if err != nil {
+		return nil, err
+	}
+	siteCache := make(map[int]*model.Site)
+	accountCache := make(map[int]*model.SiteAccount)
+
 	models := []model.LLMChannel{}
-	for _, channel := range channelCache.GetAll() {
+	for _, channel := range channelsByID {
+		var binding *model.SiteChannelBinding
+		if item, ok := bindingMap[channel.ID]; ok {
+			copy := item
+			binding = &copy
+		}
+		siteName := ""
+		siteAccountName := ""
+		siteGroupKey := ""
+		siteGroupName := ""
+		endpointType := "openai"
+		var siteID *int
+		var siteAccountID *int
+		if binding != nil {
+			siteID = &binding.SiteID
+			siteAccountID = &binding.SiteAccountID
+			siteGroupKey = model.NormalizeSiteGroupKey(binding.GroupKey)
+			if site, ok := siteCache[binding.SiteID]; ok {
+				siteName = site.Name
+			} else if site, getErr := SiteGet(binding.SiteID, ctx); getErr == nil {
+				siteCache[binding.SiteID] = site
+				siteName = site.Name
+			}
+			if account, ok := accountCache[binding.SiteAccountID]; ok {
+				siteAccountName = account.Name
+			} else if account, getErr := SiteAccountGet(binding.SiteAccountID, ctx); getErr == nil {
+				accountCache[binding.SiteAccountID] = account
+				siteAccountName = account.Name
+			}
+			siteGroupName = siteGroupKey
+			if binding.SiteUserGroupID != nil && *binding.SiteUserGroupID > 0 {
+				if account := accountCache[binding.SiteAccountID]; account != nil {
+					for _, group := range account.UserGroups {
+						if group.ID == *binding.SiteUserGroupID {
+							siteGroupName = model.NormalizeSiteGroupName(group.GroupKey, group.Name)
+							siteGroupKey = model.NormalizeSiteGroupKey(group.GroupKey)
+							break
+						}
+					}
+				}
+			}
+			if siteGroupName == "" {
+				siteGroupName = model.NormalizeSiteGroupName(siteGroupKey, "")
+			}
+			switch channel.Type {
+			case model2.OutboundTypeAnthropic:
+				endpointType = "anthropic"
+			case model2.OutboundTypeGemini:
+				endpointType = "gemini"
+			default:
+				endpointType = "openai"
+			}
+		}
 		modelNames := xstrings.SplitTrimCompact(",", channel.Model, channel.CustomModel)
 		for _, modelName := range modelNames {
 			if modelName == "" {
 				continue
 			}
 			models = append(models, model.LLMChannel{
-				Name:        modelName,
-				Enabled:     channel.Enabled,
-				ChannelID:   channel.ID,
-				ChannelName: channel.Name,
+				Name:            modelName,
+				Enabled:         channel.Enabled,
+				ChannelID:       channel.ID,
+				ChannelName:     channel.Name,
+				SiteID:          siteID,
+				SiteAccountID:   siteAccountID,
+				SiteGroupKey:    siteGroupKey,
+				SiteGroupName:   siteGroupName,
+				SiteName:        siteName,
+				SiteAccountName: siteAccountName,
+				EndpointType:    endpointType,
 			})
 		}
 	}
@@ -423,3 +495,4 @@ func channelRefreshCacheByID(id int, ctx context.Context) error {
 	}
 	return nil
 }
+

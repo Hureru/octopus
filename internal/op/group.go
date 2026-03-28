@@ -408,3 +408,7 @@ func groupRefreshCacheByIDs(ids []int, ctx context.Context) error {
 	}
 	return nil
 }
+
+func GroupRefreshCacheByIDs(ids []int, ctx context.Context) error {
+	return groupRefreshCacheByIDs(ids, ctx)
+}

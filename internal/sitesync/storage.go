@@ -52,14 +52,21 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 	}
 	now := time.Now()
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteModel{}).Error; err != nil {
-			return err
-		}
 		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteToken{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteUserGroup{}).Error; err != nil {
 			return err
+		}
+
+		var existingModels []model.SiteModel
+		if err := tx.Where("site_account_id = ?", accountID).Find(&existingModels).Error; err != nil {
+			return err
+		}
+		existingModelMap := make(map[string]model.SiteModel, len(existingModels))
+		for _, item := range existingModels {
+			key := model.NormalizeSiteGroupKey(item.GroupKey) + "\x00" + strings.TrimSpace(item.ModelName)
+			existingModelMap[key] = item
 		}
 
 		updatePayload := map[string]any{
@@ -85,6 +92,21 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		}
 		for i := range snapshot.models {
 			snapshot.models[i].SiteAccountID = accountID
+			snapshot.models[i].GroupKey = model.NormalizeSiteGroupKey(snapshot.models[i].GroupKey)
+			key := snapshot.models[i].GroupKey + "\x00" + strings.TrimSpace(snapshot.models[i].ModelName)
+			if existing, ok := existingModelMap[key]; ok {
+				snapshot.models[i].ID = existing.ID
+				snapshot.models[i].RouteType = model.NormalizeSiteModelRouteType(existing.RouteType)
+				snapshot.models[i].RouteSource = model.NormalizeSiteModelRouteSource(existing.RouteSource, existing.ManualOverride)
+				snapshot.models[i].ManualOverride = existing.ManualOverride
+				snapshot.models[i].RouteRawPayload = existing.RouteRawPayload
+				snapshot.models[i].RouteUpdatedAt = existing.RouteUpdatedAt
+				snapshot.models[i].Disabled = existing.Disabled
+				continue
+			}
+			snapshot.models[i].RouteType = inferSiteModelRouteType(snapshot.models[i])
+			snapshot.models[i].RouteSource = model.SiteModelRouteSourceSyncInferred
+			snapshot.models[i].RouteUpdatedAt = &now
 		}
 
 		if len(snapshot.groups) > 0 {
@@ -98,12 +120,23 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 			}
 		}
 		if len(snapshot.models) > 0 {
+			if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteModel{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Create(&snapshot.models).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteModel{}).Error; err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+func inferSiteModelRouteType(item model.SiteModel) model.SiteModelRouteType {
+	return model.InferSiteModelRouteType(item.ModelName)
 }
 
 func updateAccountSyncState(ctx context.Context, accountID int, status model.SiteExecutionStatus, message string, accessToken string) error {

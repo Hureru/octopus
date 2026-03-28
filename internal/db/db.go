@@ -61,7 +61,6 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.SiteUserGroup{},
 		&model.SiteModel{},
 		&model.SiteChannelBinding{},
-		&model.SiteDisabledModel{},
 		&model.Group{},
 		&model.GroupItem{},
 		&model.LLMInfo{},

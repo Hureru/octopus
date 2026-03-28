@@ -13,10 +13,17 @@ type LLMInfo struct {
 }
 
 type LLMChannel struct {
-	Name        string `json:"name"`
-	Enabled     bool   `json:"enabled"`
-	ChannelID   int    `json:"channel_id"`
-	ChannelName string `json:"channel_name"`
+	Name            string `json:"name"`
+	Enabled         bool   `json:"enabled"`
+	ChannelID       int    `json:"channel_id"`
+	ChannelName     string `json:"channel_name"`
+	SiteID          *int   `json:"site_id,omitempty"`
+	SiteAccountID   *int   `json:"site_account_id,omitempty"`
+	SiteGroupKey    string `json:"site_group_key,omitempty"`
+	SiteGroupName   string `json:"site_group_name,omitempty"`
+	SiteName        string `json:"site_name,omitempty"`
+	SiteAccountName string `json:"site_account_name,omitempty"`
+	EndpointType    string `json:"endpoint_type,omitempty"`
 }
 
 type GeminiModel struct {

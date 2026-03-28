@@ -218,11 +218,32 @@ func sitePlatformUsesV1ModelEndpoint(platform model.SitePlatform) bool {
 	}
 }
 
-func buildSiteModels(names []string, source string) []model.SiteModel {
+func buildSiteModels(names []string, groupKey string, source string) []model.SiteModel {
 	names = normalizeModelNames(names)
 	models := make([]model.SiteModel, 0, len(names))
+	groupKey = model.NormalizeSiteGroupKey(groupKey)
 	for _, name := range names {
-		models = append(models, model.SiteModel{ModelName: name, Source: source})
+		models = append(models, model.SiteModel{GroupKey: groupKey, ModelName: name, Source: source})
+	}
+	return models
+}
+
+func buildGlobalSiteModels(names []string, groups []model.SiteUserGroup, source string) []model.SiteModel {
+	if len(groups) == 0 {
+		return buildSiteModels(names, model.SiteDefaultGroupKey, source)
+	}
+	seen := make(map[string]struct{})
+	models := make([]model.SiteModel, 0, len(names)*len(groups))
+	for _, group := range groups {
+		groupKey := model.NormalizeSiteGroupKey(group.GroupKey)
+		for _, item := range buildSiteModels(names, groupKey, source) {
+			key := groupKey + "\x00" + item.ModelName
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			models = append(models, item)
+		}
 	}
 	return models
 }

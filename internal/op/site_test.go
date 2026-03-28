@@ -278,6 +278,97 @@ func TestSiteImportAllAPIHubImportsAndUpdatesAccounts(t *testing.T) {
 	})
 }
 
+func TestSiteModelRouteUpdateIfNotManualHonorsManualOverride(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "route-guard-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "route-guard-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	rows := []model.SiteModel{
+		{
+			SiteAccountID:  account.ID,
+			GroupKey:       model.SiteDefaultGroupKey,
+			ModelName:      "claude-3-haiku",
+			RouteType:      model.SiteModelRouteTypeAnthropic,
+			RouteSource:    model.SiteModelRouteSourceManualOverride,
+			ManualOverride: true,
+		},
+		{
+			SiteAccountID:  account.ID,
+			GroupKey:       model.SiteDefaultGroupKey,
+			ModelName:      "gpt-4.1",
+			RouteType:      model.SiteModelRouteTypeOpenAIChat,
+			RouteSource:    model.SiteModelRouteSourceSyncInferred,
+			ManualOverride: false,
+		},
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&rows).Error; err != nil {
+		t.Fatalf("create site models failed: %v", err)
+	}
+
+	updated, err := SiteModelRouteUpdateIfNotManual(account.ID, model.SiteDefaultGroupKey, "claude-3-haiku", model.SiteModelRouteTypeOpenAIResponse, model.SiteModelRouteSourceRuntimeLearned, "mismatch", ctx)
+	if err != nil {
+		t.Fatalf("SiteModelRouteUpdateIfNotManual returned error: %v", err)
+	}
+	if updated {
+		t.Fatalf("expected manual override row not to be updated")
+	}
+
+	updated, err = SiteModelRouteUpdateIfNotManual(account.ID, model.SiteDefaultGroupKey, "gpt-4.1", model.SiteModelRouteTypeOpenAIResponse, model.SiteModelRouteSourceRuntimeLearned, "mismatch", ctx)
+	if err != nil {
+		t.Fatalf("SiteModelRouteUpdateIfNotManual returned error: %v", err)
+	}
+	if !updated {
+		t.Fatalf("expected non-manual row to be updated")
+	}
+
+	var manualRow model.SiteModel
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND model_name = ?", account.ID, "claude-3-haiku").First(&manualRow).Error; err != nil {
+		t.Fatalf("query manual row failed: %v", err)
+	}
+	if manualRow.RouteType != model.SiteModelRouteTypeAnthropic {
+		t.Fatalf("expected manual route type to remain anthropic, got %q", manualRow.RouteType)
+	}
+	if !manualRow.ManualOverride {
+		t.Fatalf("expected manual override flag to remain true")
+	}
+
+	var learnedRow model.SiteModel
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND model_name = ?", account.ID, "gpt-4.1").First(&learnedRow).Error; err != nil {
+		t.Fatalf("query learned row failed: %v", err)
+	}
+	if learnedRow.RouteType != model.SiteModelRouteTypeOpenAIResponse {
+		t.Fatalf("expected learned route type openai_response, got %q", learnedRow.RouteType)
+	}
+	if learnedRow.RouteSource != model.SiteModelRouteSourceRuntimeLearned {
+		t.Fatalf("expected learned route source runtime_learned, got %q", learnedRow.RouteSource)
+	}
+	if learnedRow.ManualOverride {
+		t.Fatalf("expected learned row manual override to remain false")
+	}
+	if learnedRow.RouteRawPayload != "mismatch" {
+		t.Fatalf("expected learned payload to be recorded, got %q", learnedRow.RouteRawPayload)
+	}
+}
+
 func assertImportedAccount(t *testing.T, name string, assertFn func(account model.SiteAccount)) {
 	t.Helper()
 

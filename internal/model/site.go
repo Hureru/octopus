@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bestruirui/octopus/internal/transformer/outbound"
 )
 
 type SitePlatform string
@@ -36,6 +38,27 @@ const (
 	SiteExecutionStatusSuccess SiteExecutionStatus = "success"
 	SiteExecutionStatusFailed  SiteExecutionStatus = "failed"
 	SiteExecutionStatusSkipped SiteExecutionStatus = "skipped"
+)
+
+type SiteModelRouteType string
+
+const (
+	SiteModelRouteTypeOpenAIChat      SiteModelRouteType = "openai_chat"
+	SiteModelRouteTypeOpenAIResponse  SiteModelRouteType = "openai_response"
+	SiteModelRouteTypeAnthropic       SiteModelRouteType = "anthropic"
+	SiteModelRouteTypeGemini          SiteModelRouteType = "gemini"
+	SiteModelRouteTypeVolcengine      SiteModelRouteType = "volcengine"
+	SiteModelRouteTypeOpenAIEmbedding SiteModelRouteType = "openai_embedding"
+	SiteModelRouteTypeUnknown         SiteModelRouteType = "unknown"
+)
+
+type SiteModelRouteSource string
+
+const (
+	SiteModelRouteSourceSyncInferred    SiteModelRouteSource = "sync_inferred"
+	SiteModelRouteSourceManualOverride  SiteModelRouteSource = "manual_override"
+	SiteModelRouteSourceRuntimeLearned  SiteModelRouteSource = "runtime_learned"
+	SiteModelRouteSourceDefaultAssigned SiteModelRouteSource = "default_assigned"
 )
 
 type OutboundFormatMode string
@@ -122,10 +145,17 @@ type SiteUserGroup struct {
 }
 
 type SiteModel struct {
-	ID            int    `json:"id" gorm:"primaryKey"`
-	SiteAccountID int    `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_model;not null"`
-	ModelName     string `json:"model_name" gorm:"uniqueIndex:idx_site_account_model;not null"`
-	Source        string `json:"source"`
+	ID              int                  `json:"id" gorm:"primaryKey"`
+	SiteAccountID   int                  `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_group_model;not null"`
+	GroupKey        string               `json:"group_key" gorm:"uniqueIndex:idx_site_account_group_model;not null;default:'default'"`
+	ModelName       string               `json:"model_name" gorm:"uniqueIndex:idx_site_account_group_model;not null"`
+	Source          string               `json:"source"`
+	RouteType       SiteModelRouteType   `json:"route_type" gorm:"type:varchar(32);not null;default:'openai_chat';index"`
+	RouteSource     SiteModelRouteSource `json:"route_source" gorm:"type:varchar(32);not null;default:'sync_inferred'"`
+	ManualOverride  bool                 `json:"manual_override" gorm:"default:false"`
+	RouteRawPayload string               `json:"route_raw_payload"`
+	RouteUpdatedAt  *time.Time           `json:"route_updated_at"`
+	Disabled        bool                 `json:"disabled" gorm:"default:false;index"`
 }
 
 type SiteChannelBinding struct {
@@ -135,12 +165,6 @@ type SiteChannelBinding struct {
 	SiteUserGroupID *int   `json:"site_user_group_id"`
 	GroupKey        string `json:"group_key" gorm:"uniqueIndex:idx_site_account_channel_group;not null"`
 	ChannelID       int    `json:"channel_id" gorm:"uniqueIndex;not null"`
-}
-
-type SiteDisabledModel struct {
-	ID        int    `json:"id" gorm:"primaryKey"`
-	SiteID    int    `json:"site_id" gorm:"uniqueIndex:idx_site_disabled_model;not null"`
-	ModelName string `json:"model_name" gorm:"uniqueIndex:idx_site_disabled_model;not null"`
 }
 
 type SiteUpdateRequest struct {
@@ -229,6 +253,165 @@ func NormalizeSiteGroupName(groupKey string, name string) string {
 		return trimmed
 	}
 	return SiteDefaultGroupName
+}
+
+func NormalizeSiteModelRouteType(routeType SiteModelRouteType) SiteModelRouteType {
+	switch routeType {
+	case SiteModelRouteTypeOpenAIChat,
+		SiteModelRouteTypeOpenAIResponse,
+		SiteModelRouteTypeAnthropic,
+		SiteModelRouteTypeGemini,
+		SiteModelRouteTypeVolcengine,
+		SiteModelRouteTypeOpenAIEmbedding:
+		return routeType
+	default:
+		return SiteModelRouteTypeOpenAIChat
+	}
+}
+
+func NormalizeSiteModelRouteSource(routeSource SiteModelRouteSource, manualOverride bool) SiteModelRouteSource {
+	switch routeSource {
+	case SiteModelRouteSourceSyncInferred,
+		SiteModelRouteSourceManualOverride,
+		SiteModelRouteSourceRuntimeLearned,
+		SiteModelRouteSourceDefaultAssigned:
+		return routeSource
+	default:
+		if manualOverride {
+			return SiteModelRouteSourceManualOverride
+		}
+		return SiteModelRouteSourceSyncInferred
+	}
+}
+
+func InferSiteModelRouteType(modelName string) SiteModelRouteType {
+	lower := strings.ToLower(strings.TrimSpace(modelName))
+	switch {
+	case strings.HasPrefix(lower, "claude"):
+		return SiteModelRouteTypeAnthropic
+	case strings.HasPrefix(lower, "gemini"):
+		return SiteModelRouteTypeGemini
+	case strings.Contains(lower, "embedding"):
+		return SiteModelRouteTypeOpenAIEmbedding
+	default:
+		return SiteModelRouteTypeOpenAIChat
+	}
+}
+
+func SiteModelRouteTypeSuffix(routeType SiteModelRouteType) string {
+	switch NormalizeSiteModelRouteType(routeType) {
+	case SiteModelRouteTypeOpenAIResponse:
+		return "openai-response"
+	case SiteModelRouteTypeAnthropic:
+		return "anthropic"
+	case SiteModelRouteTypeGemini:
+		return "gemini"
+	case SiteModelRouteTypeVolcengine:
+		return "volcengine"
+	case SiteModelRouteTypeOpenAIEmbedding:
+		return "openai-embedding"
+	default:
+		return ""
+	}
+}
+
+func SiteModelRouteTypeName(routeType SiteModelRouteType) string {
+	switch NormalizeSiteModelRouteType(routeType) {
+	case SiteModelRouteTypeOpenAIResponse:
+		return "OpenAI Response"
+	case SiteModelRouteTypeAnthropic:
+		return "Anthropic"
+	case SiteModelRouteTypeGemini:
+		return "Gemini"
+	case SiteModelRouteTypeVolcengine:
+		return "Volcengine"
+	case SiteModelRouteTypeOpenAIEmbedding:
+		return "OpenAI Embedding"
+	default:
+		return ""
+	}
+}
+
+func ComposeSiteChannelBindingKey(groupKey string, routeType SiteModelRouteType, split bool) string {
+	groupKey = NormalizeSiteGroupKey(groupKey)
+	if !split {
+		return groupKey
+	}
+	if suffix := SiteModelRouteTypeSuffix(routeType); suffix != "" {
+		return groupKey + "::" + suffix
+	}
+	return groupKey
+}
+
+func ParseSiteChannelBindingKey(groupKey string) (string, SiteModelRouteType) {
+	baseKey, suffix, found := strings.Cut(NormalizeSiteGroupKey(groupKey), "::")
+	if !found {
+		return baseKey, SiteModelRouteTypeOpenAIChat
+	}
+	switch suffix {
+	case "openai-response":
+		return baseKey, SiteModelRouteTypeOpenAIResponse
+	case "anthropic":
+		return baseKey, SiteModelRouteTypeAnthropic
+	case "gemini":
+		return baseKey, SiteModelRouteTypeGemini
+	case "volcengine":
+		return baseKey, SiteModelRouteTypeVolcengine
+	case "openai-embedding":
+		return baseKey, SiteModelRouteTypeOpenAIEmbedding
+	default:
+		return baseKey, SiteModelRouteTypeOpenAIChat
+	}
+}
+
+func ShouldSplitSiteChannelRoutes(mode OutboundFormatMode, platform SitePlatform) bool {
+	switch mode {
+	case OutboundFormatModeOpenAI:
+		return false
+	case OutboundFormatModeAuto:
+		return true
+	default:
+		switch platform {
+		case SitePlatformClaude, SitePlatformGemini, SitePlatformOpenAI:
+			return false
+		default:
+			return true
+		}
+	}
+}
+
+func (t SiteModelRouteType) ToOutboundType() outbound.OutboundType {
+	switch NormalizeSiteModelRouteType(t) {
+	case SiteModelRouteTypeOpenAIResponse:
+		return outbound.OutboundTypeOpenAIResponse
+	case SiteModelRouteTypeAnthropic:
+		return outbound.OutboundTypeAnthropic
+	case SiteModelRouteTypeGemini:
+		return outbound.OutboundTypeGemini
+	case SiteModelRouteTypeVolcengine:
+		return outbound.OutboundTypeVolcengine
+	case SiteModelRouteTypeOpenAIEmbedding:
+		return outbound.OutboundTypeOpenAIEmbedding
+	default:
+		return outbound.OutboundTypeOpenAIChat
+	}
+}
+
+func SiteModelRouteTypeFromOutboundType(t outbound.OutboundType) SiteModelRouteType {
+	switch t {
+	case outbound.OutboundTypeOpenAIResponse:
+		return SiteModelRouteTypeOpenAIResponse
+	case outbound.OutboundTypeAnthropic:
+		return SiteModelRouteTypeAnthropic
+	case outbound.OutboundTypeGemini:
+		return SiteModelRouteTypeGemini
+	case outbound.OutboundTypeVolcengine:
+		return SiteModelRouteTypeVolcengine
+	case outbound.OutboundTypeOpenAIEmbedding:
+		return SiteModelRouteTypeOpenAIEmbedding
+	default:
+		return SiteModelRouteTypeOpenAIChat
+	}
 }
 
 func (p SitePlatform) Validate() error {

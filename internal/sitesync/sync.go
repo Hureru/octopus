@@ -98,7 +98,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		return nil, err
 	}
 	balance, balanceUsed := fetchAccountBalance(ctx, siteRecord, account, accessToken)
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildSiteModels(models, "sync"), balance: balance, balanceUsed: balanceUsed, message: "site account synced"}, nil
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildGlobalSiteModels(models, groups, "sync"), balance: balance, balanceUsed: balanceUsed, message: "site account synced"}, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -133,7 +133,7 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 	if err != nil {
 		return nil, err
 	}
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildSiteModels(models, "sync"), message: "site account synced"}, nil
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildGlobalSiteModels(models, groups, "sync"), message: "site account synced"}, nil
 }
 
 func syncOfficialPlatform(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -153,7 +153,7 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 		accessToken: strings.TrimSpace(account.AccessToken),
 		groups:      []model.SiteUserGroup{{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}},
 		tokens:      []model.SiteToken{{Name: "default", Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: source, IsDefault: true}},
-		models:      buildSiteModels(models, source),
+		models:      buildSiteModels(models, model.SiteDefaultGroupKey, source),
 		message:     "site account synced",
 	}, nil
 }

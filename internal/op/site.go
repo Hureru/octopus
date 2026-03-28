@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -174,7 +175,12 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 }
 
 func SiteEnabled(id int, enabled bool, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Model(&model.Site{}).Where("id = ?", id).Update("enabled", enabled).Error
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Site{}).Where("id = ?", id).Update("enabled", enabled).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Update("enabled", enabled).Error
+	})
 }
 
 func SiteDel(id int, ctx context.Context) error {
@@ -343,51 +349,11 @@ func SiteAccountDel(id int, ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Delete(&model.SiteAccount{}, id).Error
 }
 
-func SiteDisabledModelList(siteID int, ctx context.Context) ([]string, error) {
-	var rows []model.SiteDisabledModel
-	if err := db.GetDB().WithContext(ctx).Where("site_id = ?", siteID).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	models := make([]string, 0, len(rows))
-	for _, row := range rows {
-		models = append(models, row.ModelName)
-	}
-	return models, nil
-}
-
-func SiteDisabledModelReplace(siteID int, models []string, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("site_id = ?", siteID).Delete(&model.SiteDisabledModel{}).Error; err != nil {
-			return err
-		}
-		if len(models) == 0 {
-			return nil
-		}
-		seen := make(map[string]struct{})
-		rows := make([]model.SiteDisabledModel, 0, len(models))
-		for _, name := range models {
-			trimmed := strings.TrimSpace(name)
-			if trimmed == "" {
-				continue
-			}
-			if _, ok := seen[trimmed]; ok {
-				continue
-			}
-			seen[trimmed] = struct{}{}
-			rows = append(rows, model.SiteDisabledModel{SiteID: siteID, ModelName: trimmed})
-		}
-		if len(rows) > 0 {
-			return tx.Create(&rows).Error
-		}
-		return nil
-	})
-}
-
 func SiteAvailableModels(siteID int, ctx context.Context) ([]string, error) {
 	var rows []model.SiteModel
 	if err := db.GetDB().WithContext(ctx).
 		Joins("JOIN site_accounts ON site_accounts.id = site_models.site_account_id").
-		Where("site_accounts.site_id = ?", siteID).
+		Where("site_accounts.site_id = ? AND site_models.disabled = ?", siteID, false).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -406,6 +372,47 @@ func SiteAvailableModels(siteID int, ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(models)
 	return models, nil
+}
+
+func SiteModelRouteUpdate(accountID int, groupKey string, modelName string, routeType model.SiteModelRouteType, source model.SiteModelRouteSource, manualOverride bool, routeRawPayload string, ctx context.Context) error {
+	now := time.Now()
+	updates := map[string]any{
+		"route_type":        model.NormalizeSiteModelRouteType(routeType),
+		"route_source":      model.NormalizeSiteModelRouteSource(source, manualOverride),
+		"manual_override":   manualOverride,
+		"route_raw_payload": strings.TrimSpace(routeRawPayload),
+		"route_updated_at":  &now,
+	}
+	return db.GetDB().WithContext(ctx).
+		Model(&model.SiteModel{}).
+		Where("site_account_id = ? AND group_key = ? AND model_name = ?", accountID, model.NormalizeSiteGroupKey(groupKey), strings.TrimSpace(modelName)).
+		Updates(updates).Error
+}
+
+func SiteModelRouteUpdateIfNotManual(accountID int, groupKey string, modelName string, routeType model.SiteModelRouteType, source model.SiteModelRouteSource, routeRawPayload string, ctx context.Context) (bool, error) {
+	now := time.Now()
+	updates := map[string]any{
+		"route_type":        model.NormalizeSiteModelRouteType(routeType),
+		"route_source":      model.NormalizeSiteModelRouteSource(source, false),
+		"manual_override":   false,
+		"route_raw_payload": strings.TrimSpace(routeRawPayload),
+		"route_updated_at":  &now,
+	}
+	result := db.GetDB().WithContext(ctx).
+		Model(&model.SiteModel{}).
+		Where("site_account_id = ? AND group_key = ? AND model_name = ? AND manual_override = ?", accountID, model.NormalizeSiteGroupKey(groupKey), strings.TrimSpace(modelName), false).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func SiteModelDisabledUpdate(accountID int, groupKey string, modelName string, disabled bool, ctx context.Context) error {
+	return db.GetDB().WithContext(ctx).
+		Model(&model.SiteModel{}).
+		Where("site_account_id = ? AND group_key = ? AND model_name = ?", accountID, model.NormalizeSiteGroupKey(groupKey), strings.TrimSpace(modelName)).
+		Update("disabled", disabled).Error
 }
 
 func SiteUpdateSystemProxy(id int, useSystemProxy bool, ctx context.Context) error {
