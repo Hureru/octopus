@@ -19,6 +19,7 @@ type SiteModelRouteMetadata struct {
 	RouteType               SiteModelRouteType `json:"route_type,omitempty"`
 	EnableGroups            []string           `json:"enable_groups,omitempty"`
 	SupportedEndpointTypes  []string           `json:"supported_endpoint_types,omitempty"`
+	HeuristicEndpointTypes  []string           `json:"heuristic_endpoint_types,omitempty"`
 	NormalizedEndpointTypes []string           `json:"normalized_endpoint_types,omitempty"`
 	UnsupportedReason       string             `json:"unsupported_reason,omitempty"`
 }
@@ -29,6 +30,7 @@ func (m SiteModelRouteMetadata) Marshal() string {
 	m.Source = strings.TrimSpace(m.Source)
 	m.EnableGroups = NormalizeSiteModelRouteMetadataGroupKeys(m.EnableGroups)
 	m.SupportedEndpointTypes = normalizeRouteMetadataStrings(m.SupportedEndpointTypes)
+	m.HeuristicEndpointTypes = normalizeRouteMetadataStrings(m.HeuristicEndpointTypes)
 	m.NormalizedEndpointTypes = normalizeRouteMetadataStrings(m.NormalizedEndpointTypes)
 	if m.RouteSupported {
 		m.RouteType = NormalizeSiteModelRouteType(m.RouteType)
@@ -63,6 +65,7 @@ func ParseSiteModelRouteMetadata(raw string) (*SiteModelRouteMetadata, bool) {
 	metadata.Source = strings.TrimSpace(metadata.Source)
 	metadata.EnableGroups = NormalizeSiteModelRouteMetadataGroupKeys(metadata.EnableGroups)
 	metadata.SupportedEndpointTypes = normalizeRouteMetadataStrings(metadata.SupportedEndpointTypes)
+	metadata.HeuristicEndpointTypes = normalizeRouteMetadataStrings(metadata.HeuristicEndpointTypes)
 	metadata.NormalizedEndpointTypes = normalizeRouteMetadataStrings(metadata.NormalizedEndpointTypes)
 	if metadata.RouteSupported {
 		metadata.RouteType = NormalizeSiteModelRouteType(metadata.RouteType)

@@ -475,3 +475,60 @@ func TestSyncManagementPlatformExpandsModelsToExplicitGroupsWithoutKey(t *testin
 		t.Fatalf("expected synthesized vip model to keep explicit groups, got %#v", metadata.EnableGroups)
 	}
 }
+
+func TestSyncManagementPlatformAddsHeuristicResponsesForGPT5(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
+		case r.URL.Path == "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5.4"}]}`))
+		case r.URL.Path == "/api/pricing":
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-5.4","supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+	if len(snapshot.models) != 1 {
+		t.Fatalf("expected one synced model, got %+v", snapshot.models)
+	}
+	if snapshot.models[0].RouteType != model.SiteModelRouteTypeOpenAIResponse {
+		t.Fatalf("expected gpt-5.4 route type %q, got %q", model.SiteModelRouteTypeOpenAIResponse, snapshot.models[0].RouteType)
+	}
+	metadata, ok := model.ParseSiteModelRouteMetadata(snapshot.models[0].RouteRawPayload)
+	if !ok {
+		t.Fatalf("expected route metadata to parse")
+	}
+	if len(metadata.SupportedEndpointTypes) != 1 || metadata.SupportedEndpointTypes[0] != "/v1/chat/completions" {
+		t.Fatalf("expected upstream endpoint types to remain chat-only, got %#v", metadata.SupportedEndpointTypes)
+	}
+	if len(metadata.HeuristicEndpointTypes) != 1 || metadata.HeuristicEndpointTypes[0] != "/v1/responses" {
+		t.Fatalf("expected heuristic endpoint types to record injected responses support, got %#v", metadata.HeuristicEndpointTypes)
+	}
+}

@@ -9,6 +9,7 @@ func TestSiteModelRouteMetadataRoundTrip(t *testing.T) {
 		RouteType:               SiteModelRouteTypeOpenAIResponse,
 		EnableGroups:            []string{"vip", " default ", "vip"},
 		SupportedEndpointTypes:  []string{"/v1/responses", "/v1/chat/completions", "/v1/responses"},
+		HeuristicEndpointTypes:  []string{"/v1/responses", "/v1/responses"},
 		NormalizedEndpointTypes: []string{string(SiteModelRouteTypeOpenAIResponse), string(SiteModelRouteTypeOpenAIChat)},
 	}.Marshal()
 
@@ -24,6 +25,9 @@ func TestSiteModelRouteMetadataRoundTrip(t *testing.T) {
 	}
 	if len(metadata.SupportedEndpointTypes) != 2 {
 		t.Fatalf("expected supported endpoint list to dedupe, got %#v", metadata.SupportedEndpointTypes)
+	}
+	if len(metadata.HeuristicEndpointTypes) != 1 || metadata.HeuristicEndpointTypes[0] != "/v1/responses" {
+		t.Fatalf("expected heuristic endpoint list to dedupe, got %#v", metadata.HeuristicEndpointTypes)
 	}
 	if len(metadata.EnableGroups) != 2 || metadata.EnableGroups[0] != "default" || metadata.EnableGroups[1] != "vip" {
 		t.Fatalf("expected enable groups to normalize and dedupe, got %#v", metadata.EnableGroups)
