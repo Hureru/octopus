@@ -341,7 +341,7 @@ func buildSiteModelRouteDetection(
 		NormalizedEndpointTypes: routeTypesToStrings(knownRouteTypes),
 	}
 	if metadata.RouteSupported {
-		metadata.RouteType = pickPreferredDetectedRouteType(knownRouteTypes)
+		metadata.RouteType = pickPreferredDetectedRouteType(modelName, knownRouteTypes)
 	} else if len(supportedEndpointTypes) > 0 {
 		metadata.RouteType = model.SiteModelRouteTypeUnknown
 		metadata.UnsupportedReason = "site reports endpoint types outside current supported route buckets"
@@ -388,19 +388,41 @@ func routeTypesToStrings(values []model.SiteModelRouteType) []string {
 	return result
 }
 
-func pickPreferredDetectedRouteType(values []model.SiteModelRouteType) model.SiteModelRouteType {
+func pickPreferredDetectedRouteType(modelName string, values []model.SiteModelRouteType) model.SiteModelRouteType {
 	if len(values) == 0 {
 		return model.SiteModelRouteTypeUnknown
 	}
-	best := values[0]
-	bestPriority := detectedRouteTypePriority(best)
-	for _, value := range values[1:] {
-		if priority := detectedRouteTypePriority(value); priority < bestPriority {
-			best = value
-			bestPriority = priority
+
+	nativeRouteType := model.InferSiteModelRouteType(modelName)
+	switch nativeRouteType {
+	case model.SiteModelRouteTypeAnthropic,
+		model.SiteModelRouteTypeGemini,
+		model.SiteModelRouteTypeVolcengine,
+		model.SiteModelRouteTypeOpenAIEmbedding:
+		for _, value := range values {
+			if value == nativeRouteType {
+				return value
+			}
 		}
 	}
-	return best
+
+	fallbackOrder := []model.SiteModelRouteType{
+		model.SiteModelRouteTypeAnthropic,
+		model.SiteModelRouteTypeOpenAIResponse,
+		model.SiteModelRouteTypeOpenAIChat,
+		model.SiteModelRouteTypeGemini,
+		model.SiteModelRouteTypeVolcengine,
+		model.SiteModelRouteTypeOpenAIEmbedding,
+	}
+	for _, preferred := range fallbackOrder {
+		for _, value := range values {
+			if value == preferred {
+				return value
+			}
+		}
+	}
+
+	return values[0]
 }
 
 func detectedRouteTypePriority(routeType model.SiteModelRouteType) int {
