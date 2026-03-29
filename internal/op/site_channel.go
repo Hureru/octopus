@@ -222,6 +222,9 @@ func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyM
 	}
 	for _, item := range account.Models {
 		key := model.NormalizeSiteGroupKey(item.GroupKey)
+		if !siteModelBelongsToGroup(item, key) {
+			continue
+		}
 		group := ensureSiteChannelGroup(groups, key, key)
 		routeMetadata, _ := model.ParseSiteModelRouteMetadata(item.RouteRawPayload)
 		channelID, hasChannel := findProjectedChannelID(account.ChannelBindings, key, item.RouteType, split)
@@ -249,6 +252,20 @@ func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyM
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].GroupKey < result[j].GroupKey })
 	return result
+}
+
+func siteModelBelongsToGroup(item model.SiteModel, groupKey string) bool {
+	metadata, ok := model.ParseSiteModelRouteMetadata(item.RouteRawPayload)
+	if !ok || len(metadata.EnableGroups) == 0 {
+		return true
+	}
+	targetGroupKey := model.NormalizeSiteGroupKey(groupKey)
+	for _, explicitGroupKey := range metadata.EnableGroups {
+		if model.NormalizeSiteGroupKey(explicitGroupKey) == targetGroupKey {
+			return true
+		}
+	}
+	return false
 }
 
 func ensureSiteChannelGroup(groups map[string]*model.SiteChannelGroup, groupKey string, groupName string) *model.SiteChannelGroup {

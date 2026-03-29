@@ -26,6 +26,7 @@ func init() {
 	router.NewGroupRouter("/api/v1/site-channel").
 		Use(middleware.Auth()).
 		Use(middleware.RequireJSON()).
+		AddRoute(router.NewRoute("/:siteId/account/:accountId/keys", http.MethodPost).Handle(createSiteChannelKey)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-routes", http.MethodPut).Handle(updateSiteChannelModelRoutes)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-disabled", http.MethodPut).Handle(updateSiteChannelModelDisabled)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-routes/reset", http.MethodPost).Handle(resetSiteChannelModelRoutes))
@@ -80,6 +81,32 @@ func getSiteChannelModelHistory(c *gin.Context) {
 	resp.Success(c, data)
 }
 
+func createSiteChannelKey(c *gin.Context) {
+	siteID, accountID, ok := parseSiteChannelIDs(c)
+	if !ok {
+		return
+	}
+	if _, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context()); err != nil {
+		resp.Error(c, http.StatusNotFound, err.Error())
+		return
+	}
+	var req model.SiteChannelKeyCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		return
+	}
+	if _, err := sitesvc.CreateAccountToken(c.Request.Context(), accountID, req); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, data)
+}
+
 func updateSiteChannelModelRoutes(c *gin.Context) {
 	siteID, accountID, ok := parseSiteChannelIDs(c)
 	if !ok {
@@ -96,7 +123,10 @@ func updateSiteChannelModelRoutes(c *gin.Context) {
 			return
 		}
 	}
-	reprojectSiteChannelAccount(siteID, accountID)
+	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -121,7 +151,10 @@ func updateSiteChannelModelDisabled(c *gin.Context) {
 			return
 		}
 	}
-	reprojectSiteChannelAccount(siteID, accountID)
+	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -139,7 +172,10 @@ func resetSiteChannelModelRoutes(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	reprojectSiteChannelAccount(siteID, accountID)
+	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -162,10 +198,10 @@ func parseSiteChannelIDs(c *gin.Context) (int, int, bool) {
 	return siteID, accountID, true
 }
 
-func reprojectSiteChannelAccount(_ int, accountID int) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		_, _ = sitesvc.ProjectAccount(ctx, accountID)
-	}()
+func reprojectSiteChannelAccount(parent context.Context, accountID int) error {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
+	defer cancel()
+
+	_, err := sitesvc.ProjectAccount(ctx, accountID)
+	return err
 }

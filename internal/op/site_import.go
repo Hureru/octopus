@@ -30,6 +30,8 @@ type importedAccountInput struct {
 	Password       string
 	AccessToken    string
 	APIKey         string
+	RefreshToken   string
+	TokenExpiresAt int64
 	PlatformUserID *int
 	Enabled        bool
 	AutoSync       bool
@@ -195,6 +197,8 @@ func parseAllAPIHubAccountRow(row rawImportObject) (importedAccountInput, string
 	authType := strings.ToLower(strings.TrimSpace(asString(row["authType"])))
 	username := firstNonEmptyString(asString(accountInfo["username"]), asString(row["username"]), rowID)
 	accessTokenCandidate := firstNonEmptyString(asString(accountInfo["access_token"]), asString(row["access_token"]))
+	refreshTokenCandidate := firstNonEmptyString(asString(accountInfo["refresh_token"]), asString(row["refresh_token"]))
+	tokenExpiresAt := asInt64(accountInfo["token_expires_at"])
 	cookieSession := asString(cookieAuth["sessionCookie"])
 	platformUserID := asIntPointer(accountInfo["id"])
 
@@ -208,6 +212,8 @@ func parseAllAPIHubAccountRow(row rawImportObject) (importedAccountInput, string
 		Enabled:     !asBool(row["disabled"], false),
 		AutoSync:    true,
 		AutoCheckin: asBool(checkin["autoCheckInEnabled"], true) && platformSupportsCheckin(platform),
+		RefreshToken: refreshTokenCandidate,
+		TokenExpiresAt: tokenExpiresAt,
 	}
 	if platformUserID != nil {
 		input.PlatformUserID = platformUserID
@@ -335,6 +341,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 			Password:                   strings.TrimSpace(input.Password),
 			AccessToken:                strings.TrimSpace(input.AccessToken),
 			APIKey:                     strings.TrimSpace(input.APIKey),
+			RefreshToken:               strings.TrimSpace(input.RefreshToken),
+			TokenExpiresAt:             input.TokenExpiresAt,
 			PlatformUserID:             input.PlatformUserID,
 			Enabled:                    input.Enabled,
 			AutoSync:                   input.AutoSync,
@@ -354,6 +362,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 			"password":                      created.Password,
 			"access_token":                  created.AccessToken,
 			"api_key":                       created.APIKey,
+			"refresh_token":                 created.RefreshToken,
+			"token_expires_at":              created.TokenExpiresAt,
 			"platform_user_id":              created.PlatformUserID,
 			"enabled":                       created.Enabled,
 			"auto_sync":                     created.AutoSync,
@@ -383,6 +393,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 	merged.Password = strings.TrimSpace(input.Password)
 	merged.AccessToken = strings.TrimSpace(input.AccessToken)
 	merged.APIKey = strings.TrimSpace(input.APIKey)
+	merged.RefreshToken = strings.TrimSpace(input.RefreshToken)
+	merged.TokenExpiresAt = input.TokenExpiresAt
 	merged.PlatformUserID = input.PlatformUserID
 	merged.AutoCheckin = input.AutoCheckin
 	if err := merged.Validate(); err != nil {
@@ -396,6 +408,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 		"password":         merged.Password,
 		"access_token":     merged.AccessToken,
 		"api_key":          merged.APIKey,
+		"refresh_token":    merged.RefreshToken,
+		"token_expires_at": merged.TokenExpiresAt,
 		"platform_user_id": merged.PlatformUserID,
 		"auto_checkin":     merged.AutoCheckin,
 	}
@@ -408,6 +422,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 	accountRecord.Password = merged.Password
 	accountRecord.AccessToken = merged.AccessToken
 	accountRecord.APIKey = merged.APIKey
+	accountRecord.RefreshToken = merged.RefreshToken
+	accountRecord.TokenExpiresAt = merged.TokenExpiresAt
 	accountRecord.PlatformUserID = merged.PlatformUserID
 	accountRecord.AutoCheckin = merged.AutoCheckin
 	return accountRecord, false, true, nil
@@ -661,6 +677,32 @@ func asIntPointer(value any) *int {
 		}
 	}
 	return nil
+}
+
+func asInt64(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		if typed > 0 {
+			return int64(typed)
+		}
+	case int64:
+		if typed > 0 {
+			return typed
+		}
+	case float64:
+		if typed > 0 {
+			return int64(typed)
+		}
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil && parsed > 0 {
+			return parsed
+		}
+	case string:
+		if parsed, err := json.Number(strings.TrimSpace(typed)).Int64(); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func firstNonEmptyString(values ...string) string {

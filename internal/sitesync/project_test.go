@@ -273,6 +273,258 @@ func TestProjectAccountRemovesUnsupportedModelsFromProjectedChannels(t *testing.
 	}
 }
 
+func TestProjectAccountReusesOrphanManagedChannelWithSameName(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+
+	site := &model.Site{
+		Name:     "DoneHub Projection Site",
+		Platform: model.SitePlatformDoneHub,
+		BaseURL:  "https://donehub.example.com",
+		Enabled:  true,
+	}
+	if err := op.SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "Primary Account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "donehub-session-token",
+		Enabled:        true,
+	}
+	if err := op.SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	token := model.SiteToken{
+		SiteAccountID: account.ID,
+		Name:          "primary",
+		Token:         "key-primary",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       true,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&token).Error; err != nil {
+		t.Fatalf("create site token failed: %v", err)
+	}
+
+	siteModel := model.SiteModel{
+		SiteAccountID: account.ID,
+		GroupKey:      model.SiteDefaultGroupKey,
+		ModelName:     "gpt-4o-mini",
+		Source:        "sync",
+		RouteType:     model.SiteModelRouteTypeOpenAIChat,
+		RouteSource:   model.SiteModelRouteSourceSyncInferred,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&siteModel).Error; err != nil {
+		t.Fatalf("create site model failed: %v", err)
+	}
+
+	group := model.SiteUserGroup{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
+	orphanName := buildManagedChannelName(site, account, group, outbound.OutboundTypeOpenAIChat, shouldSplitByOutboundType(site))
+	orphanChannel := model.Channel{
+		Name:      orphanName,
+		Type:      outbound.OutboundTypeOpenAIChat,
+		Enabled:   true,
+		BaseUrls:  []model.BaseUrl{{URL: "https://donehub.example.com/v1", Delay: 0}},
+		Model:     "stale-model",
+		AutoGroup: model.AutoGroupTypeNone,
+	}
+	if err := op.ChannelCreate(&orphanChannel, ctx); err != nil {
+		t.Fatalf("creating orphan channel failed: %v", err)
+	}
+
+	channelIDs, err := ProjectAccount(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("ProjectAccount returned error: %v", err)
+	}
+	if len(channelIDs) != 1 {
+		t.Fatalf("expected one projected channel, got %d", len(channelIDs))
+	}
+	if channelIDs[0] != orphanChannel.ID {
+		t.Fatalf("expected orphan channel %d to be reused, got %v", orphanChannel.ID, channelIDs)
+	}
+
+	var binding model.SiteChannelBinding
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ?", account.ID).First(&binding).Error; err != nil {
+		t.Fatalf("expected reused channel to gain binding: %v", err)
+	}
+	if binding.ChannelID != orphanChannel.ID {
+		t.Fatalf("expected binding to point to reused orphan channel %d, got %d", orphanChannel.ID, binding.ChannelID)
+	}
+
+	reloaded, err := op.ChannelGet(orphanChannel.ID, ctx)
+	if err != nil {
+		t.Fatalf("ChannelGet failed: %v", err)
+	}
+	if reloaded.Model != "gpt-4o-mini" {
+		t.Fatalf("expected reused orphan channel model to be refreshed, got %q", reloaded.Model)
+	}
+}
+
+func TestProjectAccountPreservesManagedKeyUsageForUnchangedTokens(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("initial ProjectAccount returned error: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	channel := channelsByGroup["default"]
+	if len(channel.Keys) == 0 {
+		t.Fatalf("expected projected channel keys to exist")
+	}
+
+	firstKey := channel.Keys[0]
+	firstKey.TotalCost = 12.34
+	firstKey.StatusCode = 200
+	if err := op.ChannelKeyUpdate(firstKey); err != nil {
+		t.Fatalf("ChannelKeyUpdate failed: %v", err)
+	}
+	if err := op.ChannelKeySaveDB(ctx); err != nil {
+		t.Fatalf("ChannelKeySaveDB failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("second ProjectAccount returned error: %v", err)
+	}
+
+	reloadedChannel, err := op.ChannelGet(channel.ID, ctx)
+	if err != nil {
+		t.Fatalf("ChannelGet failed: %v", err)
+	}
+	if len(reloadedChannel.Keys) != len(channel.Keys) {
+		t.Fatalf("expected %d keys after reprojection, got %d", len(channel.Keys), len(reloadedChannel.Keys))
+	}
+
+	var preserved *model.ChannelKey
+	for i := range reloadedChannel.Keys {
+		if reloadedChannel.Keys[i].ChannelKey == firstKey.ChannelKey {
+			preserved = &reloadedChannel.Keys[i]
+			break
+		}
+	}
+	if preserved == nil {
+		t.Fatalf("expected key %q to remain after reprojection", firstKey.ChannelKey)
+	}
+	if preserved.ID != firstKey.ID {
+		t.Fatalf("expected unchanged token to keep key id %d, got %d", firstKey.ID, preserved.ID)
+	}
+	if preserved.TotalCost != firstKey.TotalCost {
+		t.Fatalf("expected unchanged token to preserve total cost %.2f, got %.2f", firstKey.TotalCost, preserved.TotalCost)
+	}
+}
+
+func TestProjectAccountSyncsProjectedModelPrices(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount returned error: %v", err)
+	}
+
+	if got, err := op.LLMGet("gpt-4o-mini"); err != nil {
+		t.Fatalf("expected gpt-4o-mini price to be inserted: %v", err)
+	} else if got.Input <= 0 || got.Output <= 0 {
+		t.Fatalf("unexpected projected price for gpt-4o-mini: %+v", got)
+	}
+}
+
+func TestDeleteSiteAccountRemovesManagedChannelChain(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	site, account := createProjectionFixture(t, ctx)
+
+	channelIDs, err := ProjectAccount(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("ProjectAccount returned error: %v", err)
+	}
+	if len(channelIDs) == 0 {
+		t.Fatalf("expected managed channels to be created")
+	}
+
+	group := &model.Group{Name: "managed-delete-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{
+		GroupID:   group.ID,
+		ChannelID: channelIDs[0],
+		ModelName: "gpt-4o-mini",
+		Priority:  1,
+		Weight:    1,
+	}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+	if err := op.StatsChannelUpdate(channelIDs[0], model.StatsMetrics{InputCost: 1, OutputCost: 2, RequestSuccess: 1}); err != nil {
+		t.Fatalf("StatsChannelUpdate failed: %v", err)
+	}
+	if err := op.StatsSaveDB(ctx); err != nil {
+		t.Fatalf("StatsSaveDB failed: %v", err)
+	}
+
+	if err := DeleteSiteAccount(ctx, account.ID); err != nil {
+		t.Fatalf("DeleteSiteAccount returned error: %v", err)
+	}
+
+	if _, err := op.SiteGet(site.ID, ctx); err != nil {
+		t.Fatalf("site should remain after account deletion: %v", err)
+	}
+	if _, err := op.SiteAccountGet(account.ID, ctx); err == nil {
+		t.Fatalf("expected site account to be deleted")
+	}
+
+	var bindingCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{}).Where("site_account_id = ?", account.ID).Count(&bindingCount).Error; err != nil {
+		t.Fatalf("count bindings failed: %v", err)
+	}
+	if bindingCount != 0 {
+		t.Fatalf("expected bindings to be deleted, got %d", bindingCount)
+	}
+
+	var tokenCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteToken{}).Where("site_account_id = ?", account.ID).Count(&tokenCount).Error; err != nil {
+		t.Fatalf("count tokens failed: %v", err)
+	}
+	if tokenCount != 0 {
+		t.Fatalf("expected tokens to be deleted, got %d", tokenCount)
+	}
+
+	var modelCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteModel{}).Where("site_account_id = ?", account.ID).Count(&modelCount).Error; err != nil {
+		t.Fatalf("count models failed: %v", err)
+	}
+	if modelCount != 0 {
+		t.Fatalf("expected site models to be deleted, got %d", modelCount)
+	}
+
+	for _, channelID := range channelIDs {
+		if _, err := op.ChannelGet(channelID, ctx); err == nil {
+			t.Fatalf("expected managed channel %d to be deleted", channelID)
+		}
+		stats := op.StatsChannelGet(channelID)
+		if stats.ChannelID != channelID || stats.InputCost != 0 || stats.OutputCost != 0 || stats.RequestSuccess != 0 {
+			t.Fatalf("expected in-memory stats for channel %d to be cleared, got %+v", channelID, stats)
+		}
+		var statsCount int64
+		if err := dbpkg.GetDB().WithContext(ctx).Model(&model.StatsChannel{}).Where("channel_id = ?", channelID).Count(&statsCount).Error; err != nil {
+			t.Fatalf("count stats failed: %v", err)
+		}
+		if statsCount != 0 {
+			t.Fatalf("expected persisted stats for channel %d to be deleted, got %d", channelID, statsCount)
+		}
+	}
+
+	items, err := op.GroupItemList(group.ID, ctx)
+	if err != nil {
+		t.Fatalf("GroupItemList failed: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected group items referencing managed channels to be deleted, got %d", len(items))
+	}
+}
+
 func setupProjectTestDB(t *testing.T) context.Context {
 	t.Helper()
 

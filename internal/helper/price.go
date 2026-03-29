@@ -10,7 +10,6 @@ import (
 
 func LLMPriceAddToDB(modelNames []string, ctx context.Context) error {
 	newLLMInfos := make([]model.LLMInfo, 0, len(modelNames))
-	newLLMNames := make([]string, 0, len(modelNames))
 	for _, modelName := range modelNames {
 		if modelName == "" {
 			continue
@@ -24,7 +23,6 @@ func LLMPriceAddToDB(modelNames []string, ctx context.Context) error {
 		} else {
 			newLLMInfos = append(newLLMInfos, model.LLMInfo{Name: modelName})
 		}
-		newLLMNames = append(newLLMNames, modelName)
 	}
 	if len(newLLMInfos) > 0 {
 		return op.LLMBatchCreate(newLLMInfos, ctx)

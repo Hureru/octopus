@@ -92,6 +92,8 @@ type SiteAccount struct {
 	Password                   string               `json:"password"`
 	AccessToken                string               `json:"access_token"`
 	APIKey                     string               `json:"api_key"`
+	RefreshToken               string               `json:"refresh_token"`
+	TokenExpiresAt             int64                `json:"token_expires_at" gorm:"default:0"`
 	PlatformUserID             *int                 `json:"platform_user_id"`
 	AccountProxy               *string              `json:"account_proxy"`
 	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
@@ -183,6 +185,8 @@ type SiteAccountUpdateRequest struct {
 	Password                   *string             `json:"password,omitempty"`
 	AccessToken                *string             `json:"access_token,omitempty"`
 	APIKey                     *string             `json:"api_key,omitempty"`
+	RefreshToken               *string             `json:"refresh_token,omitempty"`
+	TokenExpiresAt             *int64              `json:"token_expires_at,omitempty"`
 	PlatformUserID             *int                `json:"platform_user_id,omitempty"`
 	AccountProxy               *string             `json:"account_proxy,omitempty"`
 	Enabled                    *bool               `json:"enabled,omitempty"`
@@ -503,6 +507,13 @@ func (a *SiteAccount) Normalize() {
 	a.Password = strings.TrimSpace(a.Password)
 	a.AccessToken = strings.TrimSpace(a.AccessToken)
 	a.APIKey = strings.TrimSpace(a.APIKey)
+	a.RefreshToken = strings.TrimSpace(a.RefreshToken)
+	if a.TokenExpiresAt < 0 {
+		a.TokenExpiresAt = 0
+	}
+	if a.TokenExpiresAt > 0 && a.TokenExpiresAt < 1_000_000_000_000 {
+		a.TokenExpiresAt *= 1000
+	}
 	if a.PlatformUserID != nil && *a.PlatformUserID <= 0 {
 		a.PlatformUserID = nil
 	}
@@ -550,6 +561,9 @@ func (a *SiteAccount) Validate() error {
 	}
 	if a.PlatformUserID != nil && *a.PlatformUserID <= 0 {
 		return fmt.Errorf("platform user id must be greater than 0")
+	}
+	if a.TokenExpiresAt < 0 {
+		return fmt.Errorf("token expires at must be greater than or equal to 0")
 	}
 	switch a.CredentialType {
 	case SiteCredentialTypeUsernamePassword:

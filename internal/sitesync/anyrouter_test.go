@@ -183,3 +183,45 @@ func TestAnyRouterCookieTokenCanProbeUserIDAndSyncTokens(t *testing.T) {
 		t.Fatalf("expected New-API-User probing to include 131936, observed=%v", observedUserIDs)
 	}
 }
+
+func TestSyncAnyRouterFallsBackToAccessTokenWhenTokenListIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/self":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":11494,"username":"fallback-user"}}`))
+		case "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[]}}`))
+		case "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":["default"]}`))
+		case "/api/user/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":["gpt-4o-mini","claude-3-5-sonnet"]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncAnyRouter(context.Background(), &model.Site{
+		BaseURL:  server.URL,
+		Platform: model.SitePlatformAnyRouter,
+	}, &model.SiteAccount{
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "session-access-token",
+	})
+	if err != nil {
+		t.Fatalf("syncAnyRouter returned error: %v", err)
+	}
+	if len(snapshot.tokens) != 1 {
+		t.Fatalf("expected one fallback token, got %+v", snapshot.tokens)
+	}
+	if snapshot.tokens[0].Token != "session-access-token" {
+		t.Fatalf("expected fallback token to reuse account access token, got %+v", snapshot.tokens[0])
+	}
+	if len(snapshot.models) != 2 {
+		t.Fatalf("expected session model fallback to populate models, got %+v", snapshot.models)
+	}
+}

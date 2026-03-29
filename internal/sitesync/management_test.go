@@ -271,3 +271,207 @@ func TestSyncManagementPlatformFallsBackToUserModelsWhenTokenModelsUnavailable(t
 		t.Fatalf("unexpected synced models: %+v", snapshot.models)
 	}
 }
+
+func TestSyncManagementPlatformAssignsModelsPerTokenGroup(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"data":{"items":[
+				{"name":"vip-key","key":"managed-key-vip","group":"vip","status":1},
+				{"name":"default-key","key":"managed-key-default","group":"default","status":1}
+			]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
+		case r.URL.Path == "/v1/models":
+			switch r.Header.Get("Authorization") {
+			case "Bearer managed-key-vip":
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
+			case "Bearer managed-key-default":
+				_, _ = w.Write([]byte(`{"data":[{"id":"claude-3-5-sonnet"}]}`))
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			}
+		case r.URL.Path == "/api/pricing":
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","supported_endpoint_types":["/v1/chat/completions"]},
+				{"model_name":"claude-3-5-sonnet","supported_endpoint_types":["/v1/messages"]}
+			]}`))
+		case r.URL.Path == "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+
+	if len(snapshot.models) != 2 {
+		t.Fatalf("expected exactly 2 grouped models, got %+v", snapshot.models)
+	}
+
+	modelsByGroup := make(map[string][]string)
+	for _, item := range snapshot.models {
+		modelsByGroup[item.GroupKey] = append(modelsByGroup[item.GroupKey], item.ModelName)
+	}
+
+	if len(modelsByGroup["vip"]) != 1 || modelsByGroup["vip"][0] != "gpt-4o-mini" {
+		t.Fatalf("expected vip group to contain only gpt-4o-mini, got %+v", modelsByGroup["vip"])
+	}
+	if len(modelsByGroup["default"]) != 1 || modelsByGroup["default"][0] != "claude-3-5-sonnet" {
+		t.Fatalf("expected default group to contain only claude-3-5-sonnet, got %+v", modelsByGroup["default"])
+	}
+}
+
+func TestSyncManagementPlatformAppliesPricingRouteMetadata(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
+		case r.URL.Path == "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"},{"id":"text-embedding-3-large"},{"id":"vendor-embedding-x"}]}`))
+		case r.URL.Path == "/api/pricing":
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "7788" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","supported_endpoint_types":["/v1/responses","/v1/chat/completions"]},
+				{"model_name":"text-embedding-3-large","supported_endpoint_types":["/v1/embeddings"]},
+				{"model_name":"vendor-embedding-x","supported_endpoint_types":["/vendor/embeddings"]}
+			]}`))
+		case r.URL.Path == "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+
+	routeByModel := make(map[string]model.SiteModel)
+	for _, item := range snapshot.models {
+		routeByModel[item.ModelName] = item
+	}
+
+	if routeByModel["gpt-4o-mini"].RouteType != model.SiteModelRouteTypeOpenAIResponse {
+		t.Fatalf("expected gpt-4o-mini route type %q, got %q", model.SiteModelRouteTypeOpenAIResponse, routeByModel["gpt-4o-mini"].RouteType)
+	}
+	if routeByModel["text-embedding-3-large"].RouteType != model.SiteModelRouteTypeOpenAIEmbedding {
+		t.Fatalf("expected text-embedding-3-large route type %q, got %q", model.SiteModelRouteTypeOpenAIEmbedding, routeByModel["text-embedding-3-large"].RouteType)
+	}
+	if routeByModel["vendor-embedding-x"].RouteType != model.SiteModelRouteTypeUnknown {
+		t.Fatalf("expected vendor-embedding-x route type %q, got %q", model.SiteModelRouteTypeUnknown, routeByModel["vendor-embedding-x"].RouteType)
+	}
+
+	metadata, ok := model.ParseSiteModelRouteMetadata(routeByModel["vendor-embedding-x"].RouteRawPayload)
+	if !ok {
+		t.Fatalf("expected unsupported model route metadata to be recorded")
+	}
+	if metadata.RouteSupported {
+		t.Fatalf("expected unsupported vendor embedding metadata to remain unsupported")
+	}
+}
+
+func TestSyncManagementPlatformExpandsModelsToExplicitGroupsWithoutKey(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
+		case r.URL.Path == "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
+		case r.URL.Path == "/api/pricing":
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","enable_groups":["default","vip"],"supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/user/self":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+
+	if len(snapshot.models) != 2 {
+		t.Fatalf("expected model to be expanded into explicit no-key groups, got %+v", snapshot.models)
+	}
+
+	modelsByGroup := make(map[string]model.SiteModel)
+	for _, item := range snapshot.models {
+		modelsByGroup[item.GroupKey] = item
+	}
+	if _, ok := modelsByGroup["default"]; !ok {
+		t.Fatalf("expected default group model to exist, got %+v", snapshot.models)
+	}
+	vipModel, ok := modelsByGroup["vip"]
+	if !ok {
+		t.Fatalf("expected vip group model to be synthesized from explicit groups, got %+v", snapshot.models)
+	}
+	metadata, ok := model.ParseSiteModelRouteMetadata(vipModel.RouteRawPayload)
+	if !ok {
+		t.Fatalf("expected synthesized vip model to retain route metadata")
+	}
+	if len(metadata.EnableGroups) != 2 || metadata.EnableGroups[0] != "default" || metadata.EnableGroups[1] != "vip" {
+		t.Fatalf("expected synthesized vip model to keep explicit groups, got %#v", metadata.EnableGroups)
+	}
+}

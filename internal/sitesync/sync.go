@@ -9,6 +9,21 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 )
 
+func isAlreadyCheckedInMessage(message string) bool {
+	lowered := strings.ToLower(strings.TrimSpace(message))
+	if lowered == "" {
+		return false
+	}
+	return strings.Contains(lowered, "already") ||
+		strings.Contains(lowered, "already checked") ||
+		strings.Contains(lowered, "already check") ||
+		strings.Contains(lowered, "checked in today") ||
+		strings.Contains(lowered, "already signed") ||
+		strings.Contains(message, "已签到") ||
+		strings.Contains(message, "已经签到") ||
+		strings.Contains(message, "签到过")
+}
+
 func syncAccountState(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
 	if siteRecord == nil || account == nil {
 		return nil, fmt.Errorf("site or account is nil")
@@ -57,8 +72,7 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 		}
 		success := jsonBool(payload["success"])
 		message := firstNonEmptyString(jsonString(payload["message"]), "checkin success")
-		lowered := strings.ToLower(message)
-		if success || strings.Contains(lowered, "already") || strings.Contains(message, "已签到") {
+		if success || isAlreadyCheckedInMessage(message) {
 			return &model.SiteCheckinResult{Status: model.SiteExecutionStatusSuccess, Message: message, Reward: jsonString(nestedValue(payload, "data", "reward"))}, accessToken, nil
 		}
 		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusFailed, Message: message}, accessToken, nil
@@ -93,12 +107,28 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	}
 
 	groups = mergeSiteGroups(groups, tokens)
-	models, err := fetchManagementModels(ctx, siteRecord, account, accessToken, pickModelToken(tokens))
+	groupTokens := pickModelTokensByGroup(tokens)
+	siteModels, err := syncSiteModelsByGroup(
+		ctx,
+		siteRecord,
+		account,
+		accessToken,
+		groupTokens,
+		firstManagedPlatformUserID(account),
+		"sync",
+		func(token model.SiteToken, allowGlobalFallback bool) ([]string, error) {
+			if allowGlobalFallback {
+				return fetchManagementModels(ctx, siteRecord, account, accessToken, token)
+			}
+			return fetchModelsForSiteToken(ctx, siteRecord, account, token)
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
+	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
 	balance, balanceUsed := fetchAccountBalance(ctx, siteRecord, account, accessToken)
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildGlobalSiteModels(models, groups, "sync"), balance: balance, balanceUsed: balanceUsed, message: "site account synced"}, nil
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, balance: balance, balanceUsed: balanceUsed, message: "site account synced"}, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -109,7 +139,22 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 		return syncWithDirectToken(ctx, siteRecord, account, resolveDirectToken(account), "manual")
 	}
 
-	accessToken := strings.TrimSpace(account.AccessToken)
+	accessToken, err := ensureFreshSub2APIAccessToken(ctx, siteRecord, account, false)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := syncSub2APIWithAccessToken(ctx, siteRecord, account, accessToken)
+	if err != nil && shouldRetrySub2APIAfterRefresh(err, account) {
+		refreshedToken, refreshErr := ensureFreshSub2APIAccessToken(ctx, siteRecord, account, true)
+		if refreshErr == nil && stripBearerPrefix(refreshedToken) != stripBearerPrefix(accessToken) {
+			return syncSub2APIWithAccessToken(ctx, siteRecord, account, refreshedToken)
+		}
+	}
+	return snapshot, err
+}
+
+func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) (*syncSnapshot, error) {
+	accessToken = stripBearerPrefix(accessToken)
 	if accessToken == "" {
 		return nil, fmt.Errorf("access token is required")
 	}
@@ -121,6 +166,12 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 		tokens = append(tokens, model.SiteToken{Name: "default", Token: strings.TrimSpace(account.APIKey), GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "fallback", IsDefault: true})
 	}
 	if len(tokens) == 0 {
+		sessionToken := stripBearerPrefix(accessToken)
+		if sessionToken != "" {
+			tokens = append(tokens, model.SiteToken{Name: "default", Token: sessionToken, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "access_token_fallback", IsDefault: true})
+		}
+	}
+	if len(tokens) == 0 {
 		return nil, fmt.Errorf("no usable site token found")
 	}
 
@@ -129,11 +180,23 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 		groups = nil
 	}
 	groups = mergeSiteGroups(groups, tokens)
-	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, pickModelToken(tokens))
+	siteModels, err := syncSiteModelsByGroup(
+		ctx,
+		siteRecord,
+		account,
+		accessToken,
+		pickModelTokensByGroup(tokens),
+		0,
+		"sync",
+		func(token model.SiteToken, allowGlobalFallback bool) ([]string, error) {
+			return fetchModelsForSiteToken(ctx, siteRecord, account, token)
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: buildGlobalSiteModels(models, groups, "sync"), message: "site account synced"}, nil
+	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, message: "site account synced"}, nil
 }
 
 func syncOfficialPlatform(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -149,11 +212,21 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 	if err != nil {
 		return nil, err
 	}
+	siteModels := buildSiteModels(models, model.SiteDefaultGroupKey, source)
+	siteModels = applyDetectedRoutesToSiteModels(
+		ctx,
+		siteRecord,
+		account,
+		strings.TrimSpace(account.AccessToken),
+		model.SiteToken{Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true},
+		firstManagedPlatformUserID(account),
+		siteModels,
+	)
 	return &syncSnapshot{
 		accessToken: strings.TrimSpace(account.AccessToken),
 		groups:      []model.SiteUserGroup{{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}},
 		tokens:      []model.SiteToken{{Name: "default", Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: source, IsDefault: true}},
-		models:      buildSiteModels(models, model.SiteDefaultGroupKey, source),
+		models:      siteModels,
 		message:     "site account synced",
 	}, nil
 }
@@ -228,7 +301,7 @@ func checkinExternal(ctx context.Context, siteRecord *model.Site, account *model
 	success := jsonBool(payload["success"])
 	message := firstNonEmptyString(jsonString(payload["message"]), jsonString(payload["msg"]), "external checkin completed")
 	lowered := strings.ToLower(message)
-	if success || strings.Contains(lowered, "already") || strings.Contains(message, "已签到") || strings.Contains(lowered, "success") {
+	if success || isAlreadyCheckedInMessage(message) || strings.Contains(lowered, "success") {
 		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusSuccess, Message: message, Reward: jsonString(nestedValue(payload, "data", "reward"))}, accessToken, nil
 	}
 	return &model.SiteCheckinResult{Status: model.SiteExecutionStatusFailed, Message: message}, accessToken, nil

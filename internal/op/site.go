@@ -175,7 +175,30 @@ func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 }
 
 func SiteDel(id int, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Delete(&model.Site{}, id).Error
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var accountIDs []int
+		if err := tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Pluck("id", &accountIDs).Error; err != nil {
+			return err
+		}
+		if len(accountIDs) > 0 {
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteToken{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteUserGroup{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteModel{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&model.Site{}, id).Error
+	})
 }
 
 func SiteAccountGet(id int, ctx context.Context) (*model.SiteAccount, error) {
@@ -239,6 +262,14 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		merged.APIKey = *req.APIKey
 		selectFields = append(selectFields, "api_key")
 	}
+	if req.RefreshToken != nil {
+		merged.RefreshToken = *req.RefreshToken
+		selectFields = append(selectFields, "refresh_token")
+	}
+	if req.TokenExpiresAt != nil {
+		merged.TokenExpiresAt = *req.TokenExpiresAt
+		selectFields = append(selectFields, "token_expires_at")
+	}
 	if req.PlatformUserID != nil {
 		merged.PlatformUserID = req.PlatformUserID
 		selectFields = append(selectFields, "platform_user_id")
@@ -295,6 +326,12 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 	if req.APIKey != nil {
 		updates.APIKey = merged.APIKey
 	}
+	if req.RefreshToken != nil {
+		updates.RefreshToken = merged.RefreshToken
+	}
+	if req.TokenExpiresAt != nil {
+		updates.TokenExpiresAt = merged.TokenExpiresAt
+	}
 	if req.PlatformUserID != nil {
 		updates.PlatformUserID = merged.PlatformUserID
 	}
@@ -337,7 +374,21 @@ func SiteAccountEnabled(id int, enabled bool, ctx context.Context) error {
 }
 
 func SiteAccountDel(id int, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Delete(&model.SiteAccount{}, id).Error
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteToken{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteUserGroup{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.SiteAccount{}, id).Error
+	})
 }
 
 func SiteAvailableModels(siteID int, ctx context.Context) ([]string, error) {

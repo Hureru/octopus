@@ -3,6 +3,7 @@ package sitesync
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/helper"
@@ -80,7 +81,7 @@ func fetchSub2APITokens(ctx context.Context, siteRecord *model.Site, account *mo
 }
 
 func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, tokens []model.SiteToken) ([]model.SiteUserGroup, error) {
-	groups := make([]model.SiteUserGroup, 0)
+	inferredGroups := make([]model.SiteUserGroup, 0)
 	seen := make(map[string]struct{})
 	for _, token := range tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
@@ -88,13 +89,16 @@ func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, account *mo
 			continue
 		}
 		seen[key] = struct{}{}
-		groups = append(groups, model.SiteUserGroup{GroupKey: key, Name: model.NormalizeSiteGroupName(key, token.GroupName)})
-	}
-	if len(groups) > 0 {
-		return groups, nil
+		inferredGroups = append(inferredGroups, model.SiteUserGroup{GroupKey: key, Name: model.NormalizeSiteGroupName(key, token.GroupName)})
 	}
 
-	endpoints := []string{"/api/v1/groups/available", "/api/v1/groups?page=1&page_size=100", "/api/v1/groups"}
+	endpoints := []string{
+		"/api/v1/groups/available",
+		"/api/v1/groups?page=1&page_size=100",
+		"/api/v1/groups",
+		"/api/v1/group?page=1&page_size=100",
+		"/api/v1/group",
+	}
 	for _, endpoint := range endpoints {
 		payload, err := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, endpoint), nil, map[string]string{"Authorization": ensureBearer(accessToken)}, account)
 		if err != nil {
@@ -105,7 +109,18 @@ func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, account *mo
 			return items, nil
 		}
 	}
+	if len(inferredGroups) > 0 {
+		return inferredGroups, nil
+	}
 	return []model.SiteUserGroup{{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}}, nil
+}
+
+func stripBearerPrefix(token string) string {
+	trimmed := strings.TrimSpace(token)
+	if strings.HasPrefix(strings.ToLower(trimmed), "bearer ") {
+		return strings.TrimSpace(trimmed[7:])
+	}
+	return trimmed
 }
 
 func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, token model.SiteToken) ([]string, error) {
@@ -246,6 +261,175 @@ func buildGlobalSiteModels(names []string, groups []model.SiteUserGroup, source 
 		}
 	}
 	return models
+}
+
+func pickModelTokensByGroup(tokens []model.SiteToken) []model.SiteToken {
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	order := make([]string, 0, len(tokens))
+	selected := make(map[string]model.SiteToken, len(tokens))
+	for _, token := range tokens {
+		groupKey := model.NormalizeSiteGroupKey(token.GroupKey)
+		token.GroupKey = groupKey
+		token.GroupName = model.NormalizeSiteGroupName(groupKey, token.GroupName)
+		if _, ok := selected[groupKey]; !ok {
+			order = append(order, groupKey)
+			selected[groupKey] = token
+			continue
+		}
+		if shouldPreferGroupModelToken(token, selected[groupKey]) {
+			selected[groupKey] = token
+		}
+	}
+
+	result := make([]model.SiteToken, 0, len(order))
+	for _, groupKey := range order {
+		token := selected[groupKey]
+		if strings.TrimSpace(token.Token) == "" {
+			continue
+		}
+		result = append(result, token)
+	}
+	return result
+}
+
+func shouldPreferGroupModelToken(candidate model.SiteToken, current model.SiteToken) bool {
+	candidateToken := strings.TrimSpace(candidate.Token)
+	currentToken := strings.TrimSpace(current.Token)
+	if candidateToken == "" {
+		return false
+	}
+	if currentToken == "" {
+		return true
+	}
+	if candidate.Enabled != current.Enabled {
+		return candidate.Enabled
+	}
+	return candidate.IsDefault && !current.IsDefault
+}
+
+func syncSiteModelsByGroup(
+	ctx context.Context,
+	siteRecord *model.Site,
+	account *model.SiteAccount,
+	accessToken string,
+	groupTokens []model.SiteToken,
+	platformUserID int,
+	source string,
+	fetcher func(token model.SiteToken, allowGlobalFallback bool) ([]string, error),
+) ([]model.SiteModel, error) {
+	if len(groupTokens) == 0 {
+		return nil, nil
+	}
+
+	allowGlobalFallback := len(groupTokens) == 1
+	models := make([]model.SiteModel, 0)
+	seen := make(map[string]struct{})
+	var firstErr error
+
+	for _, token := range groupTokens {
+		names, err := fetcher(token, allowGlobalFallback)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if len(names) == 0 {
+			continue
+		}
+
+		groupModels := buildSiteModels(names, token.GroupKey, source)
+		groupModels = applyDetectedRoutesToSiteModels(ctx, siteRecord, account, accessToken, token, platformUserID, groupModels)
+		for _, item := range groupModels {
+			key := model.NormalizeSiteGroupKey(item.GroupKey) + "\x00" + strings.TrimSpace(item.ModelName)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			models = append(models, item)
+		}
+	}
+
+	if len(models) == 0 {
+		return nil, firstErr
+	}
+
+	sort.Slice(models, func(i, j int) bool {
+		leftGroup := model.NormalizeSiteGroupKey(models[i].GroupKey)
+		rightGroup := model.NormalizeSiteGroupKey(models[j].GroupKey)
+		if leftGroup == rightGroup {
+			return models[i].ModelName < models[j].ModelName
+		}
+		return leftGroup < rightGroup
+	})
+	return models, nil
+}
+
+func expandExplicitGroupModelsToGroups(
+	items []model.SiteModel,
+	groups []model.SiteUserGroup,
+	tokens []model.SiteToken,
+) []model.SiteModel {
+	if len(items) == 0 || len(groups) == 0 {
+		return items
+	}
+
+	groupKeys := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		groupKey := model.NormalizeSiteGroupKey(group.GroupKey)
+		groupKeys[groupKey] = struct{}{}
+	}
+
+	groupKeysWithTokens := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		groupKey := model.NormalizeSiteGroupKey(token.GroupKey)
+		groupKeysWithTokens[groupKey] = struct{}{}
+	}
+
+	groupsWithoutTokens := make(map[string]struct{})
+	for groupKey := range groupKeys {
+		if _, ok := groupKeysWithTokens[groupKey]; ok {
+			continue
+		}
+		groupsWithoutTokens[groupKey] = struct{}{}
+	}
+	if len(groupsWithoutTokens) == 0 {
+		return items
+	}
+
+	expanded := make([]model.SiteModel, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		groupKey := model.NormalizeSiteGroupKey(item.GroupKey)
+		modelName := strings.TrimSpace(item.ModelName)
+		key := groupKey + "\x00" + modelName
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			expanded = append(expanded, item)
+		}
+
+		metadata, ok := model.ParseSiteModelRouteMetadata(item.RouteRawPayload)
+		if !ok || len(metadata.EnableGroups) == 0 {
+			continue
+		}
+		for _, explicitGroupKey := range metadata.EnableGroups {
+			targetGroupKey := model.NormalizeSiteGroupKey(explicitGroupKey)
+			if _, ok := groupsWithoutTokens[targetGroupKey]; !ok {
+				continue
+			}
+			targetKey := targetGroupKey + "\x00" + modelName
+			if _, ok := seen[targetKey]; ok {
+				continue
+			}
+			copy := item
+			copy.ID = 0
+			copy.SiteAccountID = 0
+			copy.GroupKey = targetGroupKey
+			expanded = append(expanded, copy)
+			seen[targetKey] = struct{}{}
+		}
+	}
+	return expanded
 }
 
 func mergeSiteGroups(groups []model.SiteUserGroup, tokens []model.SiteToken) []model.SiteUserGroup {

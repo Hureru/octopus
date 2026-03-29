@@ -526,5 +526,9 @@ func (ra *relayAttempt) collectResponse() {
 		return
 	}
 
-	ra.metrics.SetInternalResponse(internalResponse, ra.internalRequest.Model)
+	actualModel := strings.TrimSpace(internalResponse.Model)
+	if actualModel == "" {
+		actualModel = strings.TrimSpace(ra.internalRequest.Model)
+	}
+	ra.metrics.SetInternalResponse(internalResponse, actualModel)
 }

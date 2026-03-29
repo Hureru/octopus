@@ -39,7 +39,7 @@ func deleteManagedChannelsByAccount(ctx context.Context, accountID int) error {
 		return err
 	}
 	for _, binding := range bindings {
-		if err := op.ChannelDel(binding.ChannelID, ctx); err != nil {
+		if err := op.ChannelDelManaged(binding.ChannelID, ctx); err != nil {
 			log.Warnf("failed to delete managed channel %d: %v", binding.ChannelID, err)
 		}
 	}
@@ -96,18 +96,13 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 			key := snapshot.models[i].GroupKey + "\x00" + strings.TrimSpace(snapshot.models[i].ModelName)
 			if existing, ok := existingModelMap[key]; ok {
 				snapshot.models[i].ID = existing.ID
-				snapshot.models[i].RouteType = model.NormalizeSiteModelRouteType(existing.RouteType)
-				snapshot.models[i].RouteSource = model.NormalizeSiteModelRouteSource(existing.RouteSource, existing.ManualOverride)
-				snapshot.models[i].ManualOverride = existing.ManualOverride
-				snapshot.models[i].RouteRawPayload = existing.RouteRawPayload
-				snapshot.models[i].RouteUpdatedAt = existing.RouteUpdatedAt
 				snapshot.models[i].Disabled = existing.Disabled
+				applyPersistedRouteState(&snapshot.models[i], &existing, now)
 				continue
 			}
-			snapshot.models[i].RouteType = inferSiteModelRouteType(snapshot.models[i])
-			snapshot.models[i].RouteSource = model.SiteModelRouteSourceSyncInferred
-			snapshot.models[i].RouteUpdatedAt = &now
+			applyPersistedRouteState(&snapshot.models[i], nil, now)
 		}
+		snapshot.models = compactPersistedSiteModels(snapshot.models)
 
 		if len(snapshot.groups) > 0 {
 			if err := tx.Create(&snapshot.groups).Error; err != nil {
@@ -135,8 +130,103 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 	})
 }
 
+func compactPersistedSiteModels(items []model.SiteModel) []model.SiteModel {
+	if len(items) <= 1 {
+		return items
+	}
+	seen := make(map[string]int, len(items))
+	result := make([]model.SiteModel, 0, len(items))
+	for _, item := range items {
+		groupKey := model.NormalizeSiteGroupKey(item.GroupKey)
+		modelName := strings.TrimSpace(item.ModelName)
+		if modelName == "" {
+			continue
+		}
+		item.GroupKey = groupKey
+		item.ModelName = modelName
+		key := groupKey + "\x00" + modelName
+		if index, ok := seen[key]; ok {
+			// Keep the row with stronger persisted state if duplicates slip through.
+			if result[index].ManualOverride || result[index].RouteSource == model.SiteModelRouteSourceRuntimeLearned {
+				continue
+			}
+			if item.ManualOverride || item.RouteSource == model.SiteModelRouteSourceRuntimeLearned {
+				result[index] = item
+			}
+			continue
+		}
+		seen[key] = len(result)
+		result = append(result, item)
+	}
+	return result
+}
+
 func inferSiteModelRouteType(item model.SiteModel) model.SiteModelRouteType {
 	return model.InferSiteModelRouteType(item.ModelName)
+}
+
+func applyPersistedRouteState(item *model.SiteModel, existing *model.SiteModel, now time.Time) {
+	if item == nil {
+		return
+	}
+
+	if existing != nil && (existing.ManualOverride || existing.RouteSource == model.SiteModelRouteSourceRuntimeLearned) {
+		item.RouteType = model.NormalizeSiteModelRouteType(existing.RouteType)
+		item.RouteSource = model.NormalizeSiteModelRouteSource(existing.RouteSource, existing.ManualOverride)
+		item.ManualOverride = existing.ManualOverride
+		item.RouteRawPayload = existing.RouteRawPayload
+		item.RouteUpdatedAt = existing.RouteUpdatedAt
+		return
+	}
+
+	if routeType, routeRawPayload, explicit := resolveExplicitSyncRoute(item, existing); explicit {
+		item.RouteType = routeType
+		item.RouteSource = model.SiteModelRouteSourceSyncInferred
+		item.ManualOverride = false
+		item.RouteRawPayload = routeRawPayload
+		if existing != nil &&
+			model.NormalizeSiteModelRouteType(existing.RouteType) == routeType &&
+			strings.TrimSpace(existing.RouteRawPayload) == strings.TrimSpace(routeRawPayload) &&
+			!existing.ManualOverride &&
+			existing.RouteSource == model.SiteModelRouteSourceSyncInferred {
+			item.RouteUpdatedAt = existing.RouteUpdatedAt
+			return
+		}
+		item.RouteUpdatedAt = &now
+		return
+	}
+
+	item.RouteType = inferSiteModelRouteType(*item)
+	item.RouteSource = model.SiteModelRouteSourceSyncInferred
+	item.ManualOverride = false
+	item.RouteRawPayload = ""
+	if existing != nil &&
+		model.NormalizeSiteModelRouteType(existing.RouteType) == item.RouteType &&
+		strings.TrimSpace(existing.RouteRawPayload) == "" &&
+		!existing.ManualOverride &&
+		existing.RouteSource == model.SiteModelRouteSourceSyncInferred {
+		item.RouteUpdatedAt = existing.RouteUpdatedAt
+		return
+	}
+	item.RouteUpdatedAt = &now
+}
+
+func resolveExplicitSyncRoute(item *model.SiteModel, existing *model.SiteModel) (model.SiteModelRouteType, string, bool) {
+	if item != nil {
+		if metadata, ok := model.ParseSiteModelRouteMetadata(item.RouteRawPayload); ok {
+			return metadata.RouteType, item.RouteRawPayload, true
+		}
+		if strings.TrimSpace(string(item.RouteType)) != "" {
+			routeType := model.NormalizeSiteModelRouteType(item.RouteType)
+			return routeType, strings.TrimSpace(item.RouteRawPayload), true
+		}
+	}
+	if existing != nil {
+		if metadata, ok := model.ParseSiteModelRouteMetadata(existing.RouteRawPayload); ok {
+			return metadata.RouteType, existing.RouteRawPayload, true
+		}
+	}
+	return "", "", false
 }
 
 func updateAccountSyncState(ctx context.Context, accountID int, status model.SiteExecutionStatus, message string, accessToken string) error {
@@ -158,16 +248,12 @@ func updateAccountCheckinState(ctx context.Context, account *model.SiteAccount, 
 	}
 	now := time.Now()
 	updatePayload := map[string]any{
+		"last_checkin_at":      &now,
 		"last_checkin_status":  status,
 		"last_checkin_message": message,
 	}
-	if success {
-		updatePayload["last_checkin_at"] = &now
-	}
-	if success {
-		account.LastCheckinAt = &now
-		account.LastCheckinStatus = status
-	}
+	account.LastCheckinAt = &now
+	account.LastCheckinStatus = status
 	if success {
 		nextAt := buildNextRandomCheckinAt(account, now)
 		account.NextAutoCheckinAt = nextAt

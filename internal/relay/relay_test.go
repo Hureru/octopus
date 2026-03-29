@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
+	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/gin-gonic/gin"
 )
@@ -105,6 +107,29 @@ func TestHandlerFallsBackToNextChannelAfterFirstFailure(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"content":"ok"`) {
 		t.Fatalf("expected fallback response body to be returned, got %s", recorder.Body.String())
+	}
+}
+
+func TestRelayMetricsUsesResponseModelForCostLookup(t *testing.T) {
+	metrics := NewRelayMetrics(0, "alias-model", &transformerModel.InternalLLMRequest{Model: "alias-model"})
+	metrics.StartTime = time.Now()
+
+	metrics.SetInternalResponse(&transformerModel.InternalLLMResponse{
+		Model: "gpt-4o-mini",
+		Usage: &transformerModel.Usage{
+			PromptTokens:     1000,
+			CompletionTokens: 2000,
+		},
+	}, "gpt-4o-mini")
+
+	if metrics.ActualModel != "gpt-4o-mini" {
+		t.Fatalf("expected actual model to use response model, got %q", metrics.ActualModel)
+	}
+	if metrics.Stats.InputCost <= 0 {
+		t.Fatalf("expected input cost to be computed from response model price, got %f", metrics.Stats.InputCost)
+	}
+	if metrics.Stats.OutputCost <= 0 {
+		t.Fatalf("expected output cost to be computed from response model price, got %f", metrics.Stats.OutputCost)
 	}
 }
 

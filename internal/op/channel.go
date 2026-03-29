@@ -2,7 +2,9 @@ package op
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -11,6 +13,7 @@ import (
 	"github.com/bestruirui/octopus/internal/utils/cache"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xstrings"
+	"gorm.io/gorm"
 )
 
 var channelCache = cache.New[int, model.Channel](16)
@@ -276,14 +279,29 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 }
 
 func ChannelDel(id int, ctx context.Context) error {
+	return channelDel(id, ctx, false)
+}
+
+func ChannelDelManaged(id int, ctx context.Context) error {
+	if _, managed, err := ChannelManagedBinding(id, ctx); err != nil {
+		return err
+	} else if !managed {
+		return fmt.Errorf("channel is not a managed site channel")
+	}
+	return channelDel(id, ctx, true)
+}
+
+func channelDel(id int, ctx context.Context, bypassManagedCheck bool) error {
 	ch, ok := channelCache.Get(id)
 	if !ok {
 		return fmt.Errorf("channel not found")
 	}
-	if _, managed, err := ChannelManagedBinding(id, ctx); err != nil {
-		return err
-	} else if managed {
-		return fmt.Errorf("managed site channel cannot be deleted directly; delete the site account or site binding instead")
+	if !bypassManagedCheck {
+		if _, managed, err := ChannelManagedBinding(id, ctx); err != nil {
+			return err
+		} else if managed {
+			return fmt.Errorf("managed site channel cannot be deleted directly; delete the site account or site binding instead")
+		}
 	}
 
 	// 开启事务
@@ -448,6 +466,44 @@ func ChannelGet(id int, ctx context.Context) (*model.Channel, error) {
 	return &channel, nil
 }
 
+func ChannelGetByName(name string, ctx context.Context) (*model.Channel, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil, fmt.Errorf("channel name is empty")
+	}
+
+	var channel model.Channel
+	if err := db.GetDB().WithContext(ctx).
+		Preload("Keys").
+		Preload("Stats").
+		Where("name = ?", trimmed).
+		First(&channel).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			for id, cached := range channelCache.GetAll() {
+				if cached.Name != trimmed {
+					continue
+				}
+				channelCache.Del(id)
+				for _, key := range cached.Keys {
+					if key.ID != 0 {
+						channelKeyCache.Del(key.ID)
+					}
+				}
+			}
+		}
+		return nil, err
+	}
+
+	channelCache.Set(channel.ID, channel)
+	for _, k := range channel.Keys {
+		if k.ID != 0 {
+			channelKeyCache.Set(k.ID, k)
+		}
+	}
+
+	return &channel, nil
+}
+
 func channelRefreshCache(ctx context.Context) error {
 	channels := []model.Channel{}
 	if err := db.GetDB().WithContext(ctx).
@@ -495,4 +551,3 @@ func channelRefreshCacheByID(id int, ctx context.Context) error {
 	}
 	return nil
 }
-

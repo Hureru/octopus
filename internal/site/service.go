@@ -46,3 +46,7 @@ func DeleteSiteAccount(ctx context.Context, accountID int) error {
 func DetectPlatform(ctx context.Context, rawURL string) (model.SitePlatform, error) {
 	return sitesync.DetectPlatform(ctx, rawURL)
 }
+
+func CreateAccountToken(ctx context.Context, accountID int, req model.SiteChannelKeyCreateRequest) (*model.SiteSyncResult, error) {
+	return sitesync.CreateAccountToken(ctx, accountID, req)
+}

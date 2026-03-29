@@ -48,6 +48,17 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	if err != nil {
 		return nil, err
 	}
+	if len(tokens) == 0 && account.CredentialType == model.SiteCredentialTypeAccessToken && strings.TrimSpace(account.AccessToken) != "" {
+		tokens = append(tokens, model.SiteToken{
+			Name:      "default",
+			Token:     strings.TrimSpace(account.AccessToken),
+			GroupKey:  model.SiteDefaultGroupKey,
+			GroupName: model.SiteDefaultGroupName,
+			Enabled:   true,
+			Source:    "access_token_fallback",
+			IsDefault: true,
+		})
+	}
 	if len(tokens) == 0 && strings.TrimSpace(account.APIKey) != "" {
 		tokens = append(tokens, model.SiteToken{
 			Name:      "default",
@@ -69,21 +80,35 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	}
 	groups = mergeSiteGroups(groups, tokens)
 
-	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, pickModelToken(tokens))
-	if err != nil || len(models) == 0 {
-		fallbackModels, fallbackErr := fetchAnyRouterSessionModels(ctx, siteRecord, account, accessToken, userID)
-		if fallbackErr == nil && len(fallbackModels) > 0 {
-			models = fallbackModels
-		} else if err != nil {
-			return nil, err
-		}
+	siteModels, err := syncSiteModelsByGroup(
+		ctx,
+		siteRecord,
+		account,
+		accessToken,
+		pickModelTokensByGroup(tokens),
+		userID,
+		"sync",
+		func(token model.SiteToken, allowGlobalFallback bool) ([]string, error) {
+			models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
+			if (err != nil || len(models) == 0) && allowGlobalFallback {
+				fallbackModels, fallbackErr := fetchAnyRouterSessionModels(ctx, siteRecord, account, accessToken, userID)
+				if fallbackErr == nil && len(fallbackModels) > 0 {
+					return fallbackModels, nil
+				}
+			}
+			return models, err
+		},
+	)
+	if err != nil {
+		return nil, err
 	}
+	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
 
 	return &syncSnapshot{
 		accessToken: accessToken,
 		groups:      groups,
 		tokens:      tokens,
-		models:      buildGlobalSiteModels(models, groups, "sync"),
+		models:      siteModels,
 		message:     "site account synced",
 	}, nil
 }
@@ -336,8 +361,7 @@ func anyRouterBuildCheckinResult(payload map[string]any) (*model.SiteCheckinResu
 		return nil, false
 	}
 	message := firstNonEmptyString(anyRouterExtractResponseMessage(payload), "checkin success")
-	lowered := strings.ToLower(message)
-	if jsonBool(payload["success"]) || strings.Contains(lowered, "already") || strings.Contains(message, "已签到") {
+	if jsonBool(payload["success"]) || isAlreadyCheckedInMessage(message) {
 		return &model.SiteCheckinResult{
 			Status:  model.SiteExecutionStatusSuccess,
 			Message: message,
