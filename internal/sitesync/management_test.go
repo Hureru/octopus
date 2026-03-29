@@ -244,6 +244,20 @@ func TestSyncManagementPlatformFallsBackToUserModelsWhenTokenModelsUnavailable(t
 				return
 			}
 			_, _ = w.Write([]byte(`{"data":["gpt-4o-mini","gpt-4.1"]}`))
+		case r.URL.Path == "/api/pricing":
+			w.Header().Set("Content-Type", "application/json")
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "7788" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","enable_groups":["default"],"supported_endpoint_types":["/v1/chat/completions"]},
+				{"model_name":"gpt-4.1","enable_groups":["default"],"supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/available_model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -269,6 +283,295 @@ func TestSyncManagementPlatformFallsBackToUserModelsWhenTokenModelsUnavailable(t
 	}
 	if len(snapshot.models) != 2 || snapshot.models[0].ModelName != "gpt-4.1" || snapshot.models[1].ModelName != "gpt-4o-mini" {
 		t.Fatalf("unexpected synced models: %+v", snapshot.models)
+	}
+	for _, item := range snapshot.models {
+		if item.Source != siteModelSourceSyncFallback {
+			t.Fatalf("expected fallback models to use source %q, got %+v", siteModelSourceSyncFallback, snapshot.models)
+		}
+	}
+}
+
+func TestSyncManagementPlatformDoesNotFallbackWithoutExplicitGroupMatch(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/api/user/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":["gpt-4o-mini"]}`))
+		case r.URL.Path == "/api/pricing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/available_model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err == nil {
+		t.Fatalf("expected syncManagementPlatform to fail when explicit group metadata is missing")
+	}
+}
+
+func TestSyncManagementPlatformFallsBackUsingAvailableModelExplicitGroups(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html><html><body>site home</body></html>`))
+		case r.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+		case r.URL.Path == "/api/user/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":["gpt-4o-mini","gpt-4.1"]}`))
+		case r.URL.Path == "/api/pricing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/api/available_model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{
+				"gpt-4.1":{"enable_groups":["default"],"supported_endpoint_types":["/v1/chat/completions"]}
+			}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+	if len(snapshot.models) != 1 || snapshot.models[0].ModelName != "gpt-4.1" || snapshot.models[0].Source != siteModelSourceSyncFallback {
+		t.Fatalf("expected available_model filtered fallback model, got %+v", snapshot.models)
+	}
+	metadata, ok := model.ParseSiteModelRouteMetadata(snapshot.models[0].RouteRawPayload)
+	if !ok || metadata.Source != "/api/available_model" {
+		t.Fatalf("expected available_model metadata to be recorded, got %+v", snapshot.models)
+	}
+}
+
+func TestSyncManagementPlatformFallsBackPerFailedGroupWithoutOverwritingExactModels(t *testing.T) {
+	platformUserID := 7788
+	userModelCalls := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[
+				{"name":"default-key","key":"managed-key-default","group":"default","status":1},
+				{"name":"vip-key","key":"managed-key-vip","group":"vip","status":1}
+			]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html><html><body>site home</body></html>`))
+		case r.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Header.Get("Authorization") {
+			case "Bearer managed-key-default":
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
+			case "Bearer managed-key-vip":
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			}
+		case r.URL.Path == "/api/user/models":
+			userModelCalls++
+			w.Header().Set("Content-Type", "application/json")
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "7788" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"无权进行此操作，未提供 New-Api-User"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":["gpt-4.1","gpt-4o"]}`))
+		case r.URL.Path == "/api/pricing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","enable_groups":["default"],"supported_endpoint_types":["/v1/chat/completions"]},
+				{"model_name":"gpt-4.1","enable_groups":["vip"],"supported_endpoint_types":["/v1/chat/completions"]},
+				{"model_name":"gpt-4o","enable_groups":["vip"],"supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/available_model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		case r.URL.Path == "/api/user/self":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+	if userModelCalls != 1 {
+		t.Fatalf("expected exactly 1 /api/user/models fallback call, got %d", userModelCalls)
+	}
+
+	modelsByGroup := make(map[string]map[string]string)
+	for _, item := range snapshot.models {
+		if _, ok := modelsByGroup[item.GroupKey]; !ok {
+			modelsByGroup[item.GroupKey] = make(map[string]string)
+		}
+		modelsByGroup[item.GroupKey][item.ModelName] = item.Source
+	}
+
+	defaultModels := modelsByGroup["default"]
+	if len(defaultModels) != 1 || defaultModels["gpt-4o-mini"] != siteModelSourceSync {
+		t.Fatalf("expected default group to keep exact models, got %+v", modelsByGroup["default"])
+	}
+
+	vipModels := modelsByGroup["vip"]
+	if len(vipModels) != 2 || vipModels["gpt-4.1"] != siteModelSourceSyncFallback || vipModels["gpt-4o"] != siteModelSourceSyncFallback {
+		t.Fatalf("expected vip group to use fallback models, got %+v", modelsByGroup["vip"])
+	}
+}
+
+func TestSyncManagementPlatformCachesFallbackUserModelsAcrossFailedGroups(t *testing.T) {
+	platformUserID := 7788
+	userModelCalls := 0
+	pricingCalls := 0
+	availableModelCalls := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[
+				{"name":"default-key","key":"managed-key-default","group":"default","status":1},
+				{"name":"vip-key","key":"managed-key-vip","group":"vip","status":1}
+			]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/api/user/models":
+			userModelCalls++
+			w.Header().Set("Content-Type", "application/json")
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "7788" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"无权进行此操作，未提供 New-Api-User"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":["gpt-4.1"]}`))
+		case r.URL.Path == "/api/pricing":
+			pricingCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4.1","enable_groups":["default","vip"],"supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/available_model":
+			availableModelCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		case r.URL.Path == "/api/user/self":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+	if userModelCalls != 1 {
+		t.Fatalf("expected fallback user models to be fetched once, got %d calls", userModelCalls)
+	}
+	if pricingCalls != 2 || availableModelCalls != 2 {
+		t.Fatalf("expected cached fallback route metadata probes to hit each endpoint twice (managed auth + unauthenticated), got pricing=%d available_model=%d", pricingCalls, availableModelCalls)
+	}
+	if len(snapshot.models) != 2 {
+		t.Fatalf("expected both failed groups to share cached fallback models, got %+v", snapshot.models)
+	}
+	for _, item := range snapshot.models {
+		if item.ModelName != "gpt-4.1" || item.Source != siteModelSourceSyncFallback {
+			t.Fatalf("expected cached fallback models for all groups, got %+v", snapshot.models)
+		}
 	}
 }
 

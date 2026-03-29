@@ -108,6 +108,45 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 
 	groups = mergeSiteGroups(groups, tokens)
 	groupTokens := pickModelTokensByGroup(tokens)
+	sessionModelsLoaded := false
+	var cachedSessionModels []string
+	var cachedSessionModelsErr error
+	loadSessionModels := func() ([]string, error) {
+		if sessionModelsLoaded {
+			return cachedSessionModels, cachedSessionModelsErr
+		}
+		sessionModelsLoaded = true
+		cachedSessionModels, cachedSessionModelsErr = fetchManagedSessionModels(ctx, siteRecord, account, accessToken)
+		return cachedSessionModels, cachedSessionModelsErr
+	}
+	sessionDetectionsLoaded := false
+	var cachedSessionDetections map[string]siteModelRouteDetection
+	loadSessionDetections := func() map[string]siteModelRouteDetection {
+		if sessionDetectionsLoaded {
+			return cachedSessionDetections
+		}
+		sessionDetectionsLoaded = true
+		sessionModels, err := loadSessionModels()
+		if err != nil || len(sessionModels) == 0 {
+			return nil
+		}
+		cachedSessionDetections = detectManagedExplicitGroupRoutes(ctx, siteRecord, account, accessToken, sessionModels)
+		return cachedSessionDetections
+	}
+	sessionFallbackFetcher := func(token model.SiteToken) (siteModelFetchResult, error) {
+		sessionModels, sessionErr := loadSessionModels()
+		if len(sessionModels) == 0 {
+			return siteModelFetchResult{}, sessionErr
+		}
+		result, filterErr := filterSessionFallbackModelsByGroup(sessionModels, token.GroupKey, loadSessionDetections())
+		if len(result.names) > 0 {
+			return result, nil
+		}
+		if sessionErr != nil {
+			return siteModelFetchResult{}, sessionErr
+		}
+		return siteModelFetchResult{}, filterErr
+	}
 	siteModels, err := syncSiteModelsByGroup(
 		ctx,
 		siteRecord,
@@ -115,12 +154,13 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		accessToken,
 		groupTokens,
 		firstManagedPlatformUserID(account),
-		"sync",
-		func(token model.SiteToken, allowGlobalFallback bool) ([]string, error) {
-			if allowGlobalFallback {
-				return fetchManagementModels(ctx, siteRecord, account, accessToken, token)
+		siteModelSourceSync,
+		func(token model.SiteToken, allowGlobalFallback bool) (siteModelFetchResult, error) {
+			if siteRecord.Platform == model.SitePlatformNewAPI {
+				return fetchManagementModels(ctx, siteRecord, account, accessToken, token, sessionFallbackFetcher)
 			}
-			return fetchModelsForSiteToken(ctx, siteRecord, account, token)
+			models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
+			return siteModelFetchResult{names: models, source: siteModelSourceSync}, err
 		},
 	)
 	if err != nil {
@@ -187,9 +227,10 @@ func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, acc
 		accessToken,
 		pickModelTokensByGroup(tokens),
 		0,
-		"sync",
-		func(token model.SiteToken, allowGlobalFallback bool) ([]string, error) {
-			return fetchModelsForSiteToken(ctx, siteRecord, account, token)
+		siteModelSourceSync,
+		func(token model.SiteToken, allowGlobalFallback bool) (siteModelFetchResult, error) {
+			models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
+			return siteModelFetchResult{names: models, source: siteModelSourceSync}, err
 		},
 	)
 	if err != nil {

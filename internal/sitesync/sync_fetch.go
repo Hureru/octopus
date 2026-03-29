@@ -10,6 +10,17 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 )
 
+const (
+	siteModelSourceSync         = "sync"
+	siteModelSourceSyncFallback = "sync_fallback"
+)
+
+type siteModelFetchResult struct {
+	names      []string
+	source     string
+	detections map[string]siteModelRouteDetection
+}
+
 func fetchManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]model.SiteToken, error) {
 	payload, err := requestJSONWithManagedAccessToken(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100"), nil, accessToken, account)
 	if err != nil {
@@ -180,20 +191,34 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 	return normalizeModelNames(names), nil
 }
 
-func fetchManagementModels(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, token model.SiteToken) ([]string, error) {
+func fetchManagementModels(
+	ctx context.Context,
+	siteRecord *model.Site,
+	account *model.SiteAccount,
+	accessToken string,
+	token model.SiteToken,
+	sessionFallbackFetcher func(token model.SiteToken) (siteModelFetchResult, error),
+) (siteModelFetchResult, error) {
 	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
 	if len(models) > 0 || siteRecord.Platform != model.SitePlatformNewAPI {
-		return models, err
+		return siteModelFetchResult{names: models, source: siteModelSourceSync}, err
 	}
 
-	sessionModels, sessionErr := fetchManagedSessionModels(ctx, siteRecord, account, accessToken)
-	if len(sessionModels) > 0 {
-		return sessionModels, nil
+	if sessionFallbackFetcher == nil {
+		return siteModelFetchResult{}, err
+	}
+
+	fallbackResult, fallbackErr := sessionFallbackFetcher(token)
+	if len(fallbackResult.names) > 0 {
+		if strings.TrimSpace(fallbackResult.source) == "" {
+			fallbackResult.source = siteModelSourceSyncFallback
+		}
+		return fallbackResult, nil
 	}
 	if err != nil {
-		return nil, err
+		return siteModelFetchResult{}, err
 	}
-	return nil, sessionErr
+	return siteModelFetchResult{}, fallbackErr
 }
 
 func fetchManagedSessionModels(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]string, error) {
@@ -222,6 +247,61 @@ func buildModelFetchBaseURLs(siteRecord *model.Site) []string {
 		candidates = append(candidates, baseURL+"/v1")
 	}
 	return candidates
+}
+
+func filterSessionFallbackModelsByGroup(
+	names []string,
+	groupKey string,
+	detections map[string]siteModelRouteDetection,
+) (siteModelFetchResult, error) {
+	normalizedGroupKey := model.NormalizeSiteGroupKey(groupKey)
+	if normalizedGroupKey == "" {
+		normalizedGroupKey = model.SiteDefaultGroupKey
+	}
+	if len(detections) == 0 {
+		return siteModelFetchResult{}, fmt.Errorf("no explicit group metadata available for fallback group %s", normalizedGroupKey)
+	}
+
+	filteredNames := make([]string, 0, len(names))
+	filteredDetections := make(map[string]siteModelRouteDetection)
+	for _, name := range normalizeModelNames(names) {
+		lookupKey := strings.ToLower(strings.TrimSpace(name))
+		detection, ok := detections[lookupKey]
+		if !ok {
+			continue
+		}
+		metadata, ok := model.ParseSiteModelRouteMetadata(detection.RouteRawPayload)
+		if !ok || len(metadata.EnableGroups) == 0 {
+			continue
+		}
+		if !stringSliceContainsFold(metadata.EnableGroups, normalizedGroupKey) {
+			continue
+		}
+		filteredNames = append(filteredNames, name)
+		filteredDetections[lookupKey] = detection
+	}
+	if len(filteredNames) == 0 {
+		return siteModelFetchResult{}, fmt.Errorf("no session fallback models matched group %s via explicit groups", normalizedGroupKey)
+	}
+
+	return siteModelFetchResult{
+		names:      filteredNames,
+		source:     siteModelSourceSyncFallback,
+		detections: filteredDetections,
+	}, nil
+}
+
+func stringSliceContainsFold(values []string, target string) bool {
+	normalizedTarget := strings.ToLower(strings.TrimSpace(target))
+	if normalizedTarget == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), normalizedTarget) {
+			return true
+		}
+	}
+	return false
 }
 
 func sitePlatformUsesV1ModelEndpoint(platform model.SitePlatform) bool {
@@ -318,7 +398,7 @@ func syncSiteModelsByGroup(
 	groupTokens []model.SiteToken,
 	platformUserID int,
 	source string,
-	fetcher func(token model.SiteToken, allowGlobalFallback bool) ([]string, error),
+	fetcher func(token model.SiteToken, allowGlobalFallback bool) (siteModelFetchResult, error),
 ) ([]model.SiteModel, error) {
 	if len(groupTokens) == 0 {
 		return nil, nil
@@ -330,16 +410,24 @@ func syncSiteModelsByGroup(
 	var firstErr error
 
 	for _, token := range groupTokens {
-		names, err := fetcher(token, allowGlobalFallback)
+		result, err := fetcher(token, allowGlobalFallback)
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
-		if len(names) == 0 {
+		if len(result.names) == 0 {
 			continue
 		}
 
-		groupModels := buildSiteModels(names, token.GroupKey, source)
-		groupModels = applyDetectedRoutesToSiteModels(ctx, siteRecord, account, accessToken, token, platformUserID, groupModels)
+		groupSource := strings.TrimSpace(result.source)
+		if groupSource == "" {
+			groupSource = source
+		}
+		groupModels := buildSiteModels(result.names, token.GroupKey, groupSource)
+		if len(result.detections) > 0 {
+			groupModels = applyKnownRouteDetectionsToSiteModels(groupModels, result.detections)
+		} else {
+			groupModels = applyDetectedRoutesToSiteModels(ctx, siteRecord, account, accessToken, token, platformUserID, groupModels)
+		}
 		for _, item := range groupModels {
 			key := model.NormalizeSiteGroupKey(item.GroupKey) + "\x00" + strings.TrimSpace(item.ModelName)
 			if _, ok := seen[key]; ok {

@@ -31,7 +31,16 @@ func applyDetectedRoutesToSiteModels(
 	if len(detections) == 0 {
 		return items
 	}
+	return applyKnownRouteDetectionsToSiteModels(items, detections)
+}
 
+func applyKnownRouteDetectionsToSiteModels(
+	items []model.SiteModel,
+	detections map[string]siteModelRouteDetection,
+) []model.SiteModel {
+	if len(items) == 0 || len(detections) == 0 {
+		return items
+	}
 	for i := range items {
 		modelName := strings.ToLower(strings.TrimSpace(items[i].ModelName))
 		detection, ok := detections[modelName]
@@ -123,6 +132,33 @@ func detectManagedAvailableModelRoutes(
 		modelFilter,
 		collectAvailableModelRouteDetections,
 	)
+}
+
+func detectManagedExplicitGroupRoutes(
+	ctx context.Context,
+	siteRecord *model.Site,
+	account *model.SiteAccount,
+	accessToken string,
+	modelNames []string,
+) map[string]siteModelRouteDetection {
+	modelFilter := buildSiteModelNameFilter(modelNames)
+	if len(modelFilter) == 0 {
+		return nil
+	}
+
+	var detections map[string]siteModelRouteDetection
+	detections = mergeSiteModelRouteDetections(
+		detections,
+		detectManagedPricingRoutes(ctx, siteRecord, account, accessToken, model.SiteToken{}, modelFilter),
+	)
+	detections = mergeSiteModelRouteDetections(
+		detections,
+		detectManagedAvailableModelRoutes(ctx, siteRecord, account, accessToken, model.SiteToken{}, modelFilter),
+	)
+	if len(detections) == 0 {
+		return nil
+	}
+	return detections
 }
 
 func detectManagedRoutesFromPath(
@@ -273,6 +309,24 @@ func collectPricingRouteDetections(
 		return nil
 	}
 	return result
+}
+
+func buildSiteModelNameFilter(modelNames []string) map[string]struct{} {
+	if len(modelNames) == 0 {
+		return nil
+	}
+	modelFilter := make(map[string]struct{}, len(modelNames))
+	for _, modelName := range modelNames {
+		normalizedName := strings.ToLower(strings.TrimSpace(modelName))
+		if normalizedName == "" {
+			continue
+		}
+		modelFilter[normalizedName] = struct{}{}
+	}
+	if len(modelFilter) == 0 {
+		return nil
+	}
+	return modelFilter
 }
 
 func collectAvailableModelRouteDetections(

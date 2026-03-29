@@ -87,16 +87,16 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		accessToken,
 		pickModelTokensByGroup(tokens),
 		userID,
-		"sync",
-		func(token model.SiteToken, allowGlobalFallback bool) ([]string, error) {
+		siteModelSourceSync,
+		func(token model.SiteToken, allowGlobalFallback bool) (siteModelFetchResult, error) {
 			models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
 			if (err != nil || len(models) == 0) && allowGlobalFallback {
 				fallbackModels, fallbackErr := fetchAnyRouterSessionModels(ctx, siteRecord, account, accessToken, userID)
 				if fallbackErr == nil && len(fallbackModels) > 0 {
-					return fallbackModels, nil
+					return siteModelFetchResult{names: fallbackModels, source: siteModelSourceSync}, nil
 				}
 			}
-			return models, err
+			return siteModelFetchResult{names: models, source: siteModelSourceSync}, err
 		},
 	)
 	if err != nil {
