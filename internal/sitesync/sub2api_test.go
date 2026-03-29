@@ -57,8 +57,18 @@ func TestSyncSub2APIFallsBackToAccessTokenWhenKeyListIsEmpty(t *testing.T) {
 	if snapshot.tokens[0].Token != "sub2-session-token" {
 		t.Fatalf("expected fallback token to strip Bearer prefix, got %+v", snapshot.tokens[0])
 	}
-	if len(snapshot.groups) != 1 || snapshot.groups[0].GroupKey != "7" {
-		t.Fatalf("expected groups fetched from sub2api endpoint, got %+v", snapshot.groups)
+	if len(snapshot.groups) != 2 {
+		t.Fatalf("expected fetched groups plus default fallback group, got %+v", snapshot.groups)
+	}
+	groupKeys := make(map[string]struct{}, len(snapshot.groups))
+	for _, group := range snapshot.groups {
+		groupKeys[group.GroupKey] = struct{}{}
+	}
+	if _, ok := groupKeys["7"]; !ok {
+		t.Fatalf("expected groups to include fetched sub2api group 7, got %+v", snapshot.groups)
+	}
+	if _, ok := groupKeys[model.SiteDefaultGroupKey]; !ok {
+		t.Fatalf("expected groups to include default fallback group, got %+v", snapshot.groups)
 	}
 	if len(snapshot.models) != 2 {
 		t.Fatalf("expected models discovered via fallback token, got %+v", snapshot.models)
