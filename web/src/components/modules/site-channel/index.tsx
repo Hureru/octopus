@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     DragDropContext,
     Draggable,
@@ -8,16 +8,24 @@ import {
     type DropResult,
 } from '@hello-pangea/dnd';
 import {
+    ArrowUpDown,
+    Check,
     CircleAlert,
     CircleOff,
     FolderTree,
+    Globe2,
     GripVertical,
     History,
     KeyRound,
+    LayoutGrid,
+    List,
+    MoreHorizontal,
     RefreshCw,
+    Search,
     Server,
     Sparkles,
     UserRound,
+    Waypoints,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,9 +33,21 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { toast } from '@/components/common/Toast';
 import { cn } from '@/lib/utils';
@@ -35,9 +55,11 @@ import { getModelIcon } from '@/lib/model-icons';
 import {
     type SiteChannelAccount,
     type SiteChannelCard,
+    type SiteChannelGroup,
     type SiteModelDisableUpdateRequest,
     type SiteModelRouteType,
     type SiteModelRouteUpdateRequest,
+    useCreateSiteChannelKey,
     useResetSiteChannelModelRoutes,
     useSiteChannelList,
     useUpdateSiteChannelModelDisabled,
@@ -60,40 +82,68 @@ import {
     flattenAccountModels,
     formatHistoryTime,
     getErrorMessage,
-    groupFilterCount,
     isSameGroupFilter,
     platformLabel,
     routeSourceLabel,
     routeTypeLabel,
     summarizeHistory,
 } from './utils';
+import { useJumpStore, type PendingJump, type SiteChannelJumpTarget, isSiteChannelJumpTarget } from '@/stores/jump';
+import {
+    DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES,
+    type SiteChannelQuickFilter,
+    type SiteChannelTableSort,
+    type SiteChannelTableSortField,
+    useSiteChannelPanelViewStore,
+} from './ui-store';
 
 type ChannelFilter = 'all' | 'enabled' | 'disabled';
 type ToolbarSortField = 'name' | 'created';
 type ToolbarSortOrder = 'asc' | 'desc';
+type SiteChannelPendingJump = PendingJump & { target: SiteChannelJumpTarget };
+
+function getBaseGroupKey(groupKey: string) {
+    return groupKey.split('::', 1)[0] || groupKey;
+}
 
 function makeModelKey(groupKey: string, modelName: string) {
     return `${groupKey}\u0000${modelName}`;
 }
 
-function removeKey<T>(record: Record<string, T>, key: string) {
-    if (!(key in record)) return record;
+function removeKeys<T>(record: Record<string, T>, keys: string[]) {
+    if (keys.length === 0) return record;
     const next = { ...record };
-    delete next[key];
+    let changed = false;
+
+    for (const key of keys) {
+        if (!(key in next)) continue;
+        delete next[key];
+        changed = true;
+    }
+
+    return changed ? next : record;
+}
+
+function addPendingKeys(current: Set<string>, keys: string[]) {
+    if (keys.length === 0) return current;
+    const next = new Set(current);
+    for (const key of keys) {
+        next.add(key);
+    }
     return next;
 }
 
-function addPendingKey(current: Set<string>, key: string) {
+function removePendingKeys(current: Set<string>, keys: string[]) {
+    if (keys.length === 0) return current;
     const next = new Set(current);
-    next.add(key);
-    return next;
-}
+    let changed = false;
 
-function removePendingKey(current: Set<string>, key: string) {
-    if (!current.has(key)) return current;
-    const next = new Set(current);
-    next.delete(key);
-    return next;
+    for (const key of keys) {
+        if (!next.delete(key)) continue;
+        changed = true;
+    }
+
+    return changed ? next : current;
 }
 
 function findModel(account: SiteChannelAccount, modelKey: string) {
@@ -131,6 +181,79 @@ function collectSiteSummary(card: SiteChannelCard) {
 
     return { groupCount, modelCount, totalKeys, enabledKeys, routeCounts };
 }
+
+function getModelLastRequestAt(model: SiteModelView) {
+    return model.history?.last_request_at ?? null;
+}
+
+function getModelHistoryCount(model: SiteModelView) {
+    return (model.history?.success_count ?? 0) + (model.history?.failure_count ?? 0);
+}
+
+function hasModelHistory(model: SiteModelView) {
+    return getModelHistoryCount(model) > 0 || getModelLastRequestAt(model) !== null;
+}
+
+function modelNeedsAttention(model: SiteModelView) {
+    return !model.has_keys || !model.projected_channel_id;
+}
+
+function compareNullableNumber(left: number | null, right: number | null, order: 'asc' | 'desc') {
+    const normalizedLeft = left ?? -1;
+    const normalizedRight = right ?? -1;
+    const diff = normalizedLeft - normalizedRight;
+    return order === 'asc' ? diff : -diff;
+}
+
+function compareText(left: string, right: string, order: 'asc' | 'desc') {
+    const diff = left.localeCompare(right);
+    return order === 'asc' ? diff : -diff;
+}
+
+function matchesQuickFilters(model: SiteModelView, quickFilters: SiteChannelQuickFilter[]) {
+    if (quickFilters.length === 0) return true;
+
+    return quickFilters.every((filter) => {
+        switch (filter) {
+            case 'attention':
+                return modelNeedsAttention(model);
+            case 'with_history':
+                return hasModelHistory(model);
+            case 'disabled':
+                return model.disabled;
+            case 'missing_keys':
+                return !model.has_keys;
+            default:
+                return true;
+        }
+    });
+}
+
+function sortModels(models: SiteModelView[], tableSort: SiteChannelTableSort) {
+    return [...models].sort((left, right) => {
+        switch (tableSort.field) {
+            case 'group_name':
+                return compareText(left.group_name || left.group_key, right.group_name || right.group_key, tableSort.order);
+            case 'route_type':
+                return compareText(routeTypeLabel(left.route_type), routeTypeLabel(right.route_type), tableSort.order);
+            case 'last_request_at':
+                return compareNullableNumber(getModelLastRequestAt(left), getModelLastRequestAt(right), tableSort.order);
+            case 'model_name':
+            default:
+                return compareText(left.model_name, right.model_name, tableSort.order);
+        }
+    });
+}
+
+const QUICK_FILTER_OPTIONS: Array<{
+    key: SiteChannelQuickFilter;
+    label: string;
+}> = [
+    { key: 'attention', label: '仅未正确配置' },
+    { key: 'with_history', label: '仅有请求历史' },
+    { key: 'disabled', label: '仅禁用' },
+    { key: 'missing_keys', label: '仅未创建 Key' },
+];
 
 function HistorySummary({ model }: { model: SiteModelView }) {
     const summary = summarizeHistory(model.history);
@@ -206,17 +329,204 @@ function HistorySummary({ model }: { model: SiteModelView }) {
     );
 }
 
+function SelectionCheckbox({
+    checked,
+    onCheckedChange,
+    disabled,
+    ariaLabel,
+    className,
+}: {
+    checked: boolean;
+    onCheckedChange: (checked: boolean) => void;
+    disabled?: boolean;
+    ariaLabel: string;
+    className?: string;
+}) {
+    return (
+        <input
+            type="checkbox"
+            checked={checked}
+            disabled={disabled}
+            aria-label={ariaLabel}
+            onChange={(event) => onCheckedChange(event.target.checked)}
+            className={cn(
+                'size-4 rounded border-border bg-background align-middle accent-primary disabled:cursor-not-allowed disabled:opacity-50',
+                className,
+            )}
+        />
+    );
+}
+
+function MoveRoutePopover({
+    currentRouteType,
+    disabled,
+    buttonClassName,
+    onMove,
+}: {
+    currentRouteType: SiteModelRouteType;
+    disabled?: boolean;
+    buttonClassName?: string;
+    onMove: (routeType: SiteModelRouteType) => void;
+}) {
+    const [open, setOpen] = useState(false);
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <button
+                    type="button"
+                    disabled={disabled}
+                    className={cn(
+                        'rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50',
+                        buttonClassName,
+                    )}
+                >
+                    <MoreHorizontal className="size-4" />
+                </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 rounded-2xl border border-border/70 bg-card p-2 shadow-xl">
+                <div className="space-y-2">
+                    <div className="px-2 pt-1 text-xs font-medium text-muted-foreground">移动至...</div>
+                    <div className="grid gap-1">
+                        {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
+                            <button
+                                key={routeType}
+                                type="button"
+                                disabled={disabled || routeType === currentRouteType}
+                                onClick={() => {
+                                    onMove(routeType);
+                                    setOpen(false);
+                                }}
+                                className={cn(
+                                    'flex items-center justify-between rounded-xl px-2 py-2 text-left text-sm transition',
+                                    routeType === currentRouteType
+                                        ? 'bg-muted/60 text-muted-foreground'
+                                        : 'hover:bg-muted',
+                                )}
+                            >
+                                <span>{routeTypeLabel(routeType)}</span>
+                                {routeType === currentRouteType ? <Check className="size-4" /> : null}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+function SiteChannelBulkActionBar({
+    selectedCount,
+    bulkMoveTarget,
+    disabled,
+    onBulkMoveTargetChange,
+    onBulkMove,
+    onEnableSelected,
+    onDisableSelected,
+    onClearSelection,
+}: {
+    selectedCount: number;
+    bulkMoveTarget: SiteModelRouteType;
+    disabled: boolean;
+    onBulkMoveTargetChange: (routeType: SiteModelRouteType) => void;
+    onBulkMove: () => void;
+    onEnableSelected: () => void;
+    onDisableSelected: () => void;
+    onClearSelection: () => void;
+}) {
+    if (selectedCount === 0) return null;
+
+    return (
+        <div className="flex flex-col gap-3 rounded-3xl border border-primary/20 bg-primary/5 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-medium text-foreground">
+                    已选择 {selectedCount} 个模型
+                </div>
+                <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onClearSelection}>
+                    清空选择
+                </Button>
+            </div>
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                    <Select value={bulkMoveTarget} onValueChange={(value) => onBulkMoveTargetChange(value as SiteModelRouteType)}>
+                        <SelectTrigger className="w-[14rem] rounded-2xl">
+                            <SelectValue placeholder="选择目标端点格式" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl">
+                            {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
+                                <SelectItem key={routeType} value={routeType}>
+                                    {routeTypeLabel(routeType)}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Button
+                        type="button"
+                        className="rounded-2xl"
+                        onClick={onBulkMove}
+                        disabled={disabled}
+                    >
+                        批量移动
+                    </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={onEnableSelected}
+                        disabled={disabled}
+                    >
+                        批量启用
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-2xl"
+                        onClick={onDisableSelected}
+                        disabled={disabled}
+                    >
+                        批量停用
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function RouteColumn({
     routeType,
     models,
     pendingModelKeys,
+    selectedModelKeys,
+    compactMode,
+    collapseWhenEmpty,
+    onToggleModelSelection,
+    onToggleColumnSelection,
+    onMoveModel,
     onToggleDisabled,
+    onNavigateToChannel,
+    registerModelRef,
+    highlightedModelKey,
 }: {
     routeType: SiteModelRouteType;
     models: SiteModelView[];
     pendingModelKeys: Set<string>;
+    selectedModelKeys: Set<string>;
+    compactMode: boolean;
+    collapseWhenEmpty: boolean;
+    onToggleModelSelection: (modelKey: string, checked: boolean) => void;
+    onToggleColumnSelection: (modelKeys: string[], checked: boolean) => void;
+    onMoveModel: (model: SiteModelView, routeType: SiteModelRouteType) => void;
     onToggleDisabled: (model: SiteModelView) => void;
+    onNavigateToChannel: (channelId: number) => void;
+    registerModelRef: (modelKey: string, node: HTMLElement | null) => void;
+    highlightedModelKey: string | null;
 }) {
+    const modelKeys = models.map((model) => makeModelKey(model.group_key, model.model_name));
+    const allSelected = modelKeys.length > 0 && modelKeys.every((key) => selectedModelKeys.has(key));
+    const isCollapsed = collapseWhenEmpty && models.length === 0;
+
     return (
         <Droppable droppableId={routeType}>
             {(provided, snapshot) => (
@@ -224,178 +534,514 @@ function RouteColumn({
                     ref={provided.innerRef}
                     {...provided.droppableProps}
                     className={cn(
-                        'flex min-h-[30rem] w-[18.5rem] flex-col rounded-3xl border border-border/70 bg-card/70 p-3 transition',
+                        'flex min-h-[30rem] flex-col rounded-3xl border border-border/70 bg-card/70 transition',
+                        isCollapsed ? 'w-16 items-center p-2' : 'w-[18.5rem] p-3',
                         snapshot.isDraggingOver && 'border-primary/40 bg-primary/5',
                     )}
                 >
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                        <div>
-                            <div className="text-sm font-semibold">{routeTypeLabel(routeType)}</div>
-                            <div className="text-xs text-muted-foreground">{models.length} 个模型</div>
+                    {isCollapsed ? (
+                        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-8 py-2">
+                            <Badge variant="outline" className={cn('h-6 w-6 justify-center rounded-full p-0 text-[10px]', getRouteTypeTone(routeType))}>
+                                0
+                            </Badge>
+                            <div className="-rotate-90 whitespace-nowrap text-xs font-medium text-muted-foreground">
+                                {routeTypeLabel(routeType)}
+                            </div>
+                            {provided.placeholder}
                         </div>
-                        <Badge variant="outline" className={cn('h-6 px-2 text-[10px]', getRouteTypeTone(routeType))}>
-                            {routeTypeLabel(routeType)}
-                        </Badge>
-                    </div>
+                    ) : (
+                        <>
+                            <div className="mb-3 flex items-start justify-between gap-2">
+                                <div>
+                                    <div className="text-sm font-semibold">{routeTypeLabel(routeType)}</div>
+                                    <div className="text-xs text-muted-foreground">{models.length} 个模型</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <SelectionCheckbox
+                                        checked={allSelected}
+                                        disabled={models.length === 0}
+                                        ariaLabel={`选择 ${routeTypeLabel(routeType)} 列全部模型`}
+                                        onCheckedChange={(checked) => onToggleColumnSelection(modelKeys, checked)}
+                                    />
+                                    <Badge variant="outline" className={cn('h-6 px-2 text-[10px]', getRouteTypeTone(routeType))}>
+                                        {routeTypeLabel(routeType)}
+                                    </Badge>
+                                </div>
+                            </div>
 
-                    <div className="flex min-h-0 flex-1 flex-col gap-2">
-                        {models.map((model, index) => {
-                            const modelKey = makeModelKey(model.group_key, model.model_name);
-                            const { Avatar: ModelAvatar } = getModelIcon(model.model_name);
-                            const isPending = pendingModelKeys.has(modelKey);
+                            <div className="flex min-h-0 flex-1 flex-col gap-2">
+                                {models.map((model, index) => {
+                                    const modelKey = makeModelKey(model.group_key, model.model_name);
+                                    const { Avatar: ModelAvatar } = getModelIcon(model.model_name);
+                                    const isPending = pendingModelKeys.has(modelKey);
+                                    const isSelected = selectedModelKeys.has(modelKey);
 
-                            return (
-                                <Draggable
-                                    key={modelKey}
-                                    draggableId={modelKey}
-                                    index={index}
-                                    isDragDisabled={model.disabled || isPending}
-                                >
-                                    {(draggableProvided, snapshot) => (
-                                        <div
-                                            ref={draggableProvided.innerRef}
-                                            {...draggableProvided.draggableProps}
-                                            style={draggableProvided.draggableProps.style}
-                                            className={cn(
-                                                'rounded-2xl border border-border/70 bg-background/95 p-3 shadow-xs transition',
-                                                model.disabled && 'opacity-60 grayscale',
-                                                isPending && 'opacity-70',
-                                                snapshot.isDragging && 'shadow-lg ring-2 ring-primary/30',
-                                            )}
+                                    return (
+                                        <Draggable
+                                            key={modelKey}
+                                            draggableId={modelKey}
+                                            index={index}
+                                            isDragDisabled={model.disabled || isPending}
                                         >
-                                            <div className="flex items-start gap-3">
+                                            {(draggableProvided, draggableSnapshot) => (
                                                 <div
-                                                    {...draggableProvided.dragHandleProps}
+                                                    ref={(node) => {
+                                                        draggableProvided.innerRef(node);
+                                                        registerModelRef(modelKey, node);
+                                                    }}
+                                                    {...draggableProvided.draggableProps}
+                                                    style={draggableProvided.draggableProps.style}
+                                                    data-model-key={modelKey}
                                                     className={cn(
-                                                        'mt-0.5 rounded-lg p-1 text-muted-foreground transition',
-                                                        model.disabled || isPending
-                                                            ? 'cursor-not-allowed opacity-50'
-                                                            : 'cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing',
+                                                        'rounded-2xl border border-border/70 bg-background/95 shadow-xs transition',
+                                                        compactMode ? 'p-2.5' : 'p-3',
+                                                        model.disabled && 'opacity-60 grayscale',
+                                                        isPending && 'opacity-70',
+                                                        isSelected && 'border-primary/30 bg-primary/5',
+                                                        draggableSnapshot.isDragging && 'shadow-lg ring-2 ring-primary/30',
+                                                        highlightedModelKey === modelKey && 'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
                                                     )}
                                                 >
-                                                    <GripVertical className="size-4" />
-                                                </div>
-                                                <span className="mt-0.5 shrink-0">
-                                                    <ModelAvatar size={18} />
-                                                </span>
-                                                <div className="min-w-0 flex-1 space-y-2">
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <div className="min-w-0">
-                                                            <div className="truncate text-sm font-semibold">{model.model_name}</div>
-                                                            <div className="mt-0.5 text-[11px] text-muted-foreground">
-                                                                {model.group_name || model.group_key} · Key {model.enabled_key_count}/{model.key_count}
+                                                    <div className="flex items-start gap-2.5">
+                                                        <SelectionCheckbox
+                                                            checked={isSelected}
+                                                            disabled={isPending}
+                                                            ariaLabel={`选择模型 ${model.model_name}`}
+                                                            onCheckedChange={(checked) => onToggleModelSelection(modelKey, checked)}
+                                                            className="mt-1"
+                                                        />
+                                                        <div
+                                                            {...draggableProvided.dragHandleProps}
+                                                            className={cn(
+                                                                'mt-0.5 rounded-lg p-1 text-muted-foreground transition',
+                                                                model.disabled || isPending
+                                                                    ? 'cursor-not-allowed opacity-50'
+                                                                    : 'cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing',
+                                                            )}
+                                                        >
+                                                            <GripVertical className="size-4" />
+                                                        </div>
+                                                        <span className="mt-0.5 shrink-0">
+                                                            <ModelAvatar size={18} />
+                                                        </span>
+                                                        <div className="min-w-0 flex-1 space-y-2">
+                                                            <div className="flex items-start justify-between gap-2">
+                                                                <div className="min-w-0">
+                                                                    <div className="truncate text-sm font-semibold">{model.model_name}</div>
+                                                                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                                                                        {model.group_name || model.group_key}
+                                                                        {compactMode ? '' : ` · Key ${model.enabled_key_count}/${model.key_count}`}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <MoveRoutePopover
+                                                                        currentRouteType={model.route_type}
+                                                                        disabled={isPending || model.disabled}
+                                                                        onMove={(nextRouteType) => onMoveModel(model, nextRouteType)}
+                                                                    />
+                                                                    <Tooltip side="top" align="end">
+                                                                        <TooltipTrigger asChild>
+                                                                            <button
+                                                                                type="button"
+                                                                                className="rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                                                            >
+                                                                                <History className="size-4" />
+                                                                            </button>
+                                                                        </TooltipTrigger>
+                                                                        <TooltipContent className="max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl">
+                                                                            <HistorySummary model={model} />
+                                                                        </TooltipContent>
+                                                                    </Tooltip>
+                                                                    <Tooltip side="top" align="end">
+                                                                        <TooltipTrigger asChild>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => onToggleDisabled(model)}
+                                                                                disabled={isPending}
+                                                                                className={cn(
+                                                                                    'rounded-lg p-1 transition',
+                                                                                    model.disabled
+                                                                                        ? 'text-destructive hover:bg-destructive/10'
+                                                                                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                                                                )}
+                                                                            >
+                                                                                <CircleOff className="size-4" />
+                                                                            </button>
+                                                                        </TooltipTrigger>
+                                                                        <TooltipContent>{model.disabled ? '启用模型' : '禁用模型'}</TooltipContent>
+                                                                    </Tooltip>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px]', getRouteSourceTone(model.route_source))}>
+                                                                    {routeSourceLabel(model.route_source)}
+                                                                </Badge>
+                                                                {!model.has_keys ? (
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className="h-5 px-1.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                                                    >
+                                                                        缺少 Key
+                                                                    </Badge>
+                                                                ) : null}
+                                                                {!compactMode && model.projected_channel_id ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => onNavigateToChannel(model.projected_channel_id!)}
+                                                                        className="inline-flex"
+                                                                    >
+                                                                        <Badge variant="outline" className="h-5 px-1.5 text-[10px] hover:border-primary/30 hover:bg-primary/5">
+                                                                            渠道 #{model.projected_channel_id}
+                                                                        </Badge>
+                                                                    </button>
+                                                                ) : null}
+                                                                {compactMode && model.disabled ? (
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className="h-5 px-1.5 text-[10px] border-destructive/30 bg-destructive/10 text-destructive"
+                                                                    >
+                                                                        已禁用
+                                                                    </Badge>
+                                                                ) : null}
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <Tooltip side="top" align="end">
-                                                                <TooltipTrigger asChild>
-                                                                    <button
-                                                                        type="button"
-                                                                        className="rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                                                                    >
-                                                                        <History className="size-4" />
-                                                                    </button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent className="max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl">
-                                                                    <HistorySummary model={model} />
-                                                                </TooltipContent>
-                                                            </Tooltip>
-                                                            <Tooltip side="top" align="end">
-                                                                <TooltipTrigger asChild>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => onToggleDisabled(model)}
-                                                                        disabled={isPending}
-                                                                        className={cn(
-                                                                            'rounded-lg p-1 transition',
-                                                                            model.disabled
-                                                                                ? 'text-destructive hover:bg-destructive/10'
-                                                                                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                                                                        )}
-                                                                    >
-                                                                        <CircleOff className="size-4" />
-                                                                    </button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent>{model.disabled ? '启用模型' : '禁用模型'}</TooltipContent>
-                                                            </Tooltip>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px]', getRouteSourceTone(model.route_source))}>
-                                                            {routeSourceLabel(model.route_source)}
-                                                        </Badge>
-                                                        {!model.has_keys ? (
-                                                            <Badge
-                                                                variant="outline"
-                                                                className="h-5 px-1.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                                                            >
-                                                                缺少 Key
-                                                            </Badge>
-                                                        ) : null}
-                                                        {model.projected_channel_id ? (
-                                                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                                                渠道 #{model.projected_channel_id}
-                                                            </Badge>
-                                                        ) : null}
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </Draggable>
-                            );
-                        })}
+                                            )}
+                                        </Draggable>
+                                    );
+                                })}
 
-                        {provided.placeholder}
+                                {provided.placeholder}
 
-                        {models.length === 0 ? (
-                            <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-background/50 px-4 py-8 text-center text-sm text-muted-foreground">
-                                当前筛选下没有模型
+                                {models.length === 0 ? (
+                                    <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-background/50 px-4 py-8 text-center text-sm text-muted-foreground">
+                                        当前筛选下没有模型
+                                    </div>
+                                ) : null}
                             </div>
-                        ) : null}
-                    </div>
+                        </>
+                    )}
                 </div>
             )}
         </Droppable>
     );
 }
 
-function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteChannelAccount }) {
+function SiteChannelTableView({
+    models,
+    pendingModelKeys,
+    selectedModelKeys,
+    compactMode,
+    tableSort,
+    highlightedModelKey,
+    onToggleModelSelection,
+    onToggleAllVisible,
+    onSortChange,
+    onMoveModel,
+    onToggleDisabled,
+    onNavigateToChannel,
+    registerModelRef,
+}: {
+    models: SiteModelView[];
+    pendingModelKeys: Set<string>;
+    selectedModelKeys: Set<string>;
+    compactMode: boolean;
+    tableSort: SiteChannelTableSort;
+    highlightedModelKey: string | null;
+    onToggleModelSelection: (modelKey: string, checked: boolean) => void;
+    onToggleAllVisible: (checked: boolean) => void;
+    onSortChange: (field: SiteChannelTableSortField) => void;
+    onMoveModel: (model: SiteModelView, routeType: SiteModelRouteType) => void;
+    onToggleDisabled: (model: SiteModelView) => void;
+    onNavigateToChannel: (channelId: number) => void;
+    registerModelRef: (modelKey: string, node: HTMLElement | null) => void;
+}) {
+    const allVisibleSelected = models.length > 0 && models.every((model) => selectedModelKeys.has(makeModelKey(model.group_key, model.model_name)));
+
+    const renderSortHead = (field: SiteChannelTableSortField, label: string) => (
+        <button
+            type="button"
+            onClick={() => onSortChange(field)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+        >
+            <span>{label}</span>
+            <ArrowUpDown className={cn('size-3.5', tableSort.field === field && 'text-foreground')} />
+        </button>
+    );
+
+    return (
+        <div className="overflow-hidden rounded-3xl border border-border/70 bg-card/70">
+            <Table className="min-w-[74rem]">
+                <TableHeader>
+                    <TableRow>
+                        <TableHead className="w-12">
+                            <SelectionCheckbox
+                                checked={allVisibleSelected}
+                                disabled={models.length === 0}
+                                ariaLabel="选择当前可见模型"
+                                onCheckedChange={onToggleAllVisible}
+                            />
+                        </TableHead>
+                        <TableHead>{renderSortHead('model_name', '模型')}</TableHead>
+                        <TableHead>{renderSortHead('group_name', '分组')}</TableHead>
+                        <TableHead>{renderSortHead('route_type', '端点格式')}</TableHead>
+                        <TableHead>来源</TableHead>
+                        <TableHead>Key</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead>{renderSortHead('last_request_at', '最近请求')}</TableHead>
+                        <TableHead>渠道</TableHead>
+                        <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    {models.map((model) => {
+                        const modelKey = makeModelKey(model.group_key, model.model_name);
+                        const { Avatar: ModelAvatar } = getModelIcon(model.model_name);
+                        const isPending = pendingModelKeys.has(modelKey);
+                        const isSelected = selectedModelKeys.has(modelKey);
+                        const historyCount = getModelHistoryCount(model);
+
+                        return (
+                            <TableRow
+                                key={modelKey}
+                                ref={(node) => registerModelRef(modelKey, node)}
+                                data-state={isSelected ? 'selected' : undefined}
+                                className={cn(
+                                    model.disabled && 'opacity-60',
+                                    isPending && 'opacity-70',
+                                    highlightedModelKey === modelKey && 'ring-2 ring-primary/35 ring-inset',
+                                )}
+                            >
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <SelectionCheckbox
+                                        checked={isSelected}
+                                        disabled={isPending}
+                                        ariaLabel={`选择模型 ${model.model_name}`}
+                                        onCheckedChange={(checked) => onToggleModelSelection(modelKey, checked)}
+                                    />
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        <ModelAvatar size={18} />
+                                        <div className="min-w-0">
+                                            <div className="truncate text-sm font-medium">{model.model_name}</div>
+                                            {!compactMode ? (
+                                                <div className="text-[11px] text-muted-foreground">
+                                                    {model.manual_override ? '手动覆盖' : '自动映射'}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <div className="max-w-[14rem] truncate text-sm">{model.group_name || model.group_key}</div>
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(model.route_type))}>
+                                        {routeTypeLabel(model.route_type)}
+                                    </Badge>
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteSourceTone(model.route_source))}>
+                                        {routeSourceLabel(model.route_source)}
+                                    </Badge>
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <div className="text-sm">
+                                        {model.enabled_key_count}/{model.key_count}
+                                    </div>
+                                    {!model.has_keys ? (
+                                        <div className="text-[11px] text-amber-700 dark:text-amber-300">缺少 Key</div>
+                                    ) : null}
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {model.disabled ? (
+                                            <Badge variant="outline" className="h-6 px-2 text-[11px] border-destructive/30 bg-destructive/10 text-destructive">
+                                                已禁用
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="outline" className="h-6 px-2 text-[11px] border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                                已启用
+                                            </Badge>
+                                        )}
+                                        {modelNeedsAttention(model) ? (
+                                            <Badge variant="outline" className="h-6 px-2 text-[11px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                                待处理
+                                            </Badge>
+                                        ) : null}
+                                    </div>
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    <div className="text-sm">{formatHistoryTime(getModelLastRequestAt(model))}</div>
+                                    <div className="text-[11px] text-muted-foreground">{historyCount} 次记录</div>
+                                </TableCell>
+                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                    {model.projected_channel_id ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onNavigateToChannel(model.projected_channel_id!)}
+                                            className="inline-flex rounded-full border border-border px-2 py-1 text-xs transition hover:border-primary/30 hover:bg-primary/5"
+                                        >
+                                            #{model.projected_channel_id}
+                                        </button>
+                                    ) : (
+                                        <span className="text-sm text-muted-foreground">-</span>
+                                    )}
+                                </TableCell>
+                                <TableCell className={cn('text-right', compactMode ? 'py-2' : undefined)}>
+                                    <div className="flex justify-end gap-1">
+                                        <MoveRoutePopover
+                                            currentRouteType={model.route_type}
+                                            disabled={isPending || model.disabled}
+                                            onMove={(routeType) => onMoveModel(model, routeType)}
+                                        />
+                                        <Tooltip side="top" align="end">
+                                            <TooltipTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                                >
+                                                    <History className="size-4" />
+                                                </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent className="max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl">
+                                                <HistorySummary model={model} />
+                                            </TooltipContent>
+                                        </Tooltip>
+                                        <button
+                                            type="button"
+                                            onClick={() => onToggleDisabled(model)}
+                                            disabled={isPending}
+                                            className={cn(
+                                                'rounded-lg p-1 transition',
+                                                model.disabled
+                                                    ? 'text-destructive hover:bg-destructive/10'
+                                                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                                            )}
+                                        >
+                                            <CircleOff className="size-4" />
+                                        </button>
+                                    </div>
+                                </TableCell>
+                            </TableRow>
+                        );
+                    })}
+                </TableBody>
+            </Table>
+        </div>
+    );
+}
+
+function SiteAccountPanel({
+    siteId,
+    account,
+    jumpRequest,
+    onJumpHandled,
+    onNavigateToSiteAccount,
+    onNavigateToChannel,
+}: {
+    siteId: number;
+    account: SiteChannelAccount;
+    jumpRequest: SiteChannelPendingJump | null;
+    onJumpHandled: (requestId: number) => void;
+    onNavigateToSiteAccount: () => void;
+    onNavigateToChannel: (channelId: number) => void;
+}) {
     const [activeFilter, setActiveFilter] = useState<SiteChannelGroupFilter>(SITE_GROUP_FILTER_ALL);
     const [pendingRouteOverrides, setPendingRouteOverrides] = useState<Record<string, SiteModelRouteType>>({});
     const [pendingDisabledOverrides, setPendingDisabledOverrides] = useState<Record<string, boolean>>({});
     const [pendingModelKeys, setPendingModelKeys] = useState<Set<string>>(new Set());
+    const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set());
+    const [creatingGroup, setCreatingGroup] = useState<SiteChannelGroup | null>(null);
+    const [quickCreateName, setQuickCreateName] = useState('');
+    const [highlightedModelKey, setHighlightedModelKey] = useState<string | null>(null);
+    const [modelSearchTerm, setModelSearchTerm] = useState('');
+    const [bulkMoveTarget, setBulkMoveTarget] = useState<SiteModelRouteType>('openai_chat');
+    const modelElementRefs = useRef<Map<string, HTMLElement>>(new Map());
+    const panelKey = `${siteId}:${account.account_id}`;
 
+    const panelPreferences = useSiteChannelPanelViewStore(
+        (state) => state.panels[panelKey] ?? DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES,
+    );
+    const setViewMode = useSiteChannelPanelViewStore((state) => state.setViewMode);
+    const setCompactMode = useSiteChannelPanelViewStore((state) => state.setCompactMode);
+    const setCollapseEmptyColumns = useSiteChannelPanelViewStore((state) => state.setCollapseEmptyColumns);
+    const setQuickFilters = useSiteChannelPanelViewStore((state) => state.setQuickFilters);
+    const setTableSort = useSiteChannelPanelViewStore((state) => state.setTableSort);
+
+    const createKeyMutation = useCreateSiteChannelKey(siteId, account.account_id);
     const routeMutation = useUpdateSiteChannelModelRoutes(siteId, account.account_id);
     const disabledMutation = useUpdateSiteChannelModelDisabled(siteId, account.account_id);
     const resetMutation = useResetSiteChannelModelRoutes(siteId, account.account_id);
+
+    const registerModelRef = useCallback((modelKey: string, node: HTMLElement | null) => {
+        if (node) {
+            modelElementRefs.current.set(modelKey, node);
+            return;
+        }
+        modelElementRefs.current.delete(modelKey);
+    }, []);
+
+    const forcedModelKey =
+        jumpRequest?.target.kind === 'site-channel-model' &&
+        jumpRequest.target.siteId === siteId &&
+        jumpRequest.target.accountId === account.account_id
+            ? makeModelKey(getBaseGroupKey(jumpRequest.target.groupKey), jumpRequest.target.modelName)
+            : null;
 
     const visibleGroups = useMemo(
         () => filterGroups(account.groups, activeFilter),
         [account.groups, activeFilter],
     );
 
-    const visibleModels = useMemo(() => {
-        return flattenAccountModels(account, activeFilter)
-            .map((model) => {
-                const modelKey = makeModelKey(model.group_key, model.model_name);
-                const nextRouteType = pendingRouteOverrides[modelKey];
-                const nextDisabled = pendingDisabledOverrides[modelKey];
+    const scopedModels = useMemo(() => {
+        return flattenAccountModels(account, activeFilter).map((model) => {
+            const modelKey = makeModelKey(model.group_key, model.model_name);
+            const nextRouteType = pendingRouteOverrides[modelKey];
+            const nextDisabled = pendingDisabledOverrides[modelKey];
 
-                return {
-                    ...model,
-                    route_type: nextRouteType ?? model.route_type,
-                    route_source: nextRouteType ? 'manual_override' : model.route_source,
-                    manual_override: nextRouteType ? true : model.manual_override,
-                    disabled: nextDisabled ?? model.disabled,
-                };
-            })
-            .sort((a, b) => {
-                const byGroup = (a.group_name || a.group_key).localeCompare(b.group_name || b.group_key);
-                if (byGroup !== 0) return byGroup;
-                return a.model_name.localeCompare(b.model_name);
-            });
+            return {
+                ...model,
+                route_type: nextRouteType ?? model.route_type,
+                route_source: nextRouteType ? 'manual_override' : model.route_source,
+                manual_override: nextRouteType ? true : model.manual_override,
+                disabled: nextDisabled ?? model.disabled,
+            };
+        });
     }, [account, activeFilter, pendingRouteOverrides, pendingDisabledOverrides]);
+
+    const filteredModels = useMemo(() => {
+        const normalizedSearch = modelSearchTerm.trim().toLowerCase();
+
+        return scopedModels.filter((model) => {
+            const modelKey = makeModelKey(model.group_key, model.model_name);
+            if (forcedModelKey === modelKey) return true;
+
+            const matchesSearch =
+                !normalizedSearch ||
+                model.model_name.toLowerCase().includes(normalizedSearch) ||
+                (model.group_name || model.group_key).toLowerCase().includes(normalizedSearch);
+
+            if (!matchesSearch) return false;
+
+            return matchesQuickFilters(model, panelPreferences.quickFilters);
+        });
+    }, [scopedModels, modelSearchTerm, panelPreferences.quickFilters, forcedModelKey]);
+
+    const visibleModels = useMemo(
+        () => sortModels(filteredModels, panelPreferences.tableSort),
+        [filteredModels, panelPreferences.tableSort],
+    );
+
+    const visibleModelMap = useMemo(
+        () =>
+            new Map(
+                visibleModels.map((model) => [makeModelKey(model.group_key, model.model_name), model] as const),
+            ),
+        [visibleModels],
+    );
 
     const groupedModels = useMemo(() => {
         const next: Record<SiteModelRouteType, SiteModelView[]> = {
@@ -419,7 +1065,178 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
         () => account.groups.filter((group) => !group.has_keys),
         [account.groups],
     );
+    const selectedModels = useMemo(
+        () => Array.from(selectedModelKeys).map((key) => visibleModelMap.get(key)).filter((model): model is SiteModelView => !!model),
+        [selectedModelKeys, visibleModelMap],
+    );
     const hasPendingChanges = pendingModelKeys.size > 0 || routeMutation.isPending || disabledMutation.isPending;
+
+    useEffect(() => {
+        if (!jumpRequest || jumpRequest.target.kind !== 'site-channel-model') return;
+        const target = jumpRequest.target;
+        if (target.siteId !== siteId || target.accountId !== account.account_id) return;
+
+        const targetGroupKey = getBaseGroupKey(target.groupKey);
+        const targetFilter = createGroupFilter(targetGroupKey);
+        if (!isSameGroupFilter(activeFilter, targetFilter)) {
+            const frameId = window.requestAnimationFrame(() => {
+                setActiveFilter(targetFilter);
+            });
+            return () => window.cancelAnimationFrame(frameId);
+        }
+
+        const modelKey = makeModelKey(targetGroupKey, target.modelName);
+        const node = modelElementRefs.current.get(modelKey);
+        if (!node) return;
+
+        const timer = window.setTimeout(() => {
+            node.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            setHighlightedModelKey(modelKey);
+            window.setTimeout(() => {
+                setHighlightedModelKey((current) => (current === modelKey ? null : current));
+            }, 1800);
+            onJumpHandled(jumpRequest.requestId);
+        }, 80);
+
+        return () => window.clearTimeout(timer);
+    }, [jumpRequest, siteId, account.account_id, activeFilter, onJumpHandled]);
+
+    const setSelectionForKeys = useCallback((modelKeys: string[], checked: boolean) => {
+        if (modelKeys.length === 0) return;
+
+        setSelectedModelKeys((current) => {
+            const next = new Set(current);
+            for (const modelKey of modelKeys) {
+                if (checked) {
+                    next.add(modelKey);
+                } else {
+                    next.delete(modelKey);
+                }
+            }
+            return next;
+        });
+    }, []);
+
+    const handleToggleModelSelection = useCallback((modelKey: string, checked: boolean) => {
+        setSelectionForKeys([modelKey], checked);
+    }, [setSelectionForKeys]);
+
+    const handleToggleAllVisible = useCallback((checked: boolean) => {
+        setSelectionForKeys(
+            visibleModels.map((model) => makeModelKey(model.group_key, model.model_name)),
+            checked,
+        );
+    }, [visibleModels, setSelectionForKeys]);
+
+    const applyRouteChange = useCallback((models: SiteModelView[], nextRouteType: SiteModelRouteType) => {
+        const eligibleModels = models.filter((model) => {
+            const modelKey = makeModelKey(model.group_key, model.model_name);
+            return !pendingModelKeys.has(modelKey) && !model.disabled && model.route_type !== nextRouteType;
+        });
+
+        if (eligibleModels.length === 0) return;
+
+        const modelKeys = eligibleModels.map((model) => makeModelKey(model.group_key, model.model_name));
+        const payload: SiteModelRouteUpdateRequest[] = eligibleModels.map((model) => ({
+            group_key: model.group_key,
+            model_name: model.model_name,
+            route_type: nextRouteType,
+        }));
+
+        setPendingRouteOverrides((current) => {
+            const next = { ...current };
+            for (const modelKey of modelKeys) {
+                next[modelKey] = nextRouteType;
+            }
+            return next;
+        });
+        setPendingModelKeys((current) => addPendingKeys(current, modelKeys));
+
+        routeMutation.mutate(payload, {
+            onSuccess: () => {
+                setPendingRouteOverrides((current) => removeKeys(current, modelKeys));
+                toast.success(payload.length === 1 ? '模型请求端点格式已更新' : `已更新 ${payload.length} 个模型的请求端点格式`);
+            },
+            onError: (error) => {
+                setPendingRouteOverrides((current) => removeKeys(current, modelKeys));
+                toast.error(getErrorMessage(error, '更新模型请求端点格式失败'));
+            },
+            onSettled: () => {
+                setPendingModelKeys((current) => removePendingKeys(current, modelKeys));
+            },
+        });
+    }, [pendingModelKeys, routeMutation]);
+
+    const applyDisabledChange = useCallback((models: SiteModelView[], nextDisabled: boolean) => {
+        const eligibleModels = models.filter((model) => {
+            const modelKey = makeModelKey(model.group_key, model.model_name);
+            return !pendingModelKeys.has(modelKey) && model.disabled !== nextDisabled;
+        });
+
+        if (eligibleModels.length === 0) return;
+
+        const modelKeys = eligibleModels.map((model) => makeModelKey(model.group_key, model.model_name));
+        const payload: SiteModelDisableUpdateRequest[] = eligibleModels.map((model) => ({
+            group_key: model.group_key,
+            model_name: model.model_name,
+            disabled: nextDisabled,
+        }));
+
+        setPendingDisabledOverrides((current) => {
+            const next = { ...current };
+            for (const modelKey of modelKeys) {
+                next[modelKey] = nextDisabled;
+            }
+            return next;
+        });
+        setPendingModelKeys((current) => addPendingKeys(current, modelKeys));
+
+        disabledMutation.mutate(payload, {
+            onSuccess: () => {
+                setPendingDisabledOverrides((current) => removeKeys(current, modelKeys));
+                toast.success(payload.length === 1 ? (nextDisabled ? '模型已禁用' : '模型已启用') : `${payload.length} 个模型已${nextDisabled ? '禁用' : '启用'}`);
+            },
+            onError: (error) => {
+                setPendingDisabledOverrides((current) => removeKeys(current, modelKeys));
+                toast.error(getErrorMessage(error, '更新模型禁用状态失败'));
+            },
+            onSettled: () => {
+                setPendingModelKeys((current) => removePendingKeys(current, modelKeys));
+            },
+        });
+    }, [pendingModelKeys, disabledMutation]);
+
+    const handleOpenCreateKey = (group: SiteChannelGroup) => {
+        setCreatingGroup(group);
+        setQuickCreateName('');
+    };
+
+    const handleCloseCreateKey = () => {
+        if (createKeyMutation.isPending) return;
+        setCreatingGroup(null);
+        setQuickCreateName('');
+    };
+
+    const handleCreateKey = () => {
+        if (!creatingGroup) return;
+
+        createKeyMutation.mutate(
+            {
+                group_key: creatingGroup.group_key,
+                name: quickCreateName.trim() || undefined,
+            },
+            {
+                onSuccess: () => {
+                    toast.success(`分组「${creatingGroup.group_name || creatingGroup.group_key}」已创建 Key 并完成同步`);
+                    setCreatingGroup(null);
+                    setQuickCreateName('');
+                },
+                onError: (error) => {
+                    toast.error(getErrorMessage(error, '快捷创建 Key 失败'));
+                },
+            },
+        );
+    };
 
     const handleRouteDrop = (result: DropResult) => {
         const { destination, draggableId } = result;
@@ -436,70 +1253,31 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
 
         if (currentDisabled || currentRouteType === nextRouteType) return;
 
-        setPendingRouteOverrides((current) => ({
-            ...current,
-            [draggableId]: nextRouteType,
-        }));
-        setPendingModelKeys((current) => addPendingKey(current, draggableId));
+        const visibleTarget = visibleModelMap.get(draggableId);
+        if (visibleTarget) {
+            applyRouteChange([visibleTarget], nextRouteType);
+            return;
+        }
 
-        const payload: SiteModelRouteUpdateRequest[] = [
-            {
-                group_key: target.group.group_key,
-                model_name: target.model.model_name,
-                route_type: nextRouteType,
-            },
-        ];
-
-        routeMutation.mutate(payload, {
-            onSuccess: () => {
-                setPendingRouteOverrides((current) => removeKey(current, draggableId));
-                toast.success('模型请求端点格式已更新');
-            },
-            onError: (error) => {
-                setPendingRouteOverrides((current) => removeKey(current, draggableId));
-                toast.error(getErrorMessage(error, '更新模型请求端点格式失败'));
-            },
-            onSettled: () => {
-                setPendingModelKeys((current) => removePendingKey(current, draggableId));
-            },
-        });
+        applyRouteChange(
+            [
+                {
+                    ...target.model,
+                    group_key: target.group.group_key,
+                    group_name: target.group.group_name,
+                    key_count: target.group.key_count,
+                    enabled_key_count: target.group.enabled_key_count,
+                    has_keys: target.group.has_keys,
+                    has_projected_channel: target.group.has_projected_channel,
+                    projected_channel_ids: target.group.projected_channel_ids,
+                },
+            ],
+            nextRouteType,
+        );
     };
 
     const handleToggleDisabled = (model: SiteModelView) => {
-        const modelKey = makeModelKey(model.group_key, model.model_name);
-        const target = findModel(account, modelKey);
-        if (!target || pendingModelKeys.has(modelKey)) return;
-
-        const currentDisabled = pendingDisabledOverrides[modelKey] ?? target.model.disabled;
-        const nextDisabled = !currentDisabled;
-
-        setPendingDisabledOverrides((current) => ({
-            ...current,
-            [modelKey]: nextDisabled,
-        }));
-        setPendingModelKeys((current) => addPendingKey(current, modelKey));
-
-        const payload: SiteModelDisableUpdateRequest[] = [
-            {
-                group_key: target.group.group_key,
-                model_name: target.model.model_name,
-                disabled: nextDisabled,
-            },
-        ];
-
-        disabledMutation.mutate(payload, {
-            onSuccess: () => {
-                setPendingDisabledOverrides((current) => removeKey(current, modelKey));
-                toast.success(nextDisabled ? '模型已禁用' : '模型已启用');
-            },
-            onError: (error) => {
-                setPendingDisabledOverrides((current) => removeKey(current, modelKey));
-                toast.error(getErrorMessage(error, '更新模型禁用状态失败'));
-            },
-            onSettled: () => {
-                setPendingModelKeys((current) => removePendingKey(current, modelKey));
-            },
-        });
+        applyDisabledChange([model], !model.disabled);
     };
 
     const handleResetRoutes = () => {
@@ -509,10 +1287,32 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
                 toast.success('模型请求端点格式已重置');
             },
             onError: (error) => {
-                toast.error(getErrorMessage(error, '重置模型请求端点格式失败'));
+                toast.error(getErrorMessage(error, '重置模型端点格式失败'));
             },
         });
     };
+
+    const toggleQuickFilter = (filter: SiteChannelQuickFilter) => {
+        const next = panelPreferences.quickFilters.includes(filter)
+            ? panelPreferences.quickFilters.filter((item) => item !== filter)
+            : QUICK_FILTER_OPTIONS.map((item) => item.key).filter((key) => key === filter || panelPreferences.quickFilters.includes(key));
+
+        setQuickFilters(panelKey, next);
+    };
+
+    const handleSortChange = (field: SiteChannelTableSortField) => {
+        const nextSort: SiteChannelTableSort = {
+            field,
+            order:
+                panelPreferences.tableSort.field === field && panelPreferences.tableSort.order === 'asc'
+                    ? 'desc'
+                    : 'asc',
+        };
+        setTableSort(panelKey, nextSort);
+    };
+
+    const selectedVisibleCount = selectedModels.length;
+    const shouldCollapseEmptyColumns = panelPreferences.collapseEmptyColumns && visibleModels.length > 0;
 
     return (
         <div className="space-y-4">
@@ -573,26 +1373,65 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
             </div>
 
             <div className="flex flex-col gap-3 rounded-3xl border border-border/70 bg-card/70 p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="space-y-1">
                         <div className="flex items-center gap-2 text-sm font-semibold">
                             <FolderTree className="size-4 text-primary" />
                             分组筛选
                         </div>
                         <div className="text-xs text-muted-foreground">
-                            当前筛选下显示 {groupFilterCount(account.groups, activeFilter)} 个模型
+                            分组命中 {scopedModels.length} 个模型，当前可见 {visibleModels.length} 个
                         </div>
                     </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-2xl"
-                        onClick={handleResetRoutes}
-                        disabled={resetMutation.isPending || hasPendingChanges}
-                    >
-                        <RefreshCw className={cn('size-4', resetMutation.isPending && 'animate-spin')} />
-                        {resetMutation.isPending ? '重置中...' : '重置模型端点格式'}
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="inline-flex rounded-2xl border border-border/70 bg-background/80 p-1">
+                            <button
+                                type="button"
+                                onClick={() => setViewMode(panelKey, 'board')}
+                                className={cn(
+                                    'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition',
+                                    panelPreferences.viewMode === 'board'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:text-foreground',
+                                )}
+                            >
+                                <LayoutGrid className="size-3.5" />
+                                看板视图
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode(panelKey, 'table')}
+                                className={cn(
+                                    'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition',
+                                    panelPreferences.viewMode === 'table'
+                                        ? 'bg-primary text-primary-foreground'
+                                        : 'text-muted-foreground hover:text-foreground',
+                                )}
+                            >
+                                <List className="size-3.5" />
+                                列表视图
+                            </button>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={onNavigateToSiteAccount}
+                        >
+                            <Globe2 className="size-4" />
+                            站点页账号
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={handleResetRoutes}
+                            disabled={resetMutation.isPending || hasPendingChanges}
+                        >
+                            <RefreshCw className={cn('size-4', resetMutation.isPending && 'animate-spin')} />
+                            {resetMutation.isPending ? '重置中...' : '重置模型端点格式'}
+                        </Button>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto pb-1">
@@ -648,6 +1487,66 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
                     </div>
                 </div>
 
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setCompactMode(panelKey, !panelPreferences.compactMode)}
+                            className={cn(
+                                'rounded-full border px-3 py-1.5 text-xs transition',
+                                panelPreferences.compactMode
+                                    ? 'border-primary/30 bg-primary text-primary-foreground'
+                                    : 'border-border bg-background hover:bg-muted/50',
+                            )}
+                        >
+                            紧凑模式
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setCollapseEmptyColumns(panelKey, !panelPreferences.collapseEmptyColumns)}
+                            className={cn(
+                                'rounded-full border px-3 py-1.5 text-xs transition',
+                                panelPreferences.collapseEmptyColumns
+                                    ? 'border-primary/30 bg-primary text-primary-foreground'
+                                    : 'border-border bg-background hover:bg-muted/50',
+                            )}
+                        >
+                            收起空列
+                        </button>
+                    </div>
+
+                    <div className="relative w-full max-w-md">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            value={modelSearchTerm}
+                            onChange={(event) => setModelSearchTerm(event.target.value)}
+                            placeholder="搜索模型名称、分组..."
+                            className="h-10 rounded-2xl pl-9"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                    {QUICK_FILTER_OPTIONS.map((option) => {
+                        const active = panelPreferences.quickFilters.includes(option.key);
+                        return (
+                            <button
+                                key={option.key}
+                                type="button"
+                                onClick={() => toggleQuickFilter(option.key)}
+                                className={cn(
+                                    'rounded-full border px-3 py-1.5 text-xs transition',
+                                    active
+                                        ? 'border-primary/30 bg-primary text-primary-foreground'
+                                        : 'border-border bg-background hover:bg-muted/50',
+                                )}
+                            >
+                                {option.label}
+                            </button>
+                        );
+                    })}
+                </div>
+
                 {visibleGroups.some((group) => !group.has_keys) ? (
                     <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
                         <div className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
@@ -664,12 +1563,13 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
                                         variant="outline"
                                         size="sm"
                                         className="rounded-full border-amber-500/30 bg-white/60 text-amber-800 hover:bg-white dark:bg-background/40 dark:text-amber-200"
-                                        onClick={() => {
-                                            toast.info(`分组「${group.group_name || group.group_key}」的快捷创建 Key 功能暂未接入`);
-                                        }}
+                                        onClick={() => handleOpenCreateKey(group)}
+                                        disabled={createKeyMutation.isPending}
                                     >
                                         {group.group_name || group.group_key}
-                                        <span className="text-[10px] text-amber-700/80 dark:text-amber-200/80">占位</span>
+                                        <span className="text-[10px] text-amber-700/80 dark:text-amber-200/80">
+                                            {createKeyMutation.isPending && creatingGroup?.group_key === group.group_key ? '创建中...' : '快捷创建'}
+                                        </span>
                                     </Button>
                                 ))}
                         </div>
@@ -677,32 +1577,182 @@ function SiteAccountPanel({ siteId, account }: { siteId: number; account: SiteCh
                 ) : null}
             </div>
 
-            <div className="overflow-x-auto pb-2">
-                <DragDropContext onDragEnd={handleRouteDrop}>
-                    <div className="grid min-w-max grid-cols-6 gap-4">
-                        {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
-                            <RouteColumn
-                                key={`${ROUTE_COLUMN_KEY_PREFIX}-${routeType}`}
-                                routeType={routeType}
-                                models={groupedModels[routeType]}
-                                pendingModelKeys={pendingModelKeys}
-                                onToggleDisabled={handleToggleDisabled}
+            <SiteChannelBulkActionBar
+                selectedCount={selectedVisibleCount}
+                bulkMoveTarget={bulkMoveTarget}
+                disabled={hasPendingChanges}
+                onBulkMoveTargetChange={setBulkMoveTarget}
+                onBulkMove={() => applyRouteChange(selectedModels, bulkMoveTarget)}
+                onEnableSelected={() => applyDisabledChange(selectedModels, false)}
+                onDisableSelected={() => applyDisabledChange(selectedModels, true)}
+                onClearSelection={() => setSelectedModelKeys(new Set())}
+            />
+
+            <Dialog open={!!creatingGroup} onOpenChange={(open) => !open && handleCloseCreateKey()}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>快捷创建站点 Key</DialogTitle>
+                        <DialogDescription>
+                            为分组 {creatingGroup?.group_name || creatingGroup?.group_key || '-'} 在账号 {account.account_name} 下创建新 Key，并在创建后立即同步当前卡片。
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <div className="rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                            分组 Key：<span className="font-medium text-foreground">{creatingGroup?.group_key || '-'}</span>
+                        </div>
+
+                        <label className="grid gap-1.5 text-xs text-muted-foreground">
+                            Key 名称（可选）
+                            <Input
+                                value={quickCreateName}
+                                onChange={(event) => setQuickCreateName(event.target.value)}
+                                placeholder="留空时自动生成"
+                                disabled={createKeyMutation.isPending}
+                                className="h-10 rounded-2xl"
                             />
-                        ))}
+                        </label>
                     </div>
-                </DragDropContext>
-            </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={handleCloseCreateKey}
+                            disabled={createKeyMutation.isPending}
+                        >
+                            取消
+                        </Button>
+                        <Button
+                            type="button"
+                            className="rounded-2xl"
+                            onClick={handleCreateKey}
+                            disabled={createKeyMutation.isPending || !creatingGroup}
+                        >
+                            <RefreshCw className={cn('size-4', createKeyMutation.isPending && 'animate-spin')} />
+                            {createKeyMutation.isPending ? '创建并同步中...' : '创建并同步 Key'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {visibleModels.length === 0 ? (
+                <div className="flex min-h-[18rem] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+                    当前筛选和搜索条件下没有匹配模型
+                </div>
+            ) : panelPreferences.viewMode === 'board' ? (
+                <div className="overflow-x-auto pb-2">
+                    <DragDropContext onDragEnd={handleRouteDrop}>
+                        <div className="grid min-w-max grid-cols-6 gap-4">
+                            {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
+                                <RouteColumn
+                                    key={`${ROUTE_COLUMN_KEY_PREFIX}-${routeType}`}
+                                    routeType={routeType}
+                                    models={groupedModels[routeType]}
+                                    pendingModelKeys={pendingModelKeys}
+                                    selectedModelKeys={selectedModelKeys}
+                                    compactMode={panelPreferences.compactMode}
+                                    collapseWhenEmpty={shouldCollapseEmptyColumns}
+                                    onToggleModelSelection={handleToggleModelSelection}
+                                    onToggleColumnSelection={setSelectionForKeys}
+                                    onMoveModel={(model, nextRouteType) => applyRouteChange([model], nextRouteType)}
+                                    onToggleDisabled={handleToggleDisabled}
+                                    onNavigateToChannel={onNavigateToChannel}
+                                    registerModelRef={registerModelRef}
+                                    highlightedModelKey={highlightedModelKey}
+                                />
+                            ))}
+                        </div>
+                    </DragDropContext>
+                </div>
+            ) : (
+                <div className="overflow-x-auto pb-2">
+                    <SiteChannelTableView
+                        models={visibleModels}
+                        pendingModelKeys={pendingModelKeys}
+                        selectedModelKeys={selectedModelKeys}
+                        compactMode={panelPreferences.compactMode}
+                        tableSort={panelPreferences.tableSort}
+                        highlightedModelKey={highlightedModelKey}
+                        onToggleModelSelection={handleToggleModelSelection}
+                        onToggleAllVisible={handleToggleAllVisible}
+                        onSortChange={handleSortChange}
+                        onMoveModel={(model, nextRouteType) => applyRouteChange([model], nextRouteType)}
+                        onToggleDisabled={handleToggleDisabled}
+                        onNavigateToChannel={onNavigateToChannel}
+                        registerModelRef={registerModelRef}
+                    />
+                </div>
+            )}
         </div>
     );
 }
 
-function SiteChannelDialog({ card }: { card: SiteChannelCard }) {
+function SiteChannelDialog({
+    card,
+    jumpRequest,
+    onJumpHandled,
+    onNavigateToSite,
+    onNavigateToSiteAccount,
+    onNavigateToChannel,
+}: {
+    card: SiteChannelCard;
+    jumpRequest: SiteChannelPendingJump | null;
+    onJumpHandled: (requestId: number) => void;
+    onNavigateToSite: () => void;
+    onNavigateToSiteAccount: (accountId: number) => void;
+    onNavigateToChannel: (channelId: number) => void;
+}) {
     const [activeAccountId, setActiveAccountId] = useState<number | null>(card.accounts[0]?.account_id ?? null);
+    const [highlightedAccountId, setHighlightedAccountId] = useState<number | null>(null);
+    const accountTabRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
     const resolvedAccount =
         card.accounts.find((account) => account.account_id === activeAccountId) ??
         card.accounts[0] ??
         null;
+
+    const setAccountTabRef = useCallback((accountId: number, node: HTMLButtonElement | null) => {
+        if (node) {
+            accountTabRefs.current.set(accountId, node);
+            return;
+        }
+        accountTabRefs.current.delete(accountId);
+    }, []);
+
+    useEffect(() => {
+        if (!jumpRequest) return;
+        if (jumpRequest.target.siteId !== card.site_id) return;
+        const target = jumpRequest.target;
+        if (target.kind === 'site-channel-card') return;
+
+        if (activeAccountId !== target.accountId) {
+            const frameId = window.requestAnimationFrame(() => {
+                setActiveAccountId(target.accountId);
+            });
+            return () => window.cancelAnimationFrame(frameId);
+        }
+
+        const node = accountTabRefs.current.get(target.accountId);
+        if (!node) return;
+
+        const timer = window.setTimeout(() => {
+            node.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            setHighlightedAccountId(target.accountId);
+            window.setTimeout(() => {
+                setHighlightedAccountId((current) =>
+                    current === target.accountId ? null : current,
+                );
+            }, 1800);
+
+            if (target.kind === 'site-channel-account') {
+                onJumpHandled(jumpRequest.requestId);
+            }
+        }, 80);
+
+        return () => window.clearTimeout(timer);
+    }, [jumpRequest, card.site_id, activeAccountId, onJumpHandled]);
 
     return (
         <div className="flex max-h-[88vh] flex-col overflow-hidden">
@@ -724,8 +1774,32 @@ function SiteChannelDialog({ card }: { card: SiteChannelCard }) {
                         {card.enabled ? '站点启用' : '站点停用'}
                     </Badge>
                 </DialogTitle>
-                <DialogDescription>
-                    站点渠道 · 统一管理分组、模型端点格式、请求历史和模型禁用
+                <DialogDescription className="space-y-3">
+                    <div>站点渠道 · 统一管理分组、模型端点格式、请求历史和模型禁用</div>
+                    <div className="flex flex-wrap gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={onNavigateToSite}
+                        >
+                            <Globe2 className="size-4" />
+                            站点页
+                        </Button>
+                        {resolvedAccount ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => onNavigateToSiteAccount(resolvedAccount.account_id)}
+                            >
+                                <Waypoints className="size-4" />
+                                站点页账号
+                            </Button>
+                        ) : null}
+                    </div>
                 </DialogDescription>
             </DialogHeader>
 
@@ -735,6 +1809,7 @@ function SiteChannelDialog({ card }: { card: SiteChannelCard }) {
                         {card.accounts.map((account) => (
                             <button
                                 key={account.account_id}
+                                ref={(node) => setAccountTabRef(account.account_id, node)}
                                 type="button"
                                 onClick={() => setActiveAccountId(account.account_id)}
                                 className={cn(
@@ -742,6 +1817,8 @@ function SiteChannelDialog({ card }: { card: SiteChannelCard }) {
                                     resolvedAccount?.account_id === account.account_id
                                         ? 'border-primary/30 bg-primary text-primary-foreground'
                                         : 'border-border bg-background hover:bg-muted/50',
+                                    highlightedAccountId === account.account_id &&
+                                        'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
                                 )}
                             >
                                 <div className="flex items-center justify-between gap-3">
@@ -777,7 +1854,15 @@ function SiteChannelDialog({ card }: { card: SiteChannelCard }) {
 
                 {resolvedAccount ? (
                     <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                        <SiteAccountPanel key={resolvedAccount.account_id} siteId={card.site_id} account={resolvedAccount} />
+                        <SiteAccountPanel
+                            key={resolvedAccount.account_id}
+                            siteId={card.site_id}
+                            account={resolvedAccount}
+                            jumpRequest={jumpRequest}
+                            onJumpHandled={onJumpHandled}
+                            onNavigateToSiteAccount={() => onNavigateToSiteAccount(resolvedAccount.account_id)}
+                            onNavigateToChannel={onNavigateToChannel}
+                        />
                     </div>
                 ) : (
                     <div className="flex min-h-[16rem] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 text-sm text-muted-foreground">
@@ -792,20 +1877,54 @@ function SiteChannelDialog({ card }: { card: SiteChannelCard }) {
 function SiteCard({
     card,
     layout,
+    jumpRequest,
+    highlighted,
+    registerCardRef,
+    onJumpHandled,
+    onNavigateToSite,
+    onNavigateToSiteAccount,
+    onNavigateToChannel,
 }: {
     card: SiteChannelCard;
     layout: 'grid' | 'list';
+    jumpRequest: SiteChannelPendingJump | null;
+    highlighted: boolean;
+    registerCardRef: (siteId: number, node: HTMLDivElement | null) => void;
+    onJumpHandled: (requestId: number) => void;
+    onNavigateToSite: () => void;
+    onNavigateToSiteAccount: (accountId: number) => void;
+    onNavigateToChannel: (channelId: number) => void;
 }) {
     const [open, setOpen] = useState(false);
     const summary = useMemo(() => collectSiteSummary(card), [card]);
     const isListLayout = layout === 'list';
 
+    const closeDialogAndNavigate = useCallback((navigate: () => void) => {
+        setOpen(false);
+        window.requestAnimationFrame(() => {
+            navigate();
+        });
+    }, []);
+
+    useEffect(() => {
+        if (!jumpRequest) return;
+        if (jumpRequest.target.siteId !== card.site_id) return;
+        if (jumpRequest.target.kind === 'site-channel-card' || open) return;
+
+        const frameId = window.requestAnimationFrame(() => {
+            setOpen(true);
+        });
+        return () => window.cancelAnimationFrame(frameId);
+    }, [jumpRequest, card.site_id, open]);
+
     return (
         <>
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className="w-full text-left"
+            <div
+                ref={(node) => registerCardRef(card.site_id, node)}
+                className={cn(
+                    'rounded-[1.75rem] transition-all',
+                    highlighted && 'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
+                )}
             >
                 <article
                     className={cn(
@@ -817,7 +1936,18 @@ function SiteCard({
                         containIntrinsicSize: isListLayout ? '260px' : '340px',
                     }}
                 >
-                    <div className={cn('flex min-w-0 flex-1 flex-col gap-4', isListLayout && 'md:max-w-[24rem]')}>
+                    <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setOpen(true)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setOpen(true);
+                            }
+                        }}
+                        className={cn('flex min-w-0 flex-1 flex-col gap-4 text-left outline-none', isListLayout && 'md:max-w-[24rem]')}
+                    >
                         <header className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                                 <div className="truncate text-lg font-bold">{card.site_name}</div>
@@ -884,29 +2014,62 @@ function SiteCard({
                                 </dd>
                             </div>
                         </dl>
-                    </div>
 
-                    <div className={cn('space-y-2', isListLayout ? 'md:min-w-[18rem] md:max-w-[22rem]' : '')}>
-                        <div className="text-xs font-medium text-muted-foreground">端点格式分布</div>
-                        <div className="flex flex-wrap gap-2">
-                            {SITE_ROUTE_COLUMN_ORDER.filter((routeType) => (summary.routeCounts.get(routeType) ?? 0) > 0).map((routeType) => (
-                                <Badge key={routeType} variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(routeType))}>
-                                    {routeTypeLabel(routeType)}
-                                    <span className="ml-1">{summary.routeCounts.get(routeType)}</span>
-                                </Badge>
-                            ))}
-                            {summary.routeCounts.size === 0 ? (
-                                <span className="text-xs text-muted-foreground">暂无模型分布</span>
-                            ) : null}
+                        <div className={cn('space-y-2', isListLayout ? 'md:min-w-[18rem] md:max-w-[22rem]' : '')}>
+                            <div className="text-xs font-medium text-muted-foreground">端点格式分布</div>
+                            <div className="flex flex-wrap gap-2">
+                                {SITE_ROUTE_COLUMN_ORDER.filter((routeType) => (summary.routeCounts.get(routeType) ?? 0) > 0).map((routeType) => (
+                                    <Badge key={routeType} variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(routeType))}>
+                                        {routeTypeLabel(routeType)}
+                                        <span className="ml-1">{summary.routeCounts.get(routeType)}</span>
+                                    </Badge>
+                                ))}
+                                {summary.routeCounts.size === 0 ? (
+                                    <span className="text-xs text-muted-foreground">暂无模型分布</span>
+                                ) : null}
+                            </div>
                         </div>
                     </div>
+
+                    <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={onNavigateToSite}
+                        >
+                            <Globe2 className="size-4" />
+                            站点页
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={() => setOpen(true)}
+                        >
+                            <Waypoints className="size-4" />
+                            管理站点渠道
+                        </Button>
+                    </div>
                 </article>
-            </button>
+            </div>
 
             <Dialog open={open} onOpenChange={setOpen}>
                 {open ? (
                     <DialogContent className="max-w-[min(96vw,92rem)] w-[min(96vw,92rem)] rounded-[2rem] p-0 sm:max-w-[min(96vw,92rem)]">
-                        <SiteChannelDialog card={card} />
+                        <SiteChannelDialog
+                            card={card}
+                            jumpRequest={jumpRequest?.target.siteId === card.site_id ? jumpRequest : null}
+                            onJumpHandled={onJumpHandled}
+                            onNavigateToSite={() => closeDialogAndNavigate(onNavigateToSite)}
+                            onNavigateToSiteAccount={(accountId) =>
+                                closeDialogAndNavigate(() => onNavigateToSiteAccount(accountId))
+                            }
+                            onNavigateToChannel={(channelId) => {
+                                closeDialogAndNavigate(() => onNavigateToChannel(channelId));
+                            }}
+                        />
                     </DialogContent>
                 ) : null}
             </Dialog>
@@ -928,18 +2091,38 @@ export function SiteChannelSection({
     layout: 'grid' | 'list';
 }) {
     const { data, isLoading, error } = useSiteChannelList();
+    const pendingJump = useJumpStore((state) => state.pending);
+    const clearPending = useJumpStore((state) => state.clearPending);
+    const requestJump = useJumpStore((state) => state.requestJump);
+    const [highlightedSiteId, setHighlightedSiteId] = useState<number | null>(null);
+    const siteCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+    const pendingSiteChannelJump = pendingJump && isSiteChannelJumpTarget(pendingJump.target)
+        ? pendingJump as SiteChannelPendingJump
+        : null;
+    const forcedSiteId = pendingSiteChannelJump?.target.siteId ?? null;
+
+    const registerCardRef = useCallback((siteId: number, node: HTMLDivElement | null) => {
+        if (node) {
+            siteCardRefs.current.set(siteId, node);
+            return;
+        }
+        siteCardRefs.current.delete(siteId);
+    }, []);
 
     const cards = useMemo(() => {
         const term = searchTerm.toLowerCase().trim();
         return (data ?? [])
             .filter((card) => card.account_count > 0)
             .filter((card) => {
+                if (card.site_id === forcedSiteId) return true;
                 if (!term) return true;
 
                 const accountNames = card.accounts.map((account) => account.account_name.toLowerCase());
                 return card.site_name.toLowerCase().includes(term) || accountNames.some((name) => name.includes(term));
             })
             .filter((card) => {
+                if (card.site_id === forcedSiteId) return true;
                 if (filter === 'enabled') return card.enabled;
                 if (filter === 'disabled') return !card.enabled;
                 return true;
@@ -950,7 +2133,29 @@ export function SiteChannelSection({
                     : a.site_id - b.site_id;
                 return sortOrder === 'asc' ? diff : -diff;
             });
-    }, [data, searchTerm, filter, sortField, sortOrder]);
+    }, [data, searchTerm, filter, sortField, sortOrder, forcedSiteId]);
+
+    useEffect(() => {
+        if (!pendingSiteChannelJump) return;
+        const node = siteCardRefs.current.get(pendingSiteChannelJump.target.siteId);
+        if (!node) return;
+
+        const timer = window.setTimeout(() => {
+            node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setHighlightedSiteId(pendingSiteChannelJump.target.siteId);
+            window.setTimeout(() => {
+                setHighlightedSiteId((current) =>
+                    current === pendingSiteChannelJump.target.siteId ? null : current,
+                );
+            }, 1800);
+
+            if (pendingSiteChannelJump.target.kind === 'site-channel-card') {
+                clearPending(pendingSiteChannelJump.requestId);
+            }
+        }, 80);
+
+        return () => window.clearTimeout(timer);
+    }, [pendingSiteChannelJump, clearPending, cards.length]);
 
     if (isLoading) {
         return (
@@ -991,7 +2196,22 @@ export function SiteChannelSection({
 
             <div className={cn('grid gap-4', layout === 'list' ? 'grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-3')}>
                 {cards.map((card) => (
-                    <SiteCard key={card.site_id} card={card} layout={layout} />
+                    <SiteCard
+                        key={card.site_id}
+                        card={card}
+                        layout={layout}
+                        jumpRequest={pendingSiteChannelJump?.target.siteId === card.site_id ? pendingSiteChannelJump : null}
+                        highlighted={highlightedSiteId === card.site_id}
+                        registerCardRef={registerCardRef}
+                        onJumpHandled={clearPending}
+                        onNavigateToSite={() => requestJump({ kind: 'site-card', siteId: card.site_id })}
+                        onNavigateToSiteAccount={(accountId) =>
+                            requestJump({ kind: 'site-account', siteId: card.site_id, accountId })
+                        }
+                        onNavigateToChannel={(channelId) =>
+                            requestJump({ kind: 'channel-card', channelId })
+                        }
+                    />
                 ))}
             </div>
         </section>

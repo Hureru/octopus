@@ -16,12 +16,14 @@ import { useNavStore, type NavItem } from '@/components/modules/navbar';
 import { CreateDialogContent as ChannelCreateContent } from '@/components/modules/channel/Create';
 import { CreateDialogContent as GroupCreateContent } from '@/components/modules/group/Create';
 import { CreateDialogContent as ModelCreateContent } from '@/components/modules/model/Create';
+import { useSiteUIStore } from '@/components/modules/site/ui-store';
 import { useTranslations } from 'next-intl';
 import { useSearchStore } from './search-store';
 import {
     useToolbarViewOptionsStore,
     TOOLBAR_PAGES,
     type ToolbarPage,
+    type SiteFilter,
     type ChannelFilter,
     type GroupFilter,
     type ModelFilter,
@@ -32,6 +34,7 @@ import {
 const CHANNEL_FILTER_OPTIONS: ChannelFilter[] = ['all', 'enabled', 'disabled'];
 const GROUP_FILTER_OPTIONS: GroupFilter[] = ['all', 'with-members', 'empty'];
 const MODEL_FILTER_OPTIONS: ModelFilter[] = ['all', 'priced', 'free'];
+const SITE_FILTER_OPTIONS: SiteFilter[] = ['all', 'abnormal', 'enabled', 'disabled', 'pinned'];
 type CombinedSortOption = {
     value: `${ToolbarSortField}-${ToolbarSortOrder}`;
     field: ToolbarSortField;
@@ -51,6 +54,8 @@ function isToolbarPage(item: NavItem): item is ToolbarPage {
 
 function CreateDialogContent({ activeItem }: { activeItem: ToolbarPage }) {
     switch (activeItem) {
+        case 'site':
+            return null;
         case 'channel':
             return <ChannelCreateContent />;
         case 'group':
@@ -74,19 +79,33 @@ export function Toolbar() {
     const setLayout = useToolbarViewOptionsStore((s) => s.setLayout);
     const setSortConfig = useToolbarViewOptionsStore((s) => s.setSortConfig);
     const setSortOrder = useToolbarViewOptionsStore((s) => s.setSortOrder);
+    const siteFilter = useToolbarViewOptionsStore((s) => s.siteFilter);
     const channelFilter = useToolbarViewOptionsStore((s) => s.channelFilter);
     const groupFilter = useToolbarViewOptionsStore((s) => s.groupFilter);
     const modelFilter = useToolbarViewOptionsStore((s) => s.modelFilter);
+    const setSiteFilter = useToolbarViewOptionsStore((s) => s.setSiteFilter);
     const setChannelFilter = useToolbarViewOptionsStore((s) => s.setChannelFilter);
     const setGroupFilter = useToolbarViewOptionsStore((s) => s.setGroupFilter);
     const setModelFilter = useToolbarViewOptionsStore((s) => s.setModelFilter);
+    const requestOpenCreateSite = useSiteUIStore((s) => s.requestOpenCreateDialog);
+    const requestOpenImportDialog = useSiteUIStore((s) => s.requestOpenImportDialog);
+    const requestSyncAll = useSiteUIStore((s) => s.requestSyncAll);
+    const requestCheckinAll = useSiteUIStore((s) => s.requestCheckinAll);
     const [expandedSearchItem, setExpandedSearchItem] = useState<ToolbarPage | null>(null);
     const searchExpanded = expandedSearchItem === toolbarItem;
 
     if (!toolbarItem) return null;
-    const showLayoutOptions = toolbarItem !== 'group';
+    const showLayoutOptions = toolbarItem === 'channel' || toolbarItem === 'model';
     const showCombinedSortOptions = toolbarItem === 'channel' || toolbarItem === 'group';
+    const showSortOptions = toolbarItem !== 'site';
 
+    const siteFilterLabelKeys: Record<SiteFilter, string> = {
+        all: '全部站点',
+        abnormal: '异常 / 停用',
+        enabled: '仅启用',
+        disabled: '仅停用',
+        pinned: '仅置顶',
+    };
     const channelFilterLabelKeys: Record<ChannelFilter, string> = {
         all: 'popover.filter.channel.all',
         enabled: 'popover.filter.channel.enabled',
@@ -103,7 +122,12 @@ export function Toolbar() {
         free: 'popover.filter.model.free',
     };
 
-    const filterOptions = toolbarItem === 'channel'
+    const filterOptions = toolbarItem === 'site'
+        ? SITE_FILTER_OPTIONS.map((value) => ({
+            value,
+            label: siteFilterLabelKeys[value],
+        }))
+        : toolbarItem === 'channel'
         ? CHANNEL_FILTER_OPTIONS.map((value) => ({
             value,
             label: t(channelFilterLabelKeys[value]),
@@ -118,7 +142,9 @@ export function Toolbar() {
                 label: t(modelFilterLabelKeys[value]),
             }));
 
-    const activeFilter = toolbarItem === 'channel'
+    const activeFilter = toolbarItem === 'site'
+        ? siteFilter
+        : toolbarItem === 'channel'
         ? channelFilter
         : toolbarItem === 'group'
             ? groupFilter
@@ -126,6 +152,9 @@ export function Toolbar() {
 
     const handleFilterChange = (value: string) => {
         switch (toolbarItem) {
+            case 'site':
+                setSiteFilter(value as SiteFilter);
+                break;
             case 'channel':
                 setChannelFilter(value as ChannelFilter);
                 break;
@@ -240,9 +269,10 @@ export function Toolbar() {
                                 </div>
                             )}
 
-                            <div className="grid gap-2">
-                                <p className="text-xs font-medium text-muted-foreground">{t('popover.sort')}</p>
-                                {showCombinedSortOptions ? (
+                            {showSortOptions && (
+                                <div className="grid gap-2">
+                                    <p className="text-xs font-medium text-muted-foreground">{t('popover.sort')}</p>
+                                    {showCombinedSortOptions ? (
                                     <div className="grid grid-cols-2 gap-2">
                                         {COMBINED_SORT_OPTIONS.map((option) => (
                                             <button
@@ -294,8 +324,9 @@ export function Toolbar() {
                                             {t('popover.nameDesc')}
                                         </button>
                                     </div>
-                                )}
-                            </div>
+                                    )}
+                                </div>
+                            )}
 
                             <div className="grid gap-2">
                                 <p className="text-xs font-medium text-muted-foreground">{t('popover.filter.title')}</p>
@@ -317,22 +348,64 @@ export function Toolbar() {
                                     ))}
                                 </div>
                             </div>
+
+                            {toolbarItem === 'site' && (
+                                <div className="grid gap-2">
+                                    <p className="text-xs font-medium text-muted-foreground">全局操作</p>
+                                    <div className="grid gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={requestOpenImportDialog}
+                                            className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                        >
+                                            导入 All API Hub
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={requestSyncAll}
+                                            className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                        >
+                                            全量同步
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={requestCheckinAll}
+                                            className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                        >
+                                            全量签到
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </PopoverContent>
                 </Popover>
 
-                {/* 创建按钮 */}
-                <MorphingDialog>
-                    <MorphingDialogTrigger className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}>
+                {toolbarItem === 'site' ? (
+                    <button
+                        type="button"
+                        onClick={requestOpenCreateSite}
+                        className={buttonVariants({
+                            variant: "ghost",
+                            size: "icon",
+                            className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground",
+                        })}
+                    >
                         <Plus className="size-4 transition-colors duration-300" />
-                    </MorphingDialogTrigger>
+                    </button>
+                ) : (
+                    <MorphingDialog>
+                        <MorphingDialogTrigger className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}>
+                            <Plus className="size-4 transition-colors duration-300" />
+                        </MorphingDialogTrigger>
 
-                    <MorphingDialogContainer>
-                        <MorphingDialogContent className="w-fit max-w-full bg-card text-card-foreground px-6 py-4 rounded-3xl custom-shadow max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
-                            <CreateDialogContent activeItem={toolbarItem} />
-                        </MorphingDialogContent>
-                    </MorphingDialogContainer>
-                </MorphingDialog>
+                        <MorphingDialogContainer>
+                            <MorphingDialogContent className="w-fit max-w-full bg-card text-card-foreground px-6 py-4 rounded-3xl custom-shadow max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+                                <CreateDialogContent activeItem={toolbarItem} />
+                            </MorphingDialogContent>
+                        </MorphingDialogContainer>
+                    </MorphingDialog>
+                )}
             </motion.div>
         </AnimatePresence>
     );

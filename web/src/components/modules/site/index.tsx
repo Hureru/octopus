@@ -1,6 +1,15 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type FormEvent,
+} from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   type AllAPIHubImportResult,
   Site as SiteRecord,
@@ -27,6 +36,11 @@ import {
 } from "@/api/endpoints/site";
 import { PageWrapper } from "@/components/common/PageWrapper";
 import { toast } from "@/components/common/Toast";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/animate-ui/components/animate/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,31 +59,42 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import {
+  useSearchStore,
+  useToolbarViewOptionsStore,
+} from "@/components/modules/toolbar";
+import type { SiteFilter as SiteSurfaceFilter } from "@/components/modules/toolbar/view-options-store";
 import { cn } from "@/lib/utils";
-import { CheckinPanel } from "./CheckinPanel";
+import { CheckinPanel, type CheckinFilterStatus } from "./CheckinPanel";
+import { useSiteUIStore } from "./ui-store";
+import {
+  isSiteJumpTarget,
+  type PendingJump,
+  type SiteJumpTarget,
+  useJumpStore,
+} from "@/stores/jump";
 import {
   CalendarCheck2,
-  Cable,
   CheckSquare,
+  ChevronDown,
   CircleAlert,
+  ExternalLink,
   FileJson,
-  FolderTree,
-  Globe2,
-  KeyRound,
+  FilterX,
   Link2,
+  MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
   Plus,
   RefreshCw,
-  Sparkles,
   Square,
   Trash2,
   TriangleAlert,
   Upload,
   UserRound,
-  Wallet,
   Waypoints,
   X,
 } from "lucide-react";
@@ -97,6 +122,8 @@ type SiteAccountFormState = {
   password: string;
   access_token: string;
   api_key: string;
+  refresh_token: string;
+  token_expires_at: string;
   platform_user_id: string;
   account_proxy: string;
   enabled: boolean;
@@ -126,6 +153,45 @@ const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {
   [SiteCredentialType.AccessToken]: "Access Token",
   [SiteCredentialType.APIKey]: "API Key",
 };
+
+type HealthTone = "default" | "danger" | "muted" | "warning";
+
+type SiteSummary = {
+  accountCount: number;
+  keyCount: number;
+  modelCount: number;
+  groupCount: number;
+  balance: number;
+  failedAccountCount: number;
+  disabledAccountCount: number;
+  enabledAccountCount: number;
+  healthLabel: string;
+  healthTone: HealthTone;
+};
+
+type VisibleSite = {
+  site: SiteRecord;
+  summary: SiteSummary;
+  visibleAccounts: SiteAccount[];
+  forceExpanded: boolean;
+  hasFilteredAccounts: boolean;
+};
+
+const SITE_SURFACE_FILTERS: Array<{
+  key: SiteSurfaceFilter;
+  label: string;
+}> = [
+  { key: "all", label: "全部站点" },
+  { key: "abnormal", label: "异常 / 停用" },
+  { key: "enabled", label: "仅启用" },
+  { key: "disabled", label: "仅停用" },
+  { key: "pinned", label: "仅置顶" },
+];
+
+const MENU_BUTTON_CLASS =
+  "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left transition-colors hover:bg-muted/60";
+
+type SitePendingJump = PendingJump & { target: SiteJumpTarget };
 
 function createEmptySiteForm(): SiteFormState {
   return {
@@ -200,6 +266,8 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
     password: "",
     access_token: "",
     api_key: "",
+    refresh_token: "",
+    token_expires_at: "",
     platform_user_id: "",
     account_proxy: "",
     enabled: true,
@@ -220,6 +288,9 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
     password: account.password,
     access_token: account.access_token,
     api_key: account.api_key,
+    refresh_token: account.refresh_token ?? "",
+    token_expires_at:
+      account.token_expires_at > 0 ? String(account.token_expires_at) : "",
     platform_user_id: account.platform_user_id
       ? String(account.platform_user_id)
       : "",
@@ -231,6 +302,27 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
     checkin_interval_hours: account.checkin_interval_hours,
     checkin_random_window_minutes: account.checkin_random_window_minutes,
   };
+}
+
+function parseTokenExpiresAtInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error("token_expires_at 必须是正整数时间戳");
+    }
+    return parsed < 1_000_000_000_000 ? Math.trunc(parsed * 1000) : Math.trunc(parsed);
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("token_expires_at 必须是时间戳或可解析时间");
+  }
+  return Math.trunc(parsed);
 }
 
 function formatDateTime(value?: string | null) {
@@ -253,59 +345,6 @@ function statusLabel(status: string) {
     case "idle":
     default:
       return "未执行";
-  }
-}
-
-function statusClassName(status: string) {
-  switch (status) {
-    case "success":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    case "failed":
-      return "border-destructive/20 bg-destructive/10 text-destructive";
-    case "skipped":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    case "idle":
-    default:
-      return "border-border bg-muted/40 text-muted-foreground";
-  }
-}
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") return message;
-  }
-  return "操作失败";
-}
-function buildTokenGroupSummary(account: SiteAccount) {
-  const map = new Map<string, number>();
-  account.tokens.forEach((token) => {
-    const key = token.group_name || token.group_key || "default";
-    map.set(key, (map.get(key) ?? 0) + 1);
-  });
-  return Array.from(map.entries()).map(
-    ([group, count]) => `${group} x${count}`,
-  );
-}
-
-function buildBindingSummary(account: SiteAccount) {
-  return account.channel_bindings.map(
-    (binding) =>
-      `${formatBindingGroupKey(binding.group_key)} -> #${binding.channel_id}`,
-  );
-}
-
-function formatBindingGroupKey(groupKey: string) {
-  const [baseKey, suffix] = (groupKey || "default").split("::", 2);
-  const normalizedBaseKey = baseKey || "default";
-  switch (suffix) {
-    case "anthropic":
-      return `${normalizedBaseKey} [Anthropic]`;
-    case "gemini":
-      return `${normalizedBaseKey} [Gemini]`;
-    default:
-      return normalizedBaseKey;
   }
 }
 
@@ -333,44 +372,367 @@ function SiteMetric({
   );
 }
 
-function SummaryBlock({
-  icon,
-  title,
-  items,
-  empty,
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return "操作失败";
+}
+
+function formatBalance(value: number) {
+  if (value === 0) return "0";
+  if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(2)}K`;
+  return value.toFixed(2);
+}
+
+function normalizeSearchTerm(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function matchesSearch(value: string | null | undefined, query: string) {
+  return (value ?? "").toLowerCase().includes(query);
+}
+
+function normalizedStatus(status?: string | null) {
+  return status || "idle";
+}
+
+function sitePlatformSupportsCheckin(platform: SitePlatform) {
+  switch (platform) {
+    case SitePlatform.DoneHub:
+    case SitePlatform.Sub2API:
+    case SitePlatform.OpenAI:
+    case SitePlatform.Claude:
+    case SitePlatform.Gemini:
+      return false;
+    default:
+      return true;
+  }
+}
+
+function accountHasCheckinEnabled(
+  account: SiteAccount,
+  platform: SitePlatform,
+) {
+  return sitePlatformSupportsCheckin(platform) && account.auto_checkin;
+}
+
+function accountHasSyncFailure(account: SiteAccount) {
+  return normalizedStatus(account.last_sync_status) === "failed";
+}
+
+function accountHasCheckinFailure(
+  account: SiteAccount,
+  platform: SitePlatform,
+) {
+  return (
+    accountHasCheckinEnabled(account, platform) &&
+    normalizedStatus(account.last_checkin_status) === "failed"
+  );
+}
+
+function accountHasHealthFailure(
+  account: SiteAccount,
+  platform: SitePlatform,
+) {
+  return (
+    accountHasSyncFailure(account) || accountHasCheckinFailure(account, platform)
+  );
+}
+
+function accountMatchesCheckinFilter(
+  account: SiteAccount,
+  platform: SitePlatform,
+  filterStatus: CheckinFilterStatus,
+) {
+  if (!accountHasCheckinEnabled(account, platform)) {
+    return false;
+  }
+  if (filterStatus === "all") {
+    return true;
+  }
+  return normalizedStatus(account.last_checkin_status) === filterStatus;
+}
+
+function statusDotClass(status: string) {
+  switch (status) {
+    case "success":
+      return "bg-emerald-500";
+    case "failed":
+      return "bg-destructive";
+    case "skipped":
+      return "bg-amber-500";
+    default:
+      return "bg-muted-foreground/40";
+  }
+}
+
+function badgeToneClass(tone: HealthTone) {
+  switch (tone) {
+    case "danger":
+      return "border-destructive/20 bg-destructive/10 text-destructive";
+    case "muted":
+      return "border-border bg-muted/40 text-muted-foreground";
+    case "warning":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    case "default":
+    default:
+      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  }
+}
+
+function cardToneClass(tone: HealthTone) {
+  switch (tone) {
+    case "danger":
+      return "border-l-destructive/70 bg-destructive/5";
+    case "muted":
+      return "border-l-muted-foreground/40 bg-muted/10";
+    case "warning":
+      return "border-l-amber-500/60 bg-amber-500/5";
+    case "default":
+    default:
+      return "border-l-transparent";
+  }
+}
+
+function buildSiteSummary(site: SiteRecord): SiteSummary {
+  let keyCount = 0;
+  let modelCount = 0;
+  let groupCount = 0;
+  let balance = 0;
+  let failedAccountCount = 0;
+  let disabledAccountCount = 0;
+  let enabledAccountCount = 0;
+
+  for (const account of site.accounts) {
+    keyCount += account.tokens.length;
+    modelCount += account.models.length;
+    groupCount += account.user_groups.length;
+    balance += account.balance;
+
+    if (account.enabled) enabledAccountCount += 1;
+    else disabledAccountCount += 1;
+
+    if (accountHasHealthFailure(account, site.platform)) {
+      failedAccountCount += 1;
+    }
+  }
+
+  if (failedAccountCount > 0) {
+    return {
+      accountCount: site.accounts.length,
+      keyCount,
+      modelCount,
+      groupCount,
+      balance,
+      failedAccountCount,
+      disabledAccountCount,
+      enabledAccountCount,
+      healthLabel: `${failedAccountCount} 异常`,
+      healthTone: "danger",
+    };
+  }
+
+  if (!site.enabled) {
+    return {
+      accountCount: site.accounts.length,
+      keyCount,
+      modelCount,
+      groupCount,
+      balance,
+      failedAccountCount,
+      disabledAccountCount,
+      enabledAccountCount,
+      healthLabel: "站点停用",
+      healthTone: "muted",
+    };
+  }
+
+  if (disabledAccountCount > 0) {
+    return {
+      accountCount: site.accounts.length,
+      keyCount,
+      modelCount,
+      groupCount,
+      balance,
+      failedAccountCount,
+      disabledAccountCount,
+      enabledAccountCount,
+      healthLabel: `${disabledAccountCount} 已停用`,
+      healthTone: "muted",
+    };
+  }
+
+  if (site.accounts.length === 0) {
+    return {
+      accountCount: site.accounts.length,
+      keyCount,
+      modelCount,
+      groupCount,
+      balance,
+      failedAccountCount,
+      disabledAccountCount,
+      enabledAccountCount,
+      healthLabel: "待配置",
+      healthTone: "warning",
+    };
+  }
+
+  const allIdle = site.accounts.every(
+    (account) =>
+      normalizedStatus(account.last_sync_status) === "idle" &&
+      (!accountHasCheckinEnabled(account, site.platform) ||
+        normalizedStatus(account.last_checkin_status) === "idle"),
+  );
+
+  return {
+    accountCount: site.accounts.length,
+    keyCount,
+    modelCount,
+    groupCount,
+    balance,
+    failedAccountCount,
+    disabledAccountCount,
+    enabledAccountCount,
+    healthLabel: allIdle ? "未执行" : "正常",
+    healthTone: allIdle ? "warning" : "default",
+  };
+}
+
+function matchesSiteFilter(
+  site: SiteRecord,
+  summary: SiteSummary,
+  filter: SiteSurfaceFilter,
+) {
+  switch (filter) {
+    case "abnormal":
+      return (
+        summary.failedAccountCount > 0 ||
+        !site.enabled ||
+        summary.disabledAccountCount > 0
+      );
+    case "enabled":
+      return site.enabled;
+    case "disabled":
+      return !site.enabled || summary.disabledAccountCount > 0;
+    case "pinned":
+      return site.is_pinned;
+    case "all":
+    default:
+      return true;
+  }
+}
+
+function CompactMetric({
+  label,
+  value,
 }: {
-  icon: ReactNode;
-  title: string;
-  items: string[];
-  empty: string;
+  label: string;
+  value: number | string;
 }) {
-  const visible = items.slice(0, 6);
-  const hiddenCount = items.length - visible.length;
+  return (
+    <span className="inline-flex items-baseline gap-1 text-xs text-muted-foreground">
+      <span>{label}</span>
+      <span className="font-semibold text-foreground">{value}</span>
+    </span>
+  );
+}
+
+function ExecutionSummary({
+  label,
+  status,
+  at,
+  message,
+}: {
+  label: string;
+  status: string;
+  at?: string | null;
+  message?: string | null;
+}) {
+  const text = [`上次${label} ${formatDateTime(at)}`, statusLabel(status)];
+  if (message) {
+    text.push(message);
+  }
+
+  const summary = text.join(" · ");
 
   return (
-    <div className="rounded-2xl border border-border/60 bg-background/70 p-3">
-      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        {icon}
-        <span>{title}</span>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {visible.length > 0 ? (
-          visible.map((item) => (
-            <Badge key={item} variant="outline" className="max-w-full truncate">
-              {item}
-            </Badge>
-          ))
-        ) : (
-          <span className="text-xs text-muted-foreground">{empty}</span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-start gap-2 text-xs text-muted-foreground">
+          <span
+            className={cn(
+              "mt-1 size-2 shrink-0 rounded-full",
+              statusDotClass(status),
+            )}
+          />
+          <span className="min-w-0 truncate">{summary}</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm">{summary}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function StaticSummary({
+  tone = "muted",
+  text,
+}: {
+  tone?: "muted" | "warning";
+  text: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 text-xs",
+        tone === "warning" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+      )}
+    >
+      <span
+        className={cn(
+          "mt-1 size-2 shrink-0 rounded-full",
+          tone === "warning" ? "bg-amber-500" : "bg-muted-foreground/40",
         )}
-        {hiddenCount > 0 ? (
-          <Badge variant="outline" className="text-muted-foreground">
-            +{hiddenCount}
-          </Badge>
-        ) : null}
-      </div>
+      />
+      <span className="min-w-0 truncate">{text}</span>
     </div>
   );
+}
+
+function IconActionButton({
+  label,
+  className,
+  ...props
+}: ComponentProps<typeof Button> & { label: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="outline"
+          className={cn("rounded-xl", className)}
+          aria-label={label}
+          title={label}
+          {...props}
+        />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function estimateVisibleSiteCardHeight(item: VisibleSite, expanded: boolean) {
+  if (item.forceExpanded || expanded) {
+    return 360 + item.visibleAccounts.length * 190;
+  }
+  if (item.site.accounts.length === 0) {
+    return 280;
+  }
+  return 310;
 }
 
 export function Site() {
@@ -420,22 +782,248 @@ export function Site() {
     id: number;
     name: string;
   } | null>(null);
+  const [checkinFilterStatus, setCheckinFilterStatus] =
+    useState<CheckinFilterStatus>("all");
+  const [expandedSiteIds, setExpandedSiteIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [syncingAccountIds, setSyncingAccountIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [checkinAccountIds, setCheckinAccountIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [siteCardHeights, setSiteCardHeights] = useState<Record<number, number>>(
+    {},
+  );
+  const cardObserversRef = useRef<Map<number, ResizeObserver>>(new Map());
+  const cardElementsRef = useRef<Map<number, HTMLElement>>(new Map());
+  const cardMeasureRefCallbacks = useRef<
+    Map<number, (node: HTMLElement | null) => void>
+  >(new Map());
+  const accountElementsRef = useRef<Map<number, HTMLElement>>(new Map());
+  const [highlightedSiteId, setHighlightedSiteId] = useState<number | null>(
+    null,
+  );
+  const [highlightedAccountId, setHighlightedAccountId] = useState<number | null>(
+    null,
+  );
 
-  // Disabled models dialog
+  const searchTerm = useSearchStore((state) => state.getSearchTerm("site"));
+  const setSearchTerm = useSearchStore((state) => state.setSearchTerm);
+  const siteSurfaceFilter = useToolbarViewOptionsStore(
+    (state) => state.siteFilter,
+  );
+  const setSiteSurfaceFilter = useToolbarViewOptionsStore(
+    (state) => state.setSiteFilter,
+  );
+  const setSiteHandlers = useSiteUIStore((state) => state.setHandlers);
+  const resetSiteHandlers = useSiteUIStore((state) => state.resetHandlers);
+  const pendingJump = useJumpStore((state) => state.pending);
+  const clearPendingJump = useJumpStore((state) => state.clearPending);
+  const requestJump = useJumpStore((state) => state.requestJump);
 
-  let siteCount = 0;
-  let accountCount = 0;
-  let tokenCount = 0;
-  let modelCount = 0;
+  const pendingSiteJump =
+    pendingJump && isSiteJumpTarget(pendingJump.target)
+      ? (pendingJump as SitePendingJump)
+      : null;
+  const forcedSiteId = pendingSiteJump?.target.siteId ?? null;
 
-  sites?.forEach((site) => {
-    siteCount += 1;
-    accountCount += site.accounts.length;
-    site.accounts.forEach((account) => {
-      tokenCount += account.tokens.length;
-      modelCount += account.models.length;
+  const setSiteCardMeasureRef = useCallback(
+    (siteID: number, node: HTMLElement | null) => {
+      const observers = cardObserversRef.current;
+      const elements = cardElementsRef.current;
+      const currentNode = elements.get(siteID);
+
+      if (currentNode === node) {
+        return;
+      }
+
+      if (currentNode) {
+        observers.get(siteID)?.disconnect();
+        observers.delete(siteID);
+        elements.delete(siteID);
+      }
+
+      if (!node) {
+        return;
+      }
+
+      elements.set(siteID, node);
+      const observer = new ResizeObserver((entries) => {
+        const nextHeight = Math.round(
+          entries[0]?.contentRect.height ?? node.getBoundingClientRect().height,
+        );
+        setSiteCardHeights((current) =>
+          current[siteID] === nextHeight
+            ? current
+            : { ...current, [siteID]: nextHeight },
+        );
+      });
+      observer.observe(node);
+      observers.set(siteID, observer);
+
+      const initialHeight = Math.round(node.getBoundingClientRect().height);
+      setSiteCardHeights((current) =>
+        current[siteID] === initialHeight
+          ? current
+          : { ...current, [siteID]: initialHeight },
+      );
+    },
+    [],
+  );
+
+  const getSiteCardMeasureRef = useCallback(
+    (siteID: number) => {
+      const existing = cardMeasureRefCallbacks.current.get(siteID);
+      if (existing) {
+        return existing;
+      }
+
+      const callback = (node: HTMLElement | null) => {
+        setSiteCardMeasureRef(siteID, node);
+      };
+      cardMeasureRefCallbacks.current.set(siteID, callback);
+      return callback;
+    },
+    [setSiteCardMeasureRef],
+  );
+
+  const setAccountElementRef = useCallback(
+    (accountId: number, node: HTMLElement | null) => {
+      const elements = accountElementsRef.current;
+      if (node) {
+        elements.set(accountId, node);
+        return;
+      }
+      elements.delete(accountId);
+    },
+    [],
+  );
+
+  const flashTarget = useCallback(
+    (target: "site" | "account", id: number) => {
+      if (target === "site") {
+        setHighlightedSiteId(id);
+        window.setTimeout(() => {
+          setHighlightedSiteId((current) => (current === id ? null : current));
+        }, 1800);
+        return;
+      }
+
+      setHighlightedAccountId(id);
+      window.setTimeout(() => {
+        setHighlightedAccountId((current) => (current === id ? null : current));
+      }, 1800);
+    },
+    [],
+  );
+
+  const inventory = useMemo(() => {
+    let siteCount = 0;
+    let accountCount = 0;
+    let tokenCount = 0;
+    let modelCount = 0;
+
+    for (const site of sites ?? []) {
+      siteCount += 1;
+      accountCount += site.accounts.length;
+      for (const account of site.accounts) {
+        tokenCount += account.tokens.length;
+        modelCount += account.models.length;
+      }
+    }
+
+    return {
+      siteCount,
+      accountCount,
+      tokenCount,
+      modelCount,
+    };
+  }, [sites]);
+
+  const normalizedQuery = useMemo(
+    () => normalizeSearchTerm(searchTerm),
+    [searchTerm],
+  );
+
+  const visibleSites = useMemo<VisibleSite[]>(() => {
+    const hasSearch = normalizedQuery.length > 0;
+
+    return (sites ?? []).flatMap((site) => {
+      const summary = buildSiteSummary(site);
+      const isForcedTarget = forcedSiteId === site.id;
+
+      if (!isForcedTarget && !matchesSiteFilter(site, summary, siteSurfaceFilter)) {
+        return [];
+      }
+
+      const siteMatchesQuery =
+        !hasSearch ||
+        matchesSearch(site.name, normalizedQuery) ||
+        matchesSearch(site.base_url, normalizedQuery) ||
+        matchesSearch(PLATFORM_LABELS[site.platform], normalizedQuery);
+
+      const accountMatchesQuery = (account: SiteAccount) =>
+        matchesSearch(account.name, normalizedQuery);
+
+      const matchedAccountsBySearch = hasSearch
+        ? site.accounts.filter(accountMatchesQuery)
+        : site.accounts;
+
+      let visibleAccounts = site.accounts;
+      let forceExpanded = checkinFilterStatus !== "all" || isForcedTarget;
+
+      if (checkinFilterStatus !== "all" && !isForcedTarget) {
+        visibleAccounts = visibleAccounts.filter((account) =>
+          accountMatchesCheckinFilter(
+            account,
+            site.platform,
+            checkinFilterStatus,
+          ),
+        );
+      }
+
+      if (hasSearch && !siteMatchesQuery && !isForcedTarget) {
+        visibleAccounts = visibleAccounts.filter(accountMatchesQuery);
+        forceExpanded = visibleAccounts.length > 0 || forceExpanded;
+      }
+
+      if (isForcedTarget) {
+        visibleAccounts = site.accounts;
+      }
+
+      const visible =
+        isForcedTarget
+          ? true
+          : checkinFilterStatus !== "all"
+          ? visibleAccounts.length > 0
+          : !hasSearch || siteMatchesQuery || matchedAccountsBySearch.length > 0;
+
+      if (!visible) {
+        return [];
+      }
+
+      return [
+        {
+          site,
+          summary,
+          visibleAccounts,
+          forceExpanded,
+          hasFilteredAccounts: visibleAccounts.length !== site.accounts.length,
+        },
+      ];
     });
-  });
+  }, [sites, normalizedQuery, siteSurfaceFilter, checkinFilterStatus, forcedSiteId]);
+
+  const hasActiveFilters =
+    normalizedQuery.length > 0 ||
+    siteSurfaceFilter !== "all" ||
+    checkinFilterStatus !== "all";
+  const visibleAccountCount = visibleSites.reduce(
+    (sum, item) => sum + item.visibleAccounts.length,
+    0,
+  );
 
   const currentPlatform = accountSite?.platform ?? SitePlatform.NewAPI;
   const currentCredentialOptions = credentialOptions(currentPlatform);
@@ -614,6 +1202,16 @@ export function Site() {
       return;
     }
 
+    let parsedTokenExpiresAt = 0;
+    try {
+      parsedTokenExpiresAt = parseTokenExpiresAtInput(
+        accountForm.token_expires_at,
+      );
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      return;
+    }
+
     const payload = {
       site_id: accountForm.site_id,
       name: accountForm.name.trim(),
@@ -622,6 +1220,8 @@ export function Site() {
       password: accountForm.password.trim(),
       access_token: accountForm.access_token.trim(),
       api_key: accountForm.api_key.trim(),
+      refresh_token: accountForm.refresh_token.trim(),
+      token_expires_at: parsedTokenExpiresAt,
       platform_user_id: parsedPlatformUserID,
       account_proxy: accountForm.account_proxy.trim(),
       enabled: accountForm.enabled,
@@ -685,6 +1285,7 @@ export function Site() {
   }
 
   async function handleSyncAccount(account: SiteAccount) {
+    setSyncingAccountIds((current) => new Set(current).add(account.id));
     try {
       const result = await syncSiteAccount.mutateAsync(account.id);
       toast.success(
@@ -692,36 +1293,34 @@ export function Site() {
       );
     } catch (syncError) {
       toast.error(getErrorMessage(syncError));
+    } finally {
+      setSyncingAccountIds((current) => {
+        const next = new Set(current);
+        next.delete(account.id);
+        return next;
+      });
     }
   }
 
   async function handleCheckinAccount(account: SiteAccount) {
+    setCheckinAccountIds((current) => new Set(current).add(account.id));
     try {
       const result = await checkinSiteAccount.mutateAsync(account.id);
       const suffix = result.reward ? `，奖励：${result.reward}` : "";
-      toast.success(
-        `${statusLabel(result.status)}：${result.message}${suffix}`,
-      );
+      const message = `${statusLabel(result.status)}：${result.message}${suffix}`;
+      if (result.status === "failed") {
+        toast.error(message);
+      } else {
+        toast.success(message);
+      }
     } catch (checkinError) {
       toast.error(getErrorMessage(checkinError));
-    }
-  }
-
-  async function handleSyncAll() {
-    try {
-      await syncAllSites.mutateAsync();
-      toast.success("已触发后台全量同步，页面会自动刷新");
-    } catch (syncError) {
-      toast.error(getErrorMessage(syncError));
-    }
-  }
-
-  async function handleCheckinAll() {
-    try {
-      await checkinAllSites.mutateAsync();
-      toast.success("已触发后台全量签到，页面会自动刷新");
-    } catch (checkinError) {
-      toast.error(getErrorMessage(checkinError));
+    } finally {
+      setCheckinAccountIds((current) => {
+        const next = new Set(current);
+        next.delete(account.id);
+        return next;
+      });
     }
   }
 
@@ -758,6 +1357,11 @@ export function Site() {
         setSelectedSiteIds((prev) =>
           prev.filter((id) => id !== deleteConfirm.id),
         );
+        setExpandedSiteIds((current) => {
+          const next = new Set(current);
+          next.delete(deleteConfirm.id);
+          return next;
+        });
       } else {
         await deleteSiteAccount.mutateAsync(deleteConfirm.id);
         toast.success("站点账号已删除");
@@ -806,83 +1410,629 @@ export function Site() {
     }
   }
 
-  function formatBalance(value: number) {
-    if (value === 0) return "0";
-    if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
-    if (value >= 1000) return `${(value / 1000).toFixed(2)}K`;
-    return value.toFixed(2);
+  function clearFilters() {
+    setSearchTerm("site", "");
+    setSiteSurfaceFilter("all");
+    setCheckinFilterStatus("all");
   }
+
+  function openSiteBaseURL(site: SiteRecord) {
+    window.open(site.base_url, "_blank", "noopener,noreferrer");
+  }
+
+  function jumpToSiteChannel(siteId: number) {
+    requestJump({ kind: "site-channel-card", siteId });
+  }
+
+  function jumpToSiteChannelAccount(siteId: number, accountId: number) {
+    requestJump({ kind: "site-channel-account", siteId, accountId });
+  }
+
+  function toggleSiteExpanded(siteId: number, forceExpanded: boolean) {
+    if (forceExpanded) return;
+    setExpandedSiteIds((current) => {
+      const next = new Set(current);
+      if (next.has(siteId)) next.delete(siteId);
+      else next.add(siteId);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    setSiteHandlers({
+      openCreateDialog: () => {
+        setEditingSite(null);
+        setSiteForm(createEmptySiteForm());
+        setSiteDialogOpen(true);
+      },
+      openImportDialog: () => setImportDialogOpen(true),
+      syncAll: () => {
+        syncAllSites.mutate(undefined, {
+          onSuccess: () => toast.success("已触发后台全量同步，页面会自动刷新"),
+          onError: (error) => toast.error(getErrorMessage(error)),
+        });
+      },
+      checkinAll: () => {
+        checkinAllSites.mutate(undefined, {
+          onSuccess: () => toast.success("已触发后台全量签到，页面会自动刷新"),
+          onError: (error) => toast.error(getErrorMessage(error)),
+        });
+      },
+    });
+
+    return () => {
+      resetSiteHandlers();
+    };
+  }, [setSiteHandlers, resetSiteHandlers, syncAllSites, checkinAllSites]);
+
+  useEffect(() => {
+    const observerMap = cardObserversRef.current;
+    const elementMap = cardElementsRef.current;
+    const callbackMap = cardMeasureRefCallbacks.current;
+    const accountMap = accountElementsRef.current;
+    return () => {
+      for (const observer of observerMap.values()) {
+        observer.disconnect();
+      }
+      observerMap.clear();
+      elementMap.clear();
+      callbackMap.clear();
+      accountMap.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingSiteJump) return;
+
+    const { requestId, target } = pendingSiteJump;
+    const targetSiteId = target.siteId;
+    const siteVisible = visibleSites.some((item) => item.site.id === targetSiteId);
+    if (!siteVisible) return;
+
+    if (target.kind === "site-account") {
+      setExpandedSiteIds((current) => {
+        if (current.has(target.siteId)) return current;
+        const next = new Set(current);
+        next.add(target.siteId);
+        return next;
+      });
+    }
+
+    const node =
+      target.kind === "site-account"
+        ? accountElementsRef.current.get(target.accountId)
+        : cardElementsRef.current.get(target.siteId);
+    if (!node) return;
+
+    const timer = window.setTimeout(() => {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      flashTarget("site", target.siteId);
+      if (target.kind === "site-account") {
+        flashTarget("account", target.accountId);
+      }
+      clearPendingJump(requestId);
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingSiteJump, visibleSites, clearPendingJump, flashTarget]);
+
+  const masonryColumns = useMemo<[VisibleSite[], VisibleSite[]]>(() => {
+    const left: VisibleSite[] = [];
+    const right: VisibleSite[] = [];
+    let leftHeight = 0;
+    let rightHeight = 0;
+
+    for (const item of visibleSites) {
+      const isExpanded = item.forceExpanded || expandedSiteIds.has(item.site.id);
+      const estimatedHeight =
+        siteCardHeights[item.site.id] ??
+        estimateVisibleSiteCardHeight(item, isExpanded);
+      if (leftHeight <= rightHeight) {
+        left.push(item);
+        leftHeight += estimatedHeight;
+      } else {
+        right.push(item);
+        rightHeight += estimatedHeight;
+      }
+    }
+
+    return [left, right];
+  }, [visibleSites, expandedSiteIds, siteCardHeights]);
+
+  const renderSiteCard = ({
+    site,
+    summary,
+    visibleAccounts,
+    forceExpanded,
+    hasFilteredAccounts,
+  }: VisibleSite) => {
+    const isExpanded = forceExpanded || expandedSiteIds.has(site.id);
+
+    return (
+      <section
+        key={site.id}
+        className={cn(
+          "rounded-[28px] border border-border/70 border-l-4 bg-card p-5 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.45)]",
+          cardToneClass(summary.healthTone),
+          highlightedSiteId === site.id &&
+            "ring-2 ring-primary/35 ring-offset-2 ring-offset-background",
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            className="mt-1 shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            title={
+              selectedSiteIds.includes(site.id) ? "取消选择站点" : "选择站点"
+            }
+            onClick={() => toggleSiteSelection(site.id)}
+          >
+            {selectedSiteIds.includes(site.id) ? (
+              <CheckSquare className="size-5 text-primary" />
+            ) : (
+              <Square className="size-5" />
+            )}
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => toggleSiteExpanded(site.id, forceExpanded)}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate text-lg font-semibold">{site.name}</h2>
+                  {site.is_pinned ? (
+                    <Badge variant="outline" className="text-amber-600">
+                      <Pin className="mr-1 size-3" />
+                      置顶
+                    </Badge>
+                  ) : null}
+                  <Badge variant="outline">
+                    {PLATFORM_LABELS[site.platform]}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={badgeToneClass(summary.healthTone)}
+                  >
+                    {summary.healthLabel}
+                  </Badge>
+                </div>
+
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Link2 className="size-4 shrink-0" />
+                  <span className="truncate">{site.base_url}</span>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+                  <CompactMetric label="账号" value={summary.accountCount} />
+                  <CompactMetric label="Key" value={summary.keyCount} />
+                  <CompactMetric label="模型" value={summary.modelCount} />
+                  <CompactMetric label="余额" value={formatBalance(summary.balance)} />
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>
+                    {site.proxy
+                      ? "站点代理"
+                      : site.use_system_proxy
+                        ? "系统代理"
+                        : "直连"}
+                  </span>
+                  {site.site_proxy ? (
+                    <span className="truncate">代理 {site.site_proxy}</span>
+                  ) : null}
+                  {site.custom_header.length > 0 ? (
+                    <span>{site.custom_header.length} 个 Header</span>
+                  ) : null}
+                  {site.external_checkin_url ? <span>外部签到</span> : null}
+                </div>
+              </button>
+
+              <div className="flex items-center gap-1">
+                <IconActionButton
+                  label="打开站点"
+                  onClick={() => openSiteBaseURL(site)}
+                >
+                  <ExternalLink className="size-4" />
+                </IconActionButton>
+
+                <IconActionButton
+                  label="查看站点渠道"
+                  onClick={() => jumpToSiteChannel(site.id)}
+                >
+                  <Waypoints className="size-4" />
+                </IconActionButton>
+
+                <IconActionButton
+                  label="新增账号"
+                  onClick={() => openCreateAccountDialog(site)}
+                >
+                  <Plus className="size-4" />
+                </IconActionButton>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="outline"
+                      className="rounded-xl"
+                      aria-label="更多站点操作"
+                      title="更多站点操作"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    className="w-48 rounded-2xl border border-border/60 bg-card p-2"
+                  >
+                    <div className="grid gap-1">
+                      <button
+                        type="button"
+                        className={MENU_BUTTON_CLASS}
+                        onClick={() => openEditSiteDialog(site)}
+                      >
+                        <Pencil className="size-4" />
+                        <span>编辑站点</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={MENU_BUTTON_CLASS}
+                        onClick={() => handleTogglePin(site)}
+                      >
+                        {site.is_pinned ? (
+                          <PinOff className="size-4" />
+                        ) : (
+                          <Pin className="size-4" />
+                        )}
+                        <span>{site.is_pinned ? "取消置顶" : "置顶"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={MENU_BUTTON_CLASS}
+                        onClick={() => handleToggleSite(site)}
+                      >
+                        <span>{site.enabled ? "停用站点" : "启用站点"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(MENU_BUTTON_CLASS, "text-destructive")}
+                        onClick={() => handleDeleteSite(site)}
+                      >
+                        <Trash2 className="size-4" />
+                        <span>删除站点</span>
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <IconActionButton
+                  label={
+                    forceExpanded
+                      ? "筛选结果已自动展开"
+                      : isExpanded
+                        ? "收起账号"
+                        : "展开账号"
+                  }
+                  disabled={forceExpanded || site.accounts.length === 0}
+                  onClick={() => toggleSiteExpanded(site.id, forceExpanded)}
+                >
+                  <ChevronDown
+                    className={cn(
+                      "size-4 transition-transform",
+                      isExpanded && "rotate-180",
+                    )}
+                  />
+                </IconActionButton>
+              </div>
+            </div>
+
+            <AnimatePresence initial={false}>
+              {isExpanded ? (
+                <motion.div
+                  key="site-accounts"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-4 border-t border-border/60 pt-4">
+                    {hasFilteredAccounts ? (
+                      <div className="mb-3 text-xs text-muted-foreground">
+                        显示 {visibleAccounts.length} / {site.accounts.length} 个账号
+                      </div>
+                    ) : null}
+
+                    {visibleAccounts.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-sm text-muted-foreground">
+                        暂无账号。添加账号后即可自动同步分组、模型和渠道绑定。
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {visibleAccounts.map((account) => {
+                          const accountFailed = accountHasHealthFailure(
+                            account,
+                            site.platform,
+                          );
+                          const accountTone: HealthTone = accountFailed
+                            ? "danger"
+                            : account.enabled
+                              ? "default"
+                              : "muted";
+                          const supportsCheckin = sitePlatformSupportsCheckin(
+                            site.platform,
+                          );
+                          const canShowManualCheckin =
+                            supportsCheckin &&
+                            accountHasCheckinEnabled(account, site.platform);
+
+                          return (
+                            <article
+                              key={account.id}
+                              ref={(node) => setAccountElementRef(account.id, node)}
+                              className={cn(
+                                "rounded-2xl border border-border/60 border-l-4 bg-gradient-to-br from-muted/25 via-background to-background px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+                                cardToneClass(accountTone),
+                                highlightedAccountId === account.id &&
+                                  "ring-2 ring-primary/35 ring-offset-2 ring-offset-background",
+                              )}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="min-w-0 flex-1 space-y-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="text-sm font-semibold">
+                                      {account.name}
+                                    </div>
+                                    <Badge variant="outline">
+                                      {
+                                        CREDENTIAL_LABELS[
+                                          account.credential_type
+                                        ]
+                                      }
+                                    </Badge>
+                                    <Badge
+                                      variant="outline"
+                                      className={
+                                        account.enabled
+                                          ? "text-emerald-600"
+                                          : "text-muted-foreground"
+                                      }
+                                    >
+                                      {account.enabled ? "启用中" : "已停用"}
+                                    </Badge>
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                    <CompactMetric
+                                      label="分组"
+                                      value={account.user_groups.length}
+                                    />
+                                    <CompactMetric
+                                      label="模型"
+                                      value={account.models.length}
+                                    />
+                                    <CompactMetric
+                                      label="余额"
+                                      value={formatBalance(account.balance)}
+                                    />
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                    <span>
+                                      {account.auto_sync ? "自动同步" : "手动同步"}
+                                    </span>
+                                    <span>
+                                      {account.auto_checkin
+                                        ? account.random_checkin
+                                          ? "随机签到"
+                                          : "自动签到"
+                                        : "手动签到"}
+                                    </span>
+                                    {account.account_proxy ? (
+                                      <span className="truncate">
+                                        代理 {account.account_proxy}
+                                      </span>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <ExecutionSummary
+                                      label="同步"
+                                      status={normalizedStatus(
+                                        account.last_sync_status,
+                                      )}
+                                      at={account.last_sync_at}
+                                      message={
+                                        account.last_sync_message || "等待首次同步"
+                                      }
+                                    />
+                                    {supportsCheckin ? (
+                                      accountHasCheckinEnabled(
+                                        account,
+                                        site.platform,
+                                      ) ? (
+                                        <ExecutionSummary
+                                          label="签到"
+                                          status={normalizedStatus(
+                                            account.last_checkin_status,
+                                          )}
+                                          at={account.last_checkin_at}
+                                          message={
+                                            account.last_checkin_message ||
+                                            "等待首次签到"
+                                          }
+                                        />
+                                      ) : (
+                                        <StaticSummary text="签到未启用" />
+                                      )
+                                    ) : (
+                                      <StaticSummary
+                                        tone="warning"
+                                        text="当前平台不支持签到"
+                                      />
+                                    )}
+                                    {account.auto_checkin &&
+                                    account.random_checkin ? (
+                                      <div className="pl-4 text-xs text-muted-foreground">
+                                        下次自动签到{" "}
+                                        {account.next_auto_checkin_at
+                                          ? formatDateTime(
+                                              account.next_auto_checkin_at,
+                                            )
+                                          : "待调度"}{" "}
+                                        · 最小间隔 {account.checkin_interval_hours} 小时 ·
+                                        随机延迟 0-
+                                        {account.checkin_random_window_minutes} 分钟
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <IconActionButton
+                                    label="查看站点渠道"
+                                    onClick={() =>
+                                      jumpToSiteChannelAccount(site.id, account.id)
+                                    }
+                                  >
+                                    <Waypoints className="size-4" />
+                                  </IconActionButton>
+
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span>
+                                        <Switch
+                                          checked={account.enabled}
+                                          disabled={enableSiteAccount.isPending}
+                                          onCheckedChange={() =>
+                                            handleToggleAccount(account)
+                                          }
+                                        />
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      {account.enabled ? "停用账号" : "启用账号"}
+                                    </TooltipContent>
+                                  </Tooltip>
+
+                                  <IconActionButton
+                                    label="同步账号"
+                                    disabled={syncingAccountIds.has(account.id)}
+                                    onClick={() => handleSyncAccount(account)}
+                                  >
+                                    <RefreshCw
+                                      className={cn(
+                                        "size-4",
+                                        syncingAccountIds.has(account.id) &&
+                                          "animate-spin",
+                                      )}
+                                    />
+                                  </IconActionButton>
+
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        size="icon-sm"
+                                        variant="outline"
+                                        className="rounded-xl"
+                                        aria-label="更多账号操作"
+                                        title="更多账号操作"
+                                      >
+                                        <MoreHorizontal className="size-4" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent
+                                      align="end"
+                                      className="w-44 rounded-2xl border border-border/60 bg-card p-2"
+                                    >
+                                      <div className="grid gap-1">
+                                        <button
+                                          type="button"
+                                          className={cn(
+                                            MENU_BUTTON_CLASS,
+                                            "disabled:cursor-not-allowed disabled:opacity-50",
+                                          )}
+                                          onClick={() =>
+                                            handleCheckinAccount(account)
+                                          }
+                                          disabled={checkinAccountIds.has(account.id)}
+                                          hidden={!canShowManualCheckin}
+                                        >
+                                          <CalendarCheck2 className="size-4" />
+                                          <span>立即签到</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={MENU_BUTTON_CLASS}
+                                          onClick={() =>
+                                            openEditAccountDialog(site, account)
+                                          }
+                                        >
+                                          <Pencil className="size-4" />
+                                          <span>编辑账号</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={cn(
+                                            MENU_BUTTON_CLASS,
+                                            "text-destructive",
+                                          )}
+                                          onClick={() =>
+                                            handleDeleteAccount(account)
+                                          }
+                                        >
+                                          <Trash2 className="size-4" />
+                                          <span>删除账号</span>
+                                        </button>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
+        </div>
+      </section>
+    );
+  };
 
   return (
     <div className="h-full min-h-0 overflow-y-auto overscroll-contain rounded-t-3xl">
-      <PageWrapper className="space-y-4 pb-24 md:pb-4">
-        <section className="rounded-3xl border border-border bg-card p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl space-y-3">
-              <div className="flex items-center gap-2 text-lg font-semibold">
-                <Globe2 className="size-5" />
-                <span>站点管理</span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                维护不同平台的站点与账号，自动同步分组、模型和
-                key，并将每个分组投影为一个或多个托管 channel。同分组下的多个
-                key 会聚合到同一个 channel。
-              </p>
-              <div className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                当前方案以 <code>site_user_group</code>{" "}
-                作为主拆分维度；无分组时使用 <code>default</code>
-                。多端点兼容站点会按模型已归属的请求端点格式继续拆分托管
-                channel。
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={openCreateSiteDialog} className="rounded-xl">
-                <Plus className="size-4" />
-                新增站点
-              </Button>
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => setImportDialogOpen(true)}
-              >
-                <Upload className="size-4" />
-                导入 All API Hub
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleSyncAll}
-                disabled={syncAllSites.isPending}
-                className="rounded-xl"
-              >
-                <RefreshCw
-                  className={cn(
-                    "size-4",
-                    syncAllSites.isPending ? "animate-spin" : "",
-                  )}
-                />
-                {syncAllSites.isPending ? "同步中..." : "全量同步"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleCheckinAll}
-                disabled={checkinAllSites.isPending}
-                className="rounded-xl"
-              >
-                <CalendarCheck2 className="size-4" />
-                {checkinAllSites.isPending ? "签到中..." : "全量签到"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SiteMetric label="站点数" value={siteCount} />
-            <SiteMetric label="账号数" value={accountCount} />
-            <SiteMetric label="同步到的 Key" value={tokenCount} />
-            <SiteMetric label="同步到的模型" value={modelCount} />
-          </div>
-        </section>
-
-        <CheckinPanel sites={sites} isLoading={isLoading} />
+      <PageWrapper
+        className="space-y-4 pb-24 md:pb-4"
+        childLayout={false}
+      >
+        <CheckinPanel
+          sites={sites}
+          inventory={inventory}
+          visibleSiteCount={visibleSites.length}
+          visibleAccountCount={visibleAccountCount}
+          searchTerm={searchTerm.trim()}
+          siteFilterLabel={
+            siteSurfaceFilter === "all"
+              ? null
+              : SITE_SURFACE_FILTERS.find(
+                  (filter) => filter.key === siteSurfaceFilter,
+                )?.label ?? null
+          }
+          hasActiveFilters={hasActiveFilters}
+          onClearFilters={clearFilters}
+          filterStatus={checkinFilterStatus}
+          onFilterChange={setCheckinFilterStatus}
+        />
 
         {selectedSiteIds.length > 0 ? (
           <section className="rounded-3xl border border-primary/30 bg-primary/5 p-4">
@@ -973,345 +2123,65 @@ export function Site() {
           </section>
         ) : null}
 
-        {sites?.map((site) => (
-          <section
-            key={site.id}
-            className="rounded-3xl border border-border bg-card p-6"
-          >
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="shrink-0"
-                    onClick={() => toggleSiteSelection(site.id)}
-                  >
-                    {selectedSiteIds.includes(site.id) ? (
-                      <CheckSquare className="size-5 text-primary" />
-                    ) : (
-                      <Square className="size-5 text-muted-foreground" />
-                    )}
-                  </button>
-                  <h2 className="text-xl font-semibold">{site.name}</h2>
-                  {site.is_pinned ? (
-                    <Badge variant="outline" className="text-amber-600">
-                      <Pin className="mr-1 size-3" />
-                      置顶
-                    </Badge>
-                  ) : null}
-                  <Badge variant="outline">
-                    {PLATFORM_LABELS[site.platform]}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className={
-                      site.enabled
-                        ? "text-emerald-600"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {site.enabled ? "启用中" : "已停用"}
-                  </Badge>
-                  <Badge variant="outline">{site.accounts.length} 个账号</Badge>
-                  {site.accounts.length > 0 ? (
-                    <Badge variant="outline" className="gap-1">
-                      <Wallet className="size-3" />
-                      {formatBalance(
-                        site.accounts.reduce(
-                          (sum, acc) => sum + acc.balance,
-                          0,
-                        ),
-                      )}
-                    </Badge>
-                  ) : null}
+        {!isLoading &&
+        !error &&
+        sites &&
+        sites.length > 0 &&
+        visibleSites.length === 0 ? (
+          <section className="rounded-3xl border border-dashed border-border bg-card p-10 text-center">
+            <CircleAlert className="mx-auto size-8 text-muted-foreground" />
+            <div className="mt-4 text-lg font-semibold">没有匹配的站点</div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              当前搜索和筛选条件没有命中任何站点或账号。
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-5 rounded-xl"
+              onClick={clearFilters}
+            >
+              <FilterX className="size-4" />
+              清空筛选
+            </Button>
+          </section>
+        ) : null}
+
+        {visibleSites.length > 0 ? (
+          <>
+            <div className="space-y-4 md:hidden">
+              {visibleSites.map((item) => (
+                <div
+                  key={item.site.id}
+                  ref={getSiteCardMeasureRef(item.site.id)}
+                >
+                  {renderSiteCard(item)}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  <Link2 className="size-4" />
-                  <span>{site.base_url}</span>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  <Badge variant="outline">
-                    {site.proxy
-                      ? "启用代理"
-                      : site.use_system_proxy
-                        ? "系统代理"
-                        : "直连"}
-                  </Badge>
-                  {site.site_proxy ? (
-                    <Badge variant="outline">{site.site_proxy}</Badge>
-                  ) : null}
-                  <Badge variant="outline">
-                    {site.custom_header.length} 个自定义 Header
-                  </Badge>
-                  {site.external_checkin_url ? (
-                    <Badge variant="outline">外部签到</Badge>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => openCreateAccountDialog(site)}
-                >
-                  <Plus className="size-4" />
-                  新增账号
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => handleTogglePin(site)}
-                >
-                  {site.is_pinned ? (
-                    <PinOff className="size-4" />
-                  ) : (
-                    <Pin className="size-4" />
-                  )}
-                  {site.is_pinned ? "取消置顶" : "置顶"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => openEditSiteDialog(site)}
-                >
-                  <Pencil className="size-4" />
-                  编辑
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => handleToggleSite(site)}
-                >
-                  {site.enabled ? "停用" : "启用"}
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => handleDeleteSite(site)}
-                >
-                  <Trash2 className="size-4" />
-                  删除
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-6 space-y-3">
-              {site.accounts.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-sm text-muted-foreground">
-                  暂无账号。添加账号后即可自动同步分组、模型和渠道绑定。
-                </div>
-              ) : null}
-              {site.accounts.map((account) => (
-                <article
-                  key={account.id}
-                  className="rounded-2xl border border-border/70 bg-muted/10 p-4"
-                >
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0 flex-1 space-y-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-semibold">
-                          {account.name}
-                        </div>
-                        <Badge variant="outline">
-                          {CREDENTIAL_LABELS[account.credential_type]}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className={
-                            account.enabled
-                              ? "text-emerald-600"
-                              : "text-muted-foreground"
-                          }
-                        >
-                          {account.enabled ? "启用中" : "已停用"}
-                        </Badge>
-                        {account.auto_sync ? (
-                          <Badge variant="outline">自动同步</Badge>
-                        ) : null}
-                        {account.auto_checkin ? (
-                          <Badge variant="outline">自动签到</Badge>
-                        ) : null}
-                        {account.random_checkin ? (
-                          <Badge variant="outline">随机时间</Badge>
-                        ) : null}
-                        {account.account_proxy ? (
-                          <Badge variant="outline">
-                            {account.account_proxy}
-                          </Badge>
-                        ) : null}
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                        <SiteMetric
-                          label="分组"
-                          value={account.user_groups.length}
-                        />
-                        <SiteMetric label="Key" value={account.tokens.length} />
-                        <SiteMetric
-                          label="模型"
-                          value={account.models.length}
-                        />
-                        <SiteMetric
-                          label="托管渠道"
-                          value={account.channel_bindings.length}
-                        />
-                        <SiteMetric
-                          label="余额"
-                          value={formatBalance(account.balance)}
-                        />
-                      </div>
-
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">
-                              同步状态
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={statusClassName(
-                                account.last_sync_status,
-                              )}
-                            >
-                              {statusLabel(account.last_sync_status)}
-                            </Badge>
-                          </div>
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            上次同步：{formatDateTime(account.last_sync_at)}
-                          </div>
-                          <div className="mt-2 text-sm break-all">
-                            {account.last_sync_message || "等待首次同步"}
-                          </div>
-                        </div>
-
-                        <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">
-                              签到状态
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={statusClassName(
-                                account.last_checkin_status,
-                              )}
-                            >
-                              {statusLabel(account.last_checkin_status)}
-                            </Badge>
-                          </div>
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            上次签到：{formatDateTime(account.last_checkin_at)}
-                          </div>
-                          {account.auto_checkin && account.random_checkin ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              下次自动签到：
-                              {account.next_auto_checkin_at
-                                ? formatDateTime(account.next_auto_checkin_at)
-                                : "待调度"}{" "}
-                              · 最小间隔 {account.checkin_interval_hours} 小时 ·
-                              随机延迟 0-{account.checkin_random_window_minutes}{" "}
-                              分钟
-                            </div>
-                          ) : null}
-                          <div className="mt-2 text-sm break-all">
-                            {account.last_checkin_message || "等待首次签到"}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 xl:grid-cols-4">
-                        <SummaryBlock
-                          icon={<FolderTree className="size-4" />}
-                          title="分组"
-                          items={account.user_groups.map(
-                            (item) => item.name || item.group_key,
-                          )}
-                          empty="暂无分组"
-                        />
-                        <SummaryBlock
-                          icon={<KeyRound className="size-4" />}
-                          title="Key 分组"
-                          items={buildTokenGroupSummary(account)}
-                          empty="暂无可用 key"
-                        />
-                        <SummaryBlock
-                          icon={<Sparkles className="size-4" />}
-                          title="模型"
-                          items={account.models.map((item) => item.model_name)}
-                          empty="暂无模型"
-                        />
-                        <SummaryBlock
-                          icon={<Cable className="size-4" />}
-                          title="托管渠道"
-                          items={buildBindingSummary(account)}
-                          empty="暂无绑定"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 xl:w-36 xl:flex-col">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl"
-                        onClick={() => handleSyncAccount(account)}
-                        disabled={syncSiteAccount.isPending}
-                      >
-                        <RefreshCw
-                          className={cn(
-                            "size-4",
-                            syncSiteAccount.isPending ? "animate-spin" : "",
-                          )}
-                        />
-                        同步
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl"
-                        onClick={() => handleCheckinAccount(account)}
-                        disabled={checkinSiteAccount.isPending}
-                      >
-                        <CalendarCheck2 className="size-4" />
-                        签到
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl"
-                        onClick={() => openEditAccountDialog(site, account)}
-                      >
-                        <Pencil className="size-4" />
-                        编辑
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-xl"
-                        onClick={() => handleToggleAccount(account)}
-                      >
-                        {account.enabled ? "停用" : "启用"}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="rounded-xl"
-                        onClick={() => handleDeleteAccount(account)}
-                      >
-                        <Trash2 className="size-4" />
-                        删除
-                      </Button>
-                    </div>
-                  </div>
-                </article>
               ))}
             </div>
-          </section>
-        ))}
+            <div className="hidden items-start gap-4 md:grid md:grid-cols-2">
+              <div className="space-y-4">
+                {masonryColumns[0].map((item) => (
+                  <div
+                    key={item.site.id}
+                    ref={getSiteCardMeasureRef(item.site.id)}
+                  >
+                    {renderSiteCard(item)}
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-4">
+                {masonryColumns[1].map((item) => (
+                  <div
+                    key={item.site.id}
+                    ref={getSiteCardMeasureRef(item.site.id)}
+                  >
+                    {renderSiteCard(item)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : null}
       </PageWrapper>
 
       <Dialog open={siteDialogOpen} onOpenChange={closeSiteDialog}>
@@ -1367,9 +2237,6 @@ export function Site() {
                     ))}
                   </SelectContent>
                 </Select>
-                <span className="text-xs text-muted-foreground">
-                  留空可根据站点地址自动检测平台类型
-                </span>
               </label>
             </div>
 
@@ -1691,21 +2558,72 @@ export function Site() {
 
               {accountForm.credential_type ===
               SiteCredentialType.AccessToken ? (
-                <label className="grid gap-2 text-sm">
-                  <span className="font-medium">Access Token</span>
-                  <Input
-                    value={accountForm.access_token}
-                    onChange={(event) =>
-                      setAccountForm((current) =>
-                        current
-                          ? { ...current, access_token: event.target.value }
-                          : current,
-                      )
-                    }
-                    placeholder="请输入 Access Token"
-                    className="rounded-xl"
-                  />
-                </label>
+                <div className="grid gap-4">
+                  <label className="grid gap-2 text-sm">
+                    <span className="font-medium">Access Token</span>
+                    <Input
+                      value={accountForm.access_token}
+                      onChange={(event) =>
+                        setAccountForm((current) =>
+                          current
+                            ? { ...current, access_token: event.target.value }
+                            : current,
+                        )
+                      }
+                      placeholder="请输入 Access Token"
+                      className="rounded-xl"
+                    />
+                  </label>
+
+                  {currentPlatform === SitePlatform.Sub2API ? (
+                    <div className="grid gap-2">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="grid gap-2 text-sm">
+                          <span className="font-medium">Refresh Token</span>
+                          <Input
+                            value={accountForm.refresh_token}
+                            onChange={(event) =>
+                              setAccountForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      refresh_token: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="可选：请输入 refresh_token"
+                            className="rounded-xl"
+                          />
+                        </label>
+
+                        <label className="grid gap-2 text-sm">
+                          <span className="font-medium">token_expires_at</span>
+                          <Input
+                            value={accountForm.token_expires_at}
+                            onChange={(event) =>
+                              setAccountForm((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      token_expires_at: event.target.value,
+                                    }
+                                  : current,
+                              )
+                            }
+                            placeholder="可选：F12 中的时间戳或时间字符串"
+                            className="rounded-xl"
+                          />
+                        </label>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        Sub2API 推荐同时填写 F12 里的 <code>refresh_token</code>{" "}
+                        与 <code>token_expires_at</code>，会在快过期或 401
+                        时自动续期。
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               {accountForm.credential_type === SiteCredentialType.APIKey ? (

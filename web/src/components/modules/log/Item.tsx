@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound } from 'lucide-react';
+import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Globe2, Waypoints } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -13,6 +13,17 @@ import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { CopyIconButton } from '@/components/common/CopyButton';
+import { Button } from '@/components/ui/button';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
     MorphingDialog,
     MorphingDialogTrigger,
@@ -24,6 +35,23 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/animate-ui/components/animate/tooltip';
+import { useJumpStore } from '@/stores/jump';
+import { toast } from '@/components/common/Toast';
+import { useUpdateSiteChannelModelDisabled } from '@/api/endpoints/site-channel';
+
+export type LogSiteActionTarget = {
+    siteId: number;
+    siteName: string;
+    accountId: number;
+    accountName: string;
+    groupKey: string;
+    groupName: string;
+    modelName: string;
+    modelDisabled: boolean;
+    canDisableModel: boolean;
+    channelId: number;
+    channelName: string;
+};
 
 function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
@@ -184,17 +212,126 @@ function DeferredJsonContent({ content, fallbackText }: { content: string | unde
     );
 }
 
-export function LogCard({ log }: { log: RelayLog }) {
+function LogSiteActions({
+    siteTarget,
+    compact = false,
+    disablePending,
+    onLocateSite,
+    onLocateSiteChannel,
+    onDisableModel,
+}: {
+    siteTarget: LogSiteActionTarget;
+    compact?: boolean;
+    disablePending: boolean;
+    onLocateSite: () => void;
+    onLocateSiteChannel: () => void;
+    onDisableModel: () => void;
+}) {
+    return (
+        <div className={cn('flex flex-wrap gap-2', compact && 'pt-1')}>
+            <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-xl"
+                onClick={onLocateSite}
+            >
+                <Globe2 className="size-3.5" />
+                站点
+            </Button>
+            <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-xl"
+                onClick={onLocateSiteChannel}
+            >
+                <Waypoints className="size-3.5" />
+                站点渠道
+            </Button>
+            {siteTarget.canDisableModel ? (
+                <Button
+                    type="button"
+                    variant={siteTarget.modelDisabled ? 'outline' : 'destructive'}
+                    size="sm"
+                    className="h-8 rounded-xl"
+                    disabled={disablePending || siteTarget.modelDisabled}
+                    onClick={onDisableModel}
+                >
+                    <CircleOff className="size-3.5" />
+                    {siteTarget.modelDisabled ? '已禁用' : disablePending ? '处理中...' : '禁用模型'}
+                </Button>
+            ) : null}
+        </div>
+    );
+}
+
+export function LogCard({ log, siteTarget }: { log: RelayLog; siteTarget: LogSiteActionTarget | null }) {
     const t = useTranslations('log.card');
     const { Avatar: ModelAvatar, color: brandColor } = useMemo(
         () => getModelIcon(log.actual_model_name),
         [log.actual_model_name]
     );
     const requestAPIKeyName = useMemo(() => log.request_api_key_name?.trim() ?? '', [log.request_api_key_name]);
+    const requestJump = useJumpStore((state) => state.requestJump);
+    const disableMutation = useUpdateSiteChannelModelDisabled(siteTarget?.siteId ?? 0, siteTarget?.accountId ?? 0);
 
     const hasError = !!log.error;
     const hasMultipleAttempts = log.attempts && log.attempts.length > 1;
     const [isDiagnosticExpanded, setIsDiagnosticExpanded] = useState(false);
+    const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
+
+    const handleLocateSite = () => {
+        if (!siteTarget) return;
+        requestJump({ kind: 'site-account', siteId: siteTarget.siteId, accountId: siteTarget.accountId });
+    };
+
+    const handleLocateSiteChannel = () => {
+        if (!siteTarget) return;
+        requestJump(
+            siteTarget.canDisableModel
+                ? {
+                    kind: 'site-channel-model',
+                    siteId: siteTarget.siteId,
+                    accountId: siteTarget.accountId,
+                    groupKey: siteTarget.groupKey,
+                    modelName: siteTarget.modelName,
+                }
+                : {
+                    kind: 'site-channel-account',
+                    siteId: siteTarget.siteId,
+                    accountId: siteTarget.accountId,
+                },
+        );
+    };
+
+    const handleDisableModel = () => {
+        if (!siteTarget || !siteTarget.canDisableModel || siteTarget.modelDisabled) return;
+        setConfirmDisableOpen(true);
+    };
+
+    const confirmDisableModel = () => {
+        if (!siteTarget || !siteTarget.canDisableModel || siteTarget.modelDisabled) return;
+
+        disableMutation.mutate(
+            [
+                {
+                    group_key: siteTarget.groupKey,
+                    model_name: siteTarget.modelName,
+                    disabled: true,
+                },
+            ],
+            {
+                onSuccess: () => {
+                    setConfirmDisableOpen(false);
+                    toast.success(`已禁用 ${siteTarget.groupName} / ${siteTarget.modelName}`);
+                },
+                onError: (error) => {
+                    toast.error(error.message);
+                },
+            },
+        );
+    };
 
     return (
         <TooltipProvider>
@@ -271,6 +408,18 @@ export function LogCard({ log }: { log: RelayLog }) {
                                     </span>
                                 </div>
                             </div>
+                            {siteTarget ? (
+                                <div onClick={(event) => event.stopPropagation()}>
+                                    <LogSiteActions
+                                        siteTarget={siteTarget}
+                                        compact
+                                        disablePending={disableMutation.isPending}
+                                        onLocateSite={handleLocateSite}
+                                        onLocateSiteChannel={handleLocateSiteChannel}
+                                        onDisableModel={handleDisableModel}
+                                    />
+                                </div>
+                            ) : null}
                             {hasError && (
                                 <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 overflow-hidden">
                                     <p className="text-xs text-destructive line-clamp-2">{log.error}</p>
@@ -307,6 +456,17 @@ export function LogCard({ log }: { log: RelayLog }) {
                                 <Pin className="size-3.5 shrink-0 text-amber-500" />
                             )}
                         </MorphingDialogTitle>
+                        {siteTarget ? (
+                            <div className="mb-3">
+                                <LogSiteActions
+                                    siteTarget={siteTarget}
+                                    disablePending={disableMutation.isPending}
+                                    onLocateSite={handleLocateSite}
+                                    onLocateSiteChannel={handleLocateSiteChannel}
+                                    onDisableModel={handleDisableModel}
+                                />
+                            </div>
+                        ) : null}
 
                         <MorphingDialogDescription className="flex-1 min-h-0">
                             <div className="flex flex-col min-h-0 h-full gap-4">
@@ -483,6 +643,29 @@ export function LogCard({ log }: { log: RelayLog }) {
                     </MorphingDialogContent>
                 </MorphingDialogContainer>
             </MorphingDialog>
+            {siteTarget?.canDisableModel ? (
+                <AlertDialog open={confirmDisableOpen} onOpenChange={setConfirmDisableOpen}>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>确认禁用站点模型</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                将在 {siteTarget.siteName} / {siteTarget.accountName} / {siteTarget.groupName} 中禁用模型 {siteTarget.modelName}。
+                                禁用后对应投影渠道和分组会刷新为最新状态。
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel disabled={disableMutation.isPending}>取消</AlertDialogCancel>
+                            <AlertDialogAction
+                                onClick={confirmDisableModel}
+                                disabled={disableMutation.isPending}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                                {disableMutation.isPending ? '禁用中...' : '确认禁用'}
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+            ) : null}
         </TooltipProvider>
     );
 }

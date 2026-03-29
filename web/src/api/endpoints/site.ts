@@ -72,6 +72,8 @@ export type SiteAccount = {
   password: string;
   access_token: string;
   api_key: string;
+  refresh_token: string;
+  token_expires_at: number;
   platform_user_id?: number | null;
   account_proxy?: string | null;
   enabled: boolean;
@@ -175,6 +177,15 @@ export function useSiteList() {
             : 1,
         accounts: (site.accounts ?? []).map((account) => ({
           ...account,
+          refresh_token:
+            typeof account.refresh_token === "string"
+              ? account.refresh_token
+              : "",
+          token_expires_at:
+            typeof account.token_expires_at === "number" &&
+            account.token_expires_at > 0
+              ? account.token_expires_at
+              : 0,
           platform_user_id: account.platform_user_id ?? null,
           account_proxy: account.account_proxy ?? null,
           random_checkin: account.random_checkin ?? false,

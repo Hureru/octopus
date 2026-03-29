@@ -5,16 +5,18 @@ export type ToolbarLayout = 'grid' | 'list';
 export type ToolbarSortOrder = 'asc' | 'desc';
 export type ToolbarSortField = 'name' | 'created';
 export type ToolbarCreatedSortablePage = 'channel' | 'group';
-export const TOOLBAR_PAGES = ['channel', 'group', 'model'] as const;
+export const TOOLBAR_PAGES = ['site', 'channel', 'group', 'model'] as const;
 export type ToolbarPage = (typeof TOOLBAR_PAGES)[number];
 export type ChannelFilter = 'all' | 'enabled' | 'disabled';
 export type GroupFilter = 'all' | 'with-members' | 'empty';
 export type ModelFilter = 'all' | 'priced' | 'free';
+export type SiteFilter = 'all' | 'abnormal' | 'enabled' | 'disabled' | 'pinned';
 
 interface ToolbarViewOptionsState {
     layouts: Partial<Record<ToolbarPage, ToolbarLayout>>;
     sortFields: Partial<Record<ToolbarCreatedSortablePage, ToolbarSortField>>;
     sortOrders: Partial<Record<ToolbarPage, ToolbarSortOrder>>;
+    siteFilter: SiteFilter;
     channelFilter: ChannelFilter;
     groupFilter: GroupFilter;
     modelFilter: ModelFilter;
@@ -32,6 +34,7 @@ interface ToolbarViewOptionsState {
     getSortOrder: (item: ToolbarPage) => ToolbarSortOrder;
     setSortOrder: (item: ToolbarPage, value: ToolbarSortOrder) => void;
 
+    setSiteFilter: (value: SiteFilter) => void;
     setChannelFilter: (value: ChannelFilter) => void;
     setGroupFilter: (value: GroupFilter) => void;
     setModelFilter: (value: ModelFilter) => void;
@@ -43,6 +46,7 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
             layouts: {},
             sortFields: {},
             sortOrders: {},
+            siteFilter: 'all',
             channelFilter: 'all',
             groupFilter: 'all',
             modelFilter: 'all',
@@ -65,6 +69,7 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
                 set((state) => ({ sortOrders: { ...state.sortOrders, [item]: value } }));
             },
 
+            setSiteFilter: (value) => set({ siteFilter: value }),
             setChannelFilter: (value) => set({ channelFilter: value }),
             setGroupFilter: (value) => set({ groupFilter: value }),
             setModelFilter: (value) => set({ modelFilter: value }),
@@ -75,6 +80,7 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
                 layouts: state.layouts,
                 sortFields: state.sortFields,
                 sortOrders: state.sortOrders,
+                siteFilter: state.siteFilter,
                 channelFilter: state.channelFilter,
                 groupFilter: state.groupFilter,
                 modelFilter: state.modelFilter,

@@ -95,6 +95,11 @@ export type SiteModelDisableUpdateRequest = {
     disabled: boolean;
 };
 
+export type SiteChannelKeyCreateRequest = {
+    group_key: string;
+    name?: string;
+};
+
 function getAccountPath(siteId: number, accountId: number, suffix: string) {
     return '/api/v1/site-channel/' + siteId + '/account/' + accountId + suffix;
 }
@@ -120,6 +125,7 @@ function replaceSiteChannelAccount(
 
 function invalidateSiteChannelQueries(queryClient: ReturnType<typeof useQueryClient>) {
     queryClient.invalidateQueries({ queryKey: ['site-channel', 'list'] });
+    queryClient.invalidateQueries({ queryKey: ['sites', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
 }
@@ -147,6 +153,24 @@ export function useUpdateSiteChannelModelRoutes(siteId: number, accountId: numbe
         },
         onError: (error) => {
             logger.error('site channel model route update failed:', error);
+        },
+    });
+}
+
+export function useCreateSiteChannelKey(siteId: number, accountId: number) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (payload: SiteChannelKeyCreateRequest) =>
+            apiClient.post<SiteChannelAccount>(getAccountPath(siteId, accountId, '/keys'), payload),
+        onSuccess: (account) => {
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, siteId, account),
+            );
+            invalidateSiteChannelQueries(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site channel key create failed:', error);
         },
     });
 }

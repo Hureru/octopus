@@ -1,297 +1,261 @@
-'use client';
+"use client";
 
-import { useMemo, useState, useCallback } from 'react';
-import * as AccordionPrimitive from '@radix-ui/react-accordion';
-import { CalendarCheck2, ChevronDownIcon, RefreshCw } from 'lucide-react';
-import { Accordion, AccordionContent, AccordionItem } from '@/components/ui/accordion';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
-import { toast } from '@/components/common/Toast';
-import { useCheckinSiteAccount, useCheckinAllSites, type Site } from '@/api/endpoints/site';
-import { cn } from '@/lib/utils';
+import { useMemo, type ReactNode } from "react";
+import { CalendarCheck2, FilterX, Globe2, KeyRound, Layers3, Sparkles } from "lucide-react";
+import { type Site } from "@/api/endpoints/site";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-// --- helpers (same as index.tsx, kept local to avoid touching main page) ---
+export type CheckinFilterStatus =
+  | "all"
+  | "success"
+  | "failed"
+  | "skipped"
+  | "idle";
 
-function formatDateTime(value?: string | null) {
-    if (!value) return '从未执行';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1) return '从未执行';
-    return date.toLocaleString();
-}
-
-function statusLabel(status: string) {
-    switch (status) {
-        case 'success': return '成功';
-        case 'failed':  return '失败';
-        case 'skipped': return '跳过';
-        default:        return '未执行';
-    }
-}
-
-function statusClassName(status: string) {
-    switch (status) {
-        case 'success':
-            return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
-        case 'failed':
-            return 'border-destructive/20 bg-destructive/10 text-destructive';
-        case 'skipped':
-            return 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300';
-        default:
-            return 'border-border bg-muted/40 text-muted-foreground';
-    }
-}
-
-// --- types ---
-
-type CheckinRow = {
-    siteId: number;
-    siteName: string;
-    accountId: number;
-    accountName: string;
-    status: string;
-    lastCheckinAt: string | null;
-    message: string;
-};
-
-type FilterStatus = 'all' | 'success' | 'failed' | 'skipped' | 'idle';
-
-const STATUS_PRIORITY: Record<string, number> = {
-    failed: 0, idle: 1, skipped: 2, success: 3,
-};
-
-const STORAGE_KEY = 'octopus-checkin-panel-expanded';
-
-const FILTERS: { key: FilterStatus; label: string; countKey?: string }[] = [
-    { key: 'all',     label: '全部' },
-    { key: 'success', label: '成功' },
-    { key: 'failed',  label: '失败' },
-    { key: 'skipped', label: '跳过' },
-    { key: 'idle',    label: '未执行' },
+const FILTERS: Array<{ key: CheckinFilterStatus; label: string }> = [
+  { key: "all", label: "全部" },
+  { key: "success", label: "成功" },
+  { key: "failed", label: "失败" },
+  { key: "skipped", label: "跳过" },
+  { key: "idle", label: "未执行" },
 ];
 
-// --- component ---
+function sitePlatformSupportsCheckin(platform: Site["platform"]) {
+  switch (platform) {
+    case "done-hub":
+    case "sub2api":
+    case "openai":
+    case "claude":
+    case "gemini":
+      return false;
+    default:
+      return true;
+  }
+}
 
-export function CheckinPanel({ sites, isLoading }: { sites: Site[] | undefined; isLoading: boolean }) {
-    const checkinAccount = useCheckinSiteAccount();
-    const checkinAll = useCheckinAllSites();
+function accountHasCheckinEnabled(site: Site, account: Site["accounts"][number]) {
+  return sitePlatformSupportsCheckin(site.platform) && account.auto_checkin;
+}
 
-    const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-    const [checkinLoadingIds, setCheckinLoadingIds] = useState<Set<number>>(new Set());
-    const [accordionValue, setAccordionValue] = useState<string>(() => {
-        if (typeof window === 'undefined') return 'checkin-panel';
-        return localStorage.getItem(STORAGE_KEY) === 'collapsed' ? '' : 'checkin-panel';
-    });
+function filterTone(status: CheckinFilterStatus, active: boolean) {
+  if (active) {
+    switch (status) {
+      case "success":
+        return "border-emerald-500/30 bg-emerald-500 text-white";
+      case "failed":
+        return "border-destructive/30 bg-destructive text-white";
+      case "skipped":
+        return "border-amber-500/30 bg-amber-500 text-white";
+      case "idle":
+        return "border-border bg-foreground text-background";
+      case "all":
+      default:
+        return "border-primary/30 bg-primary text-primary-foreground";
+    }
+  }
 
-    const handleValueChange = useCallback((value: string) => {
-        setAccordionValue(value);
-        localStorage.setItem(STORAGE_KEY, value ? 'expanded' : 'collapsed');
-    }, []);
+  switch (status) {
+    case "success":
+      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "failed":
+      return "border-destructive/20 bg-destructive/10 text-destructive";
+    case "skipped":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    case "idle":
+      return "border-border bg-muted/40 text-muted-foreground";
+    case "all":
+    default:
+      return "border-border bg-background text-foreground";
+  }
+}
 
-    // flatten sites → rows
-    const allRows = useMemo<CheckinRow[]>(() => {
-        if (!sites) return [];
-        const rows: CheckinRow[] = [];
-        for (const site of sites) {
-            for (const acc of site.accounts ?? []) {
-                rows.push({
-                    siteId: site.id,
-                    siteName: site.name,
-                    accountId: acc.id,
-                    accountName: acc.name,
-                    status: acc.last_checkin_status || 'idle',
-                    lastCheckinAt: acc.last_checkin_at ?? null,
-                    message: acc.last_checkin_message || '',
-                });
-            }
-        }
-        rows.sort((a, b) => {
-            const pa = STATUS_PRIORITY[a.status] ?? 99;
-            const pb = STATUS_PRIORITY[b.status] ?? 99;
-            if (pa !== pb) return pa - pb;
-            const ta = a.lastCheckinAt ? new Date(a.lastCheckinAt).getTime() : 0;
-            const tb = b.lastCheckinAt ? new Date(b.lastCheckinAt).getTime() : 0;
-            return tb - ta;
-        });
-        return rows;
-    }, [sites]);
+function statusLabel(status: CheckinFilterStatus) {
+  const filter = FILTERS.find((item) => item.key === status);
+  return filter?.label ?? "全部";
+}
 
-    const summary = useMemo(() => {
-        const s = { total: 0, success: 0, failed: 0, skipped: 0, idle: 0 };
-        for (const r of allRows) {
-            s.total++;
-            if (r.status === 'success') s.success++;
-            else if (r.status === 'failed') s.failed++;
-            else if (r.status === 'skipped') s.skipped++;
-            else s.idle++;
-        }
-        return s;
-    }, [allRows]);
+function OverviewMetric({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl bg-muted/20 px-4 py-3">
+      <span className="flex size-9 items-center justify-center rounded-xl bg-background text-muted-foreground shadow-sm">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="text-base font-semibold">{value}</div>
+      </div>
+    </div>
+  );
+}
 
-    const filteredRows = useMemo(
-        () => filterStatus === 'all' ? allRows : allRows.filter((r) => r.status === filterStatus),
-        [allRows, filterStatus],
-    );
-
-    const handleCheckinRow = useCallback(async (accountId: number) => {
-        setCheckinLoadingIds((prev) => new Set(prev).add(accountId));
-        try {
-            const res = await checkinAccount.mutateAsync(accountId);
-            if (res.status === 'success') {
-                toast.success(`签到成功${res.reward ? `：${res.reward}` : ''}`);
-            } else {
-                toast.error(`签到失败：${res.message || '未知错误'}`);
-            }
-        } catch (err) {
-            toast.error(`签到失败：${(err as Error).message}`);
-        } finally {
-            setCheckinLoadingIds((prev) => { const n = new Set(prev); n.delete(accountId); return n; });
-        }
-    }, [checkinAccount]);
-
-    const handleCheckinAll = useCallback(() => {
-        checkinAll.mutate(undefined, {
-            onSuccess: () => toast.success('已触发后台全量签到'),
-            onError: (err) => toast.error(`全量签到失败：${err.message}`),
-        });
-    }, [checkinAll]);
-
-    const summaryCountForFilter = (key: FilterStatus) => {
-        if (key === 'all') return summary.total;
-        return summary[key];
+export function CheckinPanel({
+  sites,
+  inventory,
+  visibleSiteCount,
+  visibleAccountCount,
+  searchTerm,
+  siteFilterLabel,
+  hasActiveFilters,
+  onClearFilters,
+  filterStatus,
+  onFilterChange,
+}: {
+  sites: Site[] | undefined;
+  inventory: {
+    siteCount: number;
+    accountCount: number;
+    tokenCount: number;
+    modelCount: number;
+  };
+  visibleSiteCount: number;
+  visibleAccountCount: number;
+  searchTerm: string;
+  siteFilterLabel: string | null;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
+  filterStatus: CheckinFilterStatus;
+  onFilterChange: (status: CheckinFilterStatus) => void;
+}) {
+  const summary = useMemo(() => {
+    const counters = {
+      total: 0,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      idle: 0,
     };
 
-    return (
-        <section className="rounded-3xl border border-border bg-card text-card-foreground">
-            <Accordion type="single" collapsible value={accordionValue} onValueChange={handleValueChange}>
-                <AccordionItem value="checkin-panel">
-                    {/* custom header: trigger + checkin-all button side by side */}
-                    <AccordionPrimitive.Header className="flex items-center gap-3 px-6 py-4">
-                        <AccordionPrimitive.Trigger className="flex flex-1 items-center gap-3 text-left text-sm font-medium outline-none [&[data-state=open]>svg.chevron]:rotate-180">
-                            <CalendarCheck2 className="size-5 text-primary shrink-0" />
-                            <span className="font-semibold">签到总览</span>
-                            <div className="flex items-center gap-1.5 ml-2">
-                                {summary.success > 0 && <Badge variant="outline" className="text-[11px] border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{summary.success} 成功</Badge>}
-                                {summary.failed > 0 && <Badge variant="outline" className="text-[11px] border-destructive/20 bg-destructive/10 text-destructive">{summary.failed} 失败</Badge>}
-                                {summary.skipped > 0 && <Badge variant="outline" className="text-[11px] border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300">{summary.skipped} 跳过</Badge>}
-                                {summary.idle > 0 && <Badge variant="outline" className="text-[11px] border-border bg-muted/40 text-muted-foreground">{summary.idle} 未执行</Badge>}
-                            </div>
-                            <ChevronDownIcon className="chevron ml-auto text-muted-foreground size-4 shrink-0 transition-transform duration-200" />
-                        </AccordionPrimitive.Trigger>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="shrink-0 rounded-xl"
-                            disabled={checkinAll.isPending}
-                            onClick={(e) => { e.stopPropagation(); handleCheckinAll(); }}
-                        >
-                            <RefreshCw className={cn('size-3.5', checkinAll.isPending && 'animate-spin')} />
-                            {checkinAll.isPending ? '签到中...' : '全量签到'}
-                        </Button>
-                    </AccordionPrimitive.Header>
+    for (const site of sites ?? []) {
+      for (const account of site.accounts ?? []) {
+        if (!accountHasCheckinEnabled(site, account)) {
+          continue;
+        }
+        counters.total += 1;
+        const status = account.last_checkin_status || "idle";
+        if (status === "success") counters.success += 1;
+        else if (status === "failed") counters.failed += 1;
+        else if (status === "skipped") counters.skipped += 1;
+        else counters.idle += 1;
+      }
+    }
 
-                    <AccordionContent className="px-6">
-                        {/* filter bar */}
-                        <div className="flex flex-wrap gap-1.5 mb-4">
-                            {FILTERS.map((f) => (
-                                <button
-                                    key={f.key}
-                                    type="button"
-                                    onClick={() => setFilterStatus(f.key)}
-                                    className={cn(
-                                        'px-3 py-1 text-xs rounded-lg transition-colors',
-                                        filterStatus === f.key
-                                            ? 'bg-primary text-primary-foreground'
-                                            : 'bg-muted hover:bg-muted/80 text-muted-foreground',
-                                    )}
-                                >
-                                    {f.label} ({summaryCountForFilter(f.key)})
-                                </button>
-                            ))}
-                        </div>
+    return counters;
+  }, [sites]);
 
-                        {/* table */}
-                        <div className="max-h-[400px] overflow-y-auto rounded-xl border border-border/50">
-                            {isLoading ? (
-                                <div className="py-10 text-center text-sm text-muted-foreground">正在加载...</div>
-                            ) : filteredRows.length === 0 ? (
-                                <div className="py-10 text-center text-sm text-muted-foreground">
-                                    {allRows.length === 0 ? '暂无账号数据' : '没有匹配的记录'}
-                                </div>
-                            ) : (
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead className="w-[120px]">站点</TableHead>
-                                            <TableHead className="w-[120px]">账号</TableHead>
-                                            <TableHead className="w-[80px]">状态</TableHead>
-                                            <TableHead className="w-[160px]">时间</TableHead>
-                                            <TableHead>消息</TableHead>
-                                            <TableHead className="w-[70px] text-right">操作</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {filteredRows.map((row) => (
-                                            <TableRow key={row.accountId}>
-                                                <TableCell className="font-medium truncate max-w-[120px]">
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <span className="truncate block">{row.siteName}</span>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>{row.siteName}</TooltipContent>
-                                                    </Tooltip>
-                                                </TableCell>
-                                                <TableCell className="truncate max-w-[120px]">
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <span className="truncate block">{row.accountName}</span>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>{row.accountName}</TooltipContent>
-                                                    </Tooltip>
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline" className={statusClassName(row.status)}>
-                                                        {statusLabel(row.status)}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-xs text-muted-foreground">
-                                                    {formatDateTime(row.lastCheckinAt)}
-                                                </TableCell>
-                                                <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <span className="truncate block">{row.message || '—'}</span>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent className="max-w-xs">{row.message || '—'}</TooltipContent>
-                                                    </Tooltip>
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="h-7 w-7 p-0 rounded-lg"
-                                                        disabled={checkinLoadingIds.has(row.accountId)}
-                                                        onClick={() => handleCheckinRow(row.accountId)}
-                                                    >
-                                                        {checkinLoadingIds.has(row.accountId) ? (
-                                                            <RefreshCw className="size-3.5 animate-spin" />
-                                                        ) : (
-                                                            <CalendarCheck2 className="size-3.5" />
-                                                        )}
-                                                    </Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            )}
-                        </div>
-                    </AccordionContent>
-                </AccordionItem>
-            </Accordion>
-        </section>
-    );
+  const activeCount =
+    filterStatus === "all" ? summary.total : summary[filterStatus];
+
+  return (
+    <section className="overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-[0_18px_60px_-40px_rgba(15,23,42,0.45)]">
+      <div className="border-b border-border/60 bg-gradient-to-br from-background via-card to-muted/10 px-5 py-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-base font-semibold">
+              <CalendarCheck2 className="size-5 text-primary" />
+              <span>站点总览</span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {summary.total === 0
+                ? "暂无启用签到的账号。"
+                : filterStatus === "all"
+                  ? "点击状态标签，直接定位异常站点和账号。"
+                  : `当前按“${statusLabel(filterStatus)}”筛选，命中 ${activeCount} 个账号。`}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>当前结果</span>
+            <span className="font-medium text-foreground">
+              {visibleSiteCount} 站点 / {visibleAccountCount} 账号
+            </span>
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl"
+                onClick={onClearFilters}
+              >
+                <FilterX className="size-4" />
+                清空筛选
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <OverviewMetric
+            icon={<Globe2 className="size-4" />}
+            label="站点"
+            value={inventory.siteCount}
+          />
+          <OverviewMetric
+            icon={<Layers3 className="size-4" />}
+            label="账号"
+            value={inventory.accountCount}
+          />
+          <OverviewMetric
+            icon={<KeyRound className="size-4" />}
+            label="Key"
+            value={inventory.tokenCount}
+          />
+          <OverviewMetric
+            icon={<Sparkles className="size-4" />}
+            label="模型"
+            value={inventory.modelCount}
+          />
+        </div>
+
+        {hasActiveFilters ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {searchTerm ? <Badge variant="outline">搜索：{searchTerm}</Badge> : null}
+            {siteFilterLabel ? (
+              <Badge variant="outline">站点：{siteFilterLabel}</Badge>
+            ) : null}
+            {filterStatus !== "all" ? (
+              <Badge variant="outline">签到：{statusLabel(filterStatus)}</Badge>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="px-5 py-4">
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map((filter) => {
+            const count =
+              filter.key === "all" ? summary.total : summary[filter.key];
+            const active = filterStatus === filter.key;
+            return (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() =>
+                  onFilterChange(
+                    active && filter.key !== "all" ? "all" : filter.key,
+                  )
+                }
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  filterTone(filter.key, active),
+                )}
+              >
+                <span>{count}</span>
+                <span>{filter.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
 }

@@ -26,11 +26,13 @@ import { ChannelForm, type ChannelFormData } from './Form';
 import { formatMoney } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useJumpStore } from '@/stores/jump';
 
 export function CardContent({ channel, stats }: { channel: Channel; stats: StatsMetricsFormatted }) {
     const { setIsOpen } = useMorphingDialog();
     const updateChannel = useUpdateChannel();
     const deleteChannel = useDeleteChannel();
+    const requestJump = useJumpStore((state) => state.requestJump);
     const [isEditing, setIsEditing] = useState(false);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [formData, setFormData] = useState<ChannelFormData>({
@@ -162,6 +164,25 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         }, 300);
     };
 
+    const handleManagedSourceJump = (target: 'site' | 'site-channel') => {
+        if (!channel.managed_source) return;
+
+        setIsOpen(false);
+        requestJump(
+            target === 'site'
+                ? {
+                    kind: 'site-account',
+                    siteId: channel.managed_source.site_id,
+                    accountId: channel.managed_source.site_account_id,
+                }
+                : {
+                    kind: 'site-channel-account',
+                    siteId: channel.managed_source.site_id,
+                    accountId: channel.managed_source.site_account_id,
+                },
+        );
+    };
+
     return (
         <>
             <MorphingDialogTitle>
@@ -192,7 +213,31 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                             <div className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5">
                                 {channel.managed ? (
                                     <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
-                                        这是站点账号自动投影生成的托管 channel。请到站点管理中修改账号、分组、模型、代理或启停状态；该页面不再允许直接编辑、删除或启停，避免被后续投影覆盖。
+                                        <div>
+                                            这是站点账号自动投影生成的托管 channel。请到站点管理中修改账号、分组、模型、代理或启停状态；该页面不再允许直接编辑、删除或启停，避免被后续投影覆盖。
+                                        </div>
+                                        {channel.managed_source ? (
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="rounded-xl border-amber-500/30 bg-white/70 text-amber-900 hover:bg-white dark:bg-background/40 dark:text-amber-100"
+                                                    onClick={() => handleManagedSourceJump('site')}
+                                                >
+                                                    查看来源站点
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="rounded-xl border-amber-500/30 bg-white/70 text-amber-900 hover:bg-white dark:bg-background/40 dark:text-amber-100"
+                                                    onClick={() => handleManagedSourceJump('site-channel')}
+                                                >
+                                                    查看站点渠道
+                                                </Button>
+                                            </div>
+                                        ) : null}
                                     </section>
                                 ) : null}
                                 <dl className="grid gap-3 grid-cols-1 sm:grid-cols-3">
