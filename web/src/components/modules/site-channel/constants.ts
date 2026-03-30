@@ -10,7 +10,12 @@ export const SITE_ROUTE_COLUMN_ORDER: SiteModelRouteType[] = [
     'openai_embedding',
 ];
 
-export const SITE_ROUTE_TO_CHANNEL_TYPE: Record<SiteModelRouteType, ChannelType> = {
+export const SITE_ROUTE_DISPLAY_ORDER: SiteModelRouteType[] = [
+    ...SITE_ROUTE_COLUMN_ORDER,
+    'unknown',
+];
+
+export const SITE_ROUTE_TO_CHANNEL_TYPE: Record<Exclude<SiteModelRouteType, 'unknown'>, ChannelType> = {
     openai_chat: ChannelType.OpenAIChat,
     openai_response: ChannelType.OpenAIResponse,
     anthropic: ChannelType.Anthropic,
@@ -23,6 +28,8 @@ export const ROUTE_COLUMN_KEY_PREFIX = 'site-route-column';
 
 export function getRouteTypeTone(routeType: SiteModelRouteType) {
     switch (routeType) {
+        case 'unknown':
+            return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300';
         case 'anthropic':
             return 'border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-300';
         case 'gemini':
@@ -36,6 +43,10 @@ export function getRouteTypeTone(routeType: SiteModelRouteType) {
         default:
             return 'border-primary/20 bg-primary/10 text-primary';
     }
+}
+
+export function isSupportedRouteType(routeType: SiteModelRouteType): routeType is Exclude<SiteModelRouteType, 'unknown'> {
+    return routeType !== 'unknown';
 }
 
 export function getRouteSourceTone(routeSource: SiteModelRouteSource) {

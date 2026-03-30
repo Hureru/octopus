@@ -68,9 +68,11 @@ import {
 } from '@/api/endpoints/site-channel';
 import {
     ROUTE_COLUMN_KEY_PREFIX,
+    SITE_ROUTE_DISPLAY_ORDER,
     SITE_ROUTE_COLUMN_ORDER,
     getRouteSourceTone,
     getRouteTypeTone,
+    isSupportedRouteType,
 } from './constants';
 import {
     SITE_GROUP_FILTER_ALL,
@@ -187,6 +189,21 @@ function collectSiteSummary(card: SiteChannelCard) {
     return { groupCount, modelCount, totalKeys, enabledKeys, routeCounts };
 }
 
+function getUnknownRouteReason(model: SiteModelView) {
+    const metadata = model.route_metadata;
+    if (!metadata || metadata.route_supported) return null;
+
+    const details = [metadata.unsupported_reason];
+    if (metadata.supported_endpoint_types?.length) {
+        details.push(`检测到端点: ${metadata.supported_endpoint_types.join(', ')}`);
+    }
+    if (metadata.heuristic_endpoint_types?.length) {
+        details.push(`启发式推断: ${metadata.heuristic_endpoint_types.join(', ')}`);
+    }
+
+    return details.filter((item): item is string => Boolean(item && item.trim())).join(' · ') || null;
+}
+
 function getModelLastRequestAt(model: SiteModelView) {
     return model.history?.last_request_at ?? null;
 }
@@ -200,7 +217,7 @@ function hasModelHistory(model: SiteModelView) {
 }
 
 function modelNeedsAttention(model: SiteModelView) {
-    return !model.has_keys || !model.projected_channel_id;
+    return !model.has_keys || !model.projected_channel_id || !isSupportedRouteType(model.route_type);
 }
 
 function compareNullableNumber(left: number | null, right: number | null, order: 'asc' | 'desc') {
@@ -580,6 +597,7 @@ function RouteColumn({
                                     const { Avatar: ModelAvatar } = getModelIcon(model.model_name);
                                     const isPending = pendingModelKeys.has(modelKey);
                                     const isSelected = selectedModelKeys.has(modelKey);
+                                    const unknownRouteReason = getUnknownRouteReason(model);
 
                                     return (
                                         <Draggable
@@ -681,6 +699,15 @@ function RouteColumn({
                                                                 <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px]', getRouteSourceTone(model.route_source))}>
                                                                     {routeSourceLabel(model.route_source)}
                                                                 </Badge>
+                                                                {!isSupportedRouteType(model.route_type) ? (
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className="h-5 px-1.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                                                        title={unknownRouteReason ?? undefined}
+                                                                    >
+                                                                        待人工指定
+                                                                    </Badge>
+                                                                ) : null}
                                                                 {!model.has_keys ? (
                                                                     <Badge
                                                                         variant="outline"
@@ -843,9 +870,20 @@ function SiteChannelTableView({
                                     <div className="max-w-[14rem] truncate text-sm">{model.group_name || model.group_key}</div>
                                 </TableCell>
                                 <TableCell className={compactMode ? 'py-2' : undefined}>
-                                    <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(model.route_type))}>
-                                        {routeTypeLabel(model.route_type)}
-                                    </Badge>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(model.route_type))}>
+                                            {routeTypeLabel(model.route_type)}
+                                        </Badge>
+                                        {!isSupportedRouteType(model.route_type) ? (
+                                            <Badge
+                                                variant="outline"
+                                                className="h-6 px-2 text-[11px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                                title={getUnknownRouteReason(model) ?? undefined}
+                                            >
+                                                待人工指定
+                                            </Badge>
+                                        ) : null}
+                                    </div>
                                 </TableCell>
                                 <TableCell className={compactMode ? 'py-2' : undefined}>
                                     <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteSourceTone(model.route_source))}>
@@ -1053,6 +1091,7 @@ function SiteAccountPanel({
 
     const groupedModels = useMemo(() => {
         const next: Record<SiteModelRouteType, SiteModelView[]> = {
+            unknown: [],
             openai_chat: [],
             openai_response: [],
             anthropic: [],
@@ -1443,6 +1482,11 @@ function SiteAccountPanel({
                         <div className="text-xs text-muted-foreground">
                             分组命中 {scopedModels.length} 个模型，当前可见 {visibleModels.length} 个
                         </div>
+                        {visibleModels.some((model) => !isSupportedRouteType(model.route_type)) ? (
+                            <div className="text-xs text-amber-700 dark:text-amber-300">
+                                存在未识别端点模型，需手动指定到受支持的端点格式后才能正常投影。
+                            </div>
+                        ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="inline-flex rounded-2xl border border-border/70 bg-background/80 p-1">
@@ -1837,8 +1881,8 @@ function SiteAccountPanel({
             ) : panelPreferences.viewMode === 'board' ? (
                 <div className="overflow-x-auto pb-2">
                     <DragDropContext onDragEnd={handleRouteDrop}>
-                        <div className="grid min-w-max grid-cols-6 gap-4">
-                            {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
+                        <div className="grid min-w-max grid-cols-7 gap-4">
+                            {SITE_ROUTE_DISPLAY_ORDER.map((routeType) => (
                                 <RouteColumn
                                     key={`${ROUTE_COLUMN_KEY_PREFIX}-${routeType}`}
                                     routeType={routeType}
@@ -2209,9 +2253,9 @@ function SiteCard({
                         </dl>
 
                         <div className={cn('space-y-2', isListLayout ? 'md:min-w-[18rem] md:max-w-[22rem]' : '')}>
-                            <div className="text-xs font-medium text-muted-foreground">端点格式分布</div>
-                            <div className="flex flex-wrap gap-2">
-                                {SITE_ROUTE_COLUMN_ORDER.filter((routeType) => (summary.routeCounts.get(routeType) ?? 0) > 0).map((routeType) => (
+                        <div className="text-xs font-medium text-muted-foreground">端点格式分布</div>
+                        <div className="flex flex-wrap gap-2">
+                                {SITE_ROUTE_DISPLAY_ORDER.filter((routeType) => (summary.routeCounts.get(routeType) ?? 0) > 0).map((routeType) => (
                                     <Badge key={routeType} variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(routeType))}>
                                         {routeTypeLabel(routeType)}
                                         <span className="ml-1">{summary.routeCounts.get(routeType)}</span>

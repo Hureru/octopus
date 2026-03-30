@@ -54,6 +54,8 @@ export function isSameGroupFilter(
 
 export function routeTypeLabel(routeType: SiteModelRouteType) {
     switch (routeType) {
+        case 'unknown':
+            return '未识别端点';
         case 'openai_response':
             return 'OpenAI Response';
         case 'anthropic':
