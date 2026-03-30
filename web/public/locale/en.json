@@ -450,7 +450,12 @@
             "retryDetails": "Retry Details",
             "attempts": "attempts",
             "success": "Success",
-            "failed": "Failed"
+            "failed": "Failed",
+            "skipped": "Skipped",
+            "circuitBreak": "Circuit Break",
+            "disableModel": "Disable Model",
+            "disabling": "Disabling",
+            "disabled": "Disabled"
         }
     },
     "channel": {

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xurl"
 	"github.com/samber/lo"
 )
@@ -236,7 +237,9 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			if len(msg.ToolCalls) > 0 {
 				for _, toolCall := range msg.ToolCalls {
 					var args map[string]interface{}
-					_ = json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
+					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+						log.Warnf("gemini: failed to unmarshal tool call arguments for %s: %v", toolCall.Function.Name, err)
+					}
 					content.Parts = append(content.Parts, &model.GeminiPart{
 						FunctionCall: &model.GeminiFunctionCall{
 							Name: toolCall.Function.Name,
@@ -352,7 +355,9 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			var params map[string]any
 			if len(tool.Function.Parameters) > 0 {
 				// Best-effort: if schema can't be parsed, we still send the declaration without parameters.
-				_ = json.Unmarshal(tool.Function.Parameters, &params)
+				if err := json.Unmarshal(tool.Function.Parameters, &params); err != nil {
+					log.Warnf("gemini: failed to unmarshal tool parameters for %s: %v", tool.Function.Name, err)
+				}
 			}
 			cleanGeminiSchema(params)
 
@@ -408,7 +413,9 @@ func convertLLMToolResultToGeminiContent(msg *model.Message) *model.GeminiConten
 
 	var responseData map[string]any
 	if msg.Content.Content != nil {
-		_ = json.Unmarshal([]byte(*msg.Content.Content), &responseData)
+		if err := json.Unmarshal([]byte(*msg.Content.Content), &responseData); err != nil {
+			log.Warnf("gemini: failed to unmarshal tool response content: %v", err)
+		}
 	}
 
 	if responseData == nil {
@@ -659,7 +666,9 @@ func (t *geminiSchemaTransformer) transform(schemaNode any) {
 
 				var copied map[string]any
 				if b, err := json.Marshal(resolved); err == nil {
-					_ = json.Unmarshal(b, &copied)
+					if err := json.Unmarshal(b, &copied); err != nil {
+						log.Warnf("gemini: failed to deep-copy resolved schema: %v", err)
+					}
 				}
 				if copied == nil {
 					copied = make(map[string]any, len(resolved))

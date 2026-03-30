@@ -1,4 +1,4 @@
-package authropic
+package anthropic
 
 import (
 	"bytes"

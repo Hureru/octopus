@@ -2,7 +2,7 @@ package outbound
 
 import (
 	"github.com/bestruirui/octopus/internal/transformer/model"
-	"github.com/bestruirui/octopus/internal/transformer/outbound/authropic"
+	outAnthropic "github.com/bestruirui/octopus/internal/transformer/outbound/anthropic"
 	"github.com/bestruirui/octopus/internal/transformer/outbound/gemini"
 	"github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 	"github.com/bestruirui/octopus/internal/transformer/outbound/volcengine"
@@ -47,7 +47,7 @@ var outboundFactories = map[OutboundType]func() model.Outbound{
 	OutboundTypeOpenAIChat:      func() model.Outbound { return &openai.ChatOutbound{} },
 	OutboundTypeOpenAIResponse:  func() model.Outbound { return &openai.ResponseOutbound{} },
 	OutboundTypeOpenAIEmbedding: func() model.Outbound { return &openai.EmbeddingOutbound{} },
-	OutboundTypeAnthropic:       func() model.Outbound { return &authropic.MessageOutbound{} },
+	OutboundTypeAnthropic:       func() model.Outbound { return &outAnthropic.MessageOutbound{} },
 	OutboundTypeGemini:          func() model.Outbound { return &gemini.MessagesOutbound{} },
 	OutboundTypeVolcengine:      func() model.Outbound { return &volcengine.ResponseOutbound{} },
 }

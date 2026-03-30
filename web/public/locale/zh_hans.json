@@ -450,7 +450,12 @@
             "retryDetails": "重试详情",
             "attempts": "次尝试",
             "success": "成功",
-            "failed": "失败"
+            "failed": "失败",
+            "skipped": "跳过",
+            "circuitBreak": "熔断",
+            "disableModel": "禁用模型",
+            "disabling": "禁用中",
+            "disabled": "已禁用"
         }
     },
     "channel": {

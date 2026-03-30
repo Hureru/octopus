@@ -310,9 +310,9 @@ function HistorySummary({ model }: { model: SiteModelView }) {
 
             {model.history?.recent?.length ? (
                 <div className="space-y-2">
-                    {model.history.recent.map((item) => (
+                    {model.history.recent.map((item, index) => (
                         <div
-                            key={`${item.time}-${item.channel_id}-${item.request_model}-${item.actual_model}`}
+                            key={`${item.time}-${item.channel_id}-${item.request_model}-${item.actual_model}-${index}`}
                             className="rounded-xl border border-border/60 bg-background/80 px-3 py-2"
                         >
                             <div className="flex items-center justify-between gap-2 text-[11px]">
@@ -1085,7 +1085,7 @@ function SiteAccountPanel({
     const createKeyMutation = useCreateSiteChannelKey(siteId, account.account_id);
     const projectedKeyMutation = useUpdateSiteProjectedKeys(siteId, account.account_id);
     const routeMutation = useUpdateSiteChannelModelRoutes(siteId, account.account_id);
-    const disabledMutation = useUpdateSiteChannelModelDisabled(siteId, account.account_id);
+    const disabledMutation = useUpdateSiteChannelModelDisabled();
     const resetMutation = useResetSiteChannelModelRoutes(siteId, account.account_id);
 
     const registerModelRef = useCallback((modelKey: string, node: HTMLElement | null) => {
@@ -1329,7 +1329,7 @@ function SiteAccountPanel({
         });
         setPendingModelKeys((current) => addPendingKeys(current, modelKeys));
 
-        disabledMutation.mutate(payload, {
+        disabledMutation.mutate({ siteId, accountId: account.account_id, payload }, {
             onSuccess: () => {
                 setPendingDisabledOverrides((current) => removeKeys(current, modelKeys));
                 toast.success(payload.length === 1 ? (nextDisabled ? '模型已禁用' : '模型已启用') : `${payload.length} 个模型已${nextDisabled ? '禁用' : '启用'}`);
@@ -1342,7 +1342,7 @@ function SiteAccountPanel({
                 setPendingModelKeys((current) => removePendingKeys(current, modelKeys));
             },
         });
-    }, [pendingModelKeys, disabledMutation]);
+    }, [pendingModelKeys, disabledMutation, siteId, account.account_id]);
 
     const handleOpenCreateKey = (group: SiteChannelGroup) => {
         setCreatingGroup(group);

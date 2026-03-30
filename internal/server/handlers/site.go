@@ -140,7 +140,9 @@ func updateSite(c *gin.Context) {
 	safe.Go("site-update-project", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		_ = sitesvc.ProjectSite(ctx, siteID)
+		if err := sitesvc.ProjectSite(ctx, siteID); err != nil {
+			log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
+		}
 	})
 	resp.Success(c, site)
 }
@@ -162,7 +164,9 @@ func enableSite(c *gin.Context) {
 	safe.Go("site-enable-project", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		_ = sitesvc.ProjectSite(ctx, siteID)
+		if err := sitesvc.ProjectSite(ctx, siteID); err != nil {
+			log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
+		}
 	})
 	resp.Success(c, nil)
 }
@@ -205,7 +209,9 @@ func createSiteAccount(c *gin.Context) {
 		safe.Go("site-account-create-sync", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
-			_, _ = sitesvc.SyncAccount(ctx, accountID)
+			if _, err := sitesvc.SyncAccount(ctx, accountID); err != nil {
+				log.Warnf("background SyncAccount failed (account=%d): %v", accountID, err)
+			}
 		})
 	}
 	resp.Success(c, createdAccount)
@@ -233,9 +239,13 @@ func updateSiteAccount(c *gin.Context) {
 	safe.Go("site-account-update-project-sync", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		_, _ = sitesvc.ProjectAccount(ctx, accountID)
+		if _, err := sitesvc.ProjectAccount(ctx, accountID); err != nil {
+			log.Warnf("background ProjectAccount failed (account=%d): %v", accountID, err)
+		}
 		if autoSync {
-			_, _ = sitesvc.SyncAccount(ctx, accountID)
+			if _, err := sitesvc.SyncAccount(ctx, accountID); err != nil {
+				log.Warnf("background SyncAccount failed (account=%d): %v", accountID, err)
+			}
 		}
 	})
 	resp.Success(c, account)
@@ -259,7 +269,9 @@ func enableSiteAccount(c *gin.Context) {
 	safe.Go("site-account-enable-project", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		_, _ = sitesvc.ProjectAccount(ctx, accountID)
+		if _, err := sitesvc.ProjectAccount(ctx, accountID); err != nil {
+			log.Warnf("background ProjectAccount failed (account=%d): %v", accountID, err)
+		}
 	})
 	resp.Success(c, nil)
 }
@@ -390,7 +402,9 @@ func batchSite(c *gin.Context) {
 			safe.Go("site-batch-project", func() {
 				projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				defer projCancel()
-				_ = sitesvc.ProjectSite(projCtx, siteID)
+				if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
+					log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
+				}
 			})
 		}
 	}

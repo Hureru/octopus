@@ -58,6 +58,8 @@ func maybeLearnManagedRoute(ctx context.Context, channelID int, modelName string
 	safe.Go("relay-learned-route-project", func() {
 		projCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		_, _ = sitesvc.ProjectAccount(projCtx, accountID)
+		if _, err := sitesvc.ProjectAccount(projCtx, accountID); err != nil {
+			log.Warnf("background ProjectAccount failed (account=%d): %v", accountID, err)
+		}
 	})
 }
