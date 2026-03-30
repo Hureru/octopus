@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export type SiteChannelViewMode = 'board' | 'table';
-export type SiteChannelQuickFilter = 'attention' | 'with_history' | 'disabled' | 'missing_keys';
+export type SiteChannelQuickFilter = 'attention' | 'with_history' | 'disabled';
 export type SiteChannelTableSortField = 'model_name' | 'group_name' | 'route_type' | 'last_request_at';
 export type SiteChannelSortOrder = 'asc' | 'desc';
 
@@ -22,7 +22,7 @@ export type SiteChannelPanelPreferences = {
 };
 
 export const DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES: SiteChannelPanelPreferences = {
-    viewMode: 'board',
+    viewMode: 'table',
     compactMode: false,
     collapseEmptyColumns: true,
     quickFilters: [],

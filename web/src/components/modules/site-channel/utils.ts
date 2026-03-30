@@ -10,11 +10,9 @@ import type {
 } from '@/api/endpoints/site-channel';
 
 export const SITE_GROUP_FILTER_ALL = { kind: 'all' } as const;
-export const SITE_GROUP_FILTER_MISSING_KEYS = { kind: 'missing_keys' } as const;
 
 export type SiteChannelGroupFilter =
     | typeof SITE_GROUP_FILTER_ALL
-    | typeof SITE_GROUP_FILTER_MISSING_KEYS
     | { kind: 'group'; groupKey: string };
 
 export type SiteModelView = SiteChannelModel & {
@@ -131,7 +129,6 @@ export function flattenAccountModels(
 
 export function filterGroups(groups: SiteChannelGroup[], activeFilter: SiteChannelGroupFilter) {
     if (activeFilter.kind === 'all') return groups;
-    if (activeFilter.kind === 'missing_keys') return groups.filter((group) => !group.has_keys);
     return groups.filter((group) => group.group_key === activeFilter.groupKey);
 }
 

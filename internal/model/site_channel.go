@@ -3,6 +3,7 @@ package model
 type SiteChannelCard struct {
 	SiteID       int                  `json:"site_id"`
 	SiteName     string               `json:"site_name"`
+	BaseURL      string               `json:"base_url"`
 	Platform     SitePlatform         `json:"platform"`
 	Enabled      bool                 `json:"enabled"`
 	AccountCount int                  `json:"account_count"`

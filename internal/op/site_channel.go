@@ -174,6 +174,7 @@ func buildSiteChannelCard(ctx context.Context, site model.Site, logs []model.Rel
 	card := model.SiteChannelCard{
 		SiteID:       site.ID,
 		SiteName:     site.Name,
+		BaseURL:      site.BaseURL,
 		Platform:     site.Platform,
 		Enabled:      site.Enabled,
 		AccountCount: len(site.Accounts),

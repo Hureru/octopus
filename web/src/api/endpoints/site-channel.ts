@@ -104,6 +104,7 @@ export type SiteChannelAccount = {
 export type SiteChannelCard = {
     site_id: number;
     site_name: string;
+    base_url: string;
     platform: SitePlatform;
     enabled: boolean;
     account_count: number;
