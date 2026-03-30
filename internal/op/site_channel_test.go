@@ -5,6 +5,7 @@ import (
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"gorm.io/gorm"
 )
 
 func TestSiteChannelResetAccountRoutesRestoresDetectedMetadataRoute(t *testing.T) {
@@ -226,5 +227,98 @@ func TestSiteChannelAccountGetShowsExplicitGroupModelsWithoutKeys(t *testing.T) 
 	}
 	if vipGroup.Models[0].ProjectedChannelID != nil {
 		t.Fatalf("expected vip explicit model without keys not to have projected channel, got %+v", vipGroup.Models[0])
+	}
+}
+
+func TestUpdateSiteProjectedKeysNormalizesPrefix(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "site-channel-project-key-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "site-channel-project-key-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	channel := &model.Channel{
+		Name:     "[Site] test / default",
+		Type:     model.SiteModelRouteTypeOpenAIChat.ToOutboundType(),
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: "https://example.com/v1", Delay: 0}},
+		Model:    "gpt-4o-mini",
+		Keys: []model.ChannelKey{{
+			Enabled:    true,
+			ChannelKey: "legacy-key",
+			Remark:     "default",
+		}},
+	}
+	if err := ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	binding := model.SiteChannelBinding{
+		SiteID:        site.ID,
+		SiteAccountID: account.ID,
+		GroupKey:      model.SiteDefaultGroupKey,
+		ChannelID:     channel.ID,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
+		t.Fatalf("create site channel binding failed: %v", err)
+	}
+
+	reloaded, err := ChannelGet(channel.ID, ctx)
+	if err != nil {
+		t.Fatalf("ChannelGet failed: %v", err)
+	}
+	if len(reloaded.Keys) != 1 {
+		t.Fatalf("expected existing channel to have one key, got %d", len(reloaded.Keys))
+	}
+
+	newRemark := "manual"
+	newKey := "fresh-key"
+	if err := UpdateSiteProjectedKeys(site.ID, account.ID, &model.SiteProjectedKeyUpdateRequest{
+		GroupKey: model.SiteDefaultGroupKey,
+		KeysToUpdate: []model.SiteProjectedKeyUpdateItem{{
+			ID:         reloaded.Keys[0].ID,
+			ChannelKey: &newKey,
+			Remark:     &newRemark,
+		}},
+		KeysToAdd: []model.SiteProjectedKeyAddRequest{{
+			Enabled:    true,
+			ChannelKey: "backup-key",
+			Remark:     "backup",
+		}},
+	}, ctx); err != nil {
+		t.Fatalf("UpdateSiteProjectedKeys failed: %v", err)
+	}
+
+	var saved model.Channel
+	if err := dbpkg.GetDB().WithContext(ctx).Preload("Keys", func(tx *gorm.DB) *gorm.DB {
+		return tx.Order("id ASC")
+	}).First(&saved, channel.ID).Error; err != nil {
+		t.Fatalf("reload channel failed: %v", err)
+	}
+	if len(saved.Keys) != 2 {
+		t.Fatalf("expected channel to have two keys after update, got %d", len(saved.Keys))
+	}
+	if saved.Keys[0].ChannelKey != "sk-fresh-key" {
+		t.Fatalf("expected updated key to be normalized, got %q", saved.Keys[0].ChannelKey)
+	}
+	if saved.Keys[1].ChannelKey != "sk-backup-key" {
+		t.Fatalf("expected added key to be normalized, got %q", saved.Keys[1].ChannelKey)
 	}
 }

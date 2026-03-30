@@ -314,10 +314,11 @@ func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
 func buildChannelKeys(tokens []model.SiteToken) []model.ChannelKey {
 	keys := make([]model.ChannelKey, 0, len(tokens))
 	for _, token := range tokens {
-		if strings.TrimSpace(token.Token) == "" {
+		normalized := model.NormalizeSiteSyncTokenValue(token.Token)
+		if normalized == "" {
 			continue
 		}
-		keys = append(keys, model.ChannelKey{Enabled: token.Enabled, ChannelKey: strings.TrimSpace(token.Token), Remark: model.NormalizeSiteGroupName(token.GroupKey, token.GroupName)})
+		keys = append(keys, model.ChannelKey{Enabled: token.Enabled, ChannelKey: normalized, Remark: model.NormalizeSiteGroupName(token.GroupKey, token.GroupName)})
 	}
 	return keys
 }

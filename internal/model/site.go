@@ -250,6 +250,17 @@ func NormalizeSiteGroupName(groupKey string, name string) string {
 	return SiteDefaultGroupName
 }
 
+func NormalizeSiteSyncTokenValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "sk-") {
+		return trimmed
+	}
+	return "sk-" + trimmed
+}
+
 func NormalizeSiteModelRouteType(routeType SiteModelRouteType) SiteModelRouteType {
 	switch routeType {
 	case SiteModelRouteTypeOpenAIChat,

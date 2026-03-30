@@ -589,6 +589,27 @@ func createProjectionFixture(t *testing.T, ctx context.Context) (*model.Site, *m
 	return site, account
 }
 
+func TestProjectAccountNormalizesProjectedChannelKeys(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount failed: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	channel := channelsByGroup[model.SiteDefaultGroupKey]
+	if len(channel.Keys) != 2 {
+		t.Fatalf("expected projected channel to carry two keys, got %d", len(channel.Keys))
+	}
+	if channel.Keys[0].ChannelKey != "sk-key-primary" {
+		t.Fatalf("expected first projected key to be normalized, got %q", channel.Keys[0].ChannelKey)
+	}
+	if channel.Keys[1].ChannelKey != "sk-key-backup" {
+		t.Fatalf("expected second projected key to be normalized, got %q", channel.Keys[1].ChannelKey)
+	}
+}
+
 func loadProjectedChannelsByGroupKey(t *testing.T, ctx context.Context, accountID int) map[string]model.Channel {
 	t.Helper()
 

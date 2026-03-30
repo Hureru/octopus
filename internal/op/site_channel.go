@@ -376,12 +376,13 @@ func UpdateSiteProjectedKeys(siteID int, accountID int, req *model.SiteProjected
 		if len(req.KeysToAdd) > 0 {
 			updateReq.KeysToAdd = make([]model.ChannelKeyAddRequest, 0, len(req.KeysToAdd))
 			for _, item := range req.KeysToAdd {
-				if strings.TrimSpace(item.ChannelKey) == "" {
+				normalizedKey := model.NormalizeSiteSyncTokenValue(item.ChannelKey)
+				if normalizedKey == "" {
 					continue
 				}
 				updateReq.KeysToAdd = append(updateReq.KeysToAdd, model.ChannelKeyAddRequest{
 					Enabled:    item.Enabled,
-					ChannelKey: strings.TrimSpace(item.ChannelKey),
+					ChannelKey: normalizedKey,
 					Remark:     strings.TrimSpace(item.Remark),
 				})
 			}
@@ -397,8 +398,8 @@ func UpdateSiteProjectedKeys(siteID int, accountID int, req *model.SiteProjected
 					entry.Enabled = item.Enabled
 				}
 				if item.ChannelKey != nil {
-					trimmed := strings.TrimSpace(*item.ChannelKey)
-					entry.ChannelKey = &trimmed
+					normalized := model.NormalizeSiteSyncTokenValue(*item.ChannelKey)
+					entry.ChannelKey = &normalized
 				}
 				if item.Remark != nil {
 					trimmed := strings.TrimSpace(*item.Remark)
