@@ -310,6 +310,12 @@ func resolveDirectToken(account *model.SiteAccount) string {
 	if account == nil {
 		return ""
 	}
+	switch account.CredentialType {
+	case model.SiteCredentialTypeAPIKey:
+		return strings.TrimSpace(account.APIKey)
+	case model.SiteCredentialTypeAccessToken:
+		return strings.TrimSpace(account.AccessToken)
+	}
 	if strings.TrimSpace(account.APIKey) != "" {
 		return strings.TrimSpace(account.APIKey)
 	}

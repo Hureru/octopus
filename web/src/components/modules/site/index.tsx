@@ -1212,14 +1212,23 @@ export function Site() {
       return;
     }
 
+    const trimmedAccessToken =
+      accountForm.credential_type === SiteCredentialType.AccessToken
+        ? accountForm.access_token.trim()
+        : "";
+    const trimmedAPIKey =
+      accountForm.credential_type === SiteCredentialType.APIKey
+        ? accountForm.api_key.trim()
+        : "";
+
     const payload = {
       site_id: accountForm.site_id,
       name: accountForm.name.trim(),
       credential_type: accountForm.credential_type,
       username: accountForm.username.trim(),
       password: accountForm.password.trim(),
-      access_token: accountForm.access_token.trim(),
-      api_key: accountForm.api_key.trim(),
+      access_token: trimmedAccessToken,
+      api_key: trimmedAPIKey,
       refresh_token: accountForm.refresh_token.trim(),
       token_expires_at: parsedTokenExpiresAt,
       platform_user_id: parsedPlatformUserID,
@@ -2494,14 +2503,24 @@ export function Site() {
                   <Select
                     value={accountForm.credential_type}
                     onValueChange={(value) =>
-                      setAccountForm((current) =>
-                        current
-                          ? {
-                              ...current,
-                              credential_type: value as SiteCredentialType,
-                            }
-                          : current,
-                      )
+                      setAccountForm((current) => {
+                        if (!current) {
+                          return current;
+                        }
+                        const nextType = value as SiteCredentialType;
+                        return {
+                          ...current,
+                          credential_type: nextType,
+                          access_token:
+                            nextType === SiteCredentialType.AccessToken
+                              ? current.access_token
+                              : "",
+                          api_key:
+                            nextType === SiteCredentialType.APIKey
+                              ? current.api_key
+                              : "",
+                        };
+                      })
                     }
                   >
                     <SelectTrigger className="w-full rounded-xl">
