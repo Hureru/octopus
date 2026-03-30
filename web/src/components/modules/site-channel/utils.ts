@@ -3,6 +3,7 @@ import type {
     SiteChannelCard,
     SiteChannelGroup,
     SiteChannelModel,
+    SiteProjectedKey,
     SiteModelHistorySummary,
     SiteModelRouteSource,
     SiteModelRouteType,
@@ -24,6 +25,16 @@ export type SiteModelView = SiteChannelModel & {
     has_keys: boolean;
     has_projected_channel: boolean;
     projected_channel_ids: number[];
+};
+
+export type SiteProjectedKeyFormItem = {
+    id?: number;
+    channel_id: number;
+    channel_name: string;
+    enabled: boolean;
+    channel_key: string;
+    channel_key_masked?: string;
+    remark: string;
 };
 
 export function createGroupFilter(groupKey: string): SiteChannelGroupFilter {
@@ -135,6 +146,85 @@ export function countAccountKeys(account: SiteChannelAccount) {
         },
         { total: 0, enabled: 0 },
     );
+}
+
+export function buildProjectedKeyFormItems(group: SiteChannelGroup): SiteProjectedKeyFormItem[] {
+    if (!group.projected_keys?.length) return [];
+
+    return group.projected_keys.map((key) => ({
+        id: key.id,
+        channel_id: key.channel_id,
+        channel_name: key.channel_name,
+        enabled: key.enabled,
+        channel_key: '',
+        channel_key_masked: key.channel_key_masked,
+        remark: key.remark ?? '',
+    }));
+}
+
+export function buildProjectedKeyUpdatePayload(
+    groupKey: string,
+    originalKeys: SiteProjectedKey[],
+    nextKeys: SiteProjectedKeyFormItem[],
+) {
+    const originalById = new Map(originalKeys.map((key) => [key.id, key] as const));
+    const nextIds = new Set(nextKeys.filter((key) => key.id).map((key) => key.id as number));
+
+    const keys_to_delete = originalKeys
+        .filter((key) => !nextIds.has(key.id))
+        .map((key) => key.id);
+
+    const keys_to_add = nextKeys
+        .filter((key) => !key.id && key.channel_key.trim())
+        .map((key) => ({
+            enabled: key.enabled,
+            channel_key: key.channel_key.trim(),
+            remark: key.remark.trim(),
+        }));
+
+    const keys_to_update = nextKeys
+        .filter((key) => !!key.id)
+        .map((key) => {
+            const original = originalById.get(key.id as number);
+            if (!original) return null;
+
+            const update: { id: number; enabled?: boolean; channel_key?: string; remark?: string } = {
+                id: key.id as number,
+            };
+
+            if (key.enabled !== original.enabled) update.enabled = key.enabled;
+            const trimmedKey = key.channel_key.trim();
+            if (trimmedKey) update.channel_key = trimmedKey;
+            if ((key.remark.trim()) !== (original.remark ?? '').trim()) update.remark = key.remark.trim();
+
+            if (update.enabled === undefined && update.channel_key === undefined && update.remark === undefined) {
+                return null;
+            }
+
+            return update;
+        })
+        .filter((item): item is { id: number; enabled?: boolean; channel_key?: string; remark?: string } => item !== null);
+
+    const payload: {
+        group_key: string;
+        keys_to_add?: Array<{ enabled: boolean; channel_key: string; remark?: string }>;
+        keys_to_update?: Array<{ id: number; enabled?: boolean; channel_key?: string; remark?: string }>;
+        keys_to_delete?: number[];
+    } = { group_key: groupKey };
+
+    if (keys_to_add.length > 0) payload.keys_to_add = keys_to_add;
+    if (keys_to_update.length > 0) payload.keys_to_update = keys_to_update;
+    if (keys_to_delete.length > 0) payload.keys_to_delete = keys_to_delete;
+
+    return payload;
+}
+
+export function hasProjectedKeyChanges(
+    originalKeys: SiteProjectedKey[],
+    nextKeys: SiteProjectedKeyFormItem[],
+) {
+    const payload = buildProjectedKeyUpdatePayload('x', originalKeys, nextKeys);
+    return Boolean(payload.keys_to_add?.length || payload.keys_to_update?.length || payload.keys_to_delete?.length);
 }
 
 export function formatHistoryTime(value?: number | null) {

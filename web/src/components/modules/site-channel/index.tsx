@@ -62,6 +62,7 @@ import {
     useCreateSiteChannelKey,
     useResetSiteChannelModelRoutes,
     useSiteChannelList,
+    useUpdateSiteProjectedKeys,
     useUpdateSiteChannelModelDisabled,
     useUpdateSiteChannelModelRoutes,
 } from '@/api/endpoints/site-channel';
@@ -76,12 +77,16 @@ import {
     SITE_GROUP_FILTER_MISSING_KEYS,
     createGroupFilter,
     type SiteChannelGroupFilter,
+    type SiteProjectedKeyFormItem,
     type SiteModelView,
+    buildProjectedKeyFormItems,
+    buildProjectedKeyUpdatePayload,
     countAccountKeys,
     filterGroups,
     flattenAccountModels,
     formatHistoryTime,
     getErrorMessage,
+    hasProjectedKeyChanges,
     isSameGroupFilter,
     platformLabel,
     routeSourceLabel,
@@ -955,6 +960,8 @@ function SiteAccountPanel({
     const [pendingModelKeys, setPendingModelKeys] = useState<Set<string>>(new Set());
     const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set());
     const [creatingGroup, setCreatingGroup] = useState<SiteChannelGroup | null>(null);
+    const [editingProjectedGroup, setEditingProjectedGroup] = useState<SiteChannelGroup | null>(null);
+    const [projectedKeyForm, setProjectedKeyForm] = useState<SiteProjectedKeyFormItem[]>([]);
     const [quickCreateName, setQuickCreateName] = useState('');
     const [highlightedModelKey, setHighlightedModelKey] = useState<string | null>(null);
     const [modelSearchTerm, setModelSearchTerm] = useState('');
@@ -972,6 +979,7 @@ function SiteAccountPanel({
     const setTableSort = useSiteChannelPanelViewStore((state) => state.setTableSort);
 
     const createKeyMutation = useCreateSiteChannelKey(siteId, account.account_id);
+    const projectedKeyMutation = useUpdateSiteProjectedKeys(siteId, account.account_id);
     const routeMutation = useUpdateSiteChannelModelRoutes(siteId, account.account_id);
     const disabledMutation = useUpdateSiteChannelModelDisabled(siteId, account.account_id);
     const resetMutation = useResetSiteChannelModelRoutes(siteId, account.account_id);
@@ -1238,6 +1246,59 @@ function SiteAccountPanel({
         );
     };
 
+    const handleOpenProjectedKeys = (group: SiteChannelGroup) => {
+        setEditingProjectedGroup(group);
+        setProjectedKeyForm(buildProjectedKeyFormItems(group));
+    };
+
+    const handleCloseProjectedKeys = () => {
+        if (projectedKeyMutation.isPending) return;
+        setEditingProjectedGroup(null);
+        setProjectedKeyForm([]);
+    };
+
+    const handleProjectedKeyFieldChange = (index: number, patch: Partial<SiteProjectedKeyFormItem>) => {
+        setProjectedKeyForm((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+    };
+
+    const handleAddProjectedKeyRow = () => {
+        const fallbackChannelId = editingProjectedGroup?.projected_channel_ids[0] ?? 0;
+        const fallbackChannelName = projectedKeyForm[0]?.channel_name ?? `渠道 #${fallbackChannelId}`;
+        setProjectedKeyForm((current) => ([
+            ...current,
+            {
+                channel_id: fallbackChannelId,
+                channel_name: fallbackChannelName,
+                enabled: true,
+                channel_key: '',
+                remark: '',
+            },
+        ]));
+    };
+
+    const handleRemoveProjectedKeyRow = (index: number) => {
+        setProjectedKeyForm((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    };
+
+    const handleSaveProjectedKeys = () => {
+        if (!editingProjectedGroup) return;
+        const payload = buildProjectedKeyUpdatePayload(editingProjectedGroup.group_key, editingProjectedGroup.projected_keys, projectedKeyForm);
+        if (!payload.keys_to_add?.length && !payload.keys_to_update?.length && !payload.keys_to_delete?.length) {
+            toast.error('没有需要保存的 Key 变更');
+            return;
+        }
+        projectedKeyMutation.mutate(payload, {
+            onSuccess: () => {
+                toast.success(`分组「${editingProjectedGroup.group_name || editingProjectedGroup.group_key}」的投影渠道 Key 已更新`);
+                setEditingProjectedGroup(null);
+                setProjectedKeyForm([]);
+            },
+            onError: (error) => {
+                toast.error(getErrorMessage(error, '更新投影渠道 Key 失败'));
+            },
+        });
+    };
+
     const handleRouteDrop = (result: DropResult) => {
         const { destination, draggableId } = result;
         if (!destination) return;
@@ -1477,6 +1538,9 @@ function SiteAccountPanel({
                                 <span>{group.group_name || group.group_key}</span>
                                 <span>{group.models.length}</span>
                                 <span className="text-[10px] opacity-80">Key {group.enabled_key_count}/{group.key_count}</span>
+                                {group.has_projected_channel ? (
+                                    <span className="text-[10px] opacity-80">投影 {group.projected_keys.length}</span>
+                                ) : null}
                                 {!group.has_keys ? (
                                     <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
                                         待建
@@ -1575,6 +1639,33 @@ function SiteAccountPanel({
                         </div>
                     </div>
                 ) : null}
+
+                {visibleGroups.some((group) => group.has_projected_channel) ? (
+                    <div className="rounded-2xl border border-border/70 bg-background/60 p-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                            <KeyRound className="size-4 text-primary" />
+                            投影渠道 Key 管理
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                            直接管理当前账号各分组投影渠道上的实际运行 Key，用于排查站点后台同步出的 key 不可用问题。
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {visibleGroups.filter((group) => group.has_projected_channel).map((group) => (
+                                <Button
+                                    key={`projected-${group.group_key}`}
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-full"
+                                    onClick={() => handleOpenProjectedKeys(group)}
+                                >
+                                    {group.group_name || group.group_key}
+                                    <span className="text-[10px] text-muted-foreground">{group.projected_keys.length} Keys</span>
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
             </div>
 
             <SiteChannelBulkActionBar
@@ -1632,6 +1723,108 @@ function SiteAccountPanel({
                         >
                             <RefreshCw className={cn('size-4', createKeyMutation.isPending && 'animate-spin')} />
                             {createKeyMutation.isPending ? '创建并同步中...' : '创建并同步 Key'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!editingProjectedGroup} onOpenChange={(open) => !open && handleCloseProjectedKeys()}>
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle>管理投影渠道 Key</DialogTitle>
+                        <DialogDescription>
+                            分组 {editingProjectedGroup?.group_name || editingProjectedGroup?.group_key || '-'} 的所有投影渠道会同步应用同一组 Key 变更。
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3">
+                        <div className="rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                            投影渠道：{editingProjectedGroup?.projected_channel_ids.join(', ') || '-'}
+                        </div>
+
+                        <div className="max-h-[22rem] space-y-3 overflow-y-auto pr-1">
+                            {projectedKeyForm.map((item, index) => (
+                                <div key={`${item.id ?? 'new'}-${index}`} className="rounded-2xl border border-border/70 bg-background/80 p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="text-xs text-muted-foreground">
+                                            {item.channel_name} · {item.id ? `Key #${item.id}` : '新 Key'}
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="rounded-xl"
+                                            onClick={() => handleRemoveProjectedKeyRow(index)}
+                                            disabled={projectedKeyMutation.isPending}
+                                        >
+                                            删除
+                                        </Button>
+                                    </div>
+                                    <div className="mt-3 grid gap-3 md:grid-cols-[auto,1fr,12rem]">
+                                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <input
+                                                type="checkbox"
+                                                checked={item.enabled}
+                                                disabled={projectedKeyMutation.isPending}
+                                                onChange={(event) => handleProjectedKeyFieldChange(index, { enabled: event.target.checked })}
+                                                className="size-4 rounded border-border bg-background align-middle accent-primary"
+                                            />
+                                            启用
+                                        </label>
+                                        <label className="grid gap-1.5 text-xs text-muted-foreground">
+                                            Key
+                                            <Input
+                                                value={item.channel_key}
+                                                onChange={(event) => handleProjectedKeyFieldChange(index, { channel_key: event.target.value })}
+                                                placeholder={item.channel_key_masked || '输入新的上游 Key；留空表示不改'}
+                                                disabled={projectedKeyMutation.isPending}
+                                                className="h-10 rounded-2xl"
+                                            />
+                                        </label>
+                                        <label className="grid gap-1.5 text-xs text-muted-foreground">
+                                            备注
+                                            <Input
+                                                value={item.remark}
+                                                onChange={(event) => handleProjectedKeyFieldChange(index, { remark: event.target.value })}
+                                                placeholder="备注"
+                                                disabled={projectedKeyMutation.isPending}
+                                                className="h-10 rounded-2xl"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={handleAddProjectedKeyRow}
+                            disabled={projectedKeyMutation.isPending}
+                        >
+                            新增 Key
+                        </Button>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-2xl"
+                            onClick={handleCloseProjectedKeys}
+                            disabled={projectedKeyMutation.isPending}
+                        >
+                            取消
+                        </Button>
+                        <Button
+                            type="button"
+                            className="rounded-2xl"
+                            onClick={handleSaveProjectedKeys}
+                            disabled={projectedKeyMutation.isPending || !editingProjectedGroup || !hasProjectedKeyChanges(editingProjectedGroup.projected_keys, projectedKeyForm)}
+                        >
+                            <RefreshCw className={cn('size-4', projectedKeyMutation.isPending && 'animate-spin')} />
+                            {projectedKeyMutation.isPending ? '保存中...' : '保存投影 Key'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

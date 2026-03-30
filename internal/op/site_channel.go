@@ -189,7 +189,7 @@ func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChann
 			AccountName: account.Name,
 			Enabled:     account.Enabled,
 			AutoSync:    account.AutoSync,
-			Groups:      buildSiteChannelGroups(site, account, historyByAccount[account.ID]),
+			Groups:      buildSiteChannelGroups(ctx, site, account, historyByAccount[account.ID]),
 		}
 		view.GroupCount = len(view.Groups)
 		view.ModelCount = countSiteChannelModels(view.Groups)
@@ -199,12 +199,13 @@ func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChann
 	return card, nil
 }
 
-func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyMap map[string]*model.SiteModelHistorySummary) []model.SiteChannelGroup {
+func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.SiteAccount, historyMap map[string]*model.SiteModelHistorySummary) []model.SiteChannelGroup {
 	split := siteChannelShouldSplitByOutboundType(site)
 	groups := make(map[string]*model.SiteChannelGroup)
+	projectedChannels := make(map[int]*model.Channel)
 	for _, group := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(group.GroupKey)
-		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), Models: make([]model.SiteChannelModel, 0)}
+		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	}
 	for _, token := range account.Tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
@@ -219,6 +220,27 @@ func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyM
 		group := ensureSiteChannelGroup(groups, baseKey, baseKey)
 		group.HasProjectedChannel = true
 		group.ProjectedChannelIDs = append(group.ProjectedChannelIDs, binding.ChannelID)
+		if _, ok := projectedChannels[binding.ChannelID]; ok {
+			continue
+		}
+		channel, err := ChannelGet(binding.ChannelID, ctx)
+		if err != nil {
+			continue
+		}
+		projectedChannels[binding.ChannelID] = channel
+		for _, key := range channel.Keys {
+			group.ProjectedKeys = append(group.ProjectedKeys, model.SiteProjectedKey{
+				ID:               key.ID,
+				ChannelID:        channel.ID,
+				ChannelName:      channel.Name,
+				Enabled:          key.Enabled,
+				ChannelKeyMasked: maskProjectedChannelKey(key.ChannelKey),
+				Remark:           key.Remark,
+				StatusCode:       key.StatusCode,
+				LastUseTimeStamp: key.LastUseTimeStamp,
+				TotalCost:        key.TotalCost,
+			})
+		}
 	}
 	for _, item := range account.Models {
 		key := model.NormalizeSiteGroupKey(item.GroupKey)
@@ -247,6 +269,12 @@ func buildSiteChannelGroups(site model.Site, account model.SiteAccount, historyM
 	for _, item := range groups {
 		item.HasKeys = item.KeyCount > 0
 		sort.Slice(item.ProjectedChannelIDs, func(i, j int) bool { return item.ProjectedChannelIDs[i] < item.ProjectedChannelIDs[j] })
+		sort.Slice(item.ProjectedKeys, func(i, j int) bool {
+			if item.ProjectedKeys[i].ChannelID == item.ProjectedKeys[j].ChannelID {
+				return item.ProjectedKeys[i].ID < item.ProjectedKeys[j].ID
+			}
+			return item.ProjectedKeys[i].ChannelID < item.ProjectedKeys[j].ChannelID
+		})
 		sort.Slice(item.Models, func(i, j int) bool { return item.Models[i].ModelName < item.Models[j].ModelName })
 		result = append(result, *item)
 	}
@@ -268,6 +296,17 @@ func siteModelBelongsToGroup(item model.SiteModel, groupKey string) bool {
 	return false
 }
 
+func maskProjectedChannelKey(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) <= 8 {
+		return trimmed
+	}
+	return trimmed[:4] + "..." + trimmed[len(trimmed)-4:]
+}
+
 func ensureSiteChannelGroup(groups map[string]*model.SiteChannelGroup, groupKey string, groupName string) *model.SiteChannelGroup {
 	groupKey = model.NormalizeSiteGroupKey(groupKey)
 	if item, ok := groups[groupKey]; ok {
@@ -276,9 +315,117 @@ func ensureSiteChannelGroup(groups map[string]*model.SiteChannelGroup, groupKey 
 		}
 		return item
 	}
-	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), Models: make([]model.SiteChannelModel, 0)}
+	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	groups[groupKey] = item
 	return item
+}
+
+func UpdateSiteProjectedKeys(siteID int, accountID int, req *model.SiteProjectedKeyUpdateRequest, ctx context.Context) error {
+	if req == nil {
+		return fmt.Errorf("site projected key update request is nil")
+	}
+	if strings.TrimSpace(req.GroupKey) == "" {
+		return fmt.Errorf("group key is required")
+	}
+
+	site, err := SiteGet(siteID, ctx)
+	if err != nil {
+		return err
+	}
+
+	var account *model.SiteAccount
+	for i := range site.Accounts {
+		if site.Accounts[i].ID == accountID {
+			account = &site.Accounts[i]
+			break
+		}
+	}
+	if account == nil {
+		return fmt.Errorf("site account not found")
+	}
+
+	targetGroupKey := model.NormalizeSiteGroupKey(req.GroupKey)
+	split := siteChannelShouldSplitByOutboundType(*site)
+	channelIDs := make([]int, 0)
+	for _, binding := range account.ChannelBindings {
+		baseKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
+		if model.NormalizeSiteGroupKey(baseKey) != targetGroupKey {
+			continue
+		}
+		channelIDs = append(channelIDs, binding.ChannelID)
+	}
+	if len(channelIDs) == 0 && !split {
+		return fmt.Errorf("projected channel not found for group %s", targetGroupKey)
+	}
+	if len(channelIDs) == 0 {
+		return fmt.Errorf("projected channels not found for group %s", targetGroupKey)
+	}
+
+	for _, channelID := range channelIDs {
+		channel, getErr := ChannelGet(channelID, ctx)
+		if getErr != nil {
+			return getErr
+		}
+
+		validKeyIDs := make(map[int]struct{}, len(channel.Keys))
+		for _, key := range channel.Keys {
+			validKeyIDs[key.ID] = struct{}{}
+		}
+
+		updateReq := &model.ChannelUpdateRequest{ID: channelID, BypassManagedCheck: true}
+		if len(req.KeysToAdd) > 0 {
+			updateReq.KeysToAdd = make([]model.ChannelKeyAddRequest, 0, len(req.KeysToAdd))
+			for _, item := range req.KeysToAdd {
+				if strings.TrimSpace(item.ChannelKey) == "" {
+					continue
+				}
+				updateReq.KeysToAdd = append(updateReq.KeysToAdd, model.ChannelKeyAddRequest{
+					Enabled:    item.Enabled,
+					ChannelKey: strings.TrimSpace(item.ChannelKey),
+					Remark:     strings.TrimSpace(item.Remark),
+				})
+			}
+		}
+		if len(req.KeysToUpdate) > 0 {
+			updateReq.KeysToUpdate = make([]model.ChannelKeyUpdateRequest, 0, len(req.KeysToUpdate))
+			for _, item := range req.KeysToUpdate {
+				if _, ok := validKeyIDs[item.ID]; !ok {
+					continue
+				}
+				entry := model.ChannelKeyUpdateRequest{ID: item.ID}
+				if item.Enabled != nil {
+					entry.Enabled = item.Enabled
+				}
+				if item.ChannelKey != nil {
+					trimmed := strings.TrimSpace(*item.ChannelKey)
+					entry.ChannelKey = &trimmed
+				}
+				if item.Remark != nil {
+					trimmed := strings.TrimSpace(*item.Remark)
+					entry.Remark = &trimmed
+				}
+				if entry.Enabled != nil || entry.ChannelKey != nil || entry.Remark != nil {
+					updateReq.KeysToUpdate = append(updateReq.KeysToUpdate, entry)
+				}
+			}
+		}
+		if len(req.KeysToDelete) > 0 {
+			updateReq.KeysToDelete = make([]int, 0, len(req.KeysToDelete))
+			for _, id := range req.KeysToDelete {
+				if _, ok := validKeyIDs[id]; ok {
+					updateReq.KeysToDelete = append(updateReq.KeysToDelete, id)
+				}
+			}
+		}
+		if len(updateReq.KeysToAdd) == 0 && len(updateReq.KeysToUpdate) == 0 && len(updateReq.KeysToDelete) == 0 {
+			continue
+		}
+		if _, updateErr := ChannelUpdate(updateReq, ctx); updateErr != nil {
+			return updateErr
+		}
+	}
+
+	return nil
 }
 
 func countSiteChannelModels(groups []model.SiteChannelGroup) int {

@@ -58,7 +58,20 @@ export type SiteChannelGroup = {
     has_keys: boolean;
     has_projected_channel: boolean;
     projected_channel_ids: number[];
+    projected_keys: SiteProjectedKey[];
     models: SiteChannelModel[];
+};
+
+export type SiteProjectedKey = {
+    id: number;
+    channel_id: number;
+    channel_name: string;
+    enabled: boolean;
+    channel_key_masked: string;
+    remark: string;
+    status_code: number;
+    last_use_time_stamp: number;
+    total_cost: number;
 };
 
 export type SiteChannelAccount = {
@@ -98,6 +111,26 @@ export type SiteModelDisableUpdateRequest = {
 export type SiteChannelKeyCreateRequest = {
     group_key: string;
     name?: string;
+};
+
+export type SiteProjectedKeyAddRequest = {
+    enabled: boolean;
+    channel_key: string;
+    remark?: string;
+};
+
+export type SiteProjectedKeyUpdateItem = {
+    id: number;
+    enabled?: boolean;
+    channel_key?: string;
+    remark?: string;
+};
+
+export type SiteProjectedKeyUpdateRequest = {
+    group_key: string;
+    keys_to_add?: SiteProjectedKeyAddRequest[];
+    keys_to_update?: SiteProjectedKeyUpdateItem[];
+    keys_to_delete?: number[];
 };
 
 function getAccountPath(siteId: number, accountId: number, suffix: string) {
@@ -189,6 +222,24 @@ export function useUpdateSiteChannelModelDisabled(siteId: number, accountId: num
         },
         onError: (error) => {
             logger.error('site channel model disabled update failed:', error);
+        },
+    });
+}
+
+export function useUpdateSiteProjectedKeys(siteId: number, accountId: number) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (payload: SiteProjectedKeyUpdateRequest) =>
+            apiClient.put<SiteChannelAccount>(getAccountPath(siteId, accountId, '/projected-keys'), payload),
+        onSuccess: (account) => {
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, siteId, account),
+            );
+            invalidateSiteChannelQueries(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site projected key update failed:', error);
         },
     });
 }
