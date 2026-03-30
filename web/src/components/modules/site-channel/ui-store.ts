@@ -23,7 +23,7 @@ export type SiteChannelPanelPreferences = {
 
 export const DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES: SiteChannelPanelPreferences = {
     viewMode: 'table',
-    compactMode: false,
+    compactMode: true,
     collapseEmptyColumns: true,
     quickFilters: [],
     tableSort: {

@@ -23,6 +23,7 @@ import {
     MoreHorizontal,
     RefreshCw,
     Search,
+    SlidersHorizontal,
     Sparkles,
     UserRound,
     Waypoints,
@@ -275,6 +276,8 @@ const QUICK_FILTER_OPTIONS: Array<{
     { key: 'with_history', label: '仅有请求历史' },
     { key: 'disabled', label: '仅禁用' },
 ];
+
+const SITE_GROUP_FILTER_ALL_VALUE = '__site-group-all__';
 
 function HistorySummary({ model }: { model: SiteModelView }) {
     const summary = summarizeHistory(model.history);
@@ -1047,14 +1050,12 @@ function SiteAccountPanel({
     account,
     jumpRequest,
     onJumpHandled,
-    onNavigateToSiteAccount,
     onNavigateToChannel,
 }: {
     siteId: number;
     account: SiteChannelAccount;
     jumpRequest: SiteChannelPendingJump | null;
     onJumpHandled: (requestId: number) => void;
-    onNavigateToSiteAccount: () => void;
     onNavigateToChannel: (channelId: number) => void;
 }) {
     const [activeFilter, setActiveFilter] = useState<SiteChannelGroupFilter>(SITE_GROUP_FILTER_ALL);
@@ -1503,6 +1504,40 @@ function SiteAccountPanel({
     };
 
     const selectedVisibleCount = selectedModels.length;
+    const activeGroupValue = activeFilter.kind === 'all' ? SITE_GROUP_FILTER_ALL_VALUE : activeFilter.groupKey;
+    const activeGroup = activeFilter.kind === 'group'
+        ? account.groups.find((group) => group.group_key === activeFilter.groupKey) ?? null
+        : null;
+    const activeGroupLabel = activeGroup ? (activeGroup.group_name || activeGroup.group_key) : '全部分组';
+    const activeQuickFilterCount = panelPreferences.quickFilters.length;
+    const pendingKeyGroups = useMemo(
+        () => visibleGroups.filter((group) => !group.has_keys),
+        [visibleGroups],
+    );
+    const projectedGroups = useMemo(
+        () => visibleGroups.filter((group) => group.has_projected_channel),
+        [visibleGroups],
+    );
+    const unsupportedRouteCount = useMemo(
+        () => visibleModels.filter((model) => !isSupportedRouteType(model.route_type)).length,
+        [visibleModels],
+    );
+
+    const handleGroupFilterChange = useCallback((value: string) => {
+        setActiveFilter(value === SITE_GROUP_FILTER_ALL_VALUE ? SITE_GROUP_FILTER_ALL : createGroupFilter(value));
+    }, []);
+
+    const handleClearQuickFilters = useCallback(() => {
+        setQuickFilters(panelKey, []);
+    }, [panelKey, setQuickFilters]);
+
+    const handleFocusAttention = useCallback(() => {
+        if (panelPreferences.quickFilters.includes('attention')) return;
+        const next = QUICK_FILTER_OPTIONS
+            .map((item) => item.key)
+            .filter((key) => key === 'attention' || panelPreferences.quickFilters.includes(key));
+        setQuickFilters(panelKey, next);
+    }, [panelKey, panelPreferences.quickFilters, setQuickFilters]);
 
     const expandEmptyColumn = useCallback((routeType: SiteModelRouteType) => {
         setExpandedEmptyColumns((current) => {
@@ -1523,217 +1558,261 @@ function SiteAccountPanel({
     }, []);
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-3">
             <div className="flex flex-col gap-3 rounded-3xl border border-border/70 bg-card/70 p-3">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                    <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                        <Select value={activeGroupValue} onValueChange={handleGroupFilterChange}>
+                            <SelectTrigger className="h-8 w-full rounded-2xl border-border/70 bg-background/80 sm:w-[18rem]">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">分组</span>
+                                    <span className="truncate text-sm font-medium">{activeGroupLabel}</span>
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent align="start" className="rounded-2xl border border-border/70 bg-card">
+                                <SelectItem value={SITE_GROUP_FILTER_ALL_VALUE} className="rounded-xl py-2">
+                                    <div className="flex w-full min-w-0 items-center justify-between gap-3">
+                                        <span className="truncate">全部分组</span>
+                                        <span className="text-[11px] text-muted-foreground">{account.groups.length} 组</span>
+                                    </div>
+                                </SelectItem>
+                                {account.groups.map((group) => (
+                                    <SelectItem key={group.group_key} value={group.group_key} className="rounded-xl py-2">
+                                        <div className="flex w-full min-w-0 items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="truncate">{group.group_name || group.group_key}</div>
+                                                <div className="text-[11px] text-muted-foreground">
+                                                    {group.models.length} 模型 · Key {group.enabled_key_count}/{group.key_count}
+                                                    {group.has_projected_channel ? ` · 投影 ${group.projected_keys.length}` : ''}
+                                                </div>
+                                            </div>
+                                            {!group.has_keys ? (
+                                                <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                                                    待建
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <div className="relative min-w-0 flex-1">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                value={modelSearchTerm}
+                                onChange={(event) => setModelSearchTerm(event.target.value)}
+                                placeholder="搜索模型名称、分组..."
+                                className="h-8 rounded-2xl pl-9"
+                            />
+                        </div>
+                    </div>
+
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="inline-flex rounded-2xl border border-border/70 bg-background/80 p-1">
                             <button
                                 type="button"
                                 onClick={() => setViewMode(panelKey, 'board')}
                                 className={cn(
-                                    'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition',
+                                    'inline-flex h-6 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition',
                                     panelPreferences.viewMode === 'board'
                                         ? 'bg-primary text-primary-foreground'
                                         : 'text-muted-foreground hover:text-foreground',
                                 )}
                             >
                                 <LayoutGrid className="size-3.5" />
-                                看板视图
+                                看板
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setViewMode(panelKey, 'table')}
                                 className={cn(
-                                    'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition',
+                                    'inline-flex h-6 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition',
                                     panelPreferences.viewMode === 'table'
                                         ? 'bg-primary text-primary-foreground'
                                         : 'text-muted-foreground hover:text-foreground',
                                 )}
                             >
                                 <List className="size-3.5" />
-                                列表视图
+                                列表
                             </button>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => setCompactMode(panelKey, !panelPreferences.compactMode)}
-                            className={cn(
-                                'rounded-full border px-3 py-1.5 text-xs transition',
-                                panelPreferences.compactMode
-                                    ? 'border-primary/30 bg-primary text-primary-foreground'
-                                    : 'border-border bg-background hover:bg-muted/50',
-                            )}
-                        >
-                            紧凑模式
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setCollapseEmptyColumns(panelKey, !panelPreferences.collapseEmptyColumns)}
-                            className={cn(
-                                'rounded-full border px-3 py-1.5 text-xs transition',
-                                panelPreferences.collapseEmptyColumns
-                                    ? 'border-primary/30 bg-primary text-primary-foreground'
-                                    : 'border-border bg-background hover:bg-muted/50',
-                            )}
-                        >
-                            收起空列
-                        </button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            className="rounded-2xl h-8 px-3"
-                            onClick={onNavigateToSiteAccount}
-                        >
-                            <Globe2 className="size-4" />
-                            站点页账号
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            className="rounded-2xl h-8 px-3"
-                            onClick={handleResetRoutes}
-                            disabled={resetMutation.isPending || hasPendingChanges}
-                        >
-                            <RefreshCw className={cn('size-4', resetMutation.isPending && 'animate-spin')} />
-                            {resetMutation.isPending ? '重置中...' : '重置模型端点格式'}
-                        </Button>
-                        {visibleModels.some((model) => !isSupportedRouteType(model.route_type)) ? (
-                            <Badge variant="outline" className="h-8 rounded-full border-amber-500/30 bg-amber-500/10 px-3 text-[11px] text-amber-700 dark:text-amber-300">
-                                <CircleAlert className="mr-1 size-3.5" />
-                                存在未识别端点模型
-                            </Badge>
-                        ) : null}
-                    </div>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button type="button" variant="outline" className="h-8 rounded-2xl px-3">
+                                    <SlidersHorizontal className="size-4" />
+                                    {activeQuickFilterCount > 0 ? `筛选(${activeQuickFilterCount})` : '筛选'}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-60 rounded-2xl border border-border/70 bg-card p-3 shadow-xl">
+                                <div className="space-y-3">
+                                    <div className="text-xs font-medium text-muted-foreground">快速筛选</div>
+                                    <div className="grid gap-2">
+                                        {QUICK_FILTER_OPTIONS.map((option) => {
+                                            const active = panelPreferences.quickFilters.includes(option.key);
+                                            return (
+                                                <button
+                                                    key={option.key}
+                                                    type="button"
+                                                    onClick={() => toggleQuickFilter(option.key)}
+                                                    className={cn(
+                                                        'flex items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition',
+                                                        active
+                                                            ? 'border-primary/30 bg-primary/10 text-foreground'
+                                                            : 'border-border bg-background hover:bg-muted/60',
+                                                    )}
+                                                >
+                                                    <span>{option.label}</span>
+                                                    {active ? <Check className="size-4 text-primary" /> : null}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {activeQuickFilterCount > 0 ? (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 rounded-xl px-2"
+                                            onClick={handleClearQuickFilters}
+                                        >
+                                            清空筛选
+                                        </Button>
+                                    ) : null}
+                                </div>
+                            </PopoverContent>
+                        </Popover>
 
-                    <div className="relative w-full max-w-md">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                            value={modelSearchTerm}
-                            onChange={(event) => setModelSearchTerm(event.target.value)}
-                            placeholder="搜索模型名称、分组..."
-                            className="h-9 rounded-2xl pl-9"
-                        />
-                    </div>
-                </div>
-
-                <div className="overflow-x-auto pb-1">
-                    <div className="flex min-w-max gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setActiveFilter(SITE_GROUP_FILTER_ALL)}
-                            className={cn(
-                                'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition',
-                                isSameGroupFilter(activeFilter, SITE_GROUP_FILTER_ALL)
-                                    ? 'border-primary/30 bg-primary text-primary-foreground'
-                                    : 'border-border bg-background hover:bg-muted/50',
-                            )}
-                        >
-                            全部分组
-                            <span>{account.groups.length}</span>
-                        </button>
-                        {account.groups.map((group) => (
-                            <button
-                                key={group.group_key}
-                                type="button"
-                                onClick={() => setActiveFilter(createGroupFilter(group.group_key))}
-                                className={cn(
-                                    'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs transition',
-                                    isSameGroupFilter(activeFilter, createGroupFilter(group.group_key))
-                                        ? 'border-primary/30 bg-primary text-primary-foreground'
-                                        : 'border-border bg-background hover:bg-muted/50',
-                                )}
-                            >
-                                <span>{group.group_name || group.group_key}</span>
-                                <span>{group.models.length}</span>
-                                <span className="text-[10px] opacity-80">Key {group.enabled_key_count}/{group.key_count}</span>
-                                {group.has_projected_channel ? (
-                                    <span className="text-[10px] opacity-80">投影 {group.projected_keys.length}</span>
-                                ) : null}
-                                {!group.has_keys ? (
-                                    <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-                                        待建
-                                    </span>
-                                ) : null}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                    {QUICK_FILTER_OPTIONS.map((option) => {
-                        const active = panelPreferences.quickFilters.includes(option.key);
-                        return (
-                            <button
-                                key={option.key}
-                                type="button"
-                                onClick={() => toggleQuickFilter(option.key)}
-                                className={cn(
-                                    'rounded-full border px-3 py-1 text-xs transition',
-                                    active
-                                        ? 'border-primary/30 bg-primary text-primary-foreground'
-                                        : 'border-border bg-background hover:bg-muted/50',
-                                )}
-                            >
-                                {option.label}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                {visibleGroups.some((group) => !group.has_keys) ? (
-                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
-                        <div className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
-                            <CircleAlert className="size-4" />
-                            当前筛选中存在未创建 Key 的分组
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            {visibleGroups
-                                .filter((group) => !group.has_keys)
-                                .map((group) => (
-                                    <Button
-                                        key={group.group_key}
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button type="button" variant="outline" className="h-8 rounded-2xl px-3">
+                                    <MoreHorizontal className="size-4" />
+                                    更多
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-64 rounded-2xl border border-border/70 bg-card p-2 shadow-xl">
+                                <div className="space-y-1">
+                                    <button
                                         type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="rounded-full border-amber-500/30 bg-white/60 text-amber-800 hover:bg-white dark:bg-background/40 dark:text-amber-200"
-                                        onClick={() => handleOpenCreateKey(group)}
-                                        disabled={createKeyMutation.isPending}
+                                        onClick={() => setCompactMode(panelKey, !panelPreferences.compactMode)}
+                                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-muted/60"
                                     >
-                                        {group.group_name || group.group_key}
-                                        <span className="text-[10px] text-amber-700/80 dark:text-amber-200/80">
-                                            {createKeyMutation.isPending && creatingGroup?.group_key === group.group_key ? '创建中...' : '快捷创建'}
-                                        </span>
-                                    </Button>
-                                ))}
-                        </div>
-                    </div>
-                ) : null}
-
-                {visibleGroups.some((group) => group.has_projected_channel) ? (
-                    <div className="rounded-2xl border border-border/70 bg-background/60 p-3">
-                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                            <KeyRound className="size-4 text-primary" />
-                            投影渠道 Key 管理
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                            直接管理当前账号各分组投影渠道上的实际运行 Key，用于排查站点后台同步出的 key 不可用问题。
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            {visibleGroups.filter((group) => group.has_projected_channel).map((group) => (
+                                        <div>
+                                            <div className="text-sm font-medium text-foreground">紧凑模式</div>
+                                            <div className="text-[11px] text-muted-foreground">压缩模型卡片和表格行高</div>
+                                        </div>
+                                        {panelPreferences.compactMode ? <Check className="size-4 text-primary" /> : null}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCollapseEmptyColumns(panelKey, !panelPreferences.collapseEmptyColumns)}
+                                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-muted/60"
+                                    >
+                                        <div>
+                                            <div className="text-sm font-medium text-foreground">收起空列</div>
+                                            <div className="text-[11px] text-muted-foreground">默认只展示有模型的端点列</div>
+                                        </div>
+                                        {panelPreferences.collapseEmptyColumns ? <Check className="size-4 text-primary" /> : null}
+                                    </button>
+                                </div>
                                 <Button
-                                    key={`projected-${group.group_key}`}
                                     type="button"
                                     variant="outline"
-                                    size="sm"
-                                    className="rounded-full"
-                                    onClick={() => handleOpenProjectedKeys(group)}
+                                    className="mt-2 h-8 w-full justify-start rounded-xl px-3"
+                                    onClick={handleResetRoutes}
+                                    disabled={resetMutation.isPending || hasPendingChanges}
                                 >
-                                    {group.group_name || group.group_key}
-                                    <span className="text-[10px] text-muted-foreground">{group.projected_keys.length} Keys</span>
+                                    <RefreshCw className={cn('size-4', resetMutation.isPending && 'animate-spin')} />
+                                    {resetMutation.isPending ? '重置中...' : '重置模型端点格式'}
                                 </Button>
-                            ))}
-                        </div>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                </div>
+
+                {pendingKeyGroups.length > 0 || projectedGroups.length > 0 || unsupportedRouteCount > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                        {pendingKeyGroups.length > 0 ? (
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+                                    >
+                                        <CircleAlert className="size-3.5" />
+                                        待建 Key {pendingKeyGroups.length} 组
+                                    </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-72 rounded-2xl border border-amber-500/30 bg-card p-3 shadow-xl">
+                                    <div className="space-y-2">
+                                        <div className="text-xs font-medium text-muted-foreground">未创建 Key 的分组</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {pendingKeyGroups.map((group) => (
+                                                <Button
+                                                    key={group.group_key}
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="rounded-full border-amber-500/30 bg-white/60 text-amber-800 hover:bg-white dark:bg-background/40 dark:text-amber-200"
+                                                    onClick={() => handleOpenCreateKey(group)}
+                                                    disabled={createKeyMutation.isPending}
+                                                >
+                                                    {group.group_name || group.group_key}
+                                                    <span className="text-[10px] text-amber-700/80 dark:text-amber-200/80">
+                                                        {createKeyMutation.isPending && creatingGroup?.group_key === group.group_key ? '创建中...' : '快捷创建'}
+                                                    </span>
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        ) : null}
+
+                        {projectedGroups.length > 0 ? (
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-8 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 text-xs font-medium text-foreground transition hover:bg-muted/60"
+                                    >
+                                        <KeyRound className="size-3.5 text-primary" />
+                                        投影 Key {projectedGroups.length} 组
+                                    </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-72 rounded-2xl border border-border/70 bg-card p-3 shadow-xl">
+                                    <div className="space-y-2">
+                                        <div className="text-xs font-medium text-muted-foreground">投影渠道 Key 管理</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {projectedGroups.map((group) => (
+                                                <Button
+                                                    key={`projected-${group.group_key}`}
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="rounded-full"
+                                                    onClick={() => handleOpenProjectedKeys(group)}
+                                                >
+                                                    {group.group_name || group.group_key}
+                                                    <span className="text-[10px] text-muted-foreground">{group.projected_keys.length} Keys</span>
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        ) : null}
+
+                        {unsupportedRouteCount > 0 ? (
+                            <button
+                                type="button"
+                                onClick={handleFocusAttention}
+                                className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+                            >
+                                <CircleAlert className="size-3.5" />
+                                未识别端点 {unsupportedRouteCount}
+                            </button>
+                        ) : null}
                     </div>
                 ) : null}
             </div>
@@ -2042,10 +2121,14 @@ function SiteChannelDialog({
 
     return (
         <div className="flex max-h-[88vh] flex-col overflow-hidden">
-            <DialogHeader className="gap-4 border-b border-border/70 px-6 py-5 text-left">
+            <DialogHeader className="gap-3 border-b border-border/70 px-5 py-3.5 text-left sm:px-6">
+                <DialogDescription className="sr-only">
+                    站点渠道管理面板
+                </DialogDescription>
+
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="space-y-2">
-                        <DialogTitle className="flex flex-wrap items-center gap-2 text-2xl">
+                    <div className="min-w-0 space-y-2">
+                        <DialogTitle className="flex flex-wrap items-center gap-2 text-xl sm:text-2xl">
                             <span className="truncate">{card.site_name}</span>
                             <Badge variant="outline" className="h-6 px-2 text-[11px]">
                                 {platformLabel(card.platform)}
@@ -2061,17 +2144,79 @@ function SiteChannelDialog({
                             >
                                 {card.enabled ? '站点启用' : '站点停用'}
                             </Badge>
+                            {resolvedAccount ? (
+                                <Badge
+                                    variant="outline"
+                                    className={cn(
+                                        'h-6 px-2 text-[11px]',
+                                        resolvedAccount.enabled
+                                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                            : 'border-destructive/30 bg-destructive/10 text-destructive',
+                                    )}
+                                >
+                                    {resolvedAccount.enabled ? '账号启用' : '账号停用'}
+                                </Badge>
+                            ) : null}
                         </DialogTitle>
-                        <DialogDescription>
-                            站点渠道 · 统一管理分组、模型端点格式、请求历史和模型禁用
-                        </DialogDescription>
+                        {resolvedAccount ? (
+                            <div className="text-sm text-muted-foreground">
+                                当前账号：{resolvedAccount.account_name} · {resolvedAccount.model_count} 模型 / {resolvedAccount.group_count} 分组
+                            </div>
+                        ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+
+                    <div className="max-w-full overflow-x-auto pb-1">
+                        <div className="flex min-w-max gap-2">
+                            {card.accounts.map((account) => (
+                                <button
+                                    key={account.account_id}
+                                    ref={(node) => setAccountTabRef(account.account_id, node)}
+                                    type="button"
+                                    onClick={() => setActiveAccountId(account.account_id)}
+                                    className={cn(
+                                        'min-w-[9.75rem] rounded-2xl border px-3 py-2 text-left transition',
+                                        resolvedAccount?.account_id === account.account_id
+                                            ? 'border-primary/30 bg-primary text-primary-foreground'
+                                            : 'border-border bg-background hover:bg-muted/50',
+                                        highlightedAccountId === account.account_id &&
+                                            'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
+                                    )}
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <div className="truncate text-sm font-medium">{account.account_name}</div>
+                                            <div
+                                                className={cn(
+                                                    'truncate text-[11px]',
+                                                    resolvedAccount?.account_id === account.account_id
+                                                        ? 'text-primary-foreground/80'
+                                                        : 'text-muted-foreground',
+                                                )}
+                                            >
+                                                {account.model_count} 模型 / {account.group_count} 分组
+                                            </div>
+                                        </div>
+                                        <span
+                                            className={cn(
+                                                'mt-1 size-2.5 shrink-0 rounded-full',
+                                                account.enabled ? 'bg-emerald-500' : 'bg-destructive',
+                                            )}
+                                            aria-hidden="true"
+                                        />
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto pb-1">
+                    <div className="flex min-w-max gap-2">
                         <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="rounded-xl"
+                            className="h-8 rounded-2xl px-3"
                             onClick={handleOpenSiteBaseUrl}
                             disabled={!card.base_url}
                         >
@@ -2082,7 +2227,7 @@ function SiteChannelDialog({
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="rounded-xl"
+                            className="h-8 rounded-2xl px-3"
                             onClick={onNavigateToSite}
                         >
                             <Globe2 className="size-4" />
@@ -2093,61 +2238,13 @@ function SiteChannelDialog({
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                className="rounded-xl"
+                                className="h-8 rounded-2xl px-3"
                                 onClick={() => onNavigateToSiteAccount(resolvedAccount.account_id)}
                             >
                                 <Waypoints className="size-4" />
                                 站点页账号
                             </Button>
                         ) : null}
-                    </div>
-                </div>
-
-                <div className="overflow-x-auto pb-1">
-                    <div className="flex min-w-max gap-2">
-                        {card.accounts.map((account) => (
-                            <button
-                                key={account.account_id}
-                                ref={(node) => setAccountTabRef(account.account_id, node)}
-                                type="button"
-                                onClick={() => setActiveAccountId(account.account_id)}
-                                className={cn(
-                                    'min-w-[13rem] rounded-2xl border px-4 py-2.5 text-left transition',
-                                    resolvedAccount?.account_id === account.account_id
-                                        ? 'border-primary/30 bg-primary text-primary-foreground'
-                                        : 'border-border bg-background hover:bg-muted/50',
-                                    highlightedAccountId === account.account_id &&
-                                        'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
-                                )}
-                            >
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <div className="truncate text-sm font-medium">{account.account_name}</div>
-                                        <div
-                                            className={cn(
-                                                'text-[11px]',
-                                                resolvedAccount?.account_id === account.account_id
-                                                    ? 'text-primary-foreground/80'
-                                                    : 'text-muted-foreground',
-                                            )}
-                                        >
-                                            {account.model_count} 模型 · {account.group_count} 分组
-                                        </div>
-                                    </div>
-                                    <Badge
-                                        variant="outline"
-                                        className={cn(
-                                            'h-5 px-1.5 text-[10px]',
-                                            account.enabled
-                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                                                : 'border-destructive/30 bg-destructive/10 text-destructive',
-                                        )}
-                                    >
-                                        {account.enabled ? '启用' : '停用'}
-                                    </Badge>
-                                </div>
-                            </button>
-                        ))}
                     </div>
                 </div>
             </DialogHeader>
@@ -2161,7 +2258,6 @@ function SiteChannelDialog({
                             account={resolvedAccount}
                             jumpRequest={jumpRequest}
                             onJumpHandled={onJumpHandled}
-                            onNavigateToSiteAccount={() => onNavigateToSiteAccount(resolvedAccount.account_id)}
                             onNavigateToChannel={onNavigateToChannel}
                         />
                     </div>
