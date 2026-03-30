@@ -2,9 +2,11 @@ package task
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 )
 
 type taskEntry struct {
@@ -15,6 +17,7 @@ type taskEntry struct {
 	ticker     *time.Ticker
 	stopCh     chan struct{}
 	updateCh   chan time.Duration
+	running    atomic.Bool
 }
 
 var (
@@ -81,7 +84,9 @@ func Update(name string, interval time.Duration) {
 func RUN() {
 	tasksMu.RLock()
 	for _, entry := range tasks {
-		go runTask(entry)
+		safe.Go("task-loop:"+entry.name, func() {
+			runTask(entry)
+		})
 	}
 	tasksMu.RUnlock()
 
@@ -92,7 +97,7 @@ func RUN() {
 func runTask(entry *taskEntry) {
 	// 根据配置决定是否在启动时立即执行
 	if entry.runOnStart {
-		go entry.fn()
+		triggerTask(entry, "startup")
 	}
 
 	entry.ticker = time.NewTicker(entry.interval)
@@ -101,7 +106,7 @@ func runTask(entry *taskEntry) {
 	for {
 		select {
 		case <-entry.ticker.C:
-			go entry.fn()
+			triggerTask(entry, "ticker")
 		case newInterval := <-entry.updateCh:
 			entry.ticker.Stop()
 			entry.interval = newInterval
@@ -110,4 +115,18 @@ func runTask(entry *taskEntry) {
 			return
 		}
 	}
+}
+
+func triggerTask(entry *taskEntry, trigger string) {
+	if entry == nil {
+		return
+	}
+	if !entry.running.CompareAndSwap(false, true) {
+		log.Warnf("task %s skipped: previous run still in progress (trigger=%s)", entry.name, trigger)
+		return
+	}
+	safe.Go("task-exec:"+entry.name+":"+trigger, func() {
+		defer entry.running.Store(false)
+		entry.fn()
+	})
 }

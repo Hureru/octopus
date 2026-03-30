@@ -15,6 +15,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/router"
 	sitesvc "github.com/bestruirui/octopus/internal/site"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
 )
 
@@ -76,14 +77,15 @@ func importAllAPIHub(c *gin.Context) {
 	}
 
 	for _, accountID := range syncAccountIDs {
-		go func(accountID int) {
+		accountID := accountID
+		safe.Go("site-import-sync", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 			_, syncErr := sitesvc.SyncAccount(ctx, accountID)
 			if syncErr != nil {
 				log.Warnf("failed to sync imported all api hub account %d: %v", accountID, syncErr)
 			}
-		}(accountID)
+		})
 	}
 
 	resp.Success(c, result)
@@ -134,11 +136,12 @@ func updateSite(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	go func(siteID int) {
+	siteID := site.ID
+	safe.Go("site-update-project", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		_ = sitesvc.ProjectSite(ctx, siteID)
-	}(site.ID)
+	})
 	resp.Success(c, site)
 }
 
@@ -155,11 +158,12 @@ func enableSite(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	go func(siteID int) {
+	siteID := request.ID
+	safe.Go("site-enable-project", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		_ = sitesvc.ProjectSite(ctx, siteID)
-	}(request.ID)
+	})
 	resp.Success(c, nil)
 }
 
@@ -197,11 +201,12 @@ func createSiteAccount(c *gin.Context) {
 		return
 	}
 	if account.Enabled && account.AutoSync {
-		go func(accountID int) {
+		accountID := account.ID
+		safe.Go("site-account-create-sync", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 			_, _ = sitesvc.SyncAccount(ctx, accountID)
-		}(account.ID)
+		})
 	}
 	resp.Success(c, createdAccount)
 }
@@ -223,14 +228,16 @@ func updateSiteAccount(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	go func(accountID int, autoSync bool) {
+	accountID := account.ID
+	autoSync := account.AutoSync
+	safe.Go("site-account-update-project-sync", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		_, _ = sitesvc.ProjectAccount(ctx, accountID)
 		if autoSync {
 			_, _ = sitesvc.SyncAccount(ctx, accountID)
 		}
-	}(account.ID, account.AutoSync)
+	})
 	resp.Success(c, account)
 }
 
@@ -248,11 +255,12 @@ func enableSiteAccount(c *gin.Context) {
 		return
 	}
 	refreshAccountRandomCheckinScheduleBestEffort(c.Request.Context(), request.ID)
-	go func(accountID int) {
+	accountID := request.ID
+	safe.Go("site-account-enable-project", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		_, _ = sitesvc.ProjectAccount(ctx, accountID)
-	}(request.ID)
+	})
 	resp.Success(c, nil)
 }
 
@@ -298,12 +306,16 @@ func checkinSiteAccount(c *gin.Context) {
 }
 
 func syncAllSiteAccounts(c *gin.Context) {
-	go sitesvc.SyncAll(context.Background())
+	safe.Go("site-sync-all", func() {
+		sitesvc.SyncAll(context.Background())
+	})
 	resp.Success(c, nil)
 }
 
 func checkinAllSiteAccounts(c *gin.Context) {
-	go sitesvc.CheckinAll(context.Background())
+	safe.Go("site-checkin-all", func() {
+		sitesvc.CheckinAll(context.Background())
+	})
 	resp.Success(c, nil)
 }
 
@@ -374,11 +386,12 @@ func batchSite(c *gin.Context) {
 	// Project affected sites asynchronously
 	if req.Action == "enable" || req.Action == "disable" {
 		for _, id := range result.SuccessIDs {
-			go func(siteID int) {
+			siteID := id
+			safe.Go("site-batch-project", func() {
 				projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				defer projCancel()
 				_ = sitesvc.ProjectSite(projCtx, siteID)
-			}(id)
+			})
 		}
 	}
 

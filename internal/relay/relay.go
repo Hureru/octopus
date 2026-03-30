@@ -18,6 +18,7 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
 	"github.com/tmaxmax/go-sse"
 )
@@ -413,7 +414,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 		err  error
 	}
 	results := make(chan sseReadResult, 1)
-	go func() {
+	safe.Go("relay-stream-read", func() {
 		defer close(results)
 		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
 		for ev, err := range sse.Read(response.Body, readCfg) {
@@ -423,7 +424,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			}
 			results <- sseReadResult{data: ev.Data}
 		}
-	}()
+	})
 
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time

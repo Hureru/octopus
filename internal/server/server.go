@@ -10,6 +10,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/bestruirui/octopus/static"
 	"github.com/gin-gonic/gin"
 )
@@ -25,6 +26,7 @@ func Start() error {
 
 	r := gin.New()
 	r.Use(gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
+		log.Errorf("http panic recovered: %v", recovered)
 		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
 		c.Abort()
 	}))
@@ -39,11 +41,11 @@ func Start() error {
 
 	httpSrv.Addr = fmt.Sprintf("%s:%d", conf.AppConfig.Server.Host, conf.AppConfig.Server.Port)
 	httpSrv.Handler = r
-	go func() {
+	safe.Go("http-listen", func() {
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Errorf("http server listen and serve error: %v", err)
 		}
-	}()
+	})
 	return nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/bestruirui/octopus/internal/task"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
 )
 
@@ -100,15 +101,16 @@ func createChannel(c *gin.Context) {
 	}
 	stats := op.StatsChannelGet(channel.ID)
 	channel.Stats = &stats
-	go func(channel *model.Channel) {
+	createdChannel := channel
+	safe.Go("channel-create-postprocess", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		modelStr := channel.Model + "," + channel.CustomModel
+		modelStr := createdChannel.Model + "," + createdChannel.CustomModel
 		modelArray := strings.Split(modelStr, ",")
 		helper.LLMPriceAddToDB(modelArray, ctx)
-		helper.ChannelBaseUrlDelayUpdate(channel, ctx)
-		helper.ChannelAutoGroup(channel, ctx)
-	}(&channel)
+		helper.ChannelBaseUrlDelayUpdate(&createdChannel, ctx)
+		helper.ChannelAutoGroup(&createdChannel, ctx)
+	})
 	resp.Success(c, channel)
 }
 
@@ -125,15 +127,16 @@ func updateChannel(c *gin.Context) {
 	}
 	stats := op.StatsChannelGet(channel.ID)
 	channel.Stats = &stats
-	go func(channel *model.Channel) {
+	updatedChannel := *channel
+	safe.Go("channel-update-postprocess", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		modelStr := channel.Model + "," + channel.CustomModel
+		modelStr := updatedChannel.Model + "," + updatedChannel.CustomModel
 		modelArray := strings.Split(modelStr, ",")
 		helper.LLMPriceAddToDB(modelArray, ctx)
-		helper.ChannelBaseUrlDelayUpdate(channel, ctx)
-		helper.ChannelAutoGroup(channel, ctx)
-	}(channel)
+		helper.ChannelBaseUrlDelayUpdate(&updatedChannel, ctx)
+		helper.ChannelAutoGroup(&updatedChannel, ctx)
+	})
 	resp.Success(c, channel)
 }
 

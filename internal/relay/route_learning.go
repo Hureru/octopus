@@ -10,6 +10,7 @@ import (
 	sitesvc "github.com/bestruirui/octopus/internal/site"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 )
 
 func detectRouteMismatchTarget(inboundType inbound.InboundType, err error) (model.SiteModelRouteType, bool) {
@@ -53,9 +54,10 @@ func maybeLearnManagedRoute(ctx context.Context, channelID int, modelName string
 	if !updated {
 		return
 	}
-	go func(accountID int) {
+	accountID := binding.SiteAccountID
+	safe.Go("relay-learned-route-project", func() {
 		projCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		_, _ = sitesvc.ProjectAccount(projCtx, accountID)
-	}(binding.SiteAccountID)
+	})
 }

@@ -16,9 +16,10 @@ func SiteChannelList(ctx context.Context) ([]model.SiteChannelCard, error) {
 	if err != nil {
 		return nil, err
 	}
+	logs, logsErr := RelayLogList(ctx, nil, nil, 1, 500)
 	cards := make([]model.SiteChannelCard, 0, len(sites))
 	for _, site := range sites {
-		card, err := buildSiteChannelCard(ctx, site)
+		card, err := buildSiteChannelCard(ctx, site, logs, logsErr)
 		if err != nil {
 			return nil, err
 		}
@@ -32,7 +33,8 @@ func SiteChannelGet(siteID int, ctx context.Context) (*model.SiteChannelCard, er
 	if err != nil {
 		return nil, err
 	}
-	card, err := buildSiteChannelCard(ctx, *site)
+	logs, logsErr := RelayLogList(ctx, nil, nil, 1, 500)
+	card, err := buildSiteChannelCard(ctx, *site, logs, logsErr)
 	if err != nil {
 		return nil, err
 	}
@@ -87,15 +89,19 @@ func SiteChannelModelHistory(siteID int, accountID int, ctx context.Context) (ma
 	if err != nil {
 		return nil, err
 	}
+	logs, err := RelayLogList(ctx, nil, nil, 1, 500)
+	if err != nil {
+		return nil, err
+	}
 	for _, account := range site.Accounts {
 		if account.ID == accountID {
-			return siteChannelModelHistoryForAccount(ctx, *site, account)
+			return siteChannelModelHistoryForAccount(*site, account, logs)
 		}
 	}
 	return nil, fmt.Errorf("site account not found")
 }
 
-func siteChannelModelHistoryForAccount(ctx context.Context, site model.Site, account model.SiteAccount) (map[string]*model.SiteModelHistorySummary, error) {
+func siteChannelModelHistoryForAccount(site model.Site, account model.SiteAccount, logs []model.RelayLog) (map[string]*model.SiteModelHistorySummary, error) {
 	bindingByChannel := make(map[int]model.SiteChannelBinding)
 	for _, binding := range account.ChannelBindings {
 		bindingByChannel[binding.ChannelID] = binding
@@ -104,10 +110,6 @@ func siteChannelModelHistoryForAccount(ctx context.Context, site model.Site, acc
 	for _, item := range account.Models {
 		groupKey := model.NormalizeSiteGroupKey(item.GroupKey)
 		modelRouteMap[groupKey+"\x00"+strings.TrimSpace(item.ModelName)] = model.NormalizeSiteModelRouteType(item.RouteType)
-	}
-	logs, err := RelayLogList(ctx, nil, nil, 1, 500)
-	if err != nil {
-		return nil, err
 	}
 	result := make(map[string]*model.SiteModelHistorySummary)
 	for _, entry := range logs {
@@ -168,7 +170,7 @@ func siteChannelModelHistoryForAccount(ctx context.Context, site model.Site, acc
 	return result, nil
 }
 
-func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChannelCard, error) {
+func buildSiteChannelCard(ctx context.Context, site model.Site, logs []model.RelayLog, logsErr error) (model.SiteChannelCard, error) {
 	card := model.SiteChannelCard{
 		SiteID:       site.ID,
 		SiteName:     site.Name,
@@ -179,9 +181,13 @@ func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChann
 	}
 	historyByAccount := make(map[int]map[string]*model.SiteModelHistorySummary)
 	for _, account := range site.Accounts {
-		history, err := siteChannelModelHistoryForAccount(ctx, site, account)
-		if err == nil {
-			historyByAccount[account.ID] = history
+		if logsErr == nil {
+			history, err := siteChannelModelHistoryForAccount(site, account, logs)
+			if err == nil {
+				historyByAccount[account.ID] = history
+			}
+		} else {
+			_ = ctx
 		}
 		view := model.SiteChannelAccount{
 			SiteID:      site.ID,

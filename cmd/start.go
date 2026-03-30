@@ -7,6 +7,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server"
 	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/bestruirui/octopus/internal/utils/shutdown"
 	"github.com/spf13/cobra"
 )
@@ -48,7 +49,7 @@ var startCmd = &cobra.Command{
 		shutdown.Register(server.Close)
 
 		task.Init()
-		go task.RUN()
+		safe.Go("task-runner", task.RUN)
 	},
 }
 
