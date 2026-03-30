@@ -93,7 +93,6 @@ export function useGroupList() {
             return apiClient.get<Group[]>('/api/v1/group/list');
         },
         refetchInterval: 30000,
-        refetchOnMount: 'always',
     });
 }
 

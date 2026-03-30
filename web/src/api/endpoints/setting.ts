@@ -44,7 +44,6 @@ export function useSettingList() {
             return apiClient.get<Setting[]>('/api/v1/setting/list');
         },
         refetchInterval: 30000,
-        refetchOnMount: 'always',
     });
 }
 

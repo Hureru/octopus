@@ -30,7 +30,6 @@ export function useLatestInfo() {
             return apiClient.get<LatestInfo>('/api/v1/update');
         },
         refetchInterval: 3600000, // 1 小时
-        refetchOnMount: 'always',
     });
 }
 
@@ -46,7 +45,6 @@ export function useNowVersion() {
             return apiClient.get<string>('/api/v1/update/now-version');
         },
         refetchInterval: 3600000, // 1 小时
-        refetchOnMount: 'always',
     });
 }
 

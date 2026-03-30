@@ -11,12 +11,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// siteChannelLogPageSize limits logs fetched for site channel history summaries.
+const siteChannelLogPageSize = 500
+
 func SiteChannelList(ctx context.Context) ([]model.SiteChannelCard, error) {
 	sites, err := SiteList(ctx)
 	if err != nil {
 		return nil, err
 	}
-	logs, logsErr := RelayLogList(ctx, nil, nil, 1, 500)
+	logs, logsErr := RelayLogList(ctx, nil, nil, 1, siteChannelLogPageSize)
 	cards := make([]model.SiteChannelCard, 0, len(sites))
 	for _, site := range sites {
 		card, err := buildSiteChannelCard(ctx, site, logs, logsErr)
@@ -33,7 +36,7 @@ func SiteChannelGet(siteID int, ctx context.Context) (*model.SiteChannelCard, er
 	if err != nil {
 		return nil, err
 	}
-	logs, logsErr := RelayLogList(ctx, nil, nil, 1, 500)
+	logs, logsErr := RelayLogList(ctx, nil, nil, 1, siteChannelLogPageSize)
 	card, err := buildSiteChannelCard(ctx, *site, logs, logsErr)
 	if err != nil {
 		return nil, err
@@ -42,17 +45,37 @@ func SiteChannelGet(siteID int, ctx context.Context) (*model.SiteChannelCard, er
 }
 
 func SiteChannelAccountGet(siteID int, accountID int, ctx context.Context) (*model.SiteChannelAccount, error) {
-	card, err := SiteChannelGet(siteID, ctx)
+	site, err := SiteGet(siteID, ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, account := range card.Accounts {
-		if account.AccountID == accountID {
-			copy := account
-			return &copy, nil
+	var target *model.SiteAccount
+	for i := range site.Accounts {
+		if site.Accounts[i].ID == accountID {
+			target = &site.Accounts[i]
+			break
 		}
 	}
-	return nil, fmt.Errorf("site account not found")
+	if target == nil {
+		return nil, fmt.Errorf("site account not found")
+	}
+	logs, logsErr := RelayLogList(ctx, nil, nil, 1, 100)
+	var historyMap map[string]*model.SiteModelHistorySummary
+	if logsErr == nil {
+		historyMap, _ = siteChannelModelHistoryForAccount(*site, *target, logs)
+	}
+	view := model.SiteChannelAccount{
+		SiteID:      site.ID,
+		AccountID:   target.ID,
+		AccountName: target.Name,
+		Enabled:     target.Enabled,
+		AutoSync:    target.AutoSync,
+		Groups:      buildSiteChannelGroups(ctx, *site, *target, historyMap),
+	}
+	view.GroupCount = len(view.Groups)
+	view.ModelCount = countSiteChannelModels(view.Groups)
+	view.RouteSummaries = summarizeSiteRoutes(view.Groups)
+	return &view, nil
 }
 
 func SiteChannelResetAccountRoutes(siteID int, accountID int, ctx context.Context) error {
@@ -89,7 +112,7 @@ func SiteChannelModelHistory(siteID int, accountID int, ctx context.Context) (ma
 	if err != nil {
 		return nil, err
 	}
-	logs, err := RelayLogList(ctx, nil, nil, 1, 500)
+	logs, err := RelayLogList(ctx, nil, nil, 1, siteChannelLogPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -113,61 +136,128 @@ func siteChannelModelHistoryForAccount(site model.Site, account model.SiteAccoun
 	}
 	result := make(map[string]*model.SiteModelHistorySummary)
 	for _, entry := range logs {
-		channelID := entry.ChannelId
-		if channelID == 0 {
-			for i := len(entry.Attempts) - 1; i >= 0; i-- {
-				if entry.Attempts[i].ChannelID != 0 {
-					channelID = entry.Attempts[i].ChannelID
-					break
-				}
+		if len(entry.Attempts) == 0 {
+			appendLegacySiteChannelHistory(result, bindingByChannel, modelRouteMap, entry)
+			continue
+		}
+
+		for i := len(entry.Attempts) - 1; i >= 0; i-- {
+			attempt := entry.Attempts[i]
+			if attempt.Status != model.AttemptSuccess && attempt.Status != model.AttemptFailed {
+				continue
 			}
-		}
-		binding, ok := bindingByChannel[channelID]
-		if !ok {
-			continue
-		}
-		baseGroupKey, fallbackRouteType := model.ParseSiteChannelBindingKey(binding.GroupKey)
-		lookupKey := baseGroupKey + "\x00" + strings.TrimSpace(entry.ActualModelName)
-		if strings.TrimSpace(entry.ActualModelName) == "" {
-			lookupKey = baseGroupKey + "\x00" + strings.TrimSpace(entry.RequestModelName)
-		}
-		routeType, ok := modelRouteMap[lookupKey]
-		if !ok {
-			routeType = fallbackRouteType
-		}
-		key := lookupKey
-		if strings.TrimSpace(entry.ActualModelName) == "" && strings.TrimSpace(entry.RequestModelName) == "" {
-			continue
-		}
-		summary := result[key]
-		if summary == nil {
-			summary = &model.SiteModelHistorySummary{Recent: make([]model.SiteModelHistoryEntry, 0, 5)}
-			result[key] = summary
-		}
-		success := strings.TrimSpace(entry.Error) == ""
-		if success {
-			summary.SuccessCount++
-		} else {
-			summary.FailureCount++
-		}
-		if summary.LastRequestAt == nil || entry.Time > *summary.LastRequestAt {
-			t := entry.Time
-			summary.LastRequestAt = &t
-		}
-		if len(summary.Recent) < 5 {
-			summary.Recent = append(summary.Recent, model.SiteModelHistoryEntry{
-				Time:         entry.Time,
-				Success:      success,
-				RouteType:    routeType,
-				ChannelID:    channelID,
-				ChannelName:  entry.ChannelName,
-				RequestModel: entry.RequestModelName,
-				ActualModel:  entry.ActualModelName,
-				Error:        entry.Error,
-			})
+			appendAttemptSiteChannelHistory(result, bindingByChannel, modelRouteMap, entry, attempt)
 		}
 	}
 	return result, nil
+}
+
+func appendLegacySiteChannelHistory(
+	result map[string]*model.SiteModelHistorySummary,
+	bindingByChannel map[int]model.SiteChannelBinding,
+	modelRouteMap map[string]model.SiteModelRouteType,
+	entry model.RelayLog,
+) {
+	channelID := entry.ChannelId
+	if channelID == 0 {
+		for i := len(entry.Attempts) - 1; i >= 0; i-- {
+			if entry.Attempts[i].ChannelID != 0 {
+				channelID = entry.Attempts[i].ChannelID
+				break
+			}
+		}
+	}
+	binding, ok := bindingByChannel[channelID]
+	if !ok {
+		return
+	}
+	baseGroupKey, fallbackRouteType := model.ParseSiteChannelBindingKey(binding.GroupKey)
+	actualModel := strings.TrimSpace(entry.ActualModelName)
+	if actualModel == "" {
+		actualModel = strings.TrimSpace(entry.RequestModelName)
+	}
+	if actualModel == "" {
+		return
+	}
+	lookupKey := baseGroupKey + "\x00" + actualModel
+	routeType := fallbackRouteType
+	if value, ok := modelRouteMap[lookupKey]; ok {
+		routeType = value
+	}
+	appendSiteChannelHistoryEntry(result, lookupKey, entry.Time, strings.TrimSpace(entry.Error) == "", routeType, channelID, entry.ChannelName, entry.RequestModelName, entry.ActualModelName, entry.Error)
+}
+
+func appendAttemptSiteChannelHistory(
+	result map[string]*model.SiteModelHistorySummary,
+	bindingByChannel map[int]model.SiteChannelBinding,
+	modelRouteMap map[string]model.SiteModelRouteType,
+	entry model.RelayLog,
+	attempt model.ChannelAttempt,
+) {
+	if attempt.ChannelID == 0 {
+		return
+	}
+	binding, ok := bindingByChannel[attempt.ChannelID]
+	if !ok {
+		return
+	}
+	baseGroupKey, fallbackRouteType := model.ParseSiteChannelBindingKey(binding.GroupKey)
+	actualModel := strings.TrimSpace(attempt.ModelName)
+	if actualModel == "" {
+		actualModel = strings.TrimSpace(entry.ActualModelName)
+	}
+	if actualModel == "" {
+		actualModel = strings.TrimSpace(entry.RequestModelName)
+	}
+	if actualModel == "" {
+		return
+	}
+	lookupKey := baseGroupKey + "\x00" + actualModel
+	routeType := fallbackRouteType
+	if value, ok := modelRouteMap[lookupKey]; ok {
+		routeType = value
+	}
+	appendSiteChannelHistoryEntry(result, lookupKey, entry.Time, attempt.Status == model.AttemptSuccess, routeType, attempt.ChannelID, attempt.ChannelName, entry.RequestModelName, actualModel, attempt.Msg)
+}
+
+func appendSiteChannelHistoryEntry(
+	result map[string]*model.SiteModelHistorySummary,
+	key string,
+	timeValue int64,
+	success bool,
+	routeType model.SiteModelRouteType,
+	channelID int,
+	channelName string,
+	requestModel string,
+	actualModel string,
+	errorMessage string,
+) {
+	summary := result[key]
+	if summary == nil {
+		summary = &model.SiteModelHistorySummary{Recent: make([]model.SiteModelHistoryEntry, 0, 5)}
+		result[key] = summary
+	}
+	if success {
+		summary.SuccessCount++
+	} else {
+		summary.FailureCount++
+	}
+	if summary.LastRequestAt == nil || timeValue > *summary.LastRequestAt {
+		t := timeValue
+		summary.LastRequestAt = &t
+	}
+	if len(summary.Recent) < 5 {
+		summary.Recent = append(summary.Recent, model.SiteModelHistoryEntry{
+			Time:         timeValue,
+			Success:      success,
+			RouteType:    routeType,
+			ChannelID:    channelID,
+			ChannelName:  channelName,
+			RequestModel: requestModel,
+			ActualModel:  actualModel,
+			Error:        errorMessage,
+		})
+	}
 }
 
 func buildSiteChannelCard(ctx context.Context, site model.Site, logs []model.RelayLog, logsErr error) (model.SiteChannelCard, error) {

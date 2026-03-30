@@ -54,7 +54,6 @@ export function useModelList() {
             return apiClient.get<LLMInfo[]>('/api/v1/model/list');
         },
         refetchInterval: 30000,
-        refetchOnMount: 'always',
     });
 }
 

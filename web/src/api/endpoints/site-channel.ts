@@ -255,6 +255,12 @@ export type SiteModelDisableUpdateRequest = {
     disabled: boolean;
 };
 
+export type SiteChannelModelDisabledMutationInput = {
+    siteId: number;
+    accountId: number;
+    payload: SiteModelDisableUpdateRequest[];
+};
+
 export type SiteChannelKeyCreateRequest = {
     group_key: string;
     name?: string;
@@ -305,7 +311,10 @@ function replaceSiteChannelAccount(
 
 function invalidateSiteChannelQueries(queryClient: ReturnType<typeof useQueryClient>) {
     queryClient.invalidateQueries({ queryKey: ['site-channel', 'list'] });
-    queryClient.invalidateQueries({ queryKey: ['sites', 'list'] });
+}
+
+function invalidateSiteChannelAndRelated(queryClient: ReturnType<typeof useQueryClient>) {
+    queryClient.invalidateQueries({ queryKey: ['site-channel', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
 }
@@ -316,7 +325,6 @@ export function useSiteChannelList() {
         queryFn: async () => apiClient.get<SiteChannelCardServer[]>('/api/v1/site-channel/list'),
         select: (cards) => cards.map(normalizeSiteChannelCard),
         refetchInterval: 30000,
-        refetchOnMount: 'always',
     });
 }
 
@@ -358,16 +366,16 @@ export function useCreateSiteChannelKey(siteId: number, accountId: number) {
     });
 }
 
-export function useUpdateSiteChannelModelDisabled(siteId: number, accountId: number) {
+export function useUpdateSiteChannelModelDisabled() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async (payload: SiteModelDisableUpdateRequest[]) =>
+        mutationFn: async ({ siteId, accountId, payload }: SiteChannelModelDisabledMutationInput) =>
             apiClient.put<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/model-disabled'), payload),
-        onSuccess: (account) => {
+        onSuccess: (account, variables) => {
             const normalizedAccount = normalizeSiteChannelAccount(account);
             queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
-                replaceSiteChannelAccount(cards, siteId, normalizedAccount),
+                replaceSiteChannelAccount(cards, variables.siteId, normalizedAccount),
             );
             invalidateSiteChannelQueries(queryClient);
         },
@@ -388,7 +396,7 @@ export function useUpdateSiteProjectedKeys(siteId: number, accountId: number) {
             queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
                 replaceSiteChannelAccount(cards, siteId, normalizedAccount),
             );
-            invalidateSiteChannelQueries(queryClient);
+            invalidateSiteChannelAndRelated(queryClient);
         },
         onError: (error) => {
             logger.error('site projected key update failed:', error);

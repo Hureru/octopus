@@ -221,6 +221,5 @@ export function useAPIKeyStats() {
             request_count: formatCount(data.request_success + data.request_failed),
         }),
         refetchInterval: 30000,
-        refetchOnMount: 'always',
     });
 }

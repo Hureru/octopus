@@ -178,7 +178,6 @@ export function useChannelList() {
             }
         })) as Array<{ raw: Channel; formatted: StatsMetricsFormatted }>,
         refetchInterval: 30000,
-        refetchOnMount: 'always',
     });
 }
 

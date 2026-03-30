@@ -87,10 +87,6 @@ func createSiteChannelKey(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
-		return
-	}
 	var req model.SiteChannelKeyCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)

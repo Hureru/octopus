@@ -12,6 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/bestruirui/octopus/static"
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
 
@@ -30,6 +31,11 @@ func Start() error {
 		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
 		c.Abort()
 	}))
+
+	r.Use(gzip.Gzip(gzip.DefaultCompression,
+		gzip.WithExcludedPaths([]string{"/v1/"}),
+		gzip.WithExcludedPathsRegexs([]string{`/api/v1/log/stream`}),
+	))
 
 	if conf.IsDebug() {
 		r.Use(middleware.Logger())

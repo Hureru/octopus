@@ -209,7 +209,6 @@ export function useSiteList() {
         })),
       })) as Site[],
     refetchInterval: 30000,
-    refetchOnMount: "always",
   });
 }
 
