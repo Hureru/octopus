@@ -14,6 +14,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/bestruirui/octopus/internal/task"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
 )
 
@@ -146,7 +147,9 @@ func importDB(c *gin.Context) {
 		return
 	}
 
-	_ = op.InitCache()
+	if err := op.InitCache(); err != nil {
+		log.Warnf("cache refresh after import failed: %v", err)
+	}
 
 	resp.Success(c, result)
 }
