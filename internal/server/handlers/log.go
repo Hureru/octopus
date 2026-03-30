@@ -65,7 +65,7 @@ func listLog(c *gin.Context) {
 		endTime = &et
 	}
 
-	logs, err := op.RelayLogList(c.Request.Context(), startTime, endTime, page, pageSize)
+	logs, err := op.RelayLogList(c.Request.Context(), startTime, endTime, nil, page, pageSize)
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return

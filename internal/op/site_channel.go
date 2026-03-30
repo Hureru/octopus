@@ -19,7 +19,7 @@ func SiteChannelList(ctx context.Context) ([]model.SiteChannelCard, error) {
 	if err != nil {
 		return nil, err
 	}
-	logs, logsErr := RelayLogList(ctx, nil, nil, 1, siteChannelLogPageSize)
+	logs, logsErr := RelayLogList(ctx, nil, nil, nil, 1, siteChannelLogPageSize)
 	cards := make([]model.SiteChannelCard, 0, len(sites))
 	for _, site := range sites {
 		card, err := buildSiteChannelCard(ctx, site, logs, logsErr)
@@ -36,7 +36,7 @@ func SiteChannelGet(siteID int, ctx context.Context) (*model.SiteChannelCard, er
 	if err != nil {
 		return nil, err
 	}
-	logs, logsErr := RelayLogList(ctx, nil, nil, 1, siteChannelLogPageSize)
+	logs, logsErr := RelayLogList(ctx, nil, nil, nil, 1, siteChannelLogPageSize)
 	card, err := buildSiteChannelCard(ctx, *site, logs, logsErr)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,8 @@ func SiteChannelAccountGet(siteID int, accountID int, ctx context.Context) (*mod
 	if target == nil {
 		return nil, fmt.Errorf("site account not found")
 	}
-	logs, logsErr := RelayLogList(ctx, nil, nil, 1, 100)
+	channelIDs := collectAccountChannelIDs(*target)
+	logs, logsErr := RelayLogList(ctx, nil, nil, channelIDs, 1, siteChannelLogPageSize)
 	var historyMap map[string]*model.SiteModelHistorySummary
 	if logsErr == nil {
 		historyMap, _ = siteChannelModelHistoryForAccount(*site, *target, logs)
@@ -112,12 +113,13 @@ func SiteChannelModelHistory(siteID int, accountID int, ctx context.Context) (ma
 	if err != nil {
 		return nil, err
 	}
-	logs, err := RelayLogList(ctx, nil, nil, 1, siteChannelLogPageSize)
-	if err != nil {
-		return nil, err
-	}
 	for _, account := range site.Accounts {
 		if account.ID == accountID {
+			channelIDs := collectAccountChannelIDs(account)
+			logs, err := RelayLogList(ctx, nil, nil, channelIDs, 1, siteChannelLogPageSize)
+			if err != nil {
+				return nil, err
+			}
 			return siteChannelModelHistoryForAccount(*site, account, logs)
 		}
 	}
@@ -555,6 +557,18 @@ func siteChannelShouldSplitByOutboundType(site model.Site) bool {
 
 func siteChannelCompositeBindingKey(groupKey string, routeType model.SiteModelRouteType, split bool) string {
 	return model.ComposeSiteChannelBindingKey(groupKey, routeType, split)
+}
+
+func collectAccountChannelIDs(account model.SiteAccount) []int {
+	ids := make(map[int]struct{})
+	for _, binding := range account.ChannelBindings {
+		ids[binding.ChannelID] = struct{}{}
+	}
+	result := make([]int, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	return result
 }
 
 func findProjectedChannelID(bindings []model.SiteChannelBinding, groupKey string, routeType model.SiteModelRouteType, split bool) (int, bool) {

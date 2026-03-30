@@ -186,26 +186,38 @@ func relayLogCleanup(ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Where("time < ?", cutoffTime).Delete(&model.RelayLog{}).Error
 }
 
-// RelayLogList 查询日志列表，支持可选的时间范围过滤
+// RelayLogList 查询日志列表，支持可选的时间范围和渠道ID过滤
 // startTime 和 endTime 为 nil 时表示不限制时间范围
-func RelayLogList(ctx context.Context, startTime, endTime *int, page, pageSize int) ([]model.RelayLog, error) {
+// channelIDs 为 nil 或空时表示不限制渠道
+func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int, page, pageSize int) ([]model.RelayLog, error) {
 	enabled, err := SettingGetBool(model.SettingKeyRelayLogKeepEnabled)
 	if err != nil {
 		return nil, err
 	}
 	hasTimeFilter := startTime != nil && endTime != nil
+	hasChannelFilter := len(channelIDs) > 0
+
+	var channelSet map[int]struct{}
+	if hasChannelFilter {
+		channelSet = make(map[int]struct{}, len(channelIDs))
+		for _, id := range channelIDs {
+			channelSet[id] = struct{}{}
+		}
+	}
 
 	// 获取缓存中符合条件的日志
 	relayLogCacheLock.Lock()
 	var cachedLogs []model.RelayLog
 	for _, log := range relayLogCache {
 		if hasTimeFilter {
-			if log.Time >= int64(*startTime) && log.Time <= int64(*endTime) {
-				cachedLogs = append(cachedLogs, log)
+			if log.Time < int64(*startTime) || log.Time > int64(*endTime) {
+				continue
 			}
-		} else {
-			cachedLogs = append(cachedLogs, log)
 		}
+		if hasChannelFilter && !logMatchesChannels(log, channelSet) {
+			continue
+		}
+		cachedLogs = append(cachedLogs, log)
 	}
 	relayLogCacheLock.Unlock()
 
@@ -241,6 +253,9 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, page, pageSize i
 			if hasTimeFilter {
 				query = query.Where("time >= ? AND time <= ?", *startTime, *endTime)
 			}
+			if hasChannelFilter {
+				query = query.Where("channel_id IN ?", channelIDs)
+			}
 
 			var dbLogs []model.RelayLog
 			if err := query.Order("id DESC").Offset(dbOffset).Limit(remaining).Find(&dbLogs).Error; err != nil {
@@ -251,6 +266,20 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, page, pageSize i
 	}
 
 	return result, nil
+}
+
+// logMatchesChannels 检查日志是否属于指定的渠道集合
+// 检查顶层 ChannelId 和 Attempts 中的 ChannelID
+func logMatchesChannels(log model.RelayLog, channelSet map[int]struct{}) bool {
+	if _, ok := channelSet[log.ChannelId]; ok {
+		return true
+	}
+	for _, attempt := range log.Attempts {
+		if _, ok := channelSet[attempt.ChannelID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func RelayLogClear(ctx context.Context) error {
