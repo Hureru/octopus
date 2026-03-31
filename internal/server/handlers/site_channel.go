@@ -27,7 +27,7 @@ func init() {
 		Use(middleware.Auth()).
 		Use(middleware.RequireJSON()).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/keys", http.MethodPost).Handle(createSiteChannelKey)).
-		AddRoute(router.NewRoute("/:siteId/account/:accountId/projected-keys", http.MethodPut).Handle(updateSiteProjectedKeys)).
+		AddRoute(router.NewRoute("/:siteId/account/:accountId/source-keys", http.MethodPut).Handle(updateSiteSourceKeys)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-routes", http.MethodPut).Handle(updateSiteChannelModelRoutes)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-disabled", http.MethodPut).Handle(updateSiteChannelModelDisabled)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-routes/reset", http.MethodPost).Handle(resetSiteChannelModelRoutes))
@@ -104,17 +104,21 @@ func createSiteChannelKey(c *gin.Context) {
 	resp.Success(c, data)
 }
 
-func updateSiteProjectedKeys(c *gin.Context) {
+func updateSiteSourceKeys(c *gin.Context) {
 	siteID, accountID, ok := parseSiteChannelIDs(c)
 	if !ok {
 		return
 	}
-	var req model.SiteProjectedKeyUpdateRequest
+	var req model.SiteSourceKeyUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
-	if err := op.UpdateSiteProjectedKeys(siteID, accountID, &req, c.Request.Context()); err != nil {
+	if err := op.UpdateSiteSourceKeys(siteID, accountID, &req, c.Request.Context()); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

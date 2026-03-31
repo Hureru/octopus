@@ -36,8 +36,21 @@ type SiteChannelGroup struct {
 	HasKeys               bool               `json:"has_keys"`
 	HasProjectedChannel   bool               `json:"has_projected_channel"`
 	ProjectedChannelIDs   []int              `json:"projected_channel_ids"`
+	SourceKeys            []SiteSourceKey    `json:"source_keys,omitempty"`
 	ProjectedKeys         []SiteProjectedKey `json:"projected_keys,omitempty"`
 	Models                []SiteChannelModel `json:"models"`
+}
+
+type SiteSourceKey struct {
+	ID          int                  `json:"id"`
+	Enabled     bool                 `json:"enabled"`
+	Token       string               `json:"token"`
+	TokenMasked string               `json:"token_masked"`
+	Name        string               `json:"name"`
+	GroupKey    string               `json:"group_key"`
+	GroupName   string               `json:"group_name"`
+	ValueStatus SiteTokenValueStatus `json:"value_status"`
+	LastSyncAt  *int64               `json:"last_sync_at,omitempty"`
 }
 
 type SiteProjectedKey struct {
@@ -118,4 +131,24 @@ type SiteProjectedKeyUpdateRequest struct {
 	KeysToAdd    []SiteProjectedKeyAddRequest `json:"keys_to_add,omitempty"`
 	KeysToUpdate []SiteProjectedKeyUpdateItem `json:"keys_to_update,omitempty"`
 	KeysToDelete []int                        `json:"keys_to_delete,omitempty"`
+}
+
+type SiteSourceKeyAddRequest struct {
+	Enabled bool   `json:"enabled"`
+	Token   string `json:"token" binding:"required"`
+	Name    string `json:"name,omitempty"`
+}
+
+type SiteSourceKeyUpdateItem struct {
+	ID      int     `json:"id" binding:"required"`
+	Enabled *bool   `json:"enabled,omitempty"`
+	Token   *string `json:"token,omitempty"`
+	Name    *string `json:"name,omitempty"`
+}
+
+type SiteSourceKeyUpdateRequest struct {
+	GroupKey     string                    `json:"group_key" binding:"required"`
+	KeysToAdd    []SiteSourceKeyAddRequest `json:"keys_to_add,omitempty"`
+	KeysToUpdate []SiteSourceKeyUpdateItem `json:"keys_to_update,omitempty"`
+	KeysToDelete []int                     `json:"keys_to_delete,omitempty"`
 }

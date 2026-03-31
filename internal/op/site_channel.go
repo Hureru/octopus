@@ -304,7 +304,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 	projectedChannels := make(map[int]*model.Channel)
 	for _, group := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(group.GroupKey)
-		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	}
 	for _, token := range account.Tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
@@ -316,6 +316,22 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 		if token.Enabled && model.IsReadySiteToken(token) && !model.IsMaskedSiteTokenValue(token.Token) {
 			group.EnabledKeyCount++
 		}
+		var lastSyncAt *int64
+		if token.LastSyncAt != nil && !token.LastSyncAt.IsZero() {
+			unix := token.LastSyncAt.UnixMilli()
+			lastSyncAt = &unix
+		}
+		group.SourceKeys = append(group.SourceKeys, model.SiteSourceKey{
+			ID:          token.ID,
+			Enabled:     token.Enabled,
+			Token:       token.Token,
+			TokenMasked: maskProjectedChannelKey(token.Token),
+			Name:        token.Name,
+			GroupKey:    key,
+			GroupName:   model.NormalizeSiteGroupName(key, token.GroupName),
+			ValueStatus: model.NormalizeSiteTokenValueStatus(token.ValueStatus, token.Token),
+			LastSyncAt:  lastSyncAt,
+		})
 	}
 	for _, binding := range account.ChannelBindings {
 		baseKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
@@ -372,6 +388,12 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 	for _, item := range groups {
 		item.HasKeys = item.KeyCount > 0
 		sort.Slice(item.ProjectedChannelIDs, func(i, j int) bool { return item.ProjectedChannelIDs[i] < item.ProjectedChannelIDs[j] })
+		sort.Slice(item.SourceKeys, func(i, j int) bool {
+			if item.SourceKeys[i].Name == item.SourceKeys[j].Name {
+				return item.SourceKeys[i].ID < item.SourceKeys[j].ID
+			}
+			return item.SourceKeys[i].Name < item.SourceKeys[j].Name
+		})
 		sort.Slice(item.ProjectedKeys, func(i, j int) bool {
 			if item.ProjectedKeys[i].ChannelID == item.ProjectedKeys[j].ChannelID {
 				return item.ProjectedKeys[i].ID < item.ProjectedKeys[j].ID
@@ -418,18 +440,27 @@ func ensureSiteChannelGroup(groups map[string]*model.SiteChannelGroup, groupKey 
 		}
 		return item
 	}
-	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	groups[groupKey] = item
 	return item
 }
 
-func UpdateSiteProjectedKeys(siteID int, accountID int, req *model.SiteProjectedKeyUpdateRequest, ctx context.Context) error {
+func normalizeEditableSourceTokenValue(value string) (string, error) {
+	normalized := model.NormalizeSiteSyncTokenValue(value)
+	if normalized == "" {
+		return "", fmt.Errorf("key 不能为空")
+	}
+	if model.IsMaskedSiteTokenValue(normalized) {
+		return "", fmt.Errorf("必须填写完整 Key，不能保存脱敏值")
+	}
+	return normalized, nil
+}
+
+func UpdateSiteSourceKeys(siteID int, accountID int, req *model.SiteSourceKeyUpdateRequest, ctx context.Context) error {
 	if req == nil {
-		return fmt.Errorf("site projected key update request is nil")
+		return fmt.Errorf("site source key update request is nil")
 	}
-	if strings.TrimSpace(req.GroupKey) == "" {
-		return fmt.Errorf("group key is required")
-	}
+	targetGroupKey := model.NormalizeSiteGroupKey(req.GroupKey)
 
 	site, err := SiteGet(siteID, ctx)
 	if err != nil {
@@ -447,89 +478,84 @@ func UpdateSiteProjectedKeys(siteID int, accountID int, req *model.SiteProjected
 		return fmt.Errorf("site account not found")
 	}
 
-	targetGroupKey := model.NormalizeSiteGroupKey(req.GroupKey)
-	split := siteChannelShouldSplitByOutboundType(*site)
-	channelIDs := make([]int, 0)
-	for _, binding := range account.ChannelBindings {
-		baseKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
-		if model.NormalizeSiteGroupKey(baseKey) != targetGroupKey {
-			continue
-		}
-		channelIDs = append(channelIDs, binding.ChannelID)
-	}
-	if len(channelIDs) == 0 && !split {
-		return fmt.Errorf("projected channel not found for group %s", targetGroupKey)
-	}
-	if len(channelIDs) == 0 {
-		return fmt.Errorf("projected channels not found for group %s", targetGroupKey)
-	}
-
-	for _, channelID := range channelIDs {
-		channel, getErr := ChannelGet(channelID, ctx)
-		if getErr != nil {
-			return getErr
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existingTokens []model.SiteToken
+		if err := tx.Where("site_account_id = ? AND group_key = ?", accountID, targetGroupKey).Find(&existingTokens).Error; err != nil {
+			return err
 		}
 
-		validKeyIDs := make(map[int]struct{}, len(channel.Keys))
-		for _, key := range channel.Keys {
-			validKeyIDs[key.ID] = struct{}{}
+		validIDs := make(map[int]model.SiteToken, len(existingTokens))
+		for _, token := range existingTokens {
+			validIDs[token.ID] = token
 		}
 
-		updateReq := &model.ChannelUpdateRequest{ID: channelID, BypassManagedCheck: true}
-		if len(req.KeysToAdd) > 0 {
-			updateReq.KeysToAdd = make([]model.ChannelKeyAddRequest, 0, len(req.KeysToAdd))
-			for _, item := range req.KeysToAdd {
-				normalizedKey := model.NormalizeSiteSyncTokenValue(item.ChannelKey)
-				if normalizedKey == "" {
-					continue
-				}
-				updateReq.KeysToAdd = append(updateReq.KeysToAdd, model.ChannelKeyAddRequest{
-					Enabled:    item.Enabled,
-					ChannelKey: normalizedKey,
-					Remark:     strings.TrimSpace(item.Remark),
-				})
+		for _, item := range req.KeysToAdd {
+			normalizedToken, err := normalizeEditableSourceTokenValue(item.Token)
+			if err != nil {
+				return err
+			}
+			row := model.SiteToken{
+				SiteAccountID: accountID,
+				Name:          strings.TrimSpace(item.Name),
+				Token:         normalizedToken,
+				GroupKey:      targetGroupKey,
+				GroupName:     model.NormalizeSiteGroupName(targetGroupKey, targetGroupKey),
+				Enabled:       item.Enabled,
+				ValueStatus:   model.SiteTokenValueStatusReady,
+				Source:        "manual",
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
 			}
 		}
-		if len(req.KeysToUpdate) > 0 {
-			updateReq.KeysToUpdate = make([]model.ChannelKeyUpdateRequest, 0, len(req.KeysToUpdate))
-			for _, item := range req.KeysToUpdate {
-				if _, ok := validKeyIDs[item.ID]; !ok {
-					continue
+
+		for _, item := range req.KeysToUpdate {
+			existing, ok := validIDs[item.ID]
+			if !ok {
+				continue
+			}
+			updates := map[string]any{}
+			if item.Enabled != nil {
+				updates["enabled"] = *item.Enabled
+			}
+			if item.Name != nil {
+				updates["name"] = strings.TrimSpace(*item.Name)
+			}
+			if existing.Source != "manual" {
+				updates["source"] = "manual"
+			}
+			if item.Token != nil {
+				normalizedToken, err := normalizeEditableSourceTokenValue(*item.Token)
+				if err != nil {
+					return err
 				}
-				entry := model.ChannelKeyUpdateRequest{ID: item.ID}
-				if item.Enabled != nil {
-					entry.Enabled = item.Enabled
-				}
-				if item.ChannelKey != nil {
-					normalized := model.NormalizeSiteSyncTokenValue(*item.ChannelKey)
-					entry.ChannelKey = &normalized
-				}
-				if item.Remark != nil {
-					trimmed := strings.TrimSpace(*item.Remark)
-					entry.Remark = &trimmed
-				}
-				if entry.Enabled != nil || entry.ChannelKey != nil || entry.Remark != nil {
-					updateReq.KeysToUpdate = append(updateReq.KeysToUpdate, entry)
-				}
+				updates["token"] = normalizedToken
+				updates["value_status"] = model.NormalizeSiteTokenValueStatus(existing.ValueStatus, normalizedToken)
+			}
+			if len(updates) == 0 {
+				continue
+			}
+			if err := tx.Model(&model.SiteToken{}).Where("id = ? AND site_account_id = ? AND group_key = ?", item.ID, accountID, targetGroupKey).Updates(updates).Error; err != nil {
+				return err
 			}
 		}
+
 		if len(req.KeysToDelete) > 0 {
-			updateReq.KeysToDelete = make([]int, 0, len(req.KeysToDelete))
+			deletableIDs := make([]int, 0, len(req.KeysToDelete))
 			for _, id := range req.KeysToDelete {
-				if _, ok := validKeyIDs[id]; ok {
-					updateReq.KeysToDelete = append(updateReq.KeysToDelete, id)
+				if _, ok := validIDs[id]; ok {
+					deletableIDs = append(deletableIDs, id)
+				}
+			}
+			if len(deletableIDs) > 0 {
+				if err := tx.Where("id IN ? AND site_account_id = ? AND group_key = ?", deletableIDs, accountID, targetGroupKey).Delete(&model.SiteToken{}).Error; err != nil {
+					return err
 				}
 			}
 		}
-		if len(updateReq.KeysToAdd) == 0 && len(updateReq.KeysToUpdate) == 0 && len(updateReq.KeysToDelete) == 0 {
-			continue
-		}
-		if _, updateErr := ChannelUpdate(updateReq, ctx); updateErr != nil {
-			return updateErr
-		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 func countSiteChannelModels(groups []model.SiteChannelGroup) int {

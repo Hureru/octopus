@@ -74,8 +74,21 @@ export type SiteChannelGroup = {
     has_keys: boolean;
     has_projected_channel: boolean;
     projected_channel_ids: number[];
+    source_keys: SiteSourceKey[];
     projected_keys: SiteProjectedKey[];
     models: SiteChannelModel[];
+};
+
+export type SiteSourceKey = {
+    id: number;
+    enabled: boolean;
+    token: string;
+    token_masked: string;
+    name: string;
+    group_key: string;
+    group_name: string;
+    value_status: 'ready' | 'masked_pending';
+    last_sync_at?: number | null;
 };
 
 export type SiteProjectedKey = {
@@ -133,8 +146,9 @@ type SiteChannelModelServer = Omit<SiteChannelModel, 'route_type' | 'route_metad
     } | null;
 };
 
-type SiteChannelGroupServer = Omit<SiteChannelGroup, 'models' | 'projected_channel_ids' | 'projected_keys'> & {
+type SiteChannelGroupServer = Omit<SiteChannelGroup, 'models' | 'projected_channel_ids' | 'source_keys' | 'projected_keys'> & {
     projected_channel_ids?: number[] | null;
+    source_keys?: SiteSourceKey[] | null;
     projected_keys?: SiteProjectedKey[] | null;
     models?: SiteChannelModelServer[] | null;
 };
@@ -228,6 +242,16 @@ function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteCha
             ...group,
             masked_pending_key_count: typeof group.masked_pending_key_count === 'number' ? group.masked_pending_key_count : 0,
             projected_channel_ids: group.projected_channel_ids ?? [],
+            source_keys: (group.source_keys ?? []).map((key) => ({
+                ...key,
+                token: typeof key.token === 'string' ? key.token : '',
+                token_masked: typeof key.token_masked === 'string' ? key.token_masked : '',
+                name: typeof key.name === 'string' ? key.name : '',
+                group_key: typeof key.group_key === 'string' ? key.group_key : group.group_key,
+                group_name: typeof key.group_name === 'string' ? key.group_name : group.group_name,
+                value_status: key.value_status === 'masked_pending' ? 'masked_pending' : 'ready',
+                last_sync_at: typeof key.last_sync_at === 'number' ? key.last_sync_at : null,
+            })),
             projected_keys: (group.projected_keys ?? []).map((key) => ({
                 ...key,
                 channel_key: typeof key.channel_key === 'string' ? key.channel_key : '',
@@ -277,23 +301,23 @@ export type SiteChannelKeyCreateRequest = {
     name?: string;
 };
 
-export type SiteProjectedKeyAddRequest = {
+export type SiteSourceKeyAddRequest = {
     enabled: boolean;
-    channel_key: string;
-    remark?: string;
+    token: string;
+    name?: string;
 };
 
-export type SiteProjectedKeyUpdateItem = {
+export type SiteSourceKeyUpdateItem = {
     id: number;
     enabled?: boolean;
-    channel_key?: string;
-    remark?: string;
+    token?: string;
+    name?: string;
 };
 
-export type SiteProjectedKeyUpdateRequest = {
+export type SiteSourceKeyUpdateRequest = {
     group_key: string;
-    keys_to_add?: SiteProjectedKeyAddRequest[];
-    keys_to_update?: SiteProjectedKeyUpdateItem[];
+    keys_to_add?: SiteSourceKeyAddRequest[];
+    keys_to_update?: SiteSourceKeyUpdateItem[];
     keys_to_delete?: number[];
 };
 
@@ -396,12 +420,12 @@ export function useUpdateSiteChannelModelDisabled() {
     });
 }
 
-export function useUpdateSiteProjectedKeys(siteId: number, accountId: number) {
+export function useUpdateSiteSourceKeys(siteId: number, accountId: number) {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async (payload: SiteProjectedKeyUpdateRequest) =>
-            apiClient.put<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/projected-keys'), payload),
+        mutationFn: async (payload: SiteSourceKeyUpdateRequest) =>
+            apiClient.put<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/source-keys'), payload),
         onSuccess: (account) => {
             const normalizedAccount = normalizeSiteChannelAccount(account);
             queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
@@ -410,7 +434,7 @@ export function useUpdateSiteProjectedKeys(siteId: number, accountId: number) {
             invalidateSiteChannelAndRelated(queryClient);
         },
         onError: (error) => {
-            logger.error('site projected key update failed:', error);
+            logger.error('site source key update failed:', error);
         },
     });
 }

@@ -6,7 +6,6 @@ import (
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
-	"gorm.io/gorm"
 )
 
 func TestSiteChannelResetAccountRoutesRestoresDetectedMetadataRoute(t *testing.T) {
@@ -69,6 +68,131 @@ func TestSiteChannelResetAccountRoutesRestoresDetectedMetadataRoute(t *testing.T
 	}
 	if reloaded.RouteRawPayload != routePayload {
 		t.Fatalf("expected reset to keep route metadata payload, got %q", reloaded.RouteRawPayload)
+	}
+}
+
+func TestUpdateSiteSourceKeysMarksExistingTokenAsManual(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "site-channel-source-manual-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "site-channel-source-manual-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	row := model.SiteToken{
+		SiteAccountID: account.ID,
+		Name:          "legacy",
+		Token:         "sk-legacy-key",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       true,
+		ValueStatus:   model.SiteTokenValueStatusReady,
+		Source:        "sync",
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&row).Error; err != nil {
+		t.Fatalf("create site token failed: %v", err)
+	}
+
+	updated := "new-manual-key"
+	if err := UpdateSiteSourceKeys(site.ID, account.ID, &model.SiteSourceKeyUpdateRequest{
+		GroupKey: model.SiteDefaultGroupKey,
+		KeysToUpdate: []model.SiteSourceKeyUpdateItem{{
+			ID:    row.ID,
+			Token: &updated,
+		}},
+	}, ctx); err != nil {
+		t.Fatalf("UpdateSiteSourceKeys failed: %v", err)
+	}
+
+	var saved model.SiteToken
+	if err := dbpkg.GetDB().WithContext(ctx).First(&saved, row.ID).Error; err != nil {
+		t.Fatalf("reload site token failed: %v", err)
+	}
+	if saved.Source != "manual" {
+		t.Fatalf("expected updated token source to become manual, got %q", saved.Source)
+	}
+	if saved.Token != "sk-new-manual-key" {
+		t.Fatalf("expected updated token to be normalized, got %q", saved.Token)
+	}
+	if saved.ValueStatus != model.SiteTokenValueStatusReady {
+		t.Fatalf("expected updated token value_status to be ready, got %q", saved.ValueStatus)
+	}
+}
+
+func TestUpdateSiteSourceKeysRestoresReadyWhenMaskedPendingTokenIsCompleted(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "site-channel-source-restore-ready-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "site-channel-source-restore-ready-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	row := model.SiteToken{
+		SiteAccountID: account.ID,
+		Name:          "legacy",
+		Token:         "yzFy**********OTkb",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       false,
+		ValueStatus:   model.SiteTokenValueStatusMaskedPending,
+		Source:        "sync",
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&row).Error; err != nil {
+		t.Fatalf("create site token failed: %v", err)
+	}
+
+	updated := "yzFyREALREALOTkb"
+	if err := UpdateSiteSourceKeys(site.ID, account.ID, &model.SiteSourceKeyUpdateRequest{
+		GroupKey: model.SiteDefaultGroupKey,
+		KeysToUpdate: []model.SiteSourceKeyUpdateItem{{
+			ID:    row.ID,
+			Token: &updated,
+		}},
+	}, ctx); err != nil {
+		t.Fatalf("UpdateSiteSourceKeys failed: %v", err)
+	}
+
+	var saved model.SiteToken
+	if err := dbpkg.GetDB().WithContext(ctx).First(&saved, row.ID).Error; err != nil {
+		t.Fatalf("reload site token failed: %v", err)
+	}
+	if saved.Token != "sk-yzFyREALREALOTkb" {
+		t.Fatalf("expected completed token to be normalized and saved, got %q", saved.Token)
+	}
+	if saved.ValueStatus != model.SiteTokenValueStatusReady {
+		t.Fatalf("expected completed token value_status to restore ready, got %q", saved.ValueStatus)
 	}
 }
 
@@ -374,7 +498,7 @@ func TestSiteChannelAccountGetCountsMaskedPendingKeysAsPendingOnly(t *testing.T)
 	}
 }
 
-func TestUpdateSiteProjectedKeysNormalizesPrefix(t *testing.T) {
+func TestUpdateSiteSourceKeysNormalizesPrefix(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
 	site := &model.Site{
@@ -398,72 +522,55 @@ func TestUpdateSiteProjectedKeysNormalizesPrefix(t *testing.T) {
 		t.Fatalf("SiteAccountCreate failed: %v", err)
 	}
 
-	channel := &model.Channel{
-		Name:     "[Site] test / default",
-		Type:     model.SiteModelRouteTypeOpenAIChat.ToOutboundType(),
-		Enabled:  true,
-		BaseUrls: []model.BaseUrl{{URL: "https://example.com/v1", Delay: 0}},
-		Model:    "gpt-4o-mini",
-		Keys: []model.ChannelKey{{
-			Enabled:    true,
-			ChannelKey: "legacy-key",
-			Remark:     "default",
-		}},
-	}
-	if err := ChannelCreate(channel, ctx); err != nil {
-		t.Fatalf("ChannelCreate failed: %v", err)
-	}
-
-	binding := model.SiteChannelBinding{
-		SiteID:        site.ID,
+	existing := model.SiteToken{
 		SiteAccountID: account.ID,
+		Name:          "legacy",
+		Token:         "sk-legacy-key",
 		GroupKey:      model.SiteDefaultGroupKey,
-		ChannelID:     channel.ID,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       true,
+		ValueStatus:   model.SiteTokenValueStatusReady,
 	}
-	if err := dbpkg.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
-		t.Fatalf("create site channel binding failed: %v", err)
-	}
-
-	reloaded, err := ChannelGet(channel.ID, ctx)
-	if err != nil {
-		t.Fatalf("ChannelGet failed: %v", err)
-	}
-	if len(reloaded.Keys) != 1 {
-		t.Fatalf("expected existing channel to have one key, got %d", len(reloaded.Keys))
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&existing).Error; err != nil {
+		t.Fatalf("create site token failed: %v", err)
 	}
 
-	newRemark := "manual"
+	newName := "manual"
 	newKey := "fresh-key"
-	if err := UpdateSiteProjectedKeys(site.ID, account.ID, &model.SiteProjectedKeyUpdateRequest{
+	if err := UpdateSiteSourceKeys(site.ID, account.ID, &model.SiteSourceKeyUpdateRequest{
 		GroupKey: model.SiteDefaultGroupKey,
-		KeysToUpdate: []model.SiteProjectedKeyUpdateItem{{
-			ID:         reloaded.Keys[0].ID,
-			ChannelKey: &newKey,
-			Remark:     &newRemark,
+		KeysToUpdate: []model.SiteSourceKeyUpdateItem{{
+			ID:    existing.ID,
+			Token: &newKey,
+			Name:  &newName,
 		}},
-		KeysToAdd: []model.SiteProjectedKeyAddRequest{{
-			Enabled:    true,
-			ChannelKey: "backup-key",
-			Remark:     "backup",
+		KeysToAdd: []model.SiteSourceKeyAddRequest{{
+			Enabled: true,
+			Token:   "backup-key",
+			Name:    "backup",
 		}},
 	}, ctx); err != nil {
-		t.Fatalf("UpdateSiteProjectedKeys failed: %v", err)
+		t.Fatalf("UpdateSiteSourceKeys failed: %v", err)
 	}
 
-	var saved model.Channel
-	if err := dbpkg.GetDB().WithContext(ctx).Preload("Keys", func(tx *gorm.DB) *gorm.DB {
-		return tx.Order("id ASC")
-	}).First(&saved, channel.ID).Error; err != nil {
-		t.Fatalf("reload channel failed: %v", err)
+	var saved []model.SiteToken
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("site_account_id = ? AND group_key = ?", account.ID, model.SiteDefaultGroupKey).
+		Order("id ASC").
+		Find(&saved).Error; err != nil {
+		t.Fatalf("reload site tokens failed: %v", err)
 	}
-	if len(saved.Keys) != 2 {
-		t.Fatalf("expected channel to have two keys after update, got %d", len(saved.Keys))
+	if len(saved) != 2 {
+		t.Fatalf("expected account to have two site tokens after update, got %d", len(saved))
 	}
-	if saved.Keys[0].ChannelKey != "sk-fresh-key" {
-		t.Fatalf("expected updated key to be normalized, got %q", saved.Keys[0].ChannelKey)
+	if saved[0].Token != "sk-fresh-key" {
+		t.Fatalf("expected updated token to be normalized, got %q", saved[0].Token)
 	}
-	if saved.Keys[1].ChannelKey != "sk-backup-key" {
-		t.Fatalf("expected added key to be normalized, got %q", saved.Keys[1].ChannelKey)
+	if saved[0].Name != "manual" {
+		t.Fatalf("expected updated name to be saved, got %q", saved[0].Name)
+	}
+	if saved[1].Token != "sk-backup-key" {
+		t.Fatalf("expected added token to be normalized, got %q", saved[1].Token)
 	}
 }
 
