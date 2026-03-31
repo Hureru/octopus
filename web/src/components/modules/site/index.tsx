@@ -521,21 +521,6 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
     }
   }
 
-  if (failedAccountCount > 0) {
-    return {
-      accountCount: site.accounts.length,
-      keyCount,
-      modelCount,
-      groupCount,
-      balance,
-      failedAccountCount,
-      disabledAccountCount,
-      enabledAccountCount,
-      healthLabel: `${failedAccountCount} 异常`,
-      healthTone: "danger",
-    };
-  }
-
   if (!site.enabled) {
     return {
       accountCount: site.accounts.length,
@@ -548,6 +533,21 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       enabledAccountCount,
       healthLabel: "站点停用",
       healthTone: "muted",
+    };
+  }
+
+  if (failedAccountCount > 0) {
+    return {
+      accountCount: site.accounts.length,
+      keyCount,
+      modelCount,
+      groupCount,
+      balance,
+      failedAccountCount,
+      disabledAccountCount,
+      enabledAccountCount,
+      healthLabel: `${failedAccountCount} 异常`,
+      healthTone: "danger",
     };
   }
 
