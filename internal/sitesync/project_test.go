@@ -610,6 +610,29 @@ func TestProjectAccountNormalizesProjectedChannelKeys(t *testing.T) {
 	}
 }
 
+func TestProjectAccountSkipsMaskedPendingTokens(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteToken{}).Where("site_account_id = ?", account.ID).Updates(map[string]any{
+		"token":        "sk-ab***xyz",
+		"value_status": model.SiteTokenValueStatusMaskedPending,
+		"enabled":      false,
+	}).Error; err != nil {
+		t.Fatalf("mark token as masked_pending failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount failed: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	channel := channelsByGroup[model.SiteDefaultGroupKey]
+	if len(channel.Keys) != 0 {
+		t.Fatalf("expected masked_pending tokens not to be projected, got %+v", channel.Keys)
+	}
+}
+
 func loadProjectedChannelsByGroupKey(t *testing.T, ctx context.Context, accountID int) map[string]model.Channel {
 	t.Helper()
 

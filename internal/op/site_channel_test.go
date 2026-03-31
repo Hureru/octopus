@@ -175,9 +175,9 @@ func TestSiteChannelAccountGetIncludesFullProjectedKeys(t *testing.T) {
 			ChannelKey: "sk-managed-secret-key",
 			Remark:     "default",
 		}},
-		Model:       "gpt-4o-mini",
-		AutoSync:    false,
-		AutoGroup:   model.AutoGroupTypeNone,
+		Model:     "gpt-4o-mini",
+		AutoSync:  false,
+		AutoGroup: model.AutoGroupTypeNone,
 	}
 	if err := ChannelCreate(channel, ctx); err != nil {
 		t.Fatalf("ChannelCreate failed: %v", err)
@@ -308,6 +308,69 @@ func TestSiteChannelAccountGetShowsExplicitGroupModelsWithoutKeys(t *testing.T) 
 	}
 	if vipGroup.Models[0].ProjectedChannelID != nil {
 		t.Fatalf("expected vip explicit model without keys not to have projected channel, got %+v", vipGroup.Models[0])
+	}
+}
+
+func TestSiteChannelAccountGetCountsMaskedPendingKeysAsPendingOnly(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "site-channel-masked-pending-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "site-channel-masked-pending-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&model.SiteUserGroup{
+		SiteAccountID: account.ID,
+		GroupKey:      model.SiteDefaultGroupKey,
+		Name:          model.SiteDefaultGroupName,
+	}).Error; err != nil {
+		t.Fatalf("create site group failed: %v", err)
+	}
+
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&model.SiteToken{
+		SiteAccountID: account.ID,
+		Name:          "masked-only",
+		Token:         "sk-ab***xyz",
+		ValueStatus:   model.SiteTokenValueStatusMaskedPending,
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       false,
+	}).Error; err != nil {
+		t.Fatalf("create site token failed: %v", err)
+	}
+
+	view, err := SiteChannelAccountGet(site.ID, account.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteChannelAccountGet failed: %v", err)
+	}
+	if len(view.Groups) != 1 {
+		t.Fatalf("expected one group, got %+v", view.Groups)
+	}
+	group := view.Groups[0]
+	if group.KeyCount != 1 {
+		t.Fatalf("expected key_count=1, got %d", group.KeyCount)
+	}
+	if group.EnabledKeyCount != 0 {
+		t.Fatalf("expected enabled_key_count=0 for masked_pending token, got %d", group.EnabledKeyCount)
+	}
+	if group.MaskedPendingKeyCount != 1 {
+		t.Fatalf("expected masked_pending_key_count=1, got %d", group.MaskedPendingKeyCount)
 	}
 }
 

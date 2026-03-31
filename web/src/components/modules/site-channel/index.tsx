@@ -1601,12 +1601,17 @@ function SiteAccountPanel({
                                                 <div className="truncate">{group.group_name || group.group_key}</div>
                                                 <div className="text-[11px] text-muted-foreground">
                                                     {group.models.length} 模型 · Key {group.enabled_key_count}/{group.key_count}
+                                                    {group.masked_pending_key_count > 0 ? ` · 待补全 ${group.masked_pending_key_count}` : ''}
                                                     {group.has_projected_channel ? ` · 投影 ${group.projected_keys.length}` : ''}
                                                 </div>
                                             </div>
                                             {!group.has_keys ? (
                                                 <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
                                                     待建
+                                                </span>
+                                            ) : group.masked_pending_key_count > 0 && group.enabled_key_count === 0 ? (
+                                                <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                                                    待补全
                                                 </span>
                                             ) : null}
                                         </div>
@@ -1785,6 +1790,17 @@ function SiteAccountPanel({
                                     </div>
                                 </PopoverContent>
                             </Popover>
+                        ) : null}
+
+                        {visibleGroups.some((group) => group.masked_pending_key_count > 0 && group.enabled_key_count === 0) ? (
+                            <button
+                                type="button"
+                                onClick={handleFocusAttention}
+                                className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+                            >
+                                <CircleAlert className="size-3.5" />
+                                待补全文明文 Key
+                            </button>
                         ) : null}
 
                         {projectedGroups.length > 0 ? (

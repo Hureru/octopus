@@ -70,6 +70,7 @@ export type SiteChannelGroup = {
     group_name: string;
     key_count: number;
     enabled_key_count: number;
+    masked_pending_key_count: number;
     has_keys: boolean;
     has_projected_channel: boolean;
     projected_channel_ids: number[];
@@ -225,6 +226,7 @@ function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteCha
         ...account,
         groups: (account.groups ?? []).map((group) => ({
             ...group,
+            masked_pending_key_count: typeof group.masked_pending_key_count === 'number' ? group.masked_pending_key_count : 0,
             projected_channel_ids: group.projected_channel_ids ?? [],
             projected_keys: (group.projected_keys ?? []).map((key) => ({
                 ...key,

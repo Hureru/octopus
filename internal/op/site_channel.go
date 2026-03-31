@@ -310,7 +310,10 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
 		group := ensureSiteChannelGroup(groups, key, token.GroupName)
 		group.KeyCount++
-		if token.Enabled {
+		if model.NormalizeSiteTokenValueStatus(token.ValueStatus, token.Token) == model.SiteTokenValueStatusMaskedPending {
+			group.MaskedPendingKeyCount++
+		}
+		if token.Enabled && model.IsReadySiteToken(token) && !model.IsMaskedSiteTokenValue(token.Token) {
 			group.EnabledKeyCount++
 		}
 	}

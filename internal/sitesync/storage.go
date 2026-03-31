@@ -3,6 +3,7 @@ package sitesync
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,10 +53,12 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 	}
 	now := time.Now()
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteToken{}).Error; err != nil {
+		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteUserGroup{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteUserGroup{}).Error; err != nil {
+
+		var existingTokens []model.SiteToken
+		if err := tx.Where("site_account_id = ?", accountID).Order("id ASC").Find(&existingTokens).Error; err != nil {
 			return err
 		}
 
@@ -86,10 +89,7 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		for i := range snapshot.groups {
 			snapshot.groups[i].SiteAccountID = accountID
 		}
-		for i := range snapshot.tokens {
-			snapshot.tokens[i].SiteAccountID = accountID
-			snapshot.tokens[i].LastSyncAt = &now
-		}
+		mergedTokens := mergePersistedSiteTokens(accountID, existingTokens, snapshot.tokens, now)
 		for i := range snapshot.models {
 			snapshot.models[i].SiteAccountID = accountID
 			snapshot.models[i].GroupKey = model.NormalizeSiteGroupKey(snapshot.models[i].GroupKey)
@@ -109,8 +109,11 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 				return err
 			}
 		}
-		if len(snapshot.tokens) > 0 {
-			if err := tx.Create(&snapshot.tokens).Error; err != nil {
+		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteToken{}).Error; err != nil {
+			return err
+		}
+		if len(mergedTokens) > 0 {
+			if err := tx.Create(&mergedTokens).Error; err != nil {
 				return err
 			}
 		}
@@ -128,6 +131,232 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		}
 		return nil
 	})
+}
+
+func mergePersistedSiteTokens(accountID int, existingTokens []model.SiteToken, incomingTokens []model.SiteToken, now time.Time) []model.SiteToken {
+	preparedExisting := make([]model.SiteToken, 0, len(existingTokens))
+	for _, token := range existingTokens {
+		token.SiteAccountID = accountID
+		token.GroupKey = model.NormalizeSiteGroupKey(token.GroupKey)
+		token.GroupName = model.NormalizeSiteGroupName(token.GroupKey, token.GroupName)
+		token.Token = strings.TrimSpace(token.Token)
+		token.ValueStatus = model.NormalizeSiteTokenValueStatus(token.ValueStatus, token.Token)
+		if token.ValueStatus == model.SiteTokenValueStatusMaskedPending {
+			token.Enabled = false
+			token.IsDefault = false
+		}
+		preparedExisting = append(preparedExisting, token)
+	}
+
+	readyCandidates := make([]model.SiteToken, 0)
+	for _, token := range preparedExisting {
+		if !model.IsReadySiteToken(token) || model.IsMaskedSiteTokenValue(token.Token) {
+			continue
+		}
+		readyCandidates = append(readyCandidates, token)
+	}
+
+	result := make([]model.SiteToken, 0, len(incomingTokens)+len(preparedExisting))
+	usedExistingIDs := make(map[int]struct{}, len(preparedExisting))
+
+	for _, incoming := range incomingTokens {
+		incoming.SiteAccountID = accountID
+		incoming.GroupKey = model.NormalizeSiteGroupKey(incoming.GroupKey)
+		incoming.GroupName = model.NormalizeSiteGroupName(incoming.GroupKey, incoming.GroupName)
+		incoming.Token = strings.TrimSpace(incoming.Token)
+		incoming.LastSyncAt = &now
+
+		var merged model.SiteToken
+		if model.IsMaskedSiteTokenValue(incoming.Token) {
+			merged = mergeMaskedIncomingSiteToken(incoming, preparedExisting, readyCandidates, usedExistingIDs)
+		} else {
+			merged = mergeReadyIncomingSiteToken(incoming, preparedExisting, usedExistingIDs)
+		}
+		merged.SiteAccountID = accountID
+		merged.LastSyncAt = &now
+		merged.ValueStatus = model.NormalizeSiteTokenValueStatus(merged.ValueStatus, merged.Token)
+		if merged.ValueStatus == model.SiteTokenValueStatusMaskedPending {
+			merged.Enabled = false
+			merged.IsDefault = false
+		}
+		result = append(result, merged)
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].GroupKey == result[j].GroupKey {
+			if result[i].Name == result[j].Name {
+				return result[i].ID < result[j].ID
+			}
+			return result[i].Name < result[j].Name
+		}
+		return result[i].GroupKey < result[j].GroupKey
+	})
+
+	for i := range result {
+		result[i].ID = 0
+	}
+
+	return result
+}
+
+func mergeReadyIncomingSiteToken(incoming model.SiteToken, existingTokens []model.SiteToken, usedExistingIDs map[int]struct{}) model.SiteToken {
+	incoming.ValueStatus = model.SiteTokenValueStatusReady
+	for _, existing := range existingTokens {
+		if existing.ID != 0 {
+			if _, used := usedExistingIDs[existing.ID]; used {
+				continue
+			}
+		}
+		if strings.TrimSpace(existing.Token) != incoming.Token {
+			continue
+		}
+		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
+			continue
+		}
+		incoming.ID = existing.ID
+		if existing.ID != 0 {
+			usedExistingIDs[existing.ID] = struct{}{}
+		}
+		return incoming
+	}
+	for _, existing := range existingTokens {
+		if existing.ID != 0 {
+			if _, used := usedExistingIDs[existing.ID]; used {
+				continue
+			}
+		}
+		if normalizeSiteTokenName(existing.Name) != normalizeSiteTokenName(incoming.Name) {
+			continue
+		}
+		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
+			continue
+		}
+		incoming.ID = existing.ID
+		if existing.ID != 0 {
+			usedExistingIDs[existing.ID] = struct{}{}
+		}
+		return incoming
+	}
+	return incoming
+}
+
+func mergeMaskedIncomingSiteToken(incoming model.SiteToken, existingTokens []model.SiteToken, readyCandidates []model.SiteToken, usedExistingIDs map[int]struct{}) model.SiteToken {
+	incoming.ValueStatus = model.SiteTokenValueStatusMaskedPending
+
+	for _, existing := range existingTokens {
+		if existing.ID != 0 {
+			if _, used := usedExistingIDs[existing.ID]; used {
+				continue
+			}
+		}
+		if normalizeSiteTokenName(existing.Name) != normalizeSiteTokenName(incoming.Name) {
+			continue
+		}
+		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
+			continue
+		}
+		if model.IsReadySiteToken(existing) && !model.IsMaskedSiteTokenValue(existing.Token) && siteMaskedTokenMatches(existing.Token, incoming.Token) {
+			incoming.ID = existing.ID
+			incoming.Token = existing.Token
+			incoming.ValueStatus = model.SiteTokenValueStatusReady
+			incoming.Enabled = incoming.Enabled && existing.Enabled
+			usedExistingIDs[existing.ID] = struct{}{}
+			return incoming
+		}
+	}
+
+	matches := make([]model.SiteToken, 0, 2)
+	for _, existing := range readyCandidates {
+		if existing.ID != 0 {
+			if _, used := usedExistingIDs[existing.ID]; used {
+				continue
+			}
+		}
+		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
+			continue
+		}
+		if normalizeSiteTokenName(incoming.Name) != "" && normalizeSiteTokenName(existing.Name) != normalizeSiteTokenName(incoming.Name) {
+			continue
+		}
+		if !siteMaskedTokenMatches(existing.Token, incoming.Token) {
+			continue
+		}
+		matches = append(matches, existing)
+		if len(matches) > 1 {
+			break
+		}
+	}
+	if len(matches) == 1 {
+		incoming.ID = matches[0].ID
+		incoming.Token = matches[0].Token
+		incoming.ValueStatus = model.SiteTokenValueStatusReady
+		incoming.Enabled = incoming.Enabled && matches[0].Enabled
+		usedExistingIDs[matches[0].ID] = struct{}{}
+		return incoming
+	}
+
+	for _, existing := range existingTokens {
+		if existing.ID != 0 {
+			if _, used := usedExistingIDs[existing.ID]; used {
+				continue
+			}
+		}
+		if normalizeSiteTokenName(existing.Name) != normalizeSiteTokenName(incoming.Name) {
+			continue
+		}
+		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
+			continue
+		}
+		incoming.ID = existing.ID
+		incoming.Enabled = false
+		incoming.IsDefault = false
+		if existing.ID != 0 {
+			usedExistingIDs[existing.ID] = struct{}{}
+		}
+		return incoming
+	}
+
+	incoming.Enabled = false
+	incoming.IsDefault = false
+	return incoming
+}
+
+func normalizeSiteTokenName(name string) string {
+	return strings.TrimSpace(name)
+}
+
+func siteMaskedTokenMatches(fullToken string, maskedToken string) bool {
+	normalizedFull := strings.TrimSpace(fullToken)
+	normalizedMasked := strings.TrimSpace(maskedToken)
+	if normalizedFull == "" || normalizedMasked == "" {
+		return false
+	}
+	if !model.IsMaskedSiteTokenValue(normalizedMasked) {
+		return normalizedFull == normalizedMasked
+	}
+	firstMask := strings.IndexAny(normalizedMasked, "*•")
+	if firstMask < 0 {
+		return normalizedFull == normalizedMasked
+	}
+	lastMask := strings.LastIndexAny(normalizedMasked, "*•")
+	if lastMask < firstMask {
+		return normalizedFull == normalizedMasked
+	}
+	prefix := normalizedMasked[:firstMask]
+	suffix := normalizedMasked[lastMask+1:]
+	if prefix == "" && suffix == "" {
+		return false
+	}
+	if len(normalizedFull) < len(prefix)+len(suffix) {
+		return false
+	}
+	if prefix != "" && !strings.HasPrefix(normalizedFull, prefix) {
+		return false
+	}
+	if suffix != "" && !strings.HasSuffix(normalizedFull, suffix) {
+		return false
+	}
+	return true
 }
 
 func compactPersistedSiteModels(items []model.SiteModel) []model.SiteModel {

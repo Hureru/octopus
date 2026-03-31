@@ -314,6 +314,9 @@ func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
 func buildChannelKeys(tokens []model.SiteToken) []model.ChannelKey {
 	keys := make([]model.ChannelKey, 0, len(tokens))
 	for _, token := range tokens {
+		if !model.IsReadySiteToken(token) || model.IsMaskedSiteTokenValue(token.Token) {
+			continue
+		}
 		normalized := model.NormalizeSiteSyncTokenValue(token.Token)
 		if normalized == "" {
 			continue

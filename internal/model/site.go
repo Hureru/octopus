@@ -117,17 +117,25 @@ type SiteAccount struct {
 	ChannelBindings            []SiteChannelBinding `json:"channel_bindings,omitempty" gorm:"foreignKey:SiteAccountID"`
 }
 
+type SiteTokenValueStatus string
+
+const (
+	SiteTokenValueStatusReady         SiteTokenValueStatus = "ready"
+	SiteTokenValueStatusMaskedPending SiteTokenValueStatus = "masked_pending"
+)
+
 type SiteToken struct {
-	ID            int        `json:"id" gorm:"primaryKey"`
-	SiteAccountID int        `json:"site_account_id" gorm:"index;not null"`
-	Name          string     `json:"name"`
-	Token         string     `json:"token" gorm:"not null"`
-	GroupKey      string     `json:"group_key" gorm:"index"`
-	GroupName     string     `json:"group_name"`
-	Enabled       bool       `json:"enabled" gorm:"default:true"`
-	Source        string     `json:"source"`
-	IsDefault     bool       `json:"is_default" gorm:"default:false"`
-	LastSyncAt    *time.Time `json:"last_sync_at"`
+	ID            int                  `json:"id" gorm:"primaryKey"`
+	SiteAccountID int                  `json:"site_account_id" gorm:"index;not null"`
+	Name          string               `json:"name"`
+	Token         string               `json:"token" gorm:"not null"`
+	ValueStatus   SiteTokenValueStatus `json:"value_status" gorm:"type:varchar(32);not null;default:'ready'"`
+	GroupKey      string               `json:"group_key" gorm:"index"`
+	GroupName     string               `json:"group_name"`
+	Enabled       bool                 `json:"enabled" gorm:"default:true"`
+	Source        string               `json:"source"`
+	IsDefault     bool                 `json:"is_default" gorm:"default:false"`
+	LastSyncAt    *time.Time           `json:"last_sync_at"`
 }
 
 type SiteUserGroup struct {
@@ -259,6 +267,28 @@ func NormalizeSiteSyncTokenValue(value string) string {
 		return trimmed
 	}
 	return "sk-" + trimmed
+}
+
+func IsMaskedSiteTokenValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	return strings.Contains(trimmed, "*") || strings.Contains(trimmed, "•")
+}
+
+func NormalizeSiteTokenValueStatus(value SiteTokenValueStatus, token string) SiteTokenValueStatus {
+	if IsMaskedSiteTokenValue(token) {
+		return SiteTokenValueStatusMaskedPending
+	}
+	if value == SiteTokenValueStatusMaskedPending {
+		return SiteTokenValueStatusMaskedPending
+	}
+	return SiteTokenValueStatusReady
+}
+
+func IsReadySiteToken(token SiteToken) bool {
+	return NormalizeSiteTokenValueStatus(token.ValueStatus, token.Token) == SiteTokenValueStatusReady
 }
 
 func NormalizeSiteModelRouteType(routeType SiteModelRouteType) SiteModelRouteType {

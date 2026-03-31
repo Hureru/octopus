@@ -28,15 +28,16 @@ type SiteRouteSummary struct {
 }
 
 type SiteChannelGroup struct {
-	GroupKey            string             `json:"group_key"`
-	GroupName           string             `json:"group_name"`
-	KeyCount            int                `json:"key_count"`
-	EnabledKeyCount     int                `json:"enabled_key_count"`
-	HasKeys             bool               `json:"has_keys"`
-	HasProjectedChannel bool               `json:"has_projected_channel"`
-	ProjectedChannelIDs []int              `json:"projected_channel_ids"`
-	ProjectedKeys       []SiteProjectedKey `json:"projected_keys,omitempty"`
-	Models              []SiteChannelModel `json:"models"`
+	GroupKey              string             `json:"group_key"`
+	GroupName             string             `json:"group_name"`
+	KeyCount              int                `json:"key_count"`
+	EnabledKeyCount       int                `json:"enabled_key_count"`
+	MaskedPendingKeyCount int                `json:"masked_pending_key_count"`
+	HasKeys               bool               `json:"has_keys"`
+	HasProjectedChannel   bool               `json:"has_projected_channel"`
+	ProjectedChannelIDs   []int              `json:"projected_channel_ids"`
+	ProjectedKeys         []SiteProjectedKey `json:"projected_keys,omitempty"`
+	Models                []SiteChannelModel `json:"models"`
 }
 
 type SiteProjectedKey struct {
