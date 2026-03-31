@@ -67,7 +67,14 @@ import {
 } from "@/components/modules/toolbar";
 import type { SiteFilter as SiteSurfaceFilter } from "@/components/modules/toolbar/view-options-store";
 import { cn } from "@/lib/utils";
-import { CheckinPanel, type CheckinFilterStatus } from "./CheckinPanel";
+import { CheckinPanel } from "./CheckinPanel";
+import {
+  accountHasCheckinEnabled,
+  accountMatchesCheckinFilter,
+  deriveCheckinStatus,
+  sitePlatformSupportsCheckin,
+  type CheckinFilterStatus,
+} from "./checkin-status";
 import { useSiteUIStore } from "./ui-store";
 import {
   isSiteJumpTarget,
@@ -400,61 +407,22 @@ function normalizedStatus(status?: string | null) {
   return status || "idle";
 }
 
-function sitePlatformSupportsCheckin(platform: SitePlatform) {
-  switch (platform) {
-    case SitePlatform.DoneHub:
-    case SitePlatform.Sub2API:
-    case SitePlatform.OpenAI:
-    case SitePlatform.Claude:
-    case SitePlatform.Gemini:
-      return false;
-    default:
-      return true;
-  }
-}
-
-function accountHasCheckinEnabled(
-  account: SiteAccount,
-  platform: SitePlatform,
-) {
-  return sitePlatformSupportsCheckin(platform) && account.auto_checkin;
-}
-
 function accountHasSyncFailure(account: SiteAccount) {
   return normalizedStatus(account.last_sync_status) === "failed";
 }
 
 function accountHasCheckinFailure(
+  site: SiteRecord,
   account: SiteAccount,
-  platform: SitePlatform,
 ) {
-  return (
-    accountHasCheckinEnabled(account, platform) &&
-    normalizedStatus(account.last_checkin_status) === "failed"
-  );
+  return deriveCheckinStatus(site, account) === "failed";
 }
 
 function accountHasHealthFailure(
+  site: SiteRecord,
   account: SiteAccount,
-  platform: SitePlatform,
 ) {
-  return (
-    accountHasSyncFailure(account) || accountHasCheckinFailure(account, platform)
-  );
-}
-
-function accountMatchesCheckinFilter(
-  account: SiteAccount,
-  platform: SitePlatform,
-  filterStatus: CheckinFilterStatus,
-) {
-  if (!accountHasCheckinEnabled(account, platform)) {
-    return false;
-  }
-  if (filterStatus === "all") {
-    return true;
-  }
-  return normalizedStatus(account.last_checkin_status) === filterStatus;
+  return accountHasSyncFailure(account) || accountHasCheckinFailure(site, account);
 }
 
 function statusDotClass(status: string) {
@@ -487,14 +455,14 @@ function badgeToneClass(tone: HealthTone) {
 function cardToneClass(tone: HealthTone) {
   switch (tone) {
     case "danger":
-      return "border-l-destructive/70 bg-destructive/5";
+      return "border-destructive/25 bg-gradient-to-br from-destructive/[0.07] via-card to-card";
     case "muted":
-      return "border-l-muted-foreground/40 bg-muted/10";
+      return "border-slate-400/25 bg-gradient-to-br from-slate-500/[0.06] via-card to-card dark:border-slate-600/35";
     case "warning":
-      return "border-l-amber-500/60 bg-amber-500/5";
+      return "border-amber-500/25 bg-gradient-to-br from-amber-500/[0.07] via-card to-card";
     case "default":
     default:
-      return "border-l-transparent";
+      return "border-border/70 bg-card";
   }
 }
 
@@ -516,7 +484,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
     if (account.enabled) enabledAccountCount += 1;
     else disabledAccountCount += 1;
 
-    if (accountHasHealthFailure(account, site.platform)) {
+    if (accountHasHealthFailure(site, account)) {
       failedAccountCount += 1;
     }
   }
@@ -583,9 +551,10 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
 
   const allIdle = site.accounts.every(
     (account) =>
+      account.enabled &&
       normalizedStatus(account.last_sync_status) === "idle" &&
       (!accountHasCheckinEnabled(account, site.platform) ||
-        normalizedStatus(account.last_checkin_status) === "idle"),
+        deriveCheckinStatus(site, account) === "idle"),
   );
 
   return {
@@ -796,6 +765,10 @@ export function Site() {
   const [siteCardHeights, setSiteCardHeights] = useState<Record<number, number>>(
     {},
   );
+  const [statusDayKey, setStatusDayKey] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+  });
   const cardObserversRef = useRef<Map<number, ResizeObserver>>(new Map());
   const cardElementsRef = useRef<Map<number, HTMLElement>>(new Map());
   const cardMeasureRefCallbacks = useRef<
@@ -976,12 +949,12 @@ export function Site() {
 
       if (checkinFilterStatus !== "all" && !isForcedTarget) {
         visibleAccounts = visibleAccounts.filter((account) =>
-          accountMatchesCheckinFilter(
-            account,
-            site.platform,
-            checkinFilterStatus,
-          ),
+          accountMatchesCheckinFilter(site, account, checkinFilterStatus),
         );
+
+        if (checkinFilterStatus === "disabled" && !site.enabled) {
+          visibleAccounts = site.accounts;
+        }
       }
 
       if (hasSearch && !siteMatchesQuery && !isForcedTarget) {
@@ -1475,6 +1448,17 @@ export function Site() {
   }, [setSiteHandlers, resetSiteHandlers, syncAllSites, checkinAllSites]);
 
   useEffect(() => {
+    const updateDayKey = () => {
+      const now = new Date();
+      setStatusDayKey(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
+    };
+
+    updateDayKey();
+    const timer = window.setInterval(updateDayKey, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     const observerMap = cardObserversRef.current;
     const elementMap = cardElementsRef.current;
     const callbackMap = cardMeasureRefCallbacks.current;
@@ -1561,7 +1545,7 @@ export function Site() {
       <section
         key={site.id}
         className={cn(
-          "rounded-[28px] border border-border/70 border-l-4 bg-card p-5 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.45)]",
+          "rounded-[28px] border bg-card p-5 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.45)] transition-colors",
           cardToneClass(summary.healthTone),
           highlightedSiteId === site.id &&
             "ring-2 ring-primary/35 ring-offset-2 ring-offset-background",
@@ -1763,10 +1747,7 @@ export function Site() {
                     ) : (
                       <div className="space-y-2">
                         {visibleAccounts.map((account) => {
-                          const accountFailed = accountHasHealthFailure(
-                            account,
-                            site.platform,
-                          );
+                          const accountFailed = accountHasHealthFailure(site, account);
                           const accountTone: HealthTone = accountFailed
                             ? "danger"
                             : account.enabled
@@ -1784,7 +1765,7 @@ export function Site() {
                               key={account.id}
                               ref={(node) => setAccountElementRef(account.id, node)}
                               className={cn(
-                                "rounded-2xl border border-border/60 border-l-4 bg-gradient-to-br from-muted/25 via-background to-background px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+                                "rounded-2xl border px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors",
                                 cardToneClass(accountTone),
                                 highlightedAccountId === account.id &&
                                   "ring-2 ring-primary/35 ring-offset-2 ring-offset-background",
@@ -2027,6 +2008,7 @@ export function Site() {
         <CheckinPanel
           sites={sites}
           inventory={inventory}
+          statusDayKey={statusDayKey}
           visibleSiteCount={visibleSites.length}
           visibleAccountCount={visibleAccountCount}
           searchTerm={searchTerm.trim()}
