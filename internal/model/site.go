@@ -269,6 +269,14 @@ func NormalizeSiteSyncTokenValue(value string) string {
 	return "sk-" + trimmed
 }
 
+func NormalizeComparableSiteTokenValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) >= 3 && strings.EqualFold(trimmed[:3], "sk-") {
+		return strings.TrimSpace(trimmed[3:])
+	}
+	return trimmed
+}
+
 func IsMaskedSiteTokenValue(value string) bool {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -281,9 +289,7 @@ func NormalizeSiteTokenValueStatus(value SiteTokenValueStatus, token string) Sit
 	if IsMaskedSiteTokenValue(token) {
 		return SiteTokenValueStatusMaskedPending
 	}
-	if value == SiteTokenValueStatusMaskedPending {
-		return SiteTokenValueStatusMaskedPending
-	}
+	_ = value
 	return SiteTokenValueStatusReady
 }
 

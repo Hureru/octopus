@@ -182,6 +182,19 @@ func mergePersistedSiteTokens(accountID int, existingTokens []model.SiteToken, i
 		result = append(result, merged)
 	}
 
+	for _, existing := range preparedExisting {
+		if existing.ID != 0 {
+			if _, used := usedExistingIDs[existing.ID]; used {
+				continue
+			}
+		}
+		if strings.TrimSpace(existing.Source) != "manual" {
+			continue
+		}
+		existing.LastSyncAt = &now
+		result = append(result, existing)
+	}
+
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].GroupKey == result[j].GroupKey {
 			if result[i].Name == result[j].Name {
@@ -207,13 +220,18 @@ func mergeReadyIncomingSiteToken(incoming model.SiteToken, existingTokens []mode
 				continue
 			}
 		}
-		if strings.TrimSpace(existing.Token) != incoming.Token {
+		if !sameComparableSiteTokenValue(existing.Token, incoming.Token) {
 			continue
 		}
 		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
 			continue
 		}
 		incoming.ID = existing.ID
+		incomingsToken := strings.TrimSpace(incoming.Token)
+		existingToken := strings.TrimSpace(existing.Token)
+		if existingToken != "" && existingToken != incomingsToken {
+			incoming.Token = existingToken
+		}
 		if existing.ID != 0 {
 			usedExistingIDs[existing.ID] = struct{}{}
 		}
@@ -224,6 +242,9 @@ func mergeReadyIncomingSiteToken(incoming model.SiteToken, existingTokens []mode
 			if _, used := usedExistingIDs[existing.ID]; used {
 				continue
 			}
+		}
+		if strings.TrimSpace(existing.Source) == "manual" {
+			continue
 		}
 		if normalizeSiteTokenName(existing.Name) != normalizeSiteTokenName(incoming.Name) {
 			continue
@@ -307,7 +328,22 @@ func mergeMaskedIncomingSiteToken(incoming model.SiteToken, existingTokens []mod
 		if model.NormalizeSiteGroupKey(existing.GroupKey) != incoming.GroupKey {
 			continue
 		}
+		if model.IsReadySiteToken(existing) && !model.IsMaskedSiteTokenValue(existing.Token) {
+			incoming.ID = existing.ID
+			incoming.Token = existing.Token
+			incoming.ValueStatus = model.SiteTokenValueStatusReady
+			incoming.Enabled = incoming.Enabled && existing.Enabled
+			if existing.ID != 0 {
+				usedExistingIDs[existing.ID] = struct{}{}
+			}
+			return incoming
+		}
 		incoming.ID = existing.ID
+		incomingsToken := strings.TrimSpace(incoming.Token)
+		existingToken := strings.TrimSpace(existing.Token)
+		if existingToken != "" && existingToken != incomingsToken {
+			incoming.Token = existingToken
+		}
 		incoming.Enabled = false
 		incoming.IsDefault = false
 		if existing.ID != 0 {
@@ -326,8 +362,8 @@ func normalizeSiteTokenName(name string) string {
 }
 
 func siteMaskedTokenMatches(fullToken string, maskedToken string) bool {
-	normalizedFull := strings.TrimSpace(fullToken)
-	normalizedMasked := strings.TrimSpace(maskedToken)
+	normalizedFull := model.NormalizeComparableSiteTokenValue(fullToken)
+	normalizedMasked := model.NormalizeComparableSiteTokenValue(maskedToken)
 	if normalizedFull == "" || normalizedMasked == "" {
 		return false
 	}
@@ -357,6 +393,15 @@ func siteMaskedTokenMatches(fullToken string, maskedToken string) bool {
 		return false
 	}
 	return true
+}
+
+func sameComparableSiteTokenValue(left string, right string) bool {
+	normalizedLeft := model.NormalizeComparableSiteTokenValue(left)
+	normalizedRight := model.NormalizeComparableSiteTokenValue(right)
+	if normalizedLeft == "" || normalizedRight == "" {
+		return false
+	}
+	return normalizedLeft == normalizedRight
 }
 
 func compactPersistedSiteModels(items []model.SiteModel) []model.SiteModel {

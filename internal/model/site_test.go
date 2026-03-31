@@ -2,6 +2,36 @@ package model
 
 import "testing"
 
+func TestNormalizeComparableSiteTokenValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{name: "strips sk prefix", input: "sk-abc123", expected: "abc123"},
+		{name: "strips uppercase prefix", input: "SK-abc123", expected: "abc123"},
+		{name: "keeps non prefixed token", input: "abc123", expected: "abc123"},
+		{name: "trims whitespace", input: "  sk-abc123  ", expected: "abc123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if actual := NormalizeComparableSiteTokenValue(tt.input); actual != tt.expected {
+				t.Fatalf("expected %q, got %q", tt.expected, actual)
+			}
+		})
+	}
+}
+
+func TestNormalizeSiteTokenValueStatusRestoresReadyWhenTokenIsComplete(t *testing.T) {
+	if actual := NormalizeSiteTokenValueStatus(SiteTokenValueStatusMaskedPending, "sk-real-token"); actual != SiteTokenValueStatusReady {
+		t.Fatalf("expected full token to restore ready status, got %q", actual)
+	}
+	if actual := NormalizeSiteTokenValueStatus(SiteTokenValueStatusReady, "yzFy**********OTkb"); actual != SiteTokenValueStatusMaskedPending {
+		t.Fatalf("expected masked token to stay masked_pending, got %q", actual)
+	}
+}
+
 func TestInferSiteModelRouteType(t *testing.T) {
 	tests := []struct {
 		name      string
