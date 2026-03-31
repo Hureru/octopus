@@ -333,6 +333,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 				ChannelID:        channel.ID,
 				ChannelName:      channel.Name,
 				Enabled:          key.Enabled,
+				ChannelKey:       key.ChannelKey,
 				ChannelKeyMasked: maskProjectedChannelKey(key.ChannelKey),
 				Remark:           key.Remark,
 				StatusCode:       key.StatusCode,

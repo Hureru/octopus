@@ -5,6 +5,7 @@ import (
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"gorm.io/gorm"
 )
 
@@ -129,6 +130,86 @@ func TestSiteChannelAccountGetIncludesParsedRouteMetadata(t *testing.T) {
 	}
 	if modelView.RouteMetadata.RouteType != model.SiteModelRouteTypeUnknown {
 		t.Fatalf("expected unsupported route type %q, got %q", model.SiteModelRouteTypeUnknown, modelView.RouteMetadata.RouteType)
+	}
+}
+
+func TestSiteChannelAccountGetIncludesFullProjectedKeys(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "site-channel-projected-key-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "site-channel-projected-key-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	group := model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
+		t.Fatalf("create site group failed: %v", err)
+	}
+
+	channel := &model.Channel{
+		Name:    "managed-channel",
+		Type:    outbound.OutboundTypeOpenAIChat,
+		Enabled: true,
+		BaseUrls: []model.BaseUrl{{
+			URL:   "https://example.com/v1",
+			Delay: 0,
+		}},
+		Keys: []model.ChannelKey{{
+			Enabled:    true,
+			ChannelKey: "sk-managed-secret-key",
+			Remark:     "default",
+		}},
+		Model:       "gpt-4o-mini",
+		AutoSync:    false,
+		AutoGroup:   model.AutoGroupTypeNone,
+	}
+	if err := ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	binding := model.SiteChannelBinding{
+		SiteID:          site.ID,
+		SiteAccountID:   account.ID,
+		SiteUserGroupID: &group.ID,
+		GroupKey:        model.SiteDefaultGroupKey,
+		ChannelID:       channel.ID,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&binding).Error; err != nil {
+		t.Fatalf("create site channel binding failed: %v", err)
+	}
+
+	view, err := SiteChannelAccountGet(site.ID, account.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteChannelAccountGet failed: %v", err)
+	}
+	if len(view.Groups) != 1 {
+		t.Fatalf("expected one group, got %+v", view.Groups)
+	}
+	if len(view.Groups[0].ProjectedKeys) != 1 {
+		t.Fatalf("expected one projected key, got %+v", view.Groups[0].ProjectedKeys)
+	}
+	projectedKey := view.Groups[0].ProjectedKeys[0]
+	if projectedKey.ChannelKey != "sk-managed-secret-key" {
+		t.Fatalf("expected full projected key, got %q", projectedKey.ChannelKey)
+	}
+	if projectedKey.ChannelKeyMasked != "sk-m...-key" {
+		t.Fatalf("expected masked projected key, got %q", projectedKey.ChannelKeyMasked)
 	}
 }
 
@@ -390,9 +471,9 @@ func TestSiteChannelModelHistoryForAccountCountsRetryAttempts(t *testing.T) {
 func TestSiteChannelModelHistoryForAccountFallsBackForLegacyLogs(t *testing.T) {
 	site := model.Site{Platform: model.SitePlatformNewAPI}
 	account := model.SiteAccount{
-		ID: 1,
+		ID:              1,
 		ChannelBindings: []model.SiteChannelBinding{{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ChannelID: 11}},
-		Models: []model.SiteModel{{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", RouteType: model.SiteModelRouteTypeOpenAIChat}},
+		Models:          []model.SiteModel{{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", RouteType: model.SiteModelRouteTypeOpenAIChat}},
 	}
 
 	history, err := siteChannelModelHistoryForAccount(site, account, []model.RelayLog{{

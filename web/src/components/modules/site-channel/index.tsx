@@ -12,6 +12,8 @@ import {
     Check,
     CircleAlert,
     CircleOff,
+    Eye,
+    EyeOff,
     ExternalLink,
     FolderTree,
     Globe2,
@@ -1066,6 +1068,7 @@ function SiteAccountPanel({
     const [creatingGroup, setCreatingGroup] = useState<SiteChannelGroup | null>(null);
     const [editingProjectedGroup, setEditingProjectedGroup] = useState<SiteChannelGroup | null>(null);
     const [projectedKeyForm, setProjectedKeyForm] = useState<SiteProjectedKeyFormItem[]>([]);
+    const [visibleProjectedKeyRows, setVisibleProjectedKeyRows] = useState<Record<string, boolean>>({});
     const [quickCreateName, setQuickCreateName] = useState('');
     const [highlightedModelKey, setHighlightedModelKey] = useState<string | null>(null);
     const [modelSearchTerm, setModelSearchTerm] = useState('');
@@ -1378,14 +1381,27 @@ function SiteAccountPanel({
     };
 
     const handleOpenProjectedKeys = (group: SiteChannelGroup) => {
+        const items = buildProjectedKeyFormItems(group);
         setEditingProjectedGroup(group);
-        setProjectedKeyForm(buildProjectedKeyFormItems(group));
+        setProjectedKeyForm(items);
+        setVisibleProjectedKeyRows({});
     };
 
     const handleCloseProjectedKeys = () => {
         if (projectedKeyMutation.isPending) return;
         setEditingProjectedGroup(null);
         setProjectedKeyForm([]);
+        setVisibleProjectedKeyRows({});
+    };
+
+    const projectedKeyRowId = (item: SiteProjectedKeyFormItem, index: number) => `${item.id ?? 'new'}-${index}`;
+
+    const handleToggleProjectedKeyVisibility = (item: SiteProjectedKeyFormItem, index: number) => {
+        const rowId = projectedKeyRowId(item, index);
+        setVisibleProjectedKeyRows((current) => ({
+            ...current,
+            [rowId]: !current[rowId],
+        }));
     };
 
     const handleProjectedKeyFieldChange = (index: number, patch: Partial<SiteProjectedKeyFormItem>) => {
@@ -1402,6 +1418,7 @@ function SiteAccountPanel({
                 channel_name: fallbackChannelName,
                 enabled: true,
                 channel_key: '',
+                is_new: true,
                 remark: '',
             },
         ]));
@@ -1423,6 +1440,7 @@ function SiteAccountPanel({
                 toast.success(`分组「${editingProjectedGroup.group_name || editingProjectedGroup.group_key}」的投影渠道 Key 已更新`);
                 setEditingProjectedGroup(null);
                 setProjectedKeyForm([]);
+                setVisibleProjectedKeyRows({});
             },
             onError: (error) => {
                 toast.error(getErrorMessage(error, '更新投影渠道 Key 失败'));
@@ -1893,7 +1911,13 @@ function SiteAccountPanel({
 
                         <div className="max-h-[22rem] space-y-3 overflow-y-auto pr-1">
                             {projectedKeyForm.map((item, index) => (
-                                <div key={`${item.id ?? 'new'}-${index}`} className="rounded-2xl border border-border/70 bg-background/80 p-3">
+                                <div key={projectedKeyRowId(item, index)} className="rounded-2xl border border-border/70 bg-background/80 p-3">
+                                    {(() => {
+                                        const rowId = projectedKeyRowId(item, index);
+                                        const isVisible = item.is_new || Boolean(visibleProjectedKeyRows[rowId]);
+
+                                        return (
+                                            <>
                                     <div className="flex items-center justify-between gap-2">
                                         <div className="text-xs text-muted-foreground">
                                             {item.channel_name} · {item.id ? `Key #${item.id}` : '新 Key'}
@@ -1922,13 +1946,31 @@ function SiteAccountPanel({
                                         </label>
                                         <label className="grid gap-1.5 text-xs text-muted-foreground">
                                             Key
-                                            <Input
-                                                value={item.channel_key}
-                                                onChange={(event) => handleProjectedKeyFieldChange(index, { channel_key: event.target.value })}
-                                                placeholder={item.channel_key_masked || '输入新的上游 Key；留空表示不改'}
-                                                disabled={projectedKeyMutation.isPending}
-                                                className="h-10 rounded-2xl"
-                                            />
+                                            <div className="flex items-center gap-2">
+                                                <Input
+                                                    type={isVisible ? 'text' : 'password'}
+                                                    value={item.channel_key}
+                                                    onChange={(event) => handleProjectedKeyFieldChange(index, { channel_key: event.target.value })}
+                                                    placeholder={item.id ? '点击眼睛查看或直接修改完整 Key' : '输入新的上游 Key'}
+                                                    disabled={projectedKeyMutation.isPending}
+                                                    className="h-10 rounded-2xl"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="icon"
+                                                    className="size-10 rounded-2xl shrink-0"
+                                                    onClick={() => handleToggleProjectedKeyVisibility(item, index)}
+                                                    disabled={projectedKeyMutation.isPending}
+                                                    aria-label={isVisible ? '隐藏完整 Key' : '显示完整 Key'}
+                                                    title={isVisible ? '隐藏完整 Key' : '显示完整 Key'}
+                                                >
+                                                    {isVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                                                </Button>
+                                            </div>
+                                            {!isVisible && item.channel_key_masked ? (
+                                                <span className="text-[11px] text-muted-foreground">当前值：{item.channel_key_masked}</span>
+                                            ) : null}
                                         </label>
                                         <label className="grid gap-1.5 text-xs text-muted-foreground">
                                             备注
@@ -1941,6 +1983,9 @@ function SiteAccountPanel({
                                             />
                                         </label>
                                     </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             ))}
                         </div>

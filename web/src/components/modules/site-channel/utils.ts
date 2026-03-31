@@ -32,6 +32,7 @@ export type SiteProjectedKeyFormItem = {
     enabled: boolean;
     channel_key: string;
     channel_key_masked?: string;
+    is_new?: boolean;
     remark: string;
 };
 
@@ -155,7 +156,7 @@ export function buildProjectedKeyFormItems(group: SiteChannelGroup): SiteProject
         channel_id: key.channel_id,
         channel_name: key.channel_name,
         enabled: key.enabled,
-        channel_key: '',
+        channel_key: key.channel_key,
         channel_key_masked: key.channel_key_masked,
         remark: key.remark ?? '',
     }));
@@ -193,7 +194,7 @@ export function buildProjectedKeyUpdatePayload(
 
             if (key.enabled !== original.enabled) update.enabled = key.enabled;
             const trimmedKey = key.channel_key.trim();
-            if (trimmedKey) update.channel_key = trimmedKey;
+            if (trimmedKey !== (original.channel_key ?? '').trim()) update.channel_key = trimmedKey;
             if ((key.remark.trim()) !== (original.remark ?? '').trim()) update.remark = key.remark.trim();
 
             if (update.enabled === undefined && update.channel_key === undefined && update.remark === undefined) {

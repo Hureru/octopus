@@ -40,15 +40,16 @@ type SiteChannelGroup struct {
 }
 
 type SiteProjectedKey struct {
-	ID                 int    `json:"id"`
-	ChannelID          int    `json:"channel_id"`
-	ChannelName        string `json:"channel_name"`
-	Enabled            bool   `json:"enabled"`
-	ChannelKeyMasked   string `json:"channel_key_masked"`
-	Remark             string `json:"remark"`
-	StatusCode         int    `json:"status_code"`
-	LastUseTimeStamp   int64  `json:"last_use_time_stamp"`
-	TotalCost          float64 `json:"total_cost"`
+	ID               int     `json:"id"`
+	ChannelID        int     `json:"channel_id"`
+	ChannelName      string  `json:"channel_name"`
+	Enabled          bool    `json:"enabled"`
+	ChannelKey       string  `json:"channel_key"`
+	ChannelKeyMasked string  `json:"channel_key_masked"`
+	Remark           string  `json:"remark"`
+	StatusCode       int     `json:"status_code"`
+	LastUseTimeStamp int64   `json:"last_use_time_stamp"`
+	TotalCost        float64 `json:"total_cost"`
 }
 
 type SiteChannelModel struct {
@@ -112,8 +113,8 @@ type SiteProjectedKeyUpdateItem struct {
 }
 
 type SiteProjectedKeyUpdateRequest struct {
-	GroupKey      string                       `json:"group_key" binding:"required"`
-	KeysToAdd     []SiteProjectedKeyAddRequest `json:"keys_to_add,omitempty"`
-	KeysToUpdate  []SiteProjectedKeyUpdateItem `json:"keys_to_update,omitempty"`
-	KeysToDelete  []int                        `json:"keys_to_delete,omitempty"`
+	GroupKey     string                       `json:"group_key" binding:"required"`
+	KeysToAdd    []SiteProjectedKeyAddRequest `json:"keys_to_add,omitempty"`
+	KeysToUpdate []SiteProjectedKeyUpdateItem `json:"keys_to_update,omitempty"`
+	KeysToDelete []int                        `json:"keys_to_delete,omitempty"`
 }

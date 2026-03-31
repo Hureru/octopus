@@ -82,6 +82,7 @@ export type SiteProjectedKey = {
     channel_id: number;
     channel_name: string;
     enabled: boolean;
+    channel_key: string;
     channel_key_masked: string;
     remark: string;
     status_code: number;
@@ -225,7 +226,15 @@ function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteCha
         groups: (account.groups ?? []).map((group) => ({
             ...group,
             projected_channel_ids: group.projected_channel_ids ?? [],
-            projected_keys: group.projected_keys ?? [],
+            projected_keys: (group.projected_keys ?? []).map((key) => ({
+                ...key,
+                channel_key: typeof key.channel_key === 'string' ? key.channel_key : '',
+                channel_key_masked: typeof key.channel_key_masked === 'string' ? key.channel_key_masked : '',
+                remark: typeof key.remark === 'string' ? key.remark : '',
+                status_code: typeof key.status_code === 'number' ? key.status_code : 0,
+                last_use_time_stamp: typeof key.last_use_time_stamp === 'number' ? key.last_use_time_stamp : 0,
+                total_cost: typeof key.total_cost === 'number' ? key.total_cost : 0,
+            })),
             models: (group.models ?? []).map(normalizeSiteModel),
         })),
         route_summaries: (account.route_summaries ?? []).map((summary) => ({
