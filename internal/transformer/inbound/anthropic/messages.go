@@ -128,6 +128,11 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 					if block.Signature != nil && *block.Signature != "" {
 						reasoningSignature = *block.Signature
 					}
+				case "redacted_thinking":
+					if block.Data != "" {
+						chatMsg.RedactedThinkingBlocks = append(chatMsg.RedactedThinkingBlocks, block.Data)
+						hasContent = true
+					}
 				case "text":
 					contentParts = append(contentParts, model.MessageContentPart{
 						Type:         "text",
@@ -347,11 +352,19 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 				}
 				if message.ReasoningSignature != nil && *message.ReasoningSignature != "" {
 					thinkingBlock.Signature = message.ReasoningSignature
-				} else {
-					thinkingBlock.Signature = lo.ToPtr("ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB")
 				}
+				// No fallback magic string — if signature is absent (non-Anthropic upstream),
+				// Signature remains nil and is omitted via omitempty.
 
 				contentBlocks = append(contentBlocks, thinkingBlock)
+			}
+
+			// Handle redacted thinking blocks
+			for _, data := range message.RedactedThinkingBlocks {
+				contentBlocks = append(contentBlocks, MessageContentBlock{
+					Type: "redacted_thinking",
+					Data: data,
+				})
 			}
 
 			// Handle regular content
@@ -582,6 +595,51 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 				return nil, fmt.Errorf("failed to marshal signature_delta event: %w", err)
 			}
 			events = append(events, formatSSEEvent("content_block_delta", data))
+		}
+
+		// Handle redacted thinking blocks (complete blocks, not deltas)
+		if choice.Delta != nil && len(choice.Delta.RedactedThinkingBlocks) > 0 {
+			// Close any open thinking content block first
+			if i.hasThinkingContentStarted {
+				i.hasThinkingContentStarted = false
+				stopEvent := StreamEvent{
+					Type:  "content_block_stop",
+					Index: &i.contentIndex,
+				}
+				stopData, err := json.Marshal(stopEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal content_block_stop event: %w", err)
+				}
+				events = append(events, formatSSEEvent("content_block_stop", stopData))
+				i.contentIndex++
+			}
+
+			for _, rtData := range choice.Delta.RedactedThinkingBlocks {
+				startEvent := StreamEvent{
+					Type:  "content_block_start",
+					Index: &i.contentIndex,
+					ContentBlock: &MessageContentBlock{
+						Type: "redacted_thinking",
+						Data: rtData,
+					},
+				}
+				startData, err := json.Marshal(startEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal content_block_start event: %w", err)
+				}
+				events = append(events, formatSSEEvent("content_block_start", startData))
+
+				stopEvent := StreamEvent{
+					Type:  "content_block_stop",
+					Index: &i.contentIndex,
+				}
+				stopData, err := json.Marshal(stopEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal content_block_stop event: %w", err)
+				}
+				events = append(events, formatSSEEvent("content_block_stop", stopData))
+				i.contentIndex++
+			}
 		}
 
 		// Handle content delta
@@ -944,6 +1002,14 @@ func (i *MessagesInbound) GetInternalResponse(ctx context.Context) (*model.Inter
 				// Aggregate tool calls
 				for _, toolCall := range delta.ToolCalls {
 					existingChoice.Message.ToolCalls = mergeToolCall(existingChoice.Message.ToolCalls, toolCall)
+				}
+
+				// Aggregate redacted thinking blocks
+				if len(delta.RedactedThinkingBlocks) > 0 {
+					existingChoice.Message.RedactedThinkingBlocks = append(
+						existingChoice.Message.RedactedThinkingBlocks,
+						delta.RedactedThinkingBlocks...,
+					)
 				}
 
 				// Set refusal if present

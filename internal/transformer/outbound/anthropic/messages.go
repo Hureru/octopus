@@ -197,6 +197,17 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 			case "text", "thinking":
 				// These are handled in content_block_delta
 				return nil, nil
+			case "redacted_thinking":
+				// Pass through as a complete block (no delta)
+				resp.Choices = []model.Choice{
+					{
+						Index: 0,
+						Delta: &model.Message{
+							Role:                   "assistant",
+							RedactedThinkingBlocks: []string{streamEvent.ContentBlock.Data},
+						},
+					},
+				}
 			default:
 				return nil, nil
 			}
@@ -550,6 +561,14 @@ func convertAssistantWithToolCalls(msg model.Message) []anthropicModel.MessagePa
 		})
 	}
 
+	// Add redacted thinking blocks
+	for _, data := range msg.RedactedThinkingBlocks {
+		blocks = append(blocks, anthropicModel.MessageContentBlock{
+			Type: "redacted_thinking",
+			Data: data,
+		})
+	}
+
 	// Add text content if present
 	if msg.Content.Content != nil && *msg.Content.Content != "" {
 		blocks = append(blocks, anthropicModel.MessageContentBlock{
@@ -628,6 +647,14 @@ func buildMultipleContentWithThinking(msg model.Message) anthropicModel.MessageC
 		})
 	}
 
+	// Add redacted thinking blocks
+	for _, data := range msg.RedactedThinkingBlocks {
+		blocks = append(blocks, anthropicModel.MessageContentBlock{
+			Type: "redacted_thinking",
+			Data: data,
+		})
+	}
+
 	blocks = append(blocks, anthropicModel.MessageContentBlock{
 		Type:         "text",
 		Text:         msg.Content.Content,
@@ -638,7 +665,25 @@ func buildMultipleContentWithThinking(msg model.Message) anthropicModel.MessageC
 }
 
 func convertMultiplePartContent(msg model.Message) anthropicModel.MessageContent {
-	blocks := make([]anthropicModel.MessageContentBlock, 0, len(msg.Content.MultipleContent))
+	blocks := make([]anthropicModel.MessageContentBlock, 0, len(msg.Content.MultipleContent)+2)
+
+	// Add thinking block if present with a valid signature
+	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" &&
+		msg.ReasoningSignature != nil && *msg.ReasoningSignature != "" {
+		blocks = append(blocks, anthropicModel.MessageContentBlock{
+			Type:      "thinking",
+			Thinking:  msg.ReasoningContent,
+			Signature: msg.ReasoningSignature,
+		})
+	}
+
+	// Add redacted thinking blocks
+	for _, data := range msg.RedactedThinkingBlocks {
+		blocks = append(blocks, anthropicModel.MessageContentBlock{
+			Type: "redacted_thinking",
+			Data: data,
+		})
+	}
 
 	for _, part := range msg.Content.MultipleContent {
 		switch part.Type {
@@ -792,6 +837,7 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 		thinkingSignature *string
 		toolCalls         []model.ToolCall
 		textParts         []string
+		redactedBlocks    []string
 	)
 
 	for _, block := range resp.Content {
@@ -824,6 +870,10 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 				thinkingText = block.Thinking
 			}
 			thinkingSignature = block.Signature
+		case "redacted_thinking":
+			if block.Data != "" {
+				redactedBlocks = append(redactedBlocks, block.Data)
+			}
 		}
 	}
 
@@ -835,11 +885,12 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 	}
 
 	message := &model.Message{
-		Role:               resp.Role,
-		Content:            content,
-		ToolCalls:          toolCalls,
-		ReasoningContent:   thinkingText,
-		ReasoningSignature: thinkingSignature,
+		Role:                   resp.Role,
+		Content:                content,
+		ToolCalls:              toolCalls,
+		ReasoningContent:       thinkingText,
+		ReasoningSignature:     thinkingSignature,
+		RedactedThinkingBlocks: redactedBlocks,
 	}
 
 	choice := model.Choice{

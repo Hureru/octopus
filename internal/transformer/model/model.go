@@ -495,6 +495,11 @@ type Message struct {
 	// Help field, will not be sent to the llm service, to adapt the anthropic think signature.
 	ReasoningSignature *string `json:"reasoning_signature,omitempty"`
 
+	// RedactedThinkingBlocks stores opaque redacted_thinking blocks from Anthropic.
+	// Each entry is the raw "data" field value from a redacted_thinking content block.
+	// These must be passed through transparently without modification.
+	RedactedThinkingBlocks []string `json:"-"`
+
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	// This field is not serialized in JSON.
 	CacheControl *CacheControl `json:"-"`
@@ -504,6 +509,7 @@ func (m *Message) ClearHelpFields() {
 	m.ReasoningContent = nil
 	m.Reasoning = nil
 	m.ReasoningSignature = nil
+	m.RedactedThinkingBlocks = nil
 }
 
 // GetReasoningContent returns the reasoning content from either ReasoningContent or Reasoning field.
