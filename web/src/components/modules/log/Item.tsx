@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff } from 'lucide-react';
+import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Wifi } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -455,6 +455,14 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                         {t('cost')} {Number(log.cost).toFixed(6)}
                                     </span>
                                 </div>
+                                {log.used_ws ? (
+                                    <div className="flex items-center gap-1.5">
+                                        <Wifi className="size-3.5 shrink-0 text-cyan-500" />
+                                        <span className="font-medium text-cyan-600 dark:text-cyan-400">
+                                            {t('ws')}
+                                        </span>
+                                    </div>
+                                ) : null}
                             </div>
                             {hasError ? (
                                 <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 overflow-hidden">
@@ -697,6 +705,14 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     {t('cost')}: {Number(log.cost).toFixed(6)}
                                 </span>
                             </div>
+                            {log.used_ws ? (
+                                <div className="flex items-center gap-1.5">
+                                    <Wifi className="size-3.5 text-cyan-500" />
+                                    <span className="font-medium text-cyan-600 dark:text-cyan-400">
+                                        {t('ws')}
+                                    </span>
+                                </div>
+                            ) : null}
                         </div>
                     </MorphingDialogContent>
                 </MorphingDialogContainer>

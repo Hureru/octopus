@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Monitor, Globe, Clock, Shield, HelpCircle, X } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, HelpCircle, X, Wifi } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { toast } from '@/components/common/Toast';
@@ -18,16 +19,19 @@ export function SettingSystem() {
     const [statsSaveInterval, setStatsSaveInterval] = useState('');
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
+    const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(true);
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
+    const initialWsUpgradeEnabled = useRef(true);
 
     useEffect(() => {
         if (settings) {
             const proxy = settings.find(s => s.key === SettingKey.ProxyURL);
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
+            const wsUpgrade = settings.find(s => s.key === SettingKey.RelayWSUpgradeEnabled);
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
@@ -39,6 +43,11 @@ export function SettingSystem() {
             if (cors) {
                 queueMicrotask(() => setCorsAllowOrigins(cors.value));
                 initialCorsAllowOrigins.current = cors.value;
+            }
+            if (wsUpgrade) {
+                const isEnabled = wsUpgrade.value === 'true';
+                queueMicrotask(() => setWsUpgradeEnabled(isEnabled));
+                initialWsUpgradeEnabled.current = isEnabled;
             }
         }
     }, [settings]);
@@ -55,6 +64,8 @@ export function SettingSystem() {
                     initialStatsSaveInterval.current = value;
                 } else if (key === SettingKey.CORSAllowOrigins) {
                     initialCorsAllowOrigins.current = value;
+                } else if (key === SettingKey.RelayWSUpgradeEnabled) {
+                    initialWsUpgradeEnabled.current = value === 'true';
                 }
             }
         });
@@ -112,6 +123,19 @@ export function SettingSystem() {
     const handleRemoveCorsOrigin = (originToRemove: string) => {
         const nextOrigins = corsAllowOriginsList.filter(origin => origin !== originToRemove);
         saveCorsAllowOrigins(nextOrigins);
+    };
+
+    const handleWsUpgradeChange = (checked: boolean) => {
+        setWsUpgradeEnabled(checked);
+        setSetting.mutate(
+            { key: SettingKey.RelayWSUpgradeEnabled, value: checked ? 'true' : 'false' },
+            {
+                onSuccess: () => {
+                    toast.success(t('saved'));
+                    initialWsUpgradeEnabled.current = checked;
+                }
+            }
+        );
     };
 
     return (
@@ -215,6 +239,21 @@ export function SettingSystem() {
                         </div>
                     </PopoverContent>
                 </Popover>
+            </div>
+
+            {/* WebSocket 上游升级 */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <Wifi className="h-5 w-5 text-muted-foreground" />
+                    <div className="flex flex-col">
+                        <span className="text-sm font-medium">{t('wsUpgrade.label')}</span>
+                        <span className="text-xs text-muted-foreground">{t('wsUpgrade.description')}</span>
+                    </div>
+                </div>
+                <Switch
+                    checked={wsUpgradeEnabled}
+                    onCheckedChange={handleWsUpgradeChange}
+                />
             </div>
         </div>
     );

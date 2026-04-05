@@ -24,6 +24,7 @@ export const SettingKey = {
     CircuitBreakerThreshold: 'circuit_breaker_threshold',
     CircuitBreakerCooldown: 'circuit_breaker_cooldown',
     CircuitBreakerMaxCooldown: 'circuit_breaker_max_cooldown',
+    RelayWSUpgradeEnabled: 'relay_ws_upgrade_enabled',
 } as const;
 
 /**

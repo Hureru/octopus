@@ -36,6 +36,7 @@ type ResponseInbound struct {
 	// Content accumulation
 	accumulatedText      strings.Builder
 	accumulatedReasoning strings.Builder
+	accumulatedSignature strings.Builder
 
 	// Tool call tracking
 	toolCalls           map[int]*model.ToolCall
@@ -146,6 +147,19 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		// Handle reasoning content delta
 		if choice.Delta != nil && choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 			events = append(events, i.handleReasoningContent(choice.Delta.ReasoningContent)...)
+		}
+
+		// Handle reasoning signature delta (accumulate for encrypted_content)
+		if choice.Delta != nil && choice.Delta.ReasoningSignature != nil && *choice.Delta.ReasoningSignature != "" {
+			i.accumulatedSignature.WriteString(*choice.Delta.ReasoningSignature)
+		}
+
+		// Handle redacted thinking blocks
+		if choice.Delta != nil && len(choice.Delta.RedactedThinkingBlocks) > 0 {
+			// Redacted thinking is part of reasoning, ensure reasoning item is started
+			if !i.hasReasoningItemStarted {
+				events = append(events, i.handleReasoningContent(lo.ToPtr(""))...)
+			}
 		}
 
 		// Handle text content delta
@@ -429,7 +443,7 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 		Part:         &ResponsesContentPart{Type: "summary_text", Text: &fullReasoning},
 	}))
 
-	// Emit output_item.done
+	// Emit output_item.done with encrypted_content if signature was accumulated
 	item := ResponsesItem{
 		ID:   i.currentItemID,
 		Type: "reasoning",
@@ -437,6 +451,11 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 			Type: "summary_text",
 			Text: fullReasoning,
 		}},
+	}
+
+	if i.accumulatedSignature.Len() > 0 {
+		sig := i.accumulatedSignature.String()
+		item.EncryptedContent = &sig
 	}
 
 	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
@@ -447,6 +466,7 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 
 	i.outputIndex++
 	i.accumulatedReasoning.Reset()
+	i.accumulatedSignature.Reset()
 
 	return events
 }
@@ -719,6 +739,18 @@ type ResponsesRequest struct {
 	Reasoning         *ResponsesReasoning   `json:"reasoning,omitempty"`
 	Include           []string              `json:"include,omitempty"`
 	TopLogprobs       *int64                `json:"top_logprobs,omitempty"`
+
+	// Pass-through fields for OpenAI Responses API
+	PreviousResponseID   *string         `json:"previous_response_id,omitempty"`
+	Background           *bool           `json:"background,omitempty"`
+	Prompt               json.RawMessage `json:"prompt,omitempty"`
+	PromptCacheKey       *string         `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention *string         `json:"prompt_cache_retention,omitempty"`
+	SafetyIdentifier     *string         `json:"safety_identifier,omitempty"`
+	MaxToolCalls         *int64          `json:"max_tool_calls,omitempty"`
+	Conversation         json.RawMessage `json:"conversation,omitempty"`
+	ContextManagement    json.RawMessage `json:"context_management,omitempty"`
+	StreamOptions        json.RawMessage `json:"stream_options,omitempty"`
 }
 
 type ResponsesInput struct {
@@ -878,8 +910,10 @@ type ResponsesTextFormat struct {
 }
 
 type ResponsesReasoning struct {
-	Effort    string `json:"effort,omitempty"`
-	MaxTokens *int64 `json:"max_tokens,omitempty"`
+	Effort          string  `json:"effort,omitempty"`
+	MaxTokens       *int64  `json:"max_tokens,omitempty"`
+	Summary         *string `json:"summary,omitempty"`
+	GenerateSummary *string `json:"generate_summary,omitempty"`
 }
 
 // Response types
@@ -967,7 +1001,21 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 		if req.Reasoning.MaxTokens != nil {
 			chatReq.ReasoningBudget = req.Reasoning.MaxTokens
 		}
+		chatReq.ReasoningSummary = req.Reasoning.Summary
+		chatReq.ReasoningGenerateSummary = req.Reasoning.GenerateSummary
 	}
+
+	// Pass-through fields for OpenAI Responses API
+	chatReq.PreviousResponseID = req.PreviousResponseID
+	chatReq.Background = req.Background
+	chatReq.Prompt = req.Prompt
+	chatReq.ResponsesPromptCacheKey = req.PromptCacheKey
+	chatReq.PromptCacheRetention = req.PromptCacheRetention
+	chatReq.SafetyIdentifier = req.SafetyIdentifier
+	chatReq.MaxToolCalls = req.MaxToolCalls
+	chatReq.Conversation = req.Conversation
+	chatReq.ContextManagement = req.ContextManagement
+	chatReq.ResponsesStreamOptions = req.StreamOptions
 
 	// Convert tool choice
 	if req.ToolChoice != nil {

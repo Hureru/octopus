@@ -243,6 +243,20 @@ type InternalLLMRequest struct {
 	// e.g., "file_search_call.results", "message.input_image.image_url", "reasoning.encrypted_content"
 	Include []string `json:"-"`
 
+	// Responses API pass-through fields (only meaningful for OpenAI Response outbound)
+	PreviousResponseID   *string         `json:"-"`
+	Background           *bool           `json:"-"`
+	Prompt               json.RawMessage `json:"-"`
+	ResponsesPromptCacheKey       *string         `json:"-"`
+	PromptCacheRetention *string         `json:"-"`
+	MaxToolCalls         *int64          `json:"-"`
+	Conversation         json.RawMessage `json:"-"`
+	ContextManagement    json.RawMessage `json:"-"`
+	ResponsesStreamOptions json.RawMessage `json:"-"`
+	ReasoningSummary     *string         `json:"-"`
+	ReasoningGenerateSummary *string     `json:"-"`
+	RawInputItems        json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
+
 	// Query stores the original query parameters from the inbound request.
 	// This is a help field and will not be sent to the llm service.
 	Query url.Values `json:"-"`

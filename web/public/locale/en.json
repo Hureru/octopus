@@ -169,6 +169,10 @@
             "hint": "Empty = deny all, * = allow all",
             "example": "Only allow specific domains: https://example.com,https://example2.com"
         },
+        "wsUpgrade": {
+            "label": "Proactive WebSocket Upstream Upgrade",
+            "description": "When enabled, always try WS upstream regardless of client protocol; when disabled, follow client protocol"
+        },
         "circuitBreaker": {
             "title": "Circuit Breaker",
             "threshold": {
@@ -455,7 +459,8 @@
             "circuitBreak": "Circuit Break",
             "disableModel": "Disable Model",
             "disabling": "Disabling",
-            "disabled": "Disabled"
+            "disabled": "Disabled",
+            "ws": "WS"
         }
     },
     "channel": {

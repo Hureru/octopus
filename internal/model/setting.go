@@ -21,6 +21,7 @@ const (
 	SettingKeyCircuitBreakerThreshold   SettingKey = "circuit_breaker_threshold"    // 熔断触发阈值（连续失败次数）
 	SettingKeyCircuitBreakerCooldown    SettingKey = "circuit_breaker_cooldown"     // 熔断基础冷却时间（秒）
 	SettingKeyCircuitBreakerMaxCooldown SettingKey = "circuit_breaker_max_cooldown" // 熔断最大冷却时间（秒），指数退避上限
+	SettingKeyRelayWSUpgradeEnabled    SettingKey = "relay_ws_upgrade_enabled"     // 是否主动尝试WS上游连接（双向降级）
 )
 
 type Setting struct {
@@ -42,6 +43,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},     // 默认连续失败5次触发熔断
 		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},     // 默认基础冷却60秒
 		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"}, // 默认最大冷却600秒（10分钟）
+		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "true"},    // 默认启用主动WS上游升级
 	}
 }
 
@@ -55,7 +57,7 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("model info update interval must be an integer")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("relay log keep enabled must be true or false")
 		}

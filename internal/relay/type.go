@@ -1,6 +1,9 @@
 package relay
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -54,14 +57,48 @@ var hopByHopHeaders = map[string]bool{
 	"x-cluster-client-ip": true,
 }
 
+// StreamWriter abstracts writing responses to the client (HTTP SSE or WebSocket).
+type StreamWriter interface {
+	Write(data []byte) (int, error)
+	Flush()
+	Written() bool
+	Header() http.Header
+	WriteHeader(code int)
+}
+
+// UpstreamReader abstracts reading events from upstream (SSE or WebSocket).
+type UpstreamReader interface {
+	// ReadEvent reads the next event data. Returns io.EOF at end of stream.
+	ReadEvent(ctx context.Context) ([]byte, error)
+	// StatusCode returns the HTTP status code (for error handling).
+	StatusCode() int
+	// Headers returns the response headers.
+	Headers() http.Header
+	// Body returns the raw response body for non-stream scenarios.
+	Body() io.ReadCloser
+	Close() error
+}
+
 type relayRequest struct {
 	c               *gin.Context
+	ctx             context.Context // used when c is nil (WebSocket mode)
 	inAdapter       model.Inbound
 	internalRequest *model.InternalLLMRequest
 	metrics         *RelayMetrics
 	apiKeyID        int
 	requestModel    string
 	iter            *balancer.Iterator
+
+	// streamWriter allows overriding the response writer (nil = use c.Writer)
+	streamWriter StreamWriter
+}
+
+// requestContext returns the request context from gin or the standalone context.
+func (r *relayRequest) requestContext() context.Context {
+	if r.c != nil {
+		return r.c.Request.Context()
+	}
+	return r.ctx
 }
 
 // relayAttempt 尝试级上下文

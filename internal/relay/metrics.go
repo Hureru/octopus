@@ -30,6 +30,7 @@ type RelayMetrics struct {
 	// 统计指标
 	ActualModel string
 	Stats       model.StatsMetrics
+	UsedWS      bool
 }
 
 func NewRelayMetrics(apiKeyID int, requestModel string, req *transformerModel.InternalLLMRequest) *RelayMetrics {
@@ -139,6 +140,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 		UseTime:          int(duration.Milliseconds()),
 		Attempts:         attempts,
 		TotalAttempts:    len(attempts),
+		UsedWS:           m.UsedWS,
 	}
 
 	if apiKey, getErr := op.APIKeyGet(m.APIKeyID, ctx); getErr == nil {

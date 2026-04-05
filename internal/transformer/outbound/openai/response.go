@@ -269,6 +269,20 @@ type ResponsesRequest struct {
 	Temperature       *float64              `json:"temperature,omitempty"`
 	TopP              *float64              `json:"top_p,omitempty"`
 	Reasoning         *ResponsesReasoning   `json:"reasoning,omitempty"`
+
+	// Pass-through fields
+	PreviousResponseID   *string         `json:"previous_response_id,omitempty"`
+	Background           *bool           `json:"background,omitempty"`
+	Prompt               json.RawMessage `json:"prompt,omitempty"`
+	PromptCacheKey       *string         `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention *string         `json:"prompt_cache_retention,omitempty"`
+	SafetyIdentifier     *string         `json:"safety_identifier,omitempty"`
+	MaxToolCalls         *int64          `json:"max_tool_calls,omitempty"`
+	Conversation         json.RawMessage `json:"conversation,omitempty"`
+	ContextManagement    json.RawMessage `json:"context_management,omitempty"`
+	StreamOptions        json.RawMessage `json:"stream_options,omitempty"`
+	Include              []string        `json:"include,omitempty"`
+	TopLogprobs          *int64          `json:"top_logprobs,omitempty"`
 }
 
 type ResponsesInput struct {
@@ -326,7 +340,8 @@ type ResponsesItem struct {
 	Size         *string `json:"size,omitempty"`
 
 	// Reasoning fields
-	Summary []ResponsesReasoningSummary `json:"summary,omitempty"`
+	Summary          []ResponsesReasoningSummary `json:"summary,omitempty"`
+	EncryptedContent *string                     `json:"encrypted_content,omitempty"`
 }
 
 type ResponsesReasoningSummary struct {
@@ -385,7 +400,10 @@ type ResponsesTextFormat struct {
 }
 
 type ResponsesReasoning struct {
-	Effort string `json:"effort,omitempty"`
+	Effort          string  `json:"effort,omitempty"`
+	MaxTokens       *int64  `json:"max_tokens,omitempty"`
+	Summary         *string `json:"summary,omitempty"`
+	GenerateSummary *string `json:"generate_summary,omitempty"`
 }
 
 // ResponsesResponse represents the OpenAI Responses API response format.
@@ -477,11 +495,28 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 	}
 
 	// Convert reasoning
-	if req.ReasoningEffort != "" || req.ReasoningBudget != nil {
+	if req.ReasoningEffort != "" || req.ReasoningBudget != nil || req.ReasoningSummary != nil || req.ReasoningGenerateSummary != nil {
 		result.Reasoning = &ResponsesReasoning{
-			Effort: req.ReasoningEffort,
+			Effort:          req.ReasoningEffort,
+			MaxTokens:       req.ReasoningBudget,
+			Summary:         req.ReasoningSummary,
+			GenerateSummary: req.ReasoningGenerateSummary,
 		}
 	}
+
+	// Pass-through fields
+	result.PreviousResponseID = req.PreviousResponseID
+	result.Background = req.Background
+	result.Prompt = req.Prompt
+	result.PromptCacheKey = req.ResponsesPromptCacheKey
+	result.PromptCacheRetention = req.PromptCacheRetention
+	result.SafetyIdentifier = req.SafetyIdentifier
+	result.MaxToolCalls = req.MaxToolCalls
+	result.Conversation = req.Conversation
+	result.ContextManagement = req.ContextManagement
+	result.StreamOptions = req.ResponsesStreamOptions
+	result.Include = req.Include
+	result.TopLogprobs = req.TopLogprobs
 
 	return result
 }
@@ -587,6 +622,21 @@ func convertUserMessageToResponses(msg model.Message) ResponsesItem {
 
 func convertAssistantMessageToResponses(msg model.Message) []ResponsesItem {
 	var items []ResponsesItem
+
+	// Handle reasoning content
+	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+		reasoningItem := ResponsesItem{
+			Type: "reasoning",
+			Summary: []ResponsesReasoningSummary{{
+				Type: "summary_text",
+				Text: *msg.ReasoningContent,
+			}},
+		}
+		if msg.ReasoningSignature != nil && *msg.ReasoningSignature != "" {
+			reasoningItem.EncryptedContent = msg.ReasoningSignature
+		}
+		items = append(items, reasoningItem)
+	}
 
 	// Handle tool calls
 	for _, tc := range msg.ToolCalls {

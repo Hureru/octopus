@@ -169,6 +169,10 @@
             "hint": "为空禁止跨域，* 允许所有",
             "example": "只允许指定域名: https://example.com,https://example2.com"
         },
+        "wsUpgrade": {
+            "label": "主动 WebSocket 上游升级",
+            "description": "启用后无论客户端协议都主动尝试 WS 上游连接，禁用则跟随客户端协议"
+        },
         "circuitBreaker": {
             "title": "熔断器配置",
             "threshold": {
@@ -455,7 +459,8 @@
             "circuitBreak": "熔断",
             "disableModel": "禁用模型",
             "disabling": "禁用中",
-            "disabled": "已禁用"
+            "disabled": "已禁用",
+            "ws": "WS"
         }
     },
     "channel": {

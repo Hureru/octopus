@@ -629,6 +629,11 @@ func buildMessageContent(msg model.Message) anthropicModel.MessageContent {
 		return convertMultiplePartContent(msg)
 	}
 
+	// Handle reasoning-only messages (no text content, but has thinking/redacted thinking)
+	if hasThinkingContent(msg) || len(msg.RedactedThinkingBlocks) > 0 {
+		return buildMultipleContentWithThinking(msg)
+	}
+
 	return anthropicModel.MessageContent{}
 }
 
@@ -655,11 +660,14 @@ func buildMultipleContentWithThinking(msg model.Message) anthropicModel.MessageC
 		})
 	}
 
-	blocks = append(blocks, anthropicModel.MessageContentBlock{
-		Type:         "text",
-		Text:         msg.Content.Content,
-		CacheControl: convertCacheControl(msg.CacheControl),
-	})
+	// Only add text block if content is non-nil and non-empty
+	if msg.Content.Content != nil && *msg.Content.Content != "" {
+		blocks = append(blocks, anthropicModel.MessageContentBlock{
+			Type:         "text",
+			Text:         msg.Content.Content,
+			CacheControl: convertCacheControl(msg.CacheControl),
+		})
+	}
 
 	return anthropicModel.MessageContent{MultipleContent: blocks}
 }

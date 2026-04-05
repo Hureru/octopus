@@ -4,6 +4,7 @@ import (
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server"
 	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -47,6 +48,10 @@ var startCmd = &cobra.Command{
 			return
 		}
 		shutdown.Register(server.Close)
+		shutdown.Register(func() error {
+			relay.CloseUpstreamWSPool()
+			return nil
+		})
 
 		task.Init()
 		safe.Go("task-runner", task.RUN)

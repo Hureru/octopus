@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +18,10 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
+	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/safe"
+	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tmaxmax/go-sse"
 )
@@ -269,7 +272,7 @@ func (ra *relayAttempt) attempt() attemptResult {
 	}
 
 	// ====== 失败 ======
-	if isClientCancellation(ra.c.Request.Context(), fwdErr) {
+	if isClientCancellation(ra.requestContext(), fwdErr) {
 		return attemptResult{
 			Success:  false,
 			Written:  false,
@@ -290,7 +293,7 @@ func (ra *relayAttempt) attempt() attemptResult {
 	// 注意：熔断器记录已移至 Handler() 的同通道重试循环外，
 	// 避免重试期间过早触发熔断
 
-	written := ra.c.Writer.Written()
+	written := ra.getStreamWriter().Written()
 	if written {
 		ra.collectResponse()
 	}
@@ -331,8 +334,145 @@ func parseRequest(inboundType inbound.InboundType, c *gin.Context) (*model.Inter
 
 // forward 转发请求到上游服务
 func (ra *relayAttempt) forward() (int, error) {
-	ctx := ra.c.Request.Context()
+	ctx := ra.requestContext()
 
+	// 尝试上游 WebSocket（仅 OpenAI Response outbound 类型）
+	if ra.channel.Type == outbound.OutboundTypeOpenAIResponse &&
+		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+
+		shouldTryWS := false
+		wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
+		if wsUpgradeEnabled {
+			// 设置启用：无论客户端协议都主动尝试 WS 上游
+			shouldTryWS = true
+		} else {
+			// 设置禁用：仅当客户端也是 WS 时才尝试 WS 上游
+			shouldTryWS = (ra.c == nil)
+		}
+
+		if shouldTryWS {
+			statusCode, err := ra.forwardViaWS(ctx)
+			if statusCode != -1 {
+				return statusCode, err
+			}
+			// statusCode == -1 means WS not available, fall through to HTTP
+		}
+	}
+
+	return ra.forwardViaHTTP(ctx)
+}
+
+// forwardViaWS attempts to forward via upstream WebSocket.
+// Returns statusCode=-1 if WS is not available (caller should fall through to HTTP).
+func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
+	pc := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID)
+	if pc == nil {
+		return -1, nil // WS not available
+	}
+
+	log.Infof("using upstream WebSocket for channel %s (key=%d)", ra.channel.Name, ra.usedKey.ID)
+
+	// Build the Responses API request body
+	responsesReq := openaiOutbound.ConvertToResponsesRequest(ra.internalRequest)
+	reqBody, err := json.Marshal(responsesReq)
+	if err != nil {
+		wsUpstreamPool.Put(ra.channel.ID, ra.usedKey.ID, pc)
+		return -1, nil // fall through to HTTP
+	}
+
+	// Send response.create message
+	if err := wsUpstreamPool.SendResponseCreate(ctx, pc, reqBody); err != nil {
+		log.Warnf("upstream WS send failed for channel %s: %v", ra.channel.Name, err)
+		pc.conn.Close(websocket.StatusGoingAway, "send failed")
+		wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID)
+		return -1, nil // fall through to HTTP
+	}
+
+	// Read events from WS and process through the transform pipeline
+	ra.metrics.UsedWS = true
+	reader := newWSUpstreamReader(pc, ra.channel.ID, ra.usedKey.ID)
+	err = ra.handleWSStreamResponse(ctx, reader)
+	if err != nil {
+		reader.CloseWithError()
+		return reader.StatusCode(), err
+	}
+
+	reader.Close()
+	return 200, nil
+}
+
+// handleWSStreamResponse processes events from an upstream WebSocket reader.
+func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUpstreamReader) error {
+	// Determine client writer
+	writer := ra.getStreamWriter()
+
+	// Set SSE response headers (for HTTP clients; WS clients handle this differently)
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.Header().Set("Connection", "keep-alive")
+	writer.Header().Set("X-Accel-Buffering", "no")
+
+	firstToken := true
+	var firstTokenTimer *time.Timer
+	var firstTokenC <-chan time.Time
+	if ra.firstTokenTimeOutSec > 0 {
+		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
+		firstTokenC = firstTokenTimer.C
+		defer func() {
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
+		}()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Infof("client disconnected during ws stream")
+			return nil
+		case <-firstTokenC:
+			log.Warnf("first token timeout (%ds) on ws stream, switching channel", ra.firstTokenTimeOutSec)
+			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+		default:
+		}
+
+		eventData, err := reader.ReadEvent(ctx)
+		if err != nil {
+			if err == io.EOF {
+				log.Infof("ws stream end")
+				return nil
+			}
+			return fmt.Errorf("ws stream read error: %w", err)
+		}
+
+		// Transform through outbound → internal → inbound pipeline
+		data, err := ra.transformStreamData(ctx, string(eventData))
+		if err != nil || len(data) == 0 {
+			continue
+		}
+
+		if firstToken {
+			ra.metrics.SetFirstTokenTime(time.Now())
+			firstToken = false
+			if firstTokenTimer != nil {
+				if !firstTokenTimer.Stop() {
+					select {
+					case <-firstTokenTimer.C:
+					default:
+					}
+				}
+				firstTokenTimer = nil
+				firstTokenC = nil
+			}
+		}
+
+		writer.Write(data)
+		writer.Flush()
+	}
+}
+
+// forwardViaHTTP forwards the request using traditional HTTP.
+func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 	// 构建出站请求
 	outboundRequest, err := ra.outAdapter.TransformRequest(
 		ctx,
@@ -378,14 +518,24 @@ func (ra *relayAttempt) forward() (int, error) {
 	return response.StatusCode, nil
 }
 
+// getStreamWriter returns the appropriate stream writer for the current request.
+func (ra *relayAttempt) getStreamWriter() StreamWriter {
+	if ra.streamWriter != nil {
+		return ra.streamWriter
+	}
+	return ra.c.Writer
+}
+
 // copyHeaders 复制请求头，过滤 hop-by-hop 头
 func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
-	for key, values := range ra.c.Request.Header {
-		if hopByHopHeaders[strings.ToLower(key)] {
-			continue
-		}
-		for _, value := range values {
-			outboundRequest.Header.Set(key, value)
+	if ra.c != nil {
+		for key, values := range ra.c.Request.Header {
+			if hopByHopHeaders[strings.ToLower(key)] {
+				continue
+			}
+			for _, value := range values {
+				outboundRequest.Header.Set(key, value)
+			}
 		}
 	}
 	if len(ra.channel.CustomHeader) > 0 {
@@ -423,11 +573,13 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
 	}
 
+	writer := ra.getStreamWriter()
+
 	// 设置 SSE 响应头
-	ra.c.Header("Content-Type", "text/event-stream")
-	ra.c.Header("Cache-Control", "no-cache")
-	ra.c.Header("Connection", "keep-alive")
-	ra.c.Header("X-Accel-Buffering", "no")
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.Header().Set("Connection", "keep-alive")
+	writer.Header().Set("X-Accel-Buffering", "no")
 
 	firstToken := true
 
@@ -498,8 +650,8 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 				}
 			}
 
-			ra.c.Writer.Write(data)
-			ra.c.Writer.Flush()
+			ra.getStreamWriter().Write(data)
+			ra.getStreamWriter().Flush()
 		}
 	}
 }
@@ -544,7 +696,7 @@ func (ra *relayAttempt) handleResponse(ctx context.Context, response *http.Respo
 
 // collectResponse 收集响应信息
 func (ra *relayAttempt) collectResponse() {
-	internalResponse, err := ra.inAdapter.GetInternalResponse(ra.c.Request.Context())
+	internalResponse, err := ra.inAdapter.GetInternalResponse(ra.requestContext())
 	if err != nil || internalResponse == nil {
 		return
 	}

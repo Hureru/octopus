@@ -30,7 +30,16 @@ func init() {
 			router.NewRoute("/embeddings", http.MethodPost).
 				Handle(embedding),
 		)
+
+	// WebSocket route for /v1/responses (no RequireJSON middleware)
+	router.NewGroupRouter("/v1").
+		Use(middleware.APIKeyAuth()).
+		AddRoute(
+			router.NewRoute("/responses", http.MethodGet).
+				Handle(wsResponse),
+		)
 }
+
 
 func chat(c *gin.Context) {
 	relay.Handler(inbound.InboundTypeOpenAIChat, c)
@@ -43,4 +52,7 @@ func message(c *gin.Context) {
 }
 func embedding(c *gin.Context) {
 	relay.Handler(inbound.InboundTypeOpenAIEmbedding, c)
+}
+func wsResponse(c *gin.Context) {
+	relay.HandleWSResponse(c)
 }
