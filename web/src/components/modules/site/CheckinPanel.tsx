@@ -108,7 +108,16 @@ export function CheckinPanel({
   filterStatus: CheckinFilterStatus;
   onFilterChange: (status: CheckinFilterStatus) => void;
 }) {
-  const summary = useMemo(() => buildCheckinSummary(sites, new Date()), [sites, statusDayKey]);
+  const summaryNow = useMemo(() => {
+    const [year = "", month = "", day = ""] = statusDayKey.split("-");
+    const parsed = new Date(Number(year), Number(month), Number(day));
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }, [statusDayKey]);
+
+  const summary = useMemo(
+    () => buildCheckinSummary(sites, summaryNow),
+    [sites, summaryNow],
+  );
   const hasContextBadges = Boolean(searchTerm || siteFilterLabel);
 
   const manualCheckinUrls = useMemo(

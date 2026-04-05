@@ -233,6 +233,22 @@ function createSiteForm(site: SiteRecord): SiteFormState {
   };
 }
 
+function normalizeSiteRecord(site: SiteRecord): SiteRecord {
+  return {
+    ...site,
+    custom_header: site.custom_header ?? [],
+    use_system_proxy: site.use_system_proxy ?? false,
+    external_checkin_url: site.external_checkin_url ?? null,
+    is_pinned: site.is_pinned ?? false,
+    sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
+    global_weight:
+      typeof site.global_weight === "number" && site.global_weight > 0
+        ? site.global_weight
+        : 1,
+    accounts: site.accounts ?? [],
+  };
+}
+
 function defaultCredentialType(platform: SitePlatform): SiteCredentialType {
   switch (platform) {
     case SitePlatform.Sub2API:
@@ -1103,11 +1119,15 @@ export function Site() {
       if (editingSite) {
         await updateSite.mutateAsync({ id: editingSite.id, ...payload });
         toast.success("站点已更新");
+        closeSiteDialog(false);
       } else {
-        await createSite.mutateAsync(payload);
+        const createdSite = normalizeSiteRecord(
+          await createSite.mutateAsync(payload),
+        );
         toast.success("站点已创建");
+        closeSiteDialog(false);
+        openCreateAccountDialog(createdSite);
       }
-      closeSiteDialog(false);
     } catch (submitError) {
       toast.error(getErrorMessage(submitError));
     }
@@ -1395,10 +1415,6 @@ export function Site() {
     setSearchTerm("site", "");
     setSiteSurfaceFilter("all");
     setCheckinFilterStatus("all");
-  }
-
-  function openSiteBaseURL(site: SiteRecord) {
-    window.open(site.base_url, "_blank", "noopener,noreferrer");
   }
 
   function jumpToSiteChannel(siteId: number) {
