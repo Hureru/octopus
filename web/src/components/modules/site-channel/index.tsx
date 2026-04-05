@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import {
     DragDropContext,
     Draggable,
@@ -56,6 +57,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui
 import { toast } from '@/components/common/Toast';
 import { cn } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
+import { useSettingStore } from '@/stores/setting';
 import {
     type SiteChannelAccount,
     type SiteChannelCard,
@@ -80,6 +82,7 @@ import {
     getRouteTypeTone,
     isSupportedRouteType,
 } from './constants';
+import { translateSiteMessage } from '../site/site-message';
 import {
     SITE_GROUP_FILTER_ALL,
     createGroupFilter,
@@ -133,6 +136,8 @@ function UnifiedCompletionDialog({
     onOpenChange: (open: boolean) => void;
     sites: PendingCompletionSite[];
 }) {
+    const t = useTranslations();
+    const locale = useSettingStore((state) => state.locale);
     const updateSourceKeys = useUpdateAnySiteSourceKeys();
     const [inputValues, setInputValues] = useState<UnifiedCompletionInputState>({});
     const [savingAccounts, setSavingAccounts] = useState<Record<string, boolean>>({});
@@ -297,12 +302,12 @@ function UnifiedCompletionDialog({
         } catch (error) {
             setAccountErrors((current) => ({
                 ...current,
-                [accountKey]: getErrorMessage(error, `账号「${account.account_name}」保存失败`),
+                [accountKey]: translateSiteMessage(locale, getErrorMessage(error, `账号「${account.account_name}」保存失败`), t),
             }));
         } finally {
             setSavingAccounts((current) => ({ ...current, [accountKey]: false }));
         }
-    }, [inputValues, updateSourceKeys]);
+    }, [inputValues, locale, t, updateSourceKeys]);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1322,6 +1327,8 @@ function SiteAccountPanel({
     onJumpHandled: (requestId: number) => void;
     onNavigateToChannel: (channelId: number) => void;
 }) {
+    const t = useTranslations();
+    const locale = useSettingStore((state) => state.locale);
     const [activeFilter, setActiveFilter] = useState<SiteChannelGroupFilter>(SITE_GROUP_FILTER_ALL);
     const [pendingRouteOverrides, setPendingRouteOverrides] = useState<Record<string, SiteModelRouteType>>({});
     const [pendingDisabledOverrides, setPendingDisabledOverrides] = useState<Record<string, boolean>>({});
@@ -1636,7 +1643,7 @@ function SiteAccountPanel({
                     setQuickCreateName('');
                 },
                 onError: (error) => {
-                    toast.error(getErrorMessage(error, '快捷创建 Key 失败'));
+                    toast.error(translateSiteMessage(locale, getErrorMessage(error, '快捷创建 Key 失败'), t));
                 },
             },
         );
@@ -1702,7 +1709,7 @@ function SiteAccountPanel({
                 setVisibleSourceKeyRows({});
             },
             onError: (error) => {
-                toast.error(getErrorMessage(error, '更新站点 Key 失败'));
+                toast.error(translateSiteMessage(locale, getErrorMessage(error, '更新站点 Key 失败'), t));
             },
         });
     };
@@ -2785,6 +2792,8 @@ export function SiteChannelSection({
     sortOrder: ToolbarSortOrder;
     layout: 'grid' | 'list';
 }) {
+    const t = useTranslations();
+    const locale = useSettingStore((state) => state.locale);
     const { data, isLoading, error } = useSiteChannelList();
     const pendingJump = useJumpStore((state) => state.pending);
     const clearPending = useJumpStore((state) => state.clearPending);
@@ -2882,7 +2891,7 @@ export function SiteChannelSection({
     if (error) {
         return (
             <section className="rounded-3xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                站点渠道加载失败：{error.message}
+                站点渠道加载失败：{translateSiteMessage(locale, error.message, t)}
             </section>
         );
     }

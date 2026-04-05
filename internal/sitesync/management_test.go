@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -338,6 +339,45 @@ func TestSyncManagementPlatformDoesNotFallbackWithoutExplicitGroupMatch(t *testi
 	})
 	if err == nil {
 		t.Fatalf("expected syncManagementPlatform to fail when explicit group metadata is missing")
+	}
+	if !strings.Contains(err.Error(), `site sync could not resolve models for group "default"; create a key for that group on the site and sync again`) {
+		t.Fatalf("expected translated fallback guidance error, got %v", err)
+	}
+}
+
+func TestSyncManagementPlatformReturnsStableMissingGroupKeyError(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/token/":
+			_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			_, _ = w.Write([]byte(`{"data":[{"id":"vip","name":"VIP"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err == nil {
+		t.Fatalf("expected syncManagementPlatform to fail when no usable key exists")
+	}
+	if !strings.Contains(err.Error(), `site sync requires a key for group "default"; create a key for that group on the site and sync again`) {
+		t.Fatalf("expected stable missing-key error, got %v", err)
 	}
 }
 

@@ -98,7 +98,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		tokens = append(tokens, model.SiteToken{Name: "default", Token: strings.TrimSpace(account.APIKey), GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "fallback", IsDefault: true})
 	}
 	if len(tokens) == 0 {
-		return nil, fmt.Errorf("no usable site token found")
+		return nil, fmt.Errorf("site sync requires a key for group %q; create a key for that group on the site and sync again", model.SiteDefaultGroupKey)
 	}
 
 	groups = mergeSiteGroups(groups, tokens)
@@ -207,7 +207,7 @@ func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, acc
 		}
 	}
 	if len(tokens) == 0 {
-		return nil, fmt.Errorf("no usable site token found")
+		return nil, fmt.Errorf("site sync requires a key for group %q; create a key for that group on the site and sync again", model.SiteDefaultGroupKey)
 	}
 
 	groups, err := fetchSub2APIGroups(ctx, siteRecord, account, accessToken, tokens)

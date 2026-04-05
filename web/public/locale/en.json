@@ -558,6 +558,11 @@
             "matchRegexPlaceholder": "Optional: regex pattern to match request model names",
             "remark": "Remark"
         }
+    },
+    "siteSync": {
+        "errors": {
+            "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."
+        }
     }
 }
 

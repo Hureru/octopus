@@ -259,7 +259,7 @@ func filterSessionFallbackModelsByGroup(
 		normalizedGroupKey = model.SiteDefaultGroupKey
 	}
 	if len(detections) == 0 {
-		return siteModelFetchResult{}, fmt.Errorf("no explicit group metadata available for fallback group %s", normalizedGroupKey)
+		return siteModelFetchResult{}, fmt.Errorf("site sync could not resolve models for group %q; create a key for that group on the site and sync again", normalizedGroupKey)
 	}
 
 	filteredNames := make([]string, 0, len(names))
@@ -281,7 +281,7 @@ func filterSessionFallbackModelsByGroup(
 		filteredDetections[lookupKey] = detection
 	}
 	if len(filteredNames) == 0 {
-		return siteModelFetchResult{}, fmt.Errorf("no session fallback models matched group %s via explicit groups", normalizedGroupKey)
+		return siteModelFetchResult{}, fmt.Errorf("site sync could not resolve models for group %q; create a key for that group on the site and sync again", normalizedGroupKey)
 	}
 
 	return siteModelFetchResult{

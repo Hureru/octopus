@@ -9,6 +9,7 @@ import {
   type ComponentProps,
   type FormEvent,
 } from "react";
+import { useTranslations } from "next-intl";
 import { AnimatePresence, motion } from "motion/react";
 import {
   type AllAPIHubImportResult,
@@ -67,6 +68,7 @@ import {
 } from "@/components/modules/toolbar";
 import type { SiteFilter as SiteSurfaceFilter } from "@/components/modules/toolbar/view-options-store";
 import { cn } from "@/lib/utils";
+import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import {
   accountHasCheckinEnabled,
@@ -75,6 +77,7 @@ import {
   sitePlatformSupportsCheckin,
   type CheckinFilterStatus,
 } from "./checkin-status";
+import { translateSiteMessage } from "./site-message";
 import { useSiteUIStore } from "./ui-store";
 import {
   isSiteJumpTarget,
@@ -720,6 +723,8 @@ function estimateVisibleSiteCardHeight(item: VisibleSite, expanded: boolean) {
 }
 
 export function Site() {
+  const t = useTranslations();
+  const locale = useSettingStore((state) => state.locale);
   const { data: sites, isLoading, error } = useSiteList();
   const createSite = useCreateSite();
   const updateSite = useUpdateSite();
@@ -1293,7 +1298,7 @@ export function Site() {
         `同步完成：${result.group_count} 个分组，${result.token_count} 个 key，${result.model_count} 个模型`,
       );
     } catch (syncError) {
-      toast.error(getErrorMessage(syncError));
+      toast.error(translateSiteMessage(locale, getErrorMessage(syncError), t));
     } finally {
       setSyncingAccountIds((current) => {
         const next = new Set(current);
@@ -1874,7 +1879,7 @@ export function Site() {
                                       )}
                                       at={account.last_sync_at}
                                       message={
-                                        account.last_sync_message || "等待首次同步"
+                                        translateSiteMessage(locale, account.last_sync_message) || "等待首次同步"
                                       }
                                     />
                                     {supportsCheckin ? (
