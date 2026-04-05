@@ -3,6 +3,7 @@ package balancer
 import (
 	"math/rand"
 	"sort"
+	"sync"
 	"sync/atomic"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -131,4 +132,11 @@ func sortByPriority(items []model.GroupItem) []model.GroupItem {
 		return sorted[i].Priority < sorted[j].Priority
 	})
 	return sorted
+}
+
+// Reset clears in-memory balancer state for tests.
+func Reset() {
+	roundRobinCounter = 0
+	globalBreaker = sync.Map{}
+	globalSession = sync.Map{}
 }

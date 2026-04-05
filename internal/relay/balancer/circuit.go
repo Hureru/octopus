@@ -13,10 +13,15 @@ import (
 // CircuitState 熔断器状态
 type CircuitState int
 
+type FailureKind int
+
 const (
 	StateClosed   CircuitState = iota // 正常通行
 	StateOpen                         // 熔断中，拒绝所有请求
 	StateHalfOpen                     // 半开，仅允许单个试探请求
+
+	FailureHard FailureKind = iota
+	FailureSoftRateLimit
 )
 
 // circuitEntry 单个熔断器条目
@@ -141,8 +146,10 @@ func RecordSuccess(channelID, keyID int, modelName string) {
 	entry.TripCount = 0
 }
 
-// RecordFailure 记录失败，可能触发熔断
-func RecordFailure(channelID, keyID int, modelName string) {
+// RecordFailure 记录失败，可能触发熔断。
+// FailureSoftRateLimit 用于 429/503 这类软失败：Closed 状态下不累计阈值，
+// HalfOpen 状态下重新进入 Open，但不放大 TripCount。
+func RecordFailure(channelID, keyID int, modelName string, kind FailureKind) {
 	key := circuitKey(channelID, keyID, modelName)
 	entry := getOrCreateEntry(key)
 
@@ -153,6 +160,9 @@ func RecordFailure(channelID, keyID int, modelName string) {
 
 	switch entry.State {
 	case StateClosed:
+		if kind == FailureSoftRateLimit {
+			return
+		}
 		entry.ConsecutiveFailures++
 		threshold := getThreshold()
 		if entry.ConsecutiveFailures >= threshold {
@@ -163,6 +173,12 @@ func RecordFailure(channelID, keyID int, modelName string) {
 		}
 
 	case StateHalfOpen:
+		if kind == FailureSoftRateLimit {
+			entry.State = StateOpen
+			log.Warnf("circuit breaker [%s] HalfOpen -> Open (soft rate limit, tripCount=%d, cooldown=%v)",
+				key, entry.TripCount, GetCooldown(entry.TripCount))
+			return
+		}
 		// 试探失败，重新进入 Open 状态，TripCount 递增（冷却时间翻倍）
 		entry.State = StateOpen
 		entry.TripCount++

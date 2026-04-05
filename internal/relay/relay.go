@@ -106,31 +106,20 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			continue
 		}
 
-		usedKey := channel.GetChannelKey()
-		if usedKey.ChannelKey == "" {
-			iter.Skip(channel.ID, 0, channel.Name, "no available key")
-			continue
-		}
-
-		// 熔断检查
-		if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
-			continue
-		}
-
 		// 出站适配器
 		outAdapter := outbound.Get(channel.Type)
 		if outAdapter == nil {
-			iter.Skip(channel.ID, usedKey.ID, channel.Name, fmt.Sprintf("unsupported channel type: %d", channel.Type))
+			iter.Skip(channel.ID, 0, channel.Name, fmt.Sprintf("unsupported channel type: %d", channel.Type))
 			continue
 		}
 
 		// 类型兼容性检查
 		if internalRequest.IsEmbeddingRequest() && !outbound.IsEmbeddingChannelType(channel.Type) {
-			iter.Skip(channel.ID, usedKey.ID, channel.Name, "channel type not compatible with embedding request")
+			iter.Skip(channel.ID, 0, channel.Name, "channel type not compatible with embedding request")
 			continue
 		}
 		if internalRequest.IsChatRequest() && !outbound.IsChatChannelType(channel.Type) {
-			iter.Skip(channel.ID, usedKey.ID, channel.Name, "channel type not compatible with chat request")
+			iter.Skip(channel.ID, 0, channel.Name, "channel type not compatible with chat request")
 			continue
 		}
 
@@ -140,6 +129,29 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		log.Infof("request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t)",
 			requestModel, group.Mode, channel.Name, item.ModelName,
 			iter.Index()+1, iter.Len(), iter.IsSticky())
+
+		selectOpts := dbmodel.ChannelKeySelectOptions{
+			IgnoreRecent429Cooldown: group.RetryEnabled,
+			ExcludeKeyIDs:           make(map[int]struct{}),
+		}
+		var usedKey dbmodel.ChannelKey
+		for {
+			usedKey = channel.GetChannelKey(selectOpts)
+			if usedKey.ChannelKey == "" {
+				break
+			}
+			if !iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
+				break
+			}
+			selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
+			usedKey = dbmodel.ChannelKey{}
+		}
+		if usedKey.ChannelKey == "" {
+			if len(selectOpts.ExcludeKeyIDs) == 0 {
+				iter.Skip(channel.ID, 0, channel.Name, "no available key")
+			}
+			continue
+		}
 
 		// 同通道重试循环
 		var result attemptResult
@@ -175,8 +187,11 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 		// 同通道重试耗尽后记录熔断器失败
 		if !result.Success && !result.Written && !result.Canceled {
-			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model)
-			maybeLearnManagedRoute(c.Request.Context(), channel.ID, internalRequest.Model, inboundType, result.Err)
+			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
+			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model, failureKind)
+			if failureKind == balancer.FailureHard {
+				maybeLearnManagedRoute(c.Request.Context(), channel.ID, internalRequest.Model, inboundType, result.Err)
+			}
 		}
 
 		if result.Success {
@@ -211,6 +226,13 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		return
 	}
 	resp.Error(c, http.StatusBadGateway, "channel failed")
+}
+
+func circuitFailureKind(retryEnabled bool, statusCode int) balancer.FailureKind {
+	if retryEnabled && isPassthroughStatus(statusCode) {
+		return balancer.FailureSoftRateLimit
+	}
+	return balancer.FailureHard
 }
 
 // attempt 统一管理一次通道尝试的完整生命周期
