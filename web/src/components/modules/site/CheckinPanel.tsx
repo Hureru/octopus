@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
-import { CalendarCheck2, FilterX, Globe2, KeyRound, Layers3, Sparkles } from "lucide-react";
+import { useCallback, useMemo, type ReactNode } from "react";
+import { CalendarCheck2, ExternalLink, FilterX, Globe2, KeyRound, Layers3, Sparkles } from "lucide-react";
 import { type Site } from "@/api/endpoints/site";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,6 +111,20 @@ export function CheckinPanel({
   const summary = useMemo(() => buildCheckinSummary(sites, new Date()), [sites, statusDayKey]);
   const hasContextBadges = Boolean(searchTerm || siteFilterLabel);
 
+  const manualCheckinUrls = useMemo(
+    () =>
+      (sites ?? [])
+        .filter((s) => s.external_checkin_url?.trim())
+        .map((s) => s.external_checkin_url!.trim()),
+    [sites],
+  );
+
+  const openAllManualCheckin = useCallback(() => {
+    for (const url of manualCheckinUrls) {
+      window.open(url, "_blank");
+    }
+  }, [manualCheckinUrls]);
+
   return (
     <section className="overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-[0_18px_60px_-40px_rgba(15,23,42,0.45)]">
       <div className="border-b border-border/60 bg-gradient-to-br from-background via-card to-muted/10 px-5 py-5">
@@ -183,30 +197,44 @@ export function CheckinPanel({
       </div>
 
       <div className="px-5 py-4">
-        <div className="flex flex-wrap gap-2">
-          {FILTERS.map((filter) => {
-            const count =
-              filter.key === "all" ? summary.total : summary[filter.key];
-            const active = filterStatus === filter.key;
-            return (
-              <button
-                key={filter.key}
-                type="button"
-                onClick={() =>
-                  onFilterChange(
-                    active && filter.key !== "all" ? "all" : filter.key,
-                  )
-                }
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                  filterTone(filter.key, active),
-                )}
-              >
-                <span>{count}</span>
-                <span>{filter.label}</span>
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            {FILTERS.map((filter) => {
+              const count =
+                filter.key === "all" ? summary.total : summary[filter.key];
+              const active = filterStatus === filter.key;
+              return (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() =>
+                    onFilterChange(
+                      active && filter.key !== "all" ? "all" : filter.key,
+                    )
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    filterTone(filter.key, active),
+                  )}
+                >
+                  <span>{count}</span>
+                  <span>{filter.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          {manualCheckinUrls.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-xl text-xs"
+              onClick={openAllManualCheckin}
+            >
+              <ExternalLink className="size-4" />
+              打开手动签到 ({manualCheckinUrls.length})
+            </Button>
+          ) : null}
         </div>
       </div>
     </section>
