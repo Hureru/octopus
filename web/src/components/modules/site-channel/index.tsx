@@ -23,6 +23,7 @@ import {
     LayoutGrid,
     List,
     MoreHorizontal,
+    Power,
     RefreshCw,
     Search,
     SlidersHorizontal,
@@ -97,6 +98,7 @@ import {
     summarizeHistory,
 } from './utils';
 import { useJumpStore, type PendingJump, type SiteChannelJumpTarget, isSiteChannelJumpTarget } from '@/stores/jump';
+import { useEnableSiteAccount } from '@/api/endpoints/site';
 import {
     DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES,
     type SiteChannelQuickFilter,
@@ -438,85 +440,6 @@ function MoveRoutePopover({
                 </div>
             </PopoverContent>
         </Popover>
-    );
-}
-
-function SiteChannelBulkActionBar({
-    selectedCount,
-    bulkMoveTarget,
-    disabled,
-    onBulkMoveTargetChange,
-    onBulkMove,
-    onEnableSelected,
-    onDisableSelected,
-    onClearSelection,
-}: {
-    selectedCount: number;
-    bulkMoveTarget: SiteModelRouteType;
-    disabled: boolean;
-    onBulkMoveTargetChange: (routeType: SiteModelRouteType) => void;
-    onBulkMove: () => void;
-    onEnableSelected: () => void;
-    onDisableSelected: () => void;
-    onClearSelection: () => void;
-}) {
-    if (selectedCount === 0) return null;
-
-    return (
-        <div className="flex flex-col gap-3 rounded-3xl border border-primary/20 bg-primary/5 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-medium text-foreground">
-                    已选择 {selectedCount} 个模型
-                </div>
-                <Button type="button" variant="ghost" size="sm" className="rounded-xl" onClick={onClearSelection}>
-                    清空选择
-                </Button>
-            </div>
-            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                    <Select value={bulkMoveTarget} onValueChange={(value) => onBulkMoveTargetChange(value as SiteModelRouteType)}>
-                        <SelectTrigger className="w-[14rem] rounded-2xl">
-                            <SelectValue placeholder="选择目标端点格式" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-2xl">
-                            {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
-                                <SelectItem key={routeType} value={routeType}>
-                                    {routeTypeLabel(routeType)}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Button
-                        type="button"
-                        className="rounded-2xl"
-                        onClick={onBulkMove}
-                        disabled={disabled}
-                    >
-                        批量移动
-                    </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-2xl"
-                        onClick={onEnableSelected}
-                        disabled={disabled}
-                    >
-                        批量启用
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        className="rounded-2xl"
-                        onClick={onDisableSelected}
-                        disabled={disabled}
-                    >
-                        批量停用
-                    </Button>
-                </div>
-            </div>
-        </div>
     );
 }
 
@@ -1750,114 +1673,135 @@ function SiteAccountPanel({
                     </div>
                 </div>
 
-                {pendingKeyGroups.length > 0 || projectedGroups.length > 0 || unsupportedRouteCount > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                        {pendingKeyGroups.length > 0 ? (
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <button
-                                        type="button"
-                                        className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
-                                    >
-                                        <CircleAlert className="size-3.5" />
-                                        待建 Key {pendingKeyGroups.length} 组
-                                    </button>
-                                </PopoverTrigger>
-                                <PopoverContent align="start" className="w-72 rounded-2xl border border-amber-500/30 bg-card p-3 shadow-xl">
-                                    <div className="space-y-2">
-                                        <div className="text-xs font-medium text-muted-foreground">未创建 Key 的分组</div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {pendingKeyGroups.map((group) => (
-                                                <Button
-                                                    key={group.group_key}
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="rounded-full border-amber-500/30 bg-white/60 text-amber-800 hover:bg-white dark:bg-background/40 dark:text-amber-200"
-                                                    onClick={() => handleOpenCreateKey(group)}
-                                                    disabled={createKeyMutation.isPending}
-                                                >
-                                                    {group.group_name || group.group_key}
-                                                    <span className="text-[10px] text-amber-700/80 dark:text-amber-200/80">
-                                                        {createKeyMutation.isPending && creatingGroup?.group_key === group.group_key ? '创建中...' : '快捷创建'}
-                                                    </span>
-                                                </Button>
-                                            ))}
+                {pendingKeyGroups.length > 0 || projectedGroups.length > 0 || unsupportedRouteCount > 0 || selectedVisibleCount > 0 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap gap-2">
+                            {pendingKeyGroups.length > 0 ? (
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+                                        >
+                                            <CircleAlert className="size-3.5" />
+                                            待建 Key {pendingKeyGroups.length} 组
+                                        </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="start" className="w-72 rounded-2xl border border-amber-500/30 bg-card p-3 shadow-xl">
+                                        <div className="space-y-2">
+                                            <div className="text-xs font-medium text-muted-foreground">未创建 Key 的分组</div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {pendingKeyGroups.map((group) => (
+                                                    <Button
+                                                        key={group.group_key}
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="rounded-full border-amber-500/30 bg-white/60 text-amber-800 hover:bg-white dark:bg-background/40 dark:text-amber-200"
+                                                        onClick={() => handleOpenCreateKey(group)}
+                                                        disabled={createKeyMutation.isPending}
+                                                    >
+                                                        {group.group_name || group.group_key}
+                                                        <span className="text-[10px] text-amber-700/80 dark:text-amber-200/80">
+                                                            {createKeyMutation.isPending && creatingGroup?.group_key === group.group_key ? '创建中...' : '快捷创建'}
+                                                        </span>
+                                                    </Button>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                        ) : null}
+                                    </PopoverContent>
+                                </Popover>
+                            ) : null}
 
-                        {visibleGroups.some((group) => group.masked_pending_key_count > 0 && group.enabled_key_count === 0) ? (
-                            <button
-                                type="button"
-                                onClick={handleFocusAttention}
-                                className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
-                            >
-                                <CircleAlert className="size-3.5" />
-                                待补全文明文 Key
-                            </button>
-                        ) : null}
+                            {visibleGroups.some((group) => group.masked_pending_key_count > 0 && group.enabled_key_count === 0) ? (
+                                <button
+                                    type="button"
+                                    onClick={handleFocusAttention}
+                                    className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+                                >
+                                    <CircleAlert className="size-3.5" />
+                                    待补全文明文 Key
+                                </button>
+                            ) : null}
 
-                        {projectedGroups.length > 0 ? (
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <button
-                                        type="button"
-                                        className="inline-flex h-8 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 text-xs font-medium text-foreground transition hover:bg-muted/60"
-                                    >
-                                        <KeyRound className="size-3.5 text-primary" />
-                                        投影 Key {projectedGroups.length} 组
-                                    </button>
-                                </PopoverTrigger>
-                                <PopoverContent align="start" className="w-72 rounded-2xl border border-border/70 bg-card p-3 shadow-xl">
-                                    <div className="space-y-2">
-                                        <div className="text-xs font-medium text-muted-foreground">投影渠道 Key 管理</div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {projectedGroups.map((group) => (
-                                                <Button
-                                                    key={`projected-${group.group_key}`}
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="rounded-full"
-                                                    onClick={() => handleOpenProjectedKeys(group)}
-                                                >
-                                                    {group.group_name || group.group_key}
-                                                    <span className="text-[10px] text-muted-foreground">{group.projected_keys.length} Keys</span>
-                                                </Button>
-                                            ))}
+                            {projectedGroups.length > 0 ? (
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="inline-flex h-8 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 text-xs font-medium text-foreground transition hover:bg-muted/60"
+                                        >
+                                            <KeyRound className="size-3.5 text-primary" />
+                                            投影 Key {projectedGroups.length} 组
+                                        </button>
+                                    </PopoverTrigger>
+                                    <PopoverContent align="start" className="w-72 rounded-2xl border border-border/70 bg-card p-3 shadow-xl">
+                                        <div className="space-y-2">
+                                            <div className="text-xs font-medium text-muted-foreground">投影渠道 Key 管理</div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {projectedGroups.map((group) => (
+                                                    <Button
+                                                        key={`projected-${group.group_key}`}
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="rounded-full"
+                                                        onClick={() => handleOpenProjectedKeys(group)}
+                                                    >
+                                                        {group.group_name || group.group_key}
+                                                        <span className="text-[10px] text-muted-foreground">{group.projected_keys.length} Keys</span>
+                                                    </Button>
+                                                ))}
+                                            </div>
                                         </div>
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                        ) : null}
+                                    </PopoverContent>
+                                </Popover>
+                            ) : null}
 
-                        {unsupportedRouteCount > 0 ? (
-                            <button
-                                type="button"
-                                onClick={handleFocusAttention}
-                                className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
-                            >
-                                <CircleAlert className="size-3.5" />
-                                未识别端点 {unsupportedRouteCount}
-                            </button>
+                            {unsupportedRouteCount > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={handleFocusAttention}
+                                    className="inline-flex h-8 items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 text-xs font-medium text-amber-800 transition hover:bg-amber-500/15 dark:text-amber-200"
+                                >
+                                    <CircleAlert className="size-3.5" />
+                                    未识别端点 {unsupportedRouteCount}
+                                </button>
+                            ) : null}
+                        </div>
+
+                        {selectedVisibleCount > 0 ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-medium text-foreground">已选 {selectedVisibleCount} 个</span>
+                                <Select value={bulkMoveTarget} onValueChange={(value) => setBulkMoveTarget(value as SiteModelRouteType)}>
+                                    <SelectTrigger className="h-7 w-[10rem] rounded-xl text-xs">
+                                        <SelectValue placeholder="目标端点" />
+                                    </SelectTrigger>
+                                    <SelectContent className="rounded-xl">
+                                        {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
+                                            <SelectItem key={routeType} value={routeType}>
+                                                {routeTypeLabel(routeType)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Button type="button" size="sm" className="h-7 rounded-xl px-2 text-xs" onClick={() => applyRouteChange(selectedModels, bulkMoveTarget)} disabled={hasPendingChanges}>
+                                    移动
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" className="h-7 rounded-xl px-2 text-xs" onClick={() => applyDisabledChange(selectedModels, false)} disabled={hasPendingChanges}>
+                                    启用
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" className="h-7 rounded-xl px-2 text-xs" onClick={() => applyDisabledChange(selectedModels, true)} disabled={hasPendingChanges}>
+                                    停用
+                                </Button>
+                                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-xl px-2 text-xs" onClick={() => setSelectedModelKeys(new Set())}>
+                                    清空
+                                </Button>
+                            </div>
                         ) : null}
                     </div>
                 ) : null}
             </div>
-
-            <SiteChannelBulkActionBar
-                selectedCount={selectedVisibleCount}
-                bulkMoveTarget={bulkMoveTarget}
-                disabled={hasPendingChanges}
-                onBulkMoveTargetChange={setBulkMoveTarget}
-                onBulkMove={() => applyRouteChange(selectedModels, bulkMoveTarget)}
-                onEnableSelected={() => applyDisabledChange(selectedModels, false)}
-                onDisableSelected={() => applyDisabledChange(selectedModels, true)}
-                onClearSelection={() => setSelectedModelKeys(new Set())}
-            />
 
             <Dialog open={!!creatingGroup} onOpenChange={(open) => !open && handleCloseCreateKey()}>
                 <DialogContent className="sm:max-w-md">
@@ -2142,6 +2086,8 @@ function SiteChannelDialog({
         card.accounts[0] ??
         null;
 
+    const enableSiteAccount = useEnableSiteAccount();
+
     const setAccountTabRef = useCallback((accountId: number, node: HTMLButtonElement | null) => {
         if (node) {
             accountTabRefs.current.set(accountId, node);
@@ -2209,17 +2155,25 @@ function SiteChannelDialog({
                                 {card.enabled ? '站点启用' : '站点停用'}
                             </Badge>
                             {resolvedAccount ? (
-                                <Badge
-                                    variant="outline"
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        enableSiteAccount.mutate({
+                                            id: resolvedAccount.account_id,
+                                            enabled: !resolvedAccount.enabled,
+                                        })
+                                    }
+                                    disabled={enableSiteAccount.isPending}
                                     className={cn(
-                                        'h-6 px-2 text-[11px]',
+                                        'inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition hover:opacity-80',
                                         resolvedAccount.enabled
                                             ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                                             : 'border-destructive/30 bg-destructive/10 text-destructive',
                                     )}
                                 >
+                                    <Power className={cn('size-3', enableSiteAccount.isPending && 'animate-spin')} />
                                     {resolvedAccount.enabled ? '账号启用' : '账号停用'}
-                                </Badge>
+                                </button>
                             ) : null}
                         </DialogTitle>
                         {resolvedAccount ? (
@@ -2394,7 +2348,7 @@ function SiteCard({
                     )}
                     style={{
                         contentVisibility: 'auto',
-                        containIntrinsicSize: isListLayout ? '260px' : '340px',
+                        containIntrinsicSize: isListLayout ? '200px' : '260px',
                     }}
                 >
                     <div
@@ -2411,70 +2365,32 @@ function SiteCard({
                     >
                         <header className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                                <div className="truncate text-lg font-bold">{card.site_name}</div>
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={cn(
+                                            'inline-block size-2 shrink-0 rounded-full',
+                                            card.enabled
+                                                ? 'bg-emerald-500'
+                                                : 'bg-destructive',
+                                        )}
+                                        title={card.enabled ? '启用' : '停用'}
+                                    />
+                                    <div className="truncate text-lg font-bold">{card.site_name}</div>
+                                </div>
                                 <div className="mt-1 flex flex-wrap gap-2">
                                     <Badge variant="outline" className="h-6 px-2 text-[11px]">
                                         {platformLabel(card.platform)}
                                     </Badge>
-                                    <Badge
-                                        variant="outline"
-                                        className="h-6 px-2 text-[11px] border-primary/20 bg-primary/10 text-primary"
-                                    >
-                                        站点渠道
-                                    </Badge>
-                                    <Badge
-                                        variant="outline"
-                                        className={cn(
-                                            'h-6 px-2 text-[11px]',
-                                            card.enabled
-                                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                                                : 'border-destructive/30 bg-destructive/10 text-destructive',
-                                        )}
-                                    >
-                                        {card.enabled ? '启用' : '停用'}
-                                    </Badge>
                                 </div>
-                            </div>
-                            <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-2 text-right">
-                                <div className="text-[10px] text-muted-foreground">账号</div>
-                                <div className="text-lg font-semibold">{card.account_count}</div>
                             </div>
                         </header>
 
-                        <dl className="grid grid-cols-2 gap-3">
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-3">
-                                <dt className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <FolderTree className="size-3.5" />
-                                    分组
-                                </dt>
-                                <dd className="mt-2 text-lg font-semibold">{summary.groupCount}</dd>
-                            </div>
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-3">
-                                <dt className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <Sparkles className="size-3.5" />
-                                    模型
-                                </dt>
-                                <dd className="mt-2 text-lg font-semibold">{summary.modelCount}</dd>
-                            </div>
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-3">
-                                <dt className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <KeyRound className="size-3.5" />
-                                    Key
-                                </dt>
-                                <dd className="mt-2 text-lg font-semibold">
-                                    {summary.enabledKeys}/{summary.totalKeys}
-                                </dd>
-                            </div>
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-3">
-                                <dt className="flex items-center gap-1 text-xs text-muted-foreground">
-                                    <UserRound className="size-3.5" />
-                                    账号
-                                </dt>
-                                <dd className="mt-2 truncate text-sm font-medium text-foreground">
-                                    {card.accounts.map((account) => account.account_name).join(' · ')}
-                                </dd>
-                            </div>
-                        </dl>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1"><FolderTree className="size-3.5" />{summary.groupCount} 分组</span>
+                            <span className="flex items-center gap-1"><Sparkles className="size-3.5" />{summary.modelCount} 模型</span>
+                            <span className="flex items-center gap-1"><KeyRound className="size-3.5" />{summary.enabledKeys}/{summary.totalKeys} Key</span>
+                            <span className="flex items-center gap-1"><UserRound className="size-3.5" />{card.account_count} 账号</span>
+                        </div>
 
                         <div className={cn('space-y-2', isListLayout ? 'md:min-w-[18rem] md:max-w-[22rem]' : '')}>
                         <div className="text-xs font-medium text-muted-foreground">端点格式分布</div>
@@ -2492,27 +2408,6 @@ function SiteCard({
                         </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-xl"
-                            onClick={onNavigateToSite}
-                        >
-                            <Globe2 className="size-4" />
-                            站点页
-                        </Button>
-                        <Button
-                            type="button"
-                            size="sm"
-                            className="rounded-xl"
-                            onClick={() => setOpen(true)}
-                        >
-                            <Waypoints className="size-4" />
-                            管理站点渠道
-                        </Button>
-                    </div>
                 </article>
             </div>
 
