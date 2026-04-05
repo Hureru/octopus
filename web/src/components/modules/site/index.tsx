@@ -87,7 +87,6 @@ import {
   CheckSquare,
   ChevronDown,
   CircleAlert,
-  ExternalLink,
   FileJson,
   FilterX,
   Link2,
@@ -1569,10 +1568,17 @@ export function Site() {
 
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-3">
-              <button
-                type="button"
-                className="min-w-0 flex-1 text-left"
+              <div
+                className="min-w-0 flex-1 cursor-pointer text-left"
+                role="button"
+                tabIndex={0}
                 onClick={() => toggleSiteExpanded(site.id, forceExpanded)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSiteExpanded(site.id, forceExpanded);
+                  }
+                }}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-lg font-semibold">{site.name}</h2>
@@ -1595,7 +1601,15 @@ export function Site() {
 
                 <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                   <Link2 className="size-4 shrink-0" />
-                  <span className="truncate">{site.base_url}</span>
+                  <a
+                    href={site.base_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="truncate hover:text-foreground hover:underline transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {site.base_url}
+                  </a>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
@@ -1619,31 +1633,19 @@ export function Site() {
                   {site.custom_header.length > 0 ? (
                     <span>{site.custom_header.length} 个 Header</span>
                   ) : null}
-                  {site.external_checkin_url ? <span>外部签到</span> : null}
+                  {site.external_checkin_url ? <span>手动签到</span> : null}
                 </div>
-              </button>
+              </div>
 
               <div className="flex items-center gap-1">
-                <IconActionButton
-                  label="打开站点"
-                  onClick={() => openSiteBaseURL(site)}
-                >
-                  <ExternalLink className="size-4" />
-                </IconActionButton>
-
-                <IconActionButton
-                  label="查看站点渠道"
-                  onClick={() => jumpToSiteChannel(site.id)}
-                >
-                  <Waypoints className="size-4" />
-                </IconActionButton>
-
-                <IconActionButton
-                  label="新增账号"
-                  onClick={() => openCreateAccountDialog(site)}
-                >
-                  <Plus className="size-4" />
-                </IconActionButton>
+                {site.accounts.length === 0 ? (
+                  <IconActionButton
+                    label="新增账号"
+                    onClick={() => openCreateAccountDialog(site)}
+                  >
+                    <Plus className="size-4" />
+                  </IconActionButton>
+                ) : null}
 
                 <Popover>
                   <PopoverTrigger asChild>
@@ -1660,9 +1662,28 @@ export function Site() {
                   </PopoverTrigger>
                   <PopoverContent
                     align="end"
-                    className="w-48 rounded-2xl border border-border/60 bg-card p-2"
+                    className="w-52 rounded-2xl border border-border/60 bg-card p-2"
                   >
                     <div className="grid gap-1">
+                      <button
+                        type="button"
+                        className={MENU_BUTTON_CLASS}
+                        onClick={() => jumpToSiteChannel(site.id)}
+                      >
+                        <Waypoints className="size-4" />
+                        <span>查看站点渠道</span>
+                      </button>
+                      {site.accounts.length > 0 ? (
+                        <button
+                          type="button"
+                          className={MENU_BUTTON_CLASS}
+                          onClick={() => openCreateAccountDialog(site)}
+                        >
+                          <Plus className="size-4" />
+                          <span>新增账号</span>
+                        </button>
+                      ) : null}
+                      <div className="my-1 border-t border-border/60" />
                       <button
                         type="button"
                         className={MENU_BUTTON_CLASS}
@@ -2312,7 +2333,7 @@ export function Site() {
             </label>
 
             <label className="grid gap-2 text-sm">
-              <span className="font-medium">外部签到 URL</span>
+              <span className="font-medium">手动签到 URL</span>
               <Input
                 value={siteForm.external_checkin_url}
                 onChange={(event) =>
@@ -2321,12 +2342,11 @@ export function Site() {
                     external_checkin_url: event.target.value,
                   }))
                 }
-                placeholder="可选：例如 https://example.com/api/checkin"
+                placeholder="可选：例如 https://example.com/signin"
                 className="rounded-xl"
               />
               <span className="text-xs text-muted-foreground">
-                配置后签到将调用此
-                URL，而非内置平台逻辑。适用于平台不支持签到但有外部签到接口的场景。
+                配置后可在站点总览中一键打开此页面进行手动签到，适用于有验证码等无法自动化签到的场景。
               </span>
             </label>
 
