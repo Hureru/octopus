@@ -9,6 +9,36 @@ import type {
     SiteModelRouteType,
 } from '@/api/endpoints/site-channel';
 
+export type PendingCompletionKeyItem = {
+    site_id: number;
+    site_name: string;
+    account_id: number;
+    account_name: string;
+    group_key: string;
+    group_name: string;
+    key_id: number;
+    key_name: string;
+    token: string;
+    token_masked: string;
+};
+
+export type PendingCompletionAccount = {
+    site_id: number;
+    site_name: string;
+    account_id: number;
+    account_name: string;
+    items: PendingCompletionKeyItem[];
+};
+
+export type PendingCompletionSite = {
+    site_id: number;
+    site_name: string;
+    platform: SiteChannelCard['platform'];
+    base_url: string;
+    accounts: PendingCompletionAccount[];
+    pending_count: number;
+};
+
 export const SITE_GROUP_FILTER_ALL = { kind: 'all' } as const;
 
 export type SiteChannelGroupFilter =
@@ -146,6 +176,69 @@ export function countAccountKeys(account: SiteChannelAccount) {
         },
         { total: 0, enabled: 0 },
     );
+}
+
+export function isMaskedTokenValue(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    return trimmed.includes('*') || trimmed.includes('•');
+}
+
+export function buildSiteTokenManagementUrl(baseUrl: string, platform: SiteChannelCard['platform']) {
+    const trimmed = baseUrl.trim();
+    if (!trimmed) return '';
+
+    const normalizedBase = trimmed.replace(/\/+$/, '');
+    if (platform !== 'new-api') return normalizedBase;
+    return `${normalizedBase}/console/token`;
+}
+
+export function collectPendingCompletionSites(cards: SiteChannelCard[]): PendingCompletionSite[] {
+    return cards
+        .map((card) => {
+            const accounts = card.accounts
+                .map((account) => {
+                    const items = account.groups.flatMap((group) =>
+                        group.source_keys
+                            .filter((key) => key.value_status === 'masked_pending')
+                            .map((key) => ({
+                                site_id: card.site_id,
+                                site_name: card.site_name,
+                                account_id: account.account_id,
+                                account_name: account.account_name,
+                                group_key: group.group_key,
+                                group_name: group.group_name,
+                                key_id: key.id,
+                                key_name: key.name,
+                                token: key.token,
+                                token_masked: key.token_masked,
+                            })),
+                    );
+
+                    if (items.length === 0) return null;
+
+                    return {
+                        site_id: card.site_id,
+                        site_name: card.site_name,
+                        account_id: account.account_id,
+                        account_name: account.account_name,
+                        items,
+                    } satisfies PendingCompletionAccount;
+                })
+                .filter((account): account is PendingCompletionAccount => account !== null);
+
+            if (accounts.length === 0) return null;
+
+            return {
+                site_id: card.site_id,
+                site_name: card.site_name,
+                platform: card.platform,
+                base_url: card.base_url,
+                accounts,
+                pending_count: accounts.reduce((sum, account) => sum + account.items.length, 0),
+            } satisfies PendingCompletionSite;
+        })
+        .filter((site): site is PendingCompletionSite => site !== null);
 }
 
 export function buildSourceKeyFormItems(group: SiteChannelGroup): SiteSourceKeyFormItem[] {

@@ -439,6 +439,33 @@ export function useUpdateSiteSourceKeys(siteId: number, accountId: number) {
     });
 }
 
+export function useUpdateAnySiteSourceKeys() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async ({
+            siteId,
+            accountId,
+            payload,
+        }: {
+            siteId: number;
+            accountId: number;
+            payload: SiteSourceKeyUpdateRequest;
+        }) =>
+            apiClient.put<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/source-keys'), payload),
+        onSuccess: (account, variables) => {
+            const normalizedAccount = normalizeSiteChannelAccount(account);
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, variables.siteId, normalizedAccount),
+            );
+            invalidateSiteChannelAndRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site source key update failed:', error);
+        },
+    });
+}
+
 export function useResetSiteChannelModelRoutes(siteId: number, accountId: number) {
     const queryClient = useQueryClient();
 
