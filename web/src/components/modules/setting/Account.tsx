@@ -76,7 +76,7 @@ export function SettingAccount() {
     };
 
     return (
-        <div className="rounded-3xl border border-border bg-card p-6 space-y-6">
+        <div className="min-w-0 overflow-hidden rounded-3xl border border-border bg-card p-6 space-y-6">
             <h2 className="text-lg font-bold text-card-foreground flex items-center gap-2">
                 <User className="h-5 w-5" />
                 {t('account.title')}
@@ -88,17 +88,17 @@ export function SettingAccount() {
                     <KeyRound className="size-4" />
                     {t('account.username.label')}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex min-w-0 gap-2">
                     <Input
                         value={newUsername}
                         onChange={(e) => setNewUsername(e.target.value)}
                         placeholder={t('account.username.placeholder')}
-                        className="flex-1 rounded-xl"
+                        className="min-w-0 flex-1 rounded-xl"
                     />
                     <Button
                         onClick={handleChangeUsername}
                         disabled={changeUsername.isPending || !newUsername.trim()}
-                        className="rounded-xl"
+                        className="shrink-0 rounded-xl"
                     >
                         {changeUsername.isPending ? t('account.saving') : t('account.save')}
                     </Button>
