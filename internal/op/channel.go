@@ -278,6 +278,19 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 	return nil
 }
 
+func ChannelEnabledManaged(id int, enabled bool, ctx context.Context) error {
+	oldChannel, ok := channelCache.Get(id)
+	if !ok {
+		return fmt.Errorf("channel not found")
+	}
+	if err := db.GetDB().WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", enabled).Error; err != nil {
+		return err
+	}
+	oldChannel.Enabled = enabled
+	channelCache.Set(id, oldChannel)
+	return nil
+}
+
 func ChannelDel(id int, ctx context.Context) error {
 	return channelDel(id, ctx, false)
 }

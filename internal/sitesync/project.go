@@ -30,7 +30,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		channelIDs := make([]int, 0, len(bindings))
 		for _, binding := range bindings {
 			channelIDs = append(channelIDs, binding.ChannelID)
-			if err := op.ChannelEnabled(binding.ChannelID, false, ctx); err != nil {
+			if err := op.ChannelEnabledManaged(binding.ChannelID, false, ctx); err != nil {
 				log.Warnf("failed to disable managed channel %d: %v", binding.ChannelID, err)
 			}
 		}
