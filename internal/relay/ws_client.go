@@ -281,7 +281,8 @@ func bestEffortWarmupUpstreamWS(
 			if usedKey.ChannelKey == "" {
 				break
 			}
-			if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
+			tripped, _ := balancer.PeekTripped(channel.ID, usedKey.ID, item.ModelName)
+			if tripped {
 				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
 				continue
 			}
@@ -445,6 +446,7 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 				delay := computeBackoff(retryNum, result.RetryAfter)
 				select {
 				case <-ctx.Done():
+					balancer.AbortHalfOpen(channel.ID, usedKey.ID, req.internalRequest.Model)
 					return wsRelayResult{Canceled: true, Err: ctx.Err()}
 				case <-time.After(delay):
 				}
@@ -477,12 +479,14 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			return wsRelayResult{Success: true, ResponseID: respID}
 		}
 		if result.ResetConversation {
+			balancer.AbortHalfOpen(channel.ID, usedKey.ID, req.internalRequest.Model)
 			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
 				return wsRelayResult{ResetConversation: publicErr.ResetConversation, Err: result.Err, PublicError: &publicErr}
 			}
 			return wsRelayResult{ResetConversation: true, Err: result.Err}
 		}
 		if result.Canceled || result.Written {
+			balancer.AbortHalfOpen(channel.ID, usedKey.ID, req.internalRequest.Model)
 			return wsRelayResult{Written: result.Written, Canceled: result.Canceled, Err: result.Err}
 		}
 		lastErr = result.Err

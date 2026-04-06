@@ -187,6 +187,14 @@
                 "label": "Max Cooldown (seconds)",
                 "placeholder": "Enter max cooldown in seconds"
             },
+            "clear": {
+                "label": "Clear all breaker states",
+                "button": "Clear now",
+                "clearing": "Clearing...",
+                "success": "Circuit breaker states cleared",
+                "description": "Cleared {count} breaker records",
+                "failed": "Failed to clear circuit breaker states"
+            },
             "hint": "When a channel fails consecutively up to the threshold, circuit breaker trips. Cooldown grows exponentially up to the max cooldown"
         },
         "saved": "Saved",

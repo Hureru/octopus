@@ -11,6 +11,10 @@ export interface Setting {
     value: string;
 }
 
+export interface ClearCircuitBreakersResult {
+    cleared: number;
+}
+
 export const SettingKey = {
     ProxyURL: 'proxy_url',
     StatsSaveInterval: 'stats_save_interval',
@@ -72,6 +76,20 @@ export function useSetSetting() {
         },
         onError: (error) => {
             logger.error('Setting 设置失败:', error);
+        },
+    });
+}
+
+export function useClearCircuitBreakers() {
+    return useMutation({
+        mutationFn: async () => {
+            return apiClient.post<ClearCircuitBreakersResult>('/api/v1/setting/circuit-breaker/clear');
+        },
+        onSuccess: (data) => {
+            logger.log('熔断器清空成功:', data);
+        },
+        onError: (error) => {
+            logger.error('熔断器清空失败:', error);
         },
     });
 }
@@ -211,5 +229,4 @@ export function useImportDB() {
         },
     });
 }
-
 

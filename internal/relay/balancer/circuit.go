@@ -90,6 +90,16 @@ func GetCooldown(tripCount int) time.Duration {
 // IsTripped 检查通道是否处于熔断状态
 // 返回 tripped=true 表示该通道应被跳过，remaining 为剩余冷却时间
 func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining time.Duration) {
+	return isTripped(channelID, keyID, modelName, true)
+}
+
+// PeekTripped 检查熔断状态但不推进 Open -> HalfOpen。
+// 适用于预热、后台探测等不应消耗真实试探机会的场景。
+func PeekTripped(channelID, keyID int, modelName string) (tripped bool, remaining time.Duration) {
+	return isTripped(channelID, keyID, modelName, false)
+}
+
+func isTripped(channelID, keyID int, modelName string, allowHalfOpen bool) (tripped bool, remaining time.Duration) {
 	key := circuitKey(channelID, keyID, modelName)
 	v, ok := globalBreaker.Load(key)
 	if !ok {
@@ -108,6 +118,9 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 		cooldown := GetCooldown(entry.TripCount)
 		elapsed := time.Since(entry.LastFailureTime)
 		if elapsed >= cooldown {
+			if !allowHalfOpen {
+				return true, 0
+			}
 			entry.State = StateHalfOpen
 			log.Infof("circuit breaker [%s] Open -> HalfOpen (cooldown %v elapsed)", key, cooldown)
 			return false, 0
@@ -122,6 +135,40 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 	default:
 		return false, 0
 	}
+}
+
+// AbortHalfOpen 在试探请求未正常记账时回退到 Open，避免半开状态永久卡死。
+func AbortHalfOpen(channelID, keyID int, modelName string) bool {
+	key := circuitKey(channelID, keyID, modelName)
+	v, ok := globalBreaker.Load(key)
+	if !ok {
+		return false
+	}
+	entry := v.(*circuitEntry)
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	if entry.State != StateHalfOpen {
+		return false
+	}
+
+	entry.State = StateOpen
+	entry.LastFailureTime = time.Now()
+	log.Warnf("circuit breaker [%s] HalfOpen -> Open (probe aborted, tripCount=%d, cooldown=%v)",
+		key, entry.TripCount, GetCooldown(entry.TripCount))
+	return true
+}
+
+// ClearAllCircuitBreakers 清空所有熔断状态。
+func ClearAllCircuitBreakers() int {
+	count := 0
+	globalBreaker.Range(func(key, _ any) bool {
+		globalBreaker.Delete(key)
+		count++
+		return true
+	})
+	return count
 }
 
 // RecordSuccess 记录成功，重置熔断器状态

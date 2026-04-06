@@ -170,6 +170,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				select {
 				case <-c.Request.Context().Done():
 					log.Infof("request context canceled during retry backoff")
+					balancer.AbortHalfOpen(channel.ID, usedKey.ID, internalRequest.Model)
 					metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
 					return
 				case <-time.After(delay):
@@ -205,10 +206,12 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			return
 		}
 		if result.Canceled {
+			balancer.AbortHalfOpen(channel.ID, usedKey.ID, internalRequest.Model)
 			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
 			return
 		}
 		if result.ResetConversation {
+			balancer.AbortHalfOpen(channel.ID, usedKey.ID, internalRequest.Model)
 			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
 			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
 				resp.Error(c, publicErr.Status, publicErr.Message)
@@ -218,6 +221,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			return
 		}
 		if result.Written {
+			balancer.AbortHalfOpen(channel.ID, usedKey.ID, internalRequest.Model)
 			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
 			return
 		}

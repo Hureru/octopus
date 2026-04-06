@@ -10,6 +10,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -37,6 +38,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/import", http.MethodPost).
 				Handle(importDB),
+		).
+		AddRoute(
+			router.NewRoute("/circuit-breaker/clear", http.MethodPost).
+				Handle(clearCircuitBreakers),
 		)
 }
 
@@ -152,6 +157,11 @@ func importDB(c *gin.Context) {
 	}
 
 	resp.Success(c, result)
+}
+
+func clearCircuitBreakers(c *gin.Context) {
+	count := balancer.ClearAllCircuitBreakers()
+	resp.Success(c, gin.H{"cleared": count})
 }
 
 func decodeDBDump(body []byte, dump *model.DBDump) error {

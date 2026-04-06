@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { Zap, Hash, Timer, TimerOff, HelpCircle } from 'lucide-react';
+import { Zap, Hash, Timer, TimerOff, HelpCircle, Trash2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
+import { Button } from '@/components/ui/button';
+import { useSettingList, useSetSetting, useClearCircuitBreakers, SettingKey } from '@/api/endpoints/setting';
 import { toast } from '@/components/common/Toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 
@@ -12,6 +13,7 @@ export function SettingCircuitBreaker() {
     const t = useTranslations('setting');
     const { data: settings } = useSettingList();
     const setSetting = useSetSetting();
+    const clearCircuitBreakers = useClearCircuitBreakers();
 
     const [threshold, setThreshold] = useState('');
     const [cooldown, setCooldown] = useState('');
@@ -54,6 +56,19 @@ export function SettingCircuitBreaker() {
                 } else if (key === SettingKey.CircuitBreakerMaxCooldown) {
                     initialMaxCooldown.current = value;
                 }
+            }
+        });
+    };
+
+    const handleClearCircuitBreakers = () => {
+        clearCircuitBreakers.mutate(undefined, {
+            onSuccess: (data) => {
+                toast.success(t('circuitBreaker.clear.success'), {
+                    description: t('circuitBreaker.clear.description', { count: data.cleared }),
+                });
+            },
+            onError: () => {
+                toast.error(t('circuitBreaker.clear.failed'));
             }
         });
     };
@@ -121,6 +136,22 @@ export function SettingCircuitBreaker() {
                     placeholder={t('circuitBreaker.maxCooldown.placeholder')}
                     className="w-48 rounded-xl"
                 />
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <Trash2 className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('circuitBreaker.clear.label')}</span>
+                </div>
+                <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleClearCircuitBreakers}
+                    disabled={clearCircuitBreakers.isPending}
+                    className="rounded-xl"
+                >
+                    {clearCircuitBreakers.isPending ? t('circuitBreaker.clear.clearing') : t('circuitBreaker.clear.button')}
+                </Button>
             </div>
         </div>
     );
