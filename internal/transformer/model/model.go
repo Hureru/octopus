@@ -244,18 +244,18 @@ type InternalLLMRequest struct {
 	Include []string `json:"-"`
 
 	// Responses API pass-through fields (only meaningful for OpenAI Response outbound)
-	PreviousResponseID   *string         `json:"-"`
-	Background           *bool           `json:"-"`
-	Prompt               json.RawMessage `json:"-"`
-	ResponsesPromptCacheKey       *string         `json:"-"`
-	PromptCacheRetention *string         `json:"-"`
-	MaxToolCalls         *int64          `json:"-"`
-	Conversation         json.RawMessage `json:"-"`
-	ContextManagement    json.RawMessage `json:"-"`
-	ResponsesStreamOptions json.RawMessage `json:"-"`
-	ReasoningSummary     *string         `json:"-"`
-	ReasoningGenerateSummary *string     `json:"-"`
-	RawInputItems        json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
+	PreviousResponseID       *string         `json:"-"`
+	Background               *bool           `json:"-"`
+	Prompt                   json.RawMessage `json:"-"`
+	ResponsesPromptCacheKey  *string         `json:"-"`
+	PromptCacheRetention     *string         `json:"-"`
+	MaxToolCalls             *int64          `json:"-"`
+	Conversation             json.RawMessage `json:"-"`
+	ContextManagement        json.RawMessage `json:"-"`
+	ResponsesStreamOptions   json.RawMessage `json:"-"`
+	ReasoningSummary         *string         `json:"-"`
+	ReasoningGenerateSummary *string         `json:"-"`
+	RawInputItems            json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
 
 	// Query stores the original query parameters from the inbound request.
 	// This is a help field and will not be sent to the llm service.
@@ -269,7 +269,7 @@ func (r *InternalLLMRequest) Validate() error {
 
 	// 检查是否是 embedding 请求
 	isEmbeddingRequest := r.EmbeddingInput != nil
-	isChatRequest := len(r.Messages) > 0
+	isChatRequest := r.IsChatRequest()
 
 	if isEmbeddingRequest && isChatRequest {
 		return errors.New("cannot specify both messages and input")
@@ -287,11 +287,11 @@ func (r *InternalLLMRequest) Validate() error {
 	}
 
 	// 验证 chat 请求
-	if isChatRequest && len(r.Messages) == 0 {
+	if isChatRequest && len(r.Messages) == 0 && len(r.RawInputItems) == 0 {
 		return errors.New("messages are required")
 	}
 
-	if isChatRequest {
+	if len(r.Messages) > 0 {
 		r.fillMissingToolCallIDsFromToolMessages()
 		// r.fillMissingToolCallIDs()
 	}
@@ -334,7 +334,6 @@ func (r *InternalLLMRequest) fillMissingToolCallIDs() {
 		}
 	}
 }
-
 
 func (r *InternalLLMRequest) fillMissingToolCallIDsFromToolMessages() {
 	for msgIndex := 0; msgIndex < len(r.Messages); msgIndex++ {
@@ -394,7 +393,7 @@ func (r *InternalLLMRequest) IsEmbeddingRequest() bool {
 
 // IsChatRequest returns true if this is a chat completion request.
 func (r *InternalLLMRequest) IsChatRequest() bool {
-	return len(r.Messages) > 0
+	return len(r.Messages) > 0 || (r.RawAPIFormat == APIFormatOpenAIResponse && len(r.RawInputItems) > 0)
 }
 
 func (r *InternalLLMRequest) ClearHelpFields() {

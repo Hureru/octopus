@@ -288,9 +288,13 @@ type ResponsesRequest struct {
 type ResponsesInput struct {
 	Text  *string
 	Items []ResponsesItem
+	Raw   json.RawMessage
 }
 
 func (i ResponsesInput) MarshalJSON() ([]byte, error) {
+	if len(i.Raw) > 0 {
+		return json.Marshal(json.RawMessage(i.Raw))
+	}
 	if i.Text != nil {
 		return json.Marshal(i.Text)
 	}
@@ -472,8 +476,8 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 	// Convert instructions from system messages
 	result.Instructions = convertInstructionsFromMessages(req.Messages)
 
-	// Convert input from messages
-	result.Input = convertInputFromMessages(req.Messages, req.TransformOptions)
+	// Convert input from messages or preserve original array items when available.
+	result.Input = buildResponsesInput(req)
 
 	// Convert tools
 	if len(req.Tools) > 0 {
@@ -519,6 +523,29 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 	result.TopLogprobs = req.TopLogprobs
 
 	return result
+}
+
+func buildResponsesInput(req *model.InternalLLMRequest) ResponsesInput {
+	if req != nil && len(req.RawInputItems) > 0 {
+		return ResponsesInput{Raw: append(json.RawMessage(nil), req.RawInputItems...)}
+	}
+	if req == nil {
+		return ResponsesInput{}
+	}
+	return convertInputFromMessages(req.Messages, req.TransformOptions)
+}
+
+func MarshalResponsesInputItems(msgs []model.Message) (json.RawMessage, error) {
+	forceArray := true
+	input := convertInputFromMessages(msgs, model.TransformOptions{ArrayInputs: &forceArray})
+	if len(input.Items) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(input.Items)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func convertInstructionsFromMessages(msgs []model.Message) string {

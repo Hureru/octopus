@@ -167,6 +167,10 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	req := &transformerModel.InternalLLMRequest{
 		Model:              "gpt-4o",
 		PreviousResponseID: stringPtr("resp_prev"),
+		RawInputItems: json.RawMessage(`[
+			{"type":"function_call_output","call_id":"call_123","output":[{"type":"input_text","text":"ok"}]},
+			{"type":"input_text","text":"tail","native_meta":{"keep":true}}
+		]`),
 		Messages: []transformerModel.Message{{
 			Role:       "tool",
 			ToolCallID: stringPtr("call_123"),
@@ -188,6 +192,19 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	}
 	if requiresUpstreamWSContinuation(replayed) {
 		t.Fatalf("expected replay request to be self-contained")
+	}
+	var rawItems []map[string]any
+	if err := json.Unmarshal(replayed.RawInputItems, &rawItems); err != nil {
+		t.Fatalf("expected replay raw input items to be valid json, got %v", err)
+	}
+	if len(rawItems) != 3 {
+		t.Fatalf("expected transcript item plus original raw items, got %d items", len(rawItems))
+	}
+	if rawItems[0]["type"] != "function_call" {
+		t.Fatalf("expected transcript assistant tool call to be preserved, got %#v", rawItems[0])
+	}
+	if _, ok := rawItems[2]["native_meta"]; !ok {
+		t.Fatalf("expected original raw input item native fields to be preserved, got %#v", rawItems[2])
 	}
 }
 

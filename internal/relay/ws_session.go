@@ -1,11 +1,13 @@
 package relay
 
 import (
+	"encoding/json"
 	"maps"
 	"net/url"
 	"strings"
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
+	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 )
 
 type wsConversationState struct {
@@ -38,6 +40,11 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	replayed.Messages = append(cloneMessages(s.Transcript), cloneMessages(req.Messages)...)
 	replayed.PreviousResponseID = nil
 	replayed.Conversation = nil
+	replayed.RawInputItems = nil
+	if mergedRawInputItems, ok := buildReplayRawInputItems(s.Transcript, req.RawInputItems); ok {
+		replayed.RawInputItems = mergedRawInputItems
+		replayed.TransformOptions.ArrayInputs = boolPtr(true)
+	}
 	return replayed
 }
 
@@ -177,4 +184,53 @@ func cloneBoolPointer(value *bool) *bool {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func buildReplayRawInputItems(transcript []transformerModel.Message, currentRawInputItems json.RawMessage) (json.RawMessage, bool) {
+	if len(currentRawInputItems) == 0 {
+		return nil, false
+	}
+
+	mergedItems := make([]json.RawMessage, 0)
+	if len(transcript) > 0 {
+		transcriptItems, err := openaiOutbound.MarshalResponsesInputItems(transcript)
+		if err != nil {
+			return nil, false
+		}
+		decodedTranscriptItems, err := decodeRawJSONArray(transcriptItems)
+		if err != nil {
+			return nil, false
+		}
+		mergedItems = append(mergedItems, decodedTranscriptItems...)
+	}
+
+	decodedCurrentItems, err := decodeRawJSONArray(currentRawInputItems)
+	if err != nil {
+		return nil, false
+	}
+	mergedItems = append(mergedItems, decodedCurrentItems...)
+	if len(mergedItems) == 0 {
+		return nil, false
+	}
+
+	data, err := json.Marshal(mergedItems)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+func decodeRawJSONArray(data json.RawMessage) ([]json.RawMessage, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

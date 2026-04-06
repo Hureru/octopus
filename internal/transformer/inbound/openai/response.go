@@ -991,6 +991,9 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 
 	if req.Input.Text == nil && len(req.Input.Items) > 0 {
 		chatReq.TransformOptions.ArrayInputs = lo.ToPtr(true)
+		if rawItems, marshalErr := json.Marshal(req.Input.Items); marshalErr == nil {
+			chatReq.RawInputItems = rawItems
+		}
 	}
 
 	// Convert reasoning
