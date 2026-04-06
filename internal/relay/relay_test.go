@@ -638,6 +638,59 @@ func TestHandlerRetryEnabledDoesNotTurnRecent429IntoNoAvailableKey(t *testing.T)
 	}
 }
 
+func TestHandleWSResponseKeepsIdleClientAliveWithPing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	oldInterval := wsClientIdlePingInterval
+	oldTimeout := wsClientIdlePingTimeout
+	wsClientIdlePingInterval = 20 * time.Millisecond
+	wsClientIdlePingTimeout = 200 * time.Millisecond
+	defer func() {
+		wsClientIdlePingInterval = oldInterval
+		wsClientIdlePingTimeout = oldTimeout
+	}()
+
+	var pingCount atomic.Int32
+	serverHandler := gin.New()
+	serverHandler.Use(func(c *gin.Context) {
+		c.Set("api_key_id", 1)
+		c.Set("supported_models", "")
+		c.Next()
+	})
+	serverHandler.GET("/v1/responses", func(c *gin.Context) { HandleWSResponse(c) })
+
+	server := httptest.NewServer(serverHandler)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/responses"
+	clientConn, _, err := websocket.Dial(context.Background(), wsURL, &websocket.DialOptions{
+		OnPingReceived: func(ctx context.Context, payload []byte) bool {
+			pingCount.Add(1)
+			return true
+		},
+	})
+	if err != nil {
+		t.Fatalf("websocket dial failed: %v", err)
+	}
+	defer clientConn.Close(websocket.StatusNormalClosure, "")
+
+	clientCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = clientConn.CloseRead(clientCtx)
+
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if pingCount.Load() >= 2 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if pingCount.Load() < 2 {
+		t.Fatalf("expected idle keepalive to receive at least 2 pongs, got %d", pingCount.Load())
+	}
+}
+
 func TestHandlerUsesNextKeyWhenFirstKeyCircuitIsOpen(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)

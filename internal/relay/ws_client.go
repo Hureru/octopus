@@ -24,6 +24,11 @@ const (
 	wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
 )
 
+var (
+	wsClientIdlePingInterval = 30 * time.Second
+	wsClientIdlePingTimeout  = 10 * time.Second
+)
+
 type wsRelayResult struct {
 	Success           bool
 	ResponseID        string
@@ -69,7 +74,9 @@ func HandleWSResponse(c *gin.Context) {
 		default:
 		}
 
+		stopKeepalive := startWSClientIdleKeepalive(ctx, conn)
 		msgType, data, err := conn.Read(ctx)
+		stopKeepalive()
 		if err != nil {
 			closeStatus := websocket.CloseStatus(err)
 			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway {
@@ -99,6 +106,53 @@ func HandleWSResponse(c *gin.Context) {
 		}
 
 		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, requestHeaders, conversationState)
+	}
+}
+
+func startWSClientIdleKeepalive(parent context.Context, conn *websocket.Conn) func() {
+	if wsClientIdlePingInterval <= 0 {
+		return func() {}
+	}
+
+	keepaliveCtx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		ticker := time.NewTicker(wsClientIdlePingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-keepaliveCtx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			pingCtx := keepaliveCtx
+			pingCancel := func() {}
+			if wsClientIdlePingTimeout > 0 {
+				pingCtx, pingCancel = context.WithTimeout(keepaliveCtx, wsClientIdlePingTimeout)
+			}
+
+			err := conn.Ping(pingCtx)
+			pingCancel()
+			if err == nil {
+				continue
+			}
+			if keepaliveCtx.Err() != nil {
+				return
+			}
+
+			_ = conn.CloseNow()
+			return
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
 	}
 }
 
