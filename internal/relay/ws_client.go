@@ -11,6 +11,7 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
+	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/coder/websocket"
@@ -22,15 +23,14 @@ const (
 	wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
 )
 
-// cachedWSResponse stores the last response for previous_response_id chaining.
-type cachedWSResponse struct {
-	ID string
-}
-
 type wsRelayResult struct {
 	Success           bool
 	ResponseID        string
 	ResetConversation bool
+	Written           bool
+	Canceled          bool
+	Err               error
+	PublicError       *wsPublicError
 }
 
 // HandleWSResponse handles WebSocket upgrade for /v1/responses.
@@ -54,7 +54,7 @@ func HandleWSResponse(c *gin.Context) {
 
 	log.Infof("ws client connected (apikey=%d)", apiKeyID)
 
-	var lastRespCache *cachedWSResponse
+	var conversationState *wsConversationState
 
 	// Message loop
 	for {
@@ -96,7 +96,7 @@ func HandleWSResponse(c *gin.Context) {
 			continue
 		}
 
-		lastRespCache = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, lastRespCache)
+		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, conversationState)
 	}
 }
 
@@ -106,12 +106,12 @@ func processWSResponseCreate(
 	data []byte,
 	apiKeyID int,
 	supportedModels string,
-	lastCache *cachedWSResponse,
-) *cachedWSResponse {
+	conversationState *wsConversationState,
+) *wsConversationState {
 	var reqBody map[string]json.RawMessage
 	if err := json.Unmarshal(data, &reqBody); err != nil {
 		writeWSError(ctx, conn, 400, "invalid_request", "Failed to parse request body")
-		return lastCache
+		return conversationState
 	}
 
 	// Remove WS-only fields
@@ -131,12 +131,12 @@ func processWSResponseCreate(
 					"output": []interface{}{},
 				},
 			})
-			return lastCache
+			return conversationState
 		}
 		delete(reqBody, "generate")
 	}
 
-	injectWSPreviousResponseID(reqBody, lastCache)
+	injectWSPreviousResponseID(reqBody, conversationState)
 
 	// Force stream mode
 	reqBody["stream"] = json.RawMessage("true")
@@ -144,7 +144,7 @@ func processWSResponseCreate(
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		writeWSError(ctx, conn, 500, "server_error", "Failed to build request")
-		return lastCache
+		return conversationState
 	}
 
 	// Parse request
@@ -152,8 +152,9 @@ func processWSResponseCreate(
 	internalRequest, err := inAdapter.TransformRequest(ctx, bodyBytes)
 	if err != nil {
 		writeWSError(ctx, conn, 400, "invalid_request", err.Error())
-		return lastCache
+		return conversationState
 	}
+	originalRequest := cloneInternalRequest(internalRequest)
 
 	// Check supported models
 	if supportedModels != "" {
@@ -167,52 +168,84 @@ func processWSResponseCreate(
 		}
 		if !found {
 			writeWSError(ctx, conn, 400, "invalid_request", "model not supported")
-			return lastCache
+			return conversationState
 		}
 	}
 
 	requestModel := internalRequest.Model
-
-	group, err := op.GroupGetEnabledMap(requestModel, ctx)
+	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(internalRequest), originalRequest)
 	if err != nil {
-		writeWSError(ctx, conn, 404, "model_not_found", "model not found")
-		return lastCache
+		status := 404
+		code := "model_not_found"
+		if err.Error() == "no available channel" {
+			status = 503
+			code = "no_available_channel"
+		}
+		writeWSError(ctx, conn, status, code, err.Error())
+		return conversationState
 	}
 
-	iter := balancer.NewIterator(group, apiKeyID, requestModel)
-	if iter.Len() == 0 {
-		writeWSError(ctx, conn, 503, "no_available_channel", "no available channel")
-		return lastCache
+	autoRestart := conversationState != nil && conversationState.CanAutoRestart(originalRequest)
+	result := runWSRelay(ctx, req, group)
+	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
+		balancer.DeleteSticky(apiKeyID, requestModel)
+		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
+		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest)
+		if replayErr == nil {
+			req = replayReq
+			group = replayGroup
+			result = runWSRelay(ctx, req, group)
+		}
 	}
 
-	wsWriter := NewWSStreamWriter(ctx, conn)
-	metrics := NewRelayMetrics(apiKeyID, requestModel, internalRequest)
-
-	req := &relayRequest{
-		c:               nil,
-		ctx:             ctx,
-		inAdapter:       inAdapter,
-		internalRequest: internalRequest,
-		metrics:         metrics,
-		apiKeyID:        apiKeyID,
-		requestModel:    requestModel,
-		iter:            iter,
-		streamWriter:    wsWriter,
-	}
-
-	result := executeWSRelay(ctx, conn, req, &group)
-
-	if result.Success && result.ResponseID != "" {
-		return &cachedWSResponse{ID: result.ResponseID}
+	result = finalizeWSRelay(ctx, conn, req, result)
+	if result.Success {
+		if conversationState == nil {
+			conversationState = &wsConversationState{}
+		}
+		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
+		return conversationState
 	}
 	if result.ResetConversation {
 		return nil
 	}
 
-	return lastCache
+	return conversationState
 }
 
-func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, group *dbmodel.Group) wsRelayResult {
+func newWSRelayRequest(
+	ctx context.Context,
+	conn *websocket.Conn,
+	inAdapter transformerModel.Inbound,
+	apiKeyID int,
+	requestModel string,
+	executionRequest *transformerModel.InternalLLMRequest,
+	metricsRequest *transformerModel.InternalLLMRequest,
+) (*relayRequest, *dbmodel.Group, error) {
+	group, err := op.GroupGetEnabledMap(requestModel, ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("model not found")
+	}
+
+	iter := balancer.NewIterator(group, apiKeyID, requestModel)
+	if iter.Len() == 0 {
+		return nil, nil, fmt.Errorf("no available channel")
+	}
+
+	return &relayRequest{
+		c:               nil,
+		ctx:             ctx,
+		inAdapter:       inAdapter,
+		internalRequest: executionRequest,
+		metrics:         NewRelayMetrics(apiKeyID, requestModel, metricsRequest),
+		apiKeyID:        apiKeyID,
+		requestModel:    requestModel,
+		iter:            iter,
+		streamWriter:    NewWSStreamWriter(ctx, conn),
+	}, &group, nil
+}
+
+func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) wsRelayResult {
 	maxSameChannelRetries := 1
 	if group.RetryEnabled {
 		maxSameChannelRetries = group.MaxRetries
@@ -227,7 +260,7 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 	for req.iter.Next() {
 		select {
 		case <-ctx.Done():
-			return wsRelayResult{}
+			return wsRelayResult{Canceled: true, Err: ctx.Err()}
 		default:
 		}
 
@@ -291,7 +324,7 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 				delay := computeBackoff(retryNum, result.RetryAfter)
 				select {
 				case <-ctx.Done():
-					return wsRelayResult{}
+					return wsRelayResult{Canceled: true, Err: ctx.Err()}
 				case <-time.After(delay):
 				}
 			}
@@ -316,8 +349,6 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 		}
 
 		if result.Success {
-			req.metrics.Save(ctx, true, nil, req.iter.Attempts())
-			// Get response ID from metrics (already collected by attempt → collectResponse)
 			var respID string
 			if req.metrics.InternalResponse != nil {
 				respID = req.metrics.InternalResponse.ID
@@ -325,33 +356,47 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 			return wsRelayResult{Success: true, ResponseID: respID}
 		}
 		if result.Canceled || result.Written {
-			req.metrics.Save(ctx, false, result.Err, req.iter.Attempts())
-			return wsRelayResult{}
+			return wsRelayResult{Written: result.Written, Canceled: result.Canceled, Err: result.Err}
 		}
 		lastErr = result.Err
 		lastResult = result
 	}
 
-	req.metrics.Save(ctx, false, lastErr, req.iter.Attempts())
 	if publicErr, ok := classifyWSPublicError(lastErr, lastResult.StatusCode); ok {
-		if publicErr.ResetConversation {
-			balancer.DeleteSticky(req.apiKeyID, req.requestModel)
-		}
-		writeWSError(ctx, conn, publicErr.Status, publicErr.Code, publicErr.Message)
-		return wsRelayResult{ResetConversation: publicErr.ResetConversation}
+		return wsRelayResult{ResetConversation: publicErr.ResetConversation, Err: lastErr, PublicError: &publicErr}
 	}
-	writeWSError(ctx, conn, 502, "all_channels_failed", "All channels failed")
-	return wsRelayResult{}
+	return wsRelayResult{Err: lastErr}
 }
 
-func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, lastCache *cachedWSResponse) {
-	if lastCache == nil || strings.TrimSpace(lastCache.ID) == "" {
+func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, result wsRelayResult) wsRelayResult {
+	if result.Success {
+		req.metrics.Save(ctx, true, nil, req.iter.Attempts())
+		return result
+	}
+
+	req.metrics.Save(ctx, false, result.Err, req.iter.Attempts())
+	if result.Canceled || result.Written {
+		return result
+	}
+	if result.PublicError != nil {
+		if result.PublicError.ResetConversation {
+			balancer.DeleteSticky(req.apiKeyID, req.requestModel)
+		}
+		writeWSError(ctx, conn, result.PublicError.Status, result.PublicError.Code, result.PublicError.Message)
+		return result
+	}
+	writeWSError(ctx, conn, 502, "all_channels_failed", "All channels failed")
+	return result
+}
+
+func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
+	if state == nil || strings.TrimSpace(state.LastResponseID) == "" {
 		return
 	}
 	if _, exists := reqBody["previous_response_id"]; exists {
 		return
 	}
-	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", lastCache.ID))
+	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {

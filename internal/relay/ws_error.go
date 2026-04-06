@@ -91,11 +91,22 @@ func requiresUpstreamWSContinuation(req *transformerModel.InternalLLMRequest) bo
 	if len(req.Conversation) > 0 {
 		return true
 	}
+	seenToolCalls := make(map[string]struct{})
 	for _, msg := range req.Messages {
+		if msg.Role == "assistant" {
+			for _, toolCall := range msg.ToolCalls {
+				if toolCallID := strings.TrimSpace(toolCall.ID); toolCallID != "" {
+					seenToolCalls[toolCallID] = struct{}{}
+				}
+			}
+		}
 		if msg.Role != "tool" || msg.ToolCallID == nil {
 			continue
 		}
-		if strings.TrimSpace(*msg.ToolCallID) != "" {
+		if toolCallID := strings.TrimSpace(*msg.ToolCallID); toolCallID != "" {
+			if _, exists := seenToolCalls[toolCallID]; exists {
+				continue
+			}
 			return true
 		}
 	}

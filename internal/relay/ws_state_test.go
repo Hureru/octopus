@@ -39,13 +39,13 @@ func TestInjectWSPreviousResponseIDOnlyWhenMissing(t *testing.T) {
 		"model": json.RawMessage(`"gpt-4o"`),
 	}
 
-	injectWSPreviousResponseID(reqBody, &cachedWSResponse{ID: "resp_cached"})
+	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached"})
 	if got := string(reqBody["previous_response_id"]); got != `"resp_cached"` {
 		t.Fatalf("expected cached previous_response_id to be injected, got %s", got)
 	}
 
 	reqBody["previous_response_id"] = json.RawMessage(`"resp_explicit"`)
-	injectWSPreviousResponseID(reqBody, &cachedWSResponse{ID: "resp_cached_2"})
+	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached_2"})
 	if got := string(reqBody["previous_response_id"]); got != `"resp_explicit"` {
 		t.Fatalf("expected explicit previous_response_id to be preserved, got %s", got)
 	}
@@ -110,8 +110,112 @@ func TestRequiresUpstreamWSContinuation(t *testing.T) {
 	if !requiresUpstreamWSContinuation(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "tool", ToolCallID: stringPtr("call_123")}}}) {
 		t.Fatalf("expected tool output request to require upstream ws continuation")
 	}
+	replayable := &transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{
+		{
+			Role: "assistant",
+			ToolCalls: []transformerModel.ToolCall{{
+				ID:   "call_123",
+				Type: "function",
+				Function: transformerModel.FunctionCall{
+					Name: "lookup",
+				},
+			}},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: stringPtr("call_123"),
+		},
+	}}
+	if requiresUpstreamWSContinuation(replayable) {
+		t.Fatalf("expected replayable transcript to not require upstream ws continuation")
+	}
 	if requiresUpstreamWSContinuation(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}) {
 		t.Fatalf("expected ordinary request to not require upstream ws continuation")
+	}
+}
+
+func TestWSConversationStateCanAutoRestart(t *testing.T) {
+	state := &wsConversationState{
+		LastResponseID: "resp_prev",
+		Transcript: []transformerModel.Message{{
+			Role: "assistant",
+		}},
+	}
+	if !state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_prev")}) {
+		t.Fatalf("expected latest previous_response_id to be auto-restartable")
+	}
+	if state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_other")}) {
+		t.Fatalf("expected mismatched previous_response_id to skip auto restart")
+	}
+}
+
+func TestWSConversationStateBuildReplayRequest(t *testing.T) {
+	state := &wsConversationState{
+		LastResponseID: "resp_prev",
+		Transcript: []transformerModel.Message{{
+			Role: "assistant",
+			ToolCalls: []transformerModel.ToolCall{{
+				ID:   "call_123",
+				Type: "function",
+				Function: transformerModel.FunctionCall{
+					Name:      "lookup",
+					Arguments: `{}`,
+				},
+			}},
+		}},
+	}
+	req := &transformerModel.InternalLLMRequest{
+		Model:              "gpt-4o",
+		PreviousResponseID: stringPtr("resp_prev"),
+		Messages: []transformerModel.Message{{
+			Role:       "tool",
+			ToolCallID: stringPtr("call_123"),
+			Content: transformerModel.MessageContent{
+				Content: stringPtr("ok"),
+			},
+		}},
+	}
+
+	replayed := state.BuildReplayRequest(req)
+	if replayed == nil {
+		t.Fatalf("expected replay request to be built")
+	}
+	if replayed.PreviousResponseID != nil {
+		t.Fatalf("expected replay request to clear previous_response_id")
+	}
+	if len(replayed.Messages) != 2 {
+		t.Fatalf("expected replay transcript plus current turn, got %d messages", len(replayed.Messages))
+	}
+	if requiresUpstreamWSContinuation(replayed) {
+		t.Fatalf("expected replay request to be self-contained")
+	}
+}
+
+func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
+	state := &wsConversationState{}
+	request := &transformerModel.InternalLLMRequest{
+		Messages: []transformerModel.Message{{
+			Role:    "user",
+			Content: transformerModel.MessageContent{Content: stringPtr("hello")},
+		}},
+	}
+	response := &transformerModel.InternalLLMResponse{
+		ID: "resp_new",
+		Choices: []transformerModel.Choice{{
+			Index: 0,
+			Message: &transformerModel.Message{
+				Role:    "assistant",
+				Content: transformerModel.MessageContent{Content: stringPtr("hi")},
+			},
+		}},
+	}
+
+	state.ApplySuccessfulTurn(request, response)
+	if state.LastResponseID != "resp_new" {
+		t.Fatalf("expected last response id to be updated, got %q", state.LastResponseID)
+	}
+	if len(state.Transcript) != 2 {
+		t.Fatalf("expected transcript to contain request and response, got %d messages", len(state.Transcript))
 	}
 }
 
