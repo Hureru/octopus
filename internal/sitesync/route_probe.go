@@ -191,7 +191,7 @@ func detectManagedRoutesFromPath(
 		}
 	}
 
-	tokenValue := strings.TrimSpace(modelToken.Token)
+	tokenValue := normalizeSiteTokenValueForPlatform(siteRecord, modelToken)
 	if tokenValue != "" {
 		if payload, err := requestJSON(
 			ctx,

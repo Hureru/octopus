@@ -53,7 +53,7 @@ func TestCreateAccountTokenCreatesManagedKeyAndSyncsAccount(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"data":[{"id":"vip","name":"VIP"}]}`))
 		case r.URL.Path == "/models":
-			if r.Header.Get("Authorization") != "Bearer managed-created-key" {
+			if r.Header.Get("Authorization") != "Bearer sk-managed-created-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
@@ -109,7 +109,7 @@ func TestCreateAccountTokenCreatesManagedKeyAndSyncsAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SiteAccountGet failed: %v", err)
 	}
-	if len(reloaded.Tokens) != 1 || reloaded.Tokens[0].GroupKey != "vip" || reloaded.Tokens[0].Token != "managed-created-key" {
+	if len(reloaded.Tokens) != 1 || reloaded.Tokens[0].GroupKey != "vip" || reloaded.Tokens[0].Token != "sk-managed-created-key" {
 		t.Fatalf("unexpected synced tokens: %+v", reloaded.Tokens)
 	}
 	if len(reloaded.UserGroups) != 1 || reloaded.UserGroups[0].GroupKey != "vip" {
@@ -147,7 +147,7 @@ func TestCreateAccountTokenCreatesSub2APIKeyAndSyncsAccount(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"data":[{"name":"sub2api-created","key":"sub2api-created-key","group_id":"7","group_name":"VIP 7","status":1}]}`))
 		case r.URL.Path == "/models":
-			if r.Header.Get("Authorization") != "Bearer sub2api-created-key" {
+			if r.Header.Get("Authorization") != "Bearer sk-sub2api-created-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
@@ -202,7 +202,7 @@ func TestCreateAccountTokenCreatesSub2APIKeyAndSyncsAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SiteAccountGet failed: %v", err)
 	}
-	if len(reloaded.Tokens) != 1 || reloaded.Tokens[0].GroupKey != "7" || reloaded.Tokens[0].Token != "sub2api-created-key" {
+	if len(reloaded.Tokens) != 1 || reloaded.Tokens[0].GroupKey != "7" || reloaded.Tokens[0].Token != "sk-sub2api-created-key" {
 		t.Fatalf("unexpected synced tokens: %+v", reloaded.Tokens)
 	}
 	if len(reloaded.UserGroups) != 1 || reloaded.UserGroups[0].GroupKey != "7" {

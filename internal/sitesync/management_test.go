@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 )
 
 func TestSyncManagementPlatformDiscoversNewAPIUserID(t *testing.T) {
@@ -47,7 +48,7 @@ func TestSyncManagementPlatformDiscoversNewAPIUserID(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"data":[{"id":"vip","name":"VIP"}]}`))
 		case r.URL.Path == "/models":
-			if r.Header.Get("Authorization") != "Bearer managed-key" {
+			if r.Header.Get("Authorization") != "Bearer sk-managed-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
@@ -86,6 +87,130 @@ func TestSyncManagementPlatformDiscoversNewAPIUserID(t *testing.T) {
 	}
 	if len(snapshot.models) != 1 || snapshot.models[0].ModelName != "gpt-4o-mini" {
 		t.Fatalf("unexpected synced models: %+v", snapshot.models)
+	}
+}
+
+func TestSyncManagementPlatformNormalizesSyncedTokenBeforeModelAndRouteProbe(t *testing.T) {
+	observedModelAuth := ""
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/user/self":
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "11494" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"无权进行此操作，未提供 New-Api-User"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":11494,"username":"managed-user"}}`))
+		case r.URL.Path == "/api/token/":
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "11494" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"无权进行此操作，未提供 New-Api-User"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			if r.Header.Get("Authorization") != "Bearer test-access-token" || r.Header.Get("New-API-User") != "11494" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false,"message":"无权进行此操作，未提供 New-Api-User"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
+		case r.URL.Path == "/models":
+			observedModelAuth = r.Header.Get("Authorization")
+			if observedModelAuth != "Bearer sk-managed-key" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ctx := setupProjectTestDB(t)
+	site := &model.Site{
+		Name:     "managed-normalize-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+		Enabled:  true,
+	}
+	if err := op.SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "managed-normalize-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		Enabled:        true,
+		AutoSync:       true,
+	}
+	if err := op.SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	result, err := SyncAccount(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("SyncAccount returned error: %v", err)
+	}
+	if result == nil || result.ModelCount != 1 {
+		t.Fatalf("unexpected sync result: %+v", result)
+	}
+	if observedModelAuth != "Bearer sk-managed-key" {
+		t.Fatalf("expected /models to use normalized sk token, got %q", observedModelAuth)
+	}
+
+	reloaded, err := op.SiteAccountGet(account.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteAccountGet failed: %v", err)
+	}
+	if len(reloaded.Tokens) != 1 || reloaded.Tokens[0].Token != "sk-managed-key" {
+		t.Fatalf("expected synced token to persist normalized sk value, got %+v", reloaded.Tokens)
+	}
+}
+
+func TestDetectManagedRoutesFromPathNormalizesModelToken(t *testing.T) {
+	observedPricingAuth := ""
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/pricing" {
+			http.NotFound(w, r)
+			return
+		}
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			observedPricingAuth = auth
+		}
+		if observedPricingAuth != "Bearer sk-managed-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"model_name":"gpt-4o-mini","enable_groups":["default"],"supported_endpoint_types":["/v1/chat/completions"]}]}`))
+	}))
+	defer server.Close()
+
+	detections := detectManagedRoutesFromPath(
+		context.Background(),
+		&model.Site{Platform: model.SitePlatformNewAPI, BaseURL: server.URL},
+		nil,
+		"",
+		model.SiteToken{Token: "managed-key", Source: "sync"},
+		"/api/pricing",
+		map[string]struct{}{"gpt-4o-mini": {}},
+		collectPricingRouteDetections,
+	)
+	if observedPricingAuth != "Bearer sk-managed-key" {
+		t.Fatalf("expected /api/pricing to use normalized sk token, got %q", observedPricingAuth)
+	}
+	if len(detections) != 1 {
+		t.Fatalf("expected one route detection, got %+v", detections)
 	}
 }
 
@@ -173,7 +298,7 @@ func TestSyncManagementPlatformUsesV1ModelsWhenRootModelEndpointReturnsHTML(t *t
 		case r.URL.Path == "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			observedV1AuthHeader = r.Header.Get("Authorization")
-			if observedV1AuthHeader != "Bearer managed-key" {
+			if observedV1AuthHeader != "Bearer sk-managed-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
@@ -199,7 +324,7 @@ func TestSyncManagementPlatformUsesV1ModelsWhenRootModelEndpointReturnsHTML(t *t
 	if err != nil {
 		t.Fatalf("syncManagementPlatform returned error: %v", err)
 	}
-	if observedV1AuthHeader != "Bearer managed-key" {
+	if observedV1AuthHeader != "Bearer sk-managed-key" {
 		t.Fatalf("expected /v1/models to use managed key, got %q", observedV1AuthHeader)
 	}
 	if len(snapshot.models) != 2 || snapshot.models[0].ModelName != "gpt-4.1" || snapshot.models[1].ModelName != "gpt-4o-mini" {
@@ -573,9 +698,9 @@ func TestSyncManagementPlatformFallsBackPerFailedGroupWithoutOverwritingExactMod
 		case r.URL.Path == "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			switch r.Header.Get("Authorization") {
-			case "Bearer managed-key-default":
+			case "Bearer sk-managed-key-default":
 				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
-			case "Bearer managed-key-vip":
+			case "Bearer sk-managed-key-vip":
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
 			default:
@@ -667,9 +792,9 @@ func TestSyncManagementPlatformReturnsPartialWhenSomeGroupsRemainUnresolved(t *t
 		case r.URL.Path == "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			switch r.Header.Get("Authorization") {
-			case "Bearer managed-key-default":
+			case "Bearer sk-managed-key-default":
 				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
-			case "Bearer managed-key-vip":
+			case "Bearer sk-managed-key-vip":
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
 			default:
@@ -829,9 +954,9 @@ func TestSyncManagementPlatformAssignsModelsPerTokenGroup(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
 		case r.URL.Path == "/v1/models":
 			switch r.Header.Get("Authorization") {
-			case "Bearer managed-key-vip":
+			case "Bearer sk-managed-key-vip":
 				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
-			case "Bearer managed-key-default":
+			case "Bearer sk-managed-key-default":
 				_, _ = w.Write([]byte(`{"data":[{"id":"claude-3-5-sonnet"}]}`))
 			default:
 				w.WriteHeader(http.StatusUnauthorized)

@@ -53,6 +53,10 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 	}
 	now := time.Now()
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		siteRecord, err := loadSiteRecordForSnapshot(tx, accountID)
+		if err != nil {
+			return err
+		}
 		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteUserGroup{}).Error; err != nil {
 			return err
 		}
@@ -89,7 +93,7 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		for i := range snapshot.groups {
 			snapshot.groups[i].SiteAccountID = accountID
 		}
-		mergedTokens := mergePersistedSiteTokens(accountID, existingTokens, snapshot.tokens, now)
+		mergedTokens := mergePersistedSiteTokens(siteRecord, accountID, existingTokens, snapshot.tokens, now)
 		incomingModels := preparePersistedSyncModels(accountID, snapshot.models, existingModelMap, now)
 		finalModels := mergePersistedSiteModelsByGroup(existingModels, incomingModels, snapshot.groupResults)
 
@@ -120,6 +124,18 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		}
 		return nil
 	})
+}
+
+func loadSiteRecordForSnapshot(tx *gorm.DB, accountID int) (*model.Site, error) {
+	var account model.SiteAccount
+	if err := tx.Select("site_id").Where("id = ?", accountID).First(&account).Error; err != nil {
+		return nil, err
+	}
+	var siteRecord model.Site
+	if err := tx.Select("id", "platform").Where("id = ?", account.SiteID).First(&siteRecord).Error; err != nil {
+		return nil, err
+	}
+	return &siteRecord, nil
 }
 
 func preparePersistedSyncModels(accountID int, incoming []model.SiteModel, existingModelMap map[string]model.SiteModel, now time.Time) []model.SiteModel {
@@ -167,13 +183,13 @@ func mergePersistedSiteModelsByGroup(existing []model.SiteModel, incoming []mode
 	return compactPersistedSiteModels(merged)
 }
 
-func mergePersistedSiteTokens(accountID int, existingTokens []model.SiteToken, incomingTokens []model.SiteToken, now time.Time) []model.SiteToken {
+func mergePersistedSiteTokens(siteRecord *model.Site, accountID int, existingTokens []model.SiteToken, incomingTokens []model.SiteToken, now time.Time) []model.SiteToken {
 	preparedExisting := make([]model.SiteToken, 0, len(existingTokens))
 	for _, token := range existingTokens {
 		token.SiteAccountID = accountID
 		token.GroupKey = model.NormalizeSiteGroupKey(token.GroupKey)
 		token.GroupName = model.NormalizeSiteGroupName(token.GroupKey, token.GroupName)
-		token.Token = strings.TrimSpace(token.Token)
+		token.Token = normalizeSiteTokenValueForPlatform(siteRecord, token)
 		token.ValueStatus = model.NormalizeSiteTokenValueStatus(token.ValueStatus, token.Token)
 		if token.ValueStatus == model.SiteTokenValueStatusMaskedPending {
 			token.Enabled = false
@@ -197,7 +213,7 @@ func mergePersistedSiteTokens(accountID int, existingTokens []model.SiteToken, i
 		incoming.SiteAccountID = accountID
 		incoming.GroupKey = model.NormalizeSiteGroupKey(incoming.GroupKey)
 		incoming.GroupName = model.NormalizeSiteGroupName(incoming.GroupKey, incoming.GroupName)
-		incoming.Token = strings.TrimSpace(incoming.Token)
+		incoming.Token = normalizeSiteTokenValueForPlatform(siteRecord, incoming)
 		incoming.LastSyncAt = &now
 
 		var merged model.SiteToken
@@ -261,10 +277,9 @@ func mergeReadyIncomingSiteToken(incoming model.SiteToken, existingTokens []mode
 			continue
 		}
 		incoming.ID = existing.ID
-		incomingsToken := strings.TrimSpace(incoming.Token)
-		existingToken := strings.TrimSpace(existing.Token)
-		if existingToken != "" && existingToken != incomingsToken {
-			incoming.Token = existingToken
+		preferredToken := preferComparableSiteTokenValue(existing.Token, incoming.Token)
+		if preferredToken != "" {
+			incoming.Token = preferredToken
 		}
 		if existing.ID != 0 {
 			usedExistingIDs[existing.ID] = struct{}{}

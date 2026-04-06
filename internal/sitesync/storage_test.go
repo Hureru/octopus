@@ -10,6 +10,8 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 )
 
+var skNormalizedSite = &model.Site{Platform: model.SitePlatformNewAPI}
+
 func TestSiteMaskedTokenMatchesIgnoresOptionalSKPrefix(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -53,7 +55,7 @@ func TestMergePersistedSiteTokensPreservesManualFullTokenWhenIncomingIsMasked(t 
 		Source:      "sync",
 	}}
 
-	merged := mergePersistedSiteTokens(9, existing, incoming, now)
+	merged := mergePersistedSiteTokens(skNormalizedSite, 9, existing, incoming, now)
 	if len(merged) != 1 {
 		t.Fatalf("expected exactly one merged token, got %+v", merged)
 	}
@@ -90,7 +92,7 @@ func TestMergePersistedSiteTokensTreatsOptionalSKPrefixAsSameReadyToken(t *testi
 		Source:    "sync",
 	}}
 
-	merged := mergePersistedSiteTokens(9, existing, incoming, now)
+	merged := mergePersistedSiteTokens(skNormalizedSite, 9, existing, incoming, now)
 	if len(merged) != 1 {
 		t.Fatalf("expected exactly one merged token, got %+v", merged)
 	}
@@ -138,7 +140,7 @@ func TestMergePersistedSiteTokensKeepsMaskedPendingWhenMatchIsAmbiguous(t *testi
 		Source:      "sync",
 	}}
 
-	merged := mergePersistedSiteTokens(9, existing, incoming, now)
+	merged := mergePersistedSiteTokens(skNormalizedSite, 9, existing, incoming, now)
 	if len(merged) != 3 {
 		t.Fatalf("expected masked pending token plus two preserved manual tokens, got %+v", merged)
 	}
@@ -182,7 +184,7 @@ func TestMergePersistedSiteTokensDoesNotOverwriteReadyTokenOnNameOnlyMaskedFallb
 		Source:      "sync",
 	}}
 
-	merged := mergePersistedSiteTokens(9, existing, incoming, now)
+	merged := mergePersistedSiteTokens(skNormalizedSite, 9, existing, incoming, now)
 	if len(merged) != 1 {
 		t.Fatalf("expected exactly one merged token, got %+v", merged)
 	}
@@ -263,5 +265,36 @@ func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 	}
 	if reloaded.LastSyncMessage != snapshot.message {
 		t.Fatalf("expected last_sync_message %q, got %q", snapshot.message, reloaded.LastSyncMessage)
+	}
+}
+
+func TestMergePersistedSiteTokensNormalizesComparableReadyTokenToSKPrefix(t *testing.T) {
+	now := time.Unix(1711929600, 0)
+	existing := []model.SiteToken{{
+		ID:            17,
+		SiteAccountID: 9,
+		Name:          "primary",
+		Token:         "legacy-no-prefix",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       true,
+		ValueStatus:   model.SiteTokenValueStatusReady,
+		Source:        "sync",
+	}}
+	incoming := []model.SiteToken{{
+		Name:      "primary",
+		Token:     "legacy-no-prefix",
+		GroupKey:  model.SiteDefaultGroupKey,
+		GroupName: model.SiteDefaultGroupName,
+		Enabled:   true,
+		Source:    "sync",
+	}}
+
+	merged := mergePersistedSiteTokens(skNormalizedSite, 9, existing, incoming, now)
+	if len(merged) != 1 {
+		t.Fatalf("expected exactly one merged token, got %+v", merged)
+	}
+	if merged[0].Token != "sk-legacy-no-prefix" {
+		t.Fatalf("expected merged token to normalize to sk prefix, got %q", merged[0].Token)
 	}
 }

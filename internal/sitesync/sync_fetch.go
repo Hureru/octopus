@@ -144,7 +144,8 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 	)
 
 	for _, baseURL := range buildModelFetchBaseURLs(siteRecord) {
-		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, Proxy: useProxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: proxyURL}
+		requestToken := normalizeSiteTokenValueForPlatform(siteRecord, token)
+		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: requestToken}}, Proxy: useProxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: proxyURL}
 		fetched, err := helper.FetchModels(ctx, channel)
 		if err == nil && len(fetched) > 0 {
 			return normalizeModelNames(fetched), nil
@@ -163,7 +164,7 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		return normalizeModelNames(models), nil
 	}
 
-	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + token.Token}, account)
+	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": ensureBearer(normalizeSiteTokenValueForPlatform(siteRecord, token))}, account)
 	if fallbackErr != nil {
 		if firstErr != nil {
 			return nil, firstErr
