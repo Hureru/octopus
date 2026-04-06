@@ -580,7 +580,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                 <MorphingDialogContainer>
                     <MorphingDialogContent className="relative w-[calc(100vw-2rem)] md:w-[80vw] bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
                         <MorphingDialogClose className="top-4 right-5 text-muted-foreground hover:text-foreground transition-colors" />
-                        <MorphingDialogTitle className="mb-3 flex min-w-0 items-start gap-3 text-sm">
+                        <MorphingDialogTitle className="mb-3 flex min-w-0 items-start gap-3 pr-14 text-sm md:pr-16">
                             <div className="flex min-w-0 flex-1 items-center gap-2">
                                 <ModelAvatar size={28} />
                                 <span className="font-semibold text-card-foreground truncate">{log.request_model_name}</span>
