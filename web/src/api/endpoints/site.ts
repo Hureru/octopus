@@ -132,12 +132,22 @@ type SiteServer = Omit<Site, "accounts" | "custom_header"> & {
 export type SiteSyncResult = {
   account_id: number;
   site_id: number;
+  status: string;
   channel_count: number;
   group_count: number;
   token_count: number;
   model_count: number;
   managed_channels: number[];
   models: string[];
+  group_results: Array<{
+    group_key: string;
+    group_name: string;
+    has_key: boolean;
+    status: string;
+    authoritative: boolean;
+    model_count: number;
+    message?: string;
+  }>;
   message: string;
 };
 

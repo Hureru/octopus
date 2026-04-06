@@ -340,8 +340,8 @@ func TestSyncManagementPlatformDoesNotFallbackWithoutExplicitGroupMatch(t *testi
 	if err == nil {
 		t.Fatalf("expected syncManagementPlatform to fail when explicit group metadata is missing")
 	}
-	if !strings.Contains(err.Error(), `site sync could not resolve models for group "default"; create a key for that group on the site and sync again`) {
-		t.Fatalf("expected translated fallback guidance error, got %v", err)
+	if !strings.Contains(err.Error(), `站点账号同步失败：所有分组都未能确认模型`) {
+		t.Fatalf("expected unresolved-group failure, got %v", err)
 	}
 }
 
@@ -391,8 +391,8 @@ func TestSyncManagementPlatformPrefersStableGroupErrorOverHTMLSummary(t *testing
 	if strings.Contains(err.Error(), `decode response failed: New API`) {
 		t.Fatalf("expected stable group guidance instead of HTML summary, got %v", err)
 	}
-	if !strings.Contains(err.Error(), `site sync could not resolve models for group "default"; create a key for that group on the site and sync again`) {
-		t.Fatalf("expected stable group guidance error, got %v", err)
+	if !strings.Contains(err.Error(), `站点账号同步失败：所有分组都未能确认模型`) {
+		t.Fatalf("expected unresolved-group failure, got %v", err)
 	}
 }
 
@@ -490,6 +490,68 @@ func TestSyncManagementPlatformFallsBackUsingAvailableModelExplicitGroups(t *tes
 	}
 }
 
+func TestSyncManagementPlatformMarksAllGroupsEmptyWhenSessionModelsAreEmpty(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[
+				{"name":"default-key","key":"managed-key-default","group":"default","status":1},
+				{"name":"vip-key","key":"managed-key-vip","group":"vip","status":1}
+			]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/api/user/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.URL.Path == "/api/user/self":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+	if snapshot.status != model.SiteExecutionStatusSuccess {
+		t.Fatalf("expected success snapshot status, got %q", snapshot.status)
+	}
+	if len(snapshot.models) != 0 {
+		t.Fatalf("expected no models when session model list is empty, got %+v", snapshot.models)
+	}
+	for _, item := range snapshot.groupResults {
+		if item.Status != siteGroupSyncStatusEmpty {
+			t.Fatalf("expected all groups to be marked empty, got %+v", snapshot.groupResults)
+		}
+	}
+	if !strings.Contains(snapshot.message, "上游当前无可用模型") {
+		t.Fatalf("expected empty-model snapshot message, got %q", snapshot.message)
+	}
+}
+
 func TestSyncManagementPlatformFallsBackPerFailedGroupWithoutOverwritingExactModels(t *testing.T) {
 	platformUserID := 7788
 	userModelCalls := 0
@@ -582,6 +644,91 @@ func TestSyncManagementPlatformFallsBackPerFailedGroupWithoutOverwritingExactMod
 	vipModels := modelsByGroup["vip"]
 	if len(vipModels) != 2 || vipModels["gpt-4.1"] != siteModelSourceSyncFallback || vipModels["gpt-4o"] != siteModelSourceSyncFallback {
 		t.Fatalf("expected vip group to use fallback models, got %+v", modelsByGroup["vip"])
+	}
+}
+
+func TestSyncManagementPlatformReturnsPartialWhenSomeGroupsRemainUnresolved(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[
+				{"name":"default-key","key":"managed-key-default","group":"default","status":1},
+				{"name":"vip-key","key":"managed-key-vip","group":"vip","status":1}
+			]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html><html><body>site home</body></html>`))
+		case r.URL.Path == "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Header.Get("Authorization") {
+			case "Bearer managed-key-default":
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
+			case "Bearer managed-key-vip":
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			}
+		case r.URL.Path == "/api/user/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":["gpt-4o-mini","gpt-4.1"]}`))
+		case r.URL.Path == "/api/pricing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[
+				{"model_name":"gpt-4o-mini","enable_groups":["default"],"supported_endpoint_types":["/v1/chat/completions"]},
+				{"model_name":"gpt-4.1","supported_endpoint_types":["/v1/chat/completions"]}
+			]}`))
+		case r.URL.Path == "/api/available_model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		case r.URL.Path == "/api/user/self":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":7788,"username":"managed-user"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	snapshot, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err != nil {
+		t.Fatalf("syncManagementPlatform returned error: %v", err)
+	}
+	if snapshot.status != model.SiteExecutionStatusPartial {
+		t.Fatalf("expected partial snapshot status, got %q", snapshot.status)
+	}
+	if !strings.Contains(snapshot.message, "部分分组同步完成") {
+		t.Fatalf("expected partial snapshot message, got %q", snapshot.message)
+	}
+	if len(snapshot.models) != 1 || snapshot.models[0].GroupKey != "default" || snapshot.models[0].ModelName != "gpt-4o-mini" {
+		t.Fatalf("expected only default group model to be updated, got %+v", snapshot.models)
+	}
+	groupStatus := make(map[string]siteGroupSyncStatus)
+	for _, item := range snapshot.groupResults {
+		groupStatus[item.GroupKey] = item.Status
+	}
+	if groupStatus["default"] != siteGroupSyncStatusSynced {
+		t.Fatalf("expected default group synced, got %+v", snapshot.groupResults)
+	}
+	if groupStatus["vip"] != siteGroupSyncStatusFailed {
+		t.Fatalf("expected vip group to be kept as failed, got %+v", snapshot.groupResults)
 	}
 }
 

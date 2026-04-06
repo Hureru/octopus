@@ -74,7 +74,7 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 
 		updatePayload := map[string]any{
 			"last_sync_at":      &now,
-			"last_sync_status":  model.SiteExecutionStatusSuccess,
+			"last_sync_status":  snapshot.status,
 			"last_sync_message": snapshot.message,
 			"balance":           snapshot.balance,
 			"balance_used":      snapshot.balanceUsed,
@@ -90,19 +90,8 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 			snapshot.groups[i].SiteAccountID = accountID
 		}
 		mergedTokens := mergePersistedSiteTokens(accountID, existingTokens, snapshot.tokens, now)
-		for i := range snapshot.models {
-			snapshot.models[i].SiteAccountID = accountID
-			snapshot.models[i].GroupKey = model.NormalizeSiteGroupKey(snapshot.models[i].GroupKey)
-			key := snapshot.models[i].GroupKey + "\x00" + strings.TrimSpace(snapshot.models[i].ModelName)
-			if existing, ok := existingModelMap[key]; ok {
-				snapshot.models[i].ID = existing.ID
-				snapshot.models[i].Disabled = existing.Disabled
-				applyPersistedRouteState(&snapshot.models[i], &existing, now)
-				continue
-			}
-			applyPersistedRouteState(&snapshot.models[i], nil, now)
-		}
-		snapshot.models = compactPersistedSiteModels(snapshot.models)
+		incomingModels := preparePersistedSyncModels(accountID, snapshot.models, existingModelMap, now)
+		finalModels := mergePersistedSiteModelsByGroup(existingModels, incomingModels, snapshot.groupResults)
 
 		if len(snapshot.groups) > 0 {
 			if err := tx.Create(&snapshot.groups).Error; err != nil {
@@ -117,11 +106,11 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 				return err
 			}
 		}
-		if len(snapshot.models) > 0 {
+		if len(finalModels) > 0 {
 			if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteModel{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Create(&snapshot.models).Error; err != nil {
+			if err := tx.Create(&finalModels).Error; err != nil {
 				return err
 			}
 		} else {
@@ -131,6 +120,51 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		}
 		return nil
 	})
+}
+
+func preparePersistedSyncModels(accountID int, incoming []model.SiteModel, existingModelMap map[string]model.SiteModel, now time.Time) []model.SiteModel {
+	prepared := make([]model.SiteModel, 0, len(incoming))
+	for i := range incoming {
+		item := incoming[i]
+		item.SiteAccountID = accountID
+		item.GroupKey = model.NormalizeSiteGroupKey(item.GroupKey)
+		key := item.GroupKey + "\x00" + strings.TrimSpace(item.ModelName)
+		if existing, ok := existingModelMap[key]; ok {
+			item.ID = existing.ID
+			item.Disabled = existing.Disabled
+			applyPersistedRouteState(&item, &existing, now)
+		} else {
+			applyPersistedRouteState(&item, nil, now)
+		}
+		prepared = append(prepared, item)
+	}
+	return compactPersistedSiteModels(prepared)
+}
+
+func mergePersistedSiteModelsByGroup(existing []model.SiteModel, incoming []model.SiteModel, results []siteGroupSyncResult) []model.SiteModel {
+	replaceGroups := make(map[string]struct{})
+	for _, result := range results {
+		switch result.Status {
+		case siteGroupSyncStatusSynced, siteGroupSyncStatusEmpty, siteGroupSyncStatusRemoved:
+			replaceGroups[model.NormalizeSiteGroupKey(result.GroupKey)] = struct{}{}
+		}
+	}
+
+	merged := make([]model.SiteModel, 0, len(existing)+len(incoming))
+	for _, item := range existing {
+		groupKey := model.NormalizeSiteGroupKey(item.GroupKey)
+		if _, ok := replaceGroups[groupKey]; ok {
+			continue
+		}
+		item.GroupKey = groupKey
+		item.ModelName = strings.TrimSpace(item.ModelName)
+		if item.ModelName == "" {
+			continue
+		}
+		merged = append(merged, item)
+	}
+	merged = append(merged, incoming...)
+	return compactPersistedSiteModels(merged)
 }
 
 func mergePersistedSiteTokens(accountID int, existingTokens []model.SiteToken, incomingTokens []model.SiteToken, now time.Time) []model.SiteToken {

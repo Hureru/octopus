@@ -36,6 +36,7 @@ type SiteExecutionStatus string
 const (
 	SiteExecutionStatusIdle    SiteExecutionStatus = "idle"
 	SiteExecutionStatusSuccess SiteExecutionStatus = "success"
+	SiteExecutionStatusPartial SiteExecutionStatus = "partial"
 	SiteExecutionStatusFailed  SiteExecutionStatus = "failed"
 	SiteExecutionStatusSkipped SiteExecutionStatus = "skipped"
 )
@@ -206,15 +207,27 @@ type SiteAccountUpdateRequest struct {
 }
 
 type SiteSyncResult struct {
-	AccountID       int      `json:"account_id"`
-	SiteID          int      `json:"site_id"`
-	ChannelCount    int      `json:"channel_count"`
-	GroupCount      int      `json:"group_count"`
-	TokenCount      int      `json:"token_count"`
-	ModelCount      int      `json:"model_count"`
-	ManagedChannels []int    `json:"managed_channels,omitempty"`
-	Models          []string `json:"models,omitempty"`
-	Message         string   `json:"message"`
+	AccountID       int                   `json:"account_id"`
+	SiteID          int                   `json:"site_id"`
+	Status          SiteExecutionStatus   `json:"status"`
+	ChannelCount    int                   `json:"channel_count"`
+	GroupCount      int                   `json:"group_count"`
+	TokenCount      int                   `json:"token_count"`
+	ModelCount      int                   `json:"model_count"`
+	ManagedChannels []int                 `json:"managed_channels,omitempty"`
+	Models          []string              `json:"models,omitempty"`
+	GroupResults    []SiteSyncGroupResult `json:"group_results,omitempty"`
+	Message         string                `json:"message"`
+}
+
+type SiteSyncGroupResult struct {
+	GroupKey      string `json:"group_key"`
+	GroupName     string `json:"group_name"`
+	HasKey        bool   `json:"has_key"`
+	Status        string `json:"status"`
+	Authoritative bool   `json:"authoritative"`
+	ModelCount    int    `json:"model_count"`
+	Message       string `json:"message,omitempty"`
 }
 
 type SiteCheckinResult struct {

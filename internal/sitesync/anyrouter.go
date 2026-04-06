@@ -80,7 +80,7 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	}
 	groups = mergeSiteGroups(groups, tokens)
 
-	siteModels, err := syncSiteModelsByGroup(
+	siteModels, tokenGroupResults := syncSiteModelsByGroup(
 		ctx,
 		siteRecord,
 		account,
@@ -93,23 +93,31 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 			if (err != nil || len(models) == 0) && allowGlobalFallback {
 				fallbackModels, fallbackErr := fetchAnyRouterSessionModels(ctx, siteRecord, account, accessToken, userID)
 				if fallbackErr == nil && len(fallbackModels) > 0 {
-					return siteModelFetchResult{names: fallbackModels, source: siteModelSourceSync}, nil
+					return siteModelFetchResult{names: fallbackModels, source: siteModelSourceSync, authoritative: true, message: fmt.Sprintf("同步到 %d 个模型", len(fallbackModels))}, nil
 				}
 			}
-			return siteModelFetchResult{names: models, source: siteModelSourceSync}, err
+			message := "上游当前没有可用模型"
+			if len(models) > 0 {
+				message = fmt.Sprintf("同步到 %d 个模型", len(models))
+			}
+			return siteModelFetchResult{names: models, source: siteModelSourceSync, authoritative: err == nil, message: message}, err
 		},
 	)
-	if err != nil {
-		return nil, err
-	}
 	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
+	groupResults := finalizeSiteGroupSyncResults(account, groups, tokens, siteModels, tokenGroupResults)
+	status := buildSyncSnapshotStatus(groupResults)
+	if status == model.SiteExecutionStatusFailed {
+		return nil, buildSyncSnapshotFailure(groupResults)
+	}
 
 	return &syncSnapshot{
-		accessToken: accessToken,
-		groups:      groups,
-		tokens:      tokens,
-		models:      siteModels,
-		message:     "site account synced",
+		accessToken:  accessToken,
+		groups:       groups,
+		tokens:       tokens,
+		models:       siteModels,
+		groupResults: groupResults,
+		status:       status,
+		message:      buildSyncSnapshotMessage(groupResults),
 	}, nil
 }
 

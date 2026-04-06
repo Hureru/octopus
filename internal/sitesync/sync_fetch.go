@@ -11,15 +11,16 @@ import (
 )
 
 const (
-	siteModelSourceSync               = "sync"
-	siteModelSourceSyncFallback       = "sync_fallback"
-	siteSyncMissingGroupModelsMessage = "site sync could not resolve models for group %q; create a key for that group on the site and sync again"
+	siteModelSourceSync         = "sync"
+	siteModelSourceSyncFallback = "sync_fallback"
 )
 
 type siteModelFetchResult struct {
-	names      []string
-	source     string
-	detections map[string]siteModelRouteDetection
+	names         []string
+	source        string
+	detections    map[string]siteModelRouteDetection
+	authoritative bool
+	message       string
 }
 
 func fetchManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]model.SiteToken, error) {
@@ -201,35 +202,37 @@ func fetchManagementModels(
 	sessionFallbackFetcher func(token model.SiteToken) (siteModelFetchResult, error),
 ) (siteModelFetchResult, error) {
 	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
-	if len(models) > 0 || siteRecord.Platform != model.SitePlatformNewAPI {
-		return siteModelFetchResult{names: models, source: siteModelSourceSync}, err
+	if len(models) > 0 {
+		return siteModelFetchResult{names: models, source: siteModelSourceSync, authoritative: true, message: fmt.Sprintf("同步到 %d 个模型", len(models))}, nil
+	}
+	if siteRecord.Platform != model.SitePlatformNewAPI {
+		return siteModelFetchResult{source: siteModelSourceSync, authoritative: err == nil, message: "上游当前没有返回可用模型"}, err
 	}
 
 	if sessionFallbackFetcher == nil {
-		return siteModelFetchResult{}, err
+		return siteModelFetchResult{message: "本次未能确认该分组模型，已保留历史模型"}, err
 	}
 
 	fallbackResult, fallbackErr := sessionFallbackFetcher(token)
-	if len(fallbackResult.names) > 0 {
+	if len(fallbackResult.names) > 0 || fallbackResult.authoritative {
 		if strings.TrimSpace(fallbackResult.source) == "" {
 			fallbackResult.source = siteModelSourceSyncFallback
 		}
 		return fallbackResult, nil
 	}
-	if isSiteSyncMissingGroupModelsError(fallbackErr) {
-		return siteModelFetchResult{}, fallbackErr
-	}
 	if err != nil {
-		return siteModelFetchResult{}, err
+		if strings.TrimSpace(fallbackResult.message) == "" {
+			fallbackResult.message = "本次未能确认该分组模型，已保留历史模型"
+		}
+		return fallbackResult, err
 	}
-	return siteModelFetchResult{}, fallbackErr
-}
-
-func isSiteSyncMissingGroupModelsError(err error) bool {
-	if err == nil {
-		return false
+	if fallbackErr != nil {
+		return fallbackResult, fallbackErr
 	}
-	return strings.Contains(err.Error(), "site sync could not resolve models for group ")
+	if strings.TrimSpace(fallbackResult.message) == "" {
+		fallbackResult.message = "本次未能确认该分组模型，已保留历史模型"
+	}
+	return fallbackResult, nil
 }
 
 func fetchManagedSessionModels(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]string, error) {
@@ -264,42 +267,58 @@ func filterSessionFallbackModelsByGroup(
 	names []string,
 	groupKey string,
 	detections map[string]siteModelRouteDetection,
-) (siteModelFetchResult, error) {
+) siteModelFetchResult {
 	normalizedGroupKey := model.NormalizeSiteGroupKey(groupKey)
 	if normalizedGroupKey == "" {
 		normalizedGroupKey = model.SiteDefaultGroupKey
 	}
 	if len(detections) == 0 {
-		return siteModelFetchResult{}, fmt.Errorf(siteSyncMissingGroupModelsMessage, normalizedGroupKey)
+		return siteModelFetchResult{message: fmt.Sprintf("无法从显式分组元数据确认分组 %q 的模型", normalizedGroupKey)}
 	}
 
 	filteredNames := make([]string, 0, len(names))
 	filteredDetections := make(map[string]siteModelRouteDetection)
+	hasExplicitGroupMetadata := false
+	allModelsHaveExplicitGroupMetadata := true
 	for _, name := range normalizeModelNames(names) {
 		lookupKey := strings.ToLower(strings.TrimSpace(name))
 		detection, ok := detections[lookupKey]
 		if !ok {
+			allModelsHaveExplicitGroupMetadata = false
 			continue
 		}
 		metadata, ok := model.ParseSiteModelRouteMetadata(detection.RouteRawPayload)
 		if !ok || len(metadata.EnableGroups) == 0 {
+			allModelsHaveExplicitGroupMetadata = false
 			continue
 		}
+		hasExplicitGroupMetadata = true
 		if !stringSliceContainsFold(metadata.EnableGroups, normalizedGroupKey) {
 			continue
 		}
 		filteredNames = append(filteredNames, name)
 		filteredDetections[lookupKey] = detection
 	}
+	if len(filteredNames) > 0 {
+		return siteModelFetchResult{
+			names:         filteredNames,
+			source:        siteModelSourceSyncFallback,
+			detections:    filteredDetections,
+			authoritative: true,
+			message:       fmt.Sprintf("同步到 %d 个模型", len(filteredNames)),
+		}
+	}
+	if !hasExplicitGroupMetadata {
+		return siteModelFetchResult{message: fmt.Sprintf("显式分组元数据缺失，无法确认分组 %q 的模型", normalizedGroupKey)}
+	}
+	if !allModelsHaveExplicitGroupMetadata {
+		return siteModelFetchResult{message: fmt.Sprintf("部分模型缺少显式分组元数据，无法确认分组 %q 的模型", normalizedGroupKey)}
+	}
 	if len(filteredNames) == 0 {
-		return siteModelFetchResult{}, fmt.Errorf(siteSyncMissingGroupModelsMessage, normalizedGroupKey)
+		return siteModelFetchResult{source: siteModelSourceSyncFallback, authoritative: true, message: fmt.Sprintf("分组 %q 当前没有可用模型", normalizedGroupKey)}
 	}
 
-	return siteModelFetchResult{
-		names:      filteredNames,
-		source:     siteModelSourceSyncFallback,
-		detections: filteredDetections,
-	}, nil
+	return siteModelFetchResult{message: fmt.Sprintf("无法确认分组 %q 的模型", normalizedGroupKey)}
 }
 
 func stringSliceContainsFold(values []string, target string) bool {
@@ -410,22 +429,39 @@ func syncSiteModelsByGroup(
 	platformUserID int,
 	source string,
 	fetcher func(token model.SiteToken, allowGlobalFallback bool) (siteModelFetchResult, error),
-) ([]model.SiteModel, error) {
+) ([]model.SiteModel, []siteGroupSyncResult) {
 	if len(groupTokens) == 0 {
 		return nil, nil
 	}
 
 	allowGlobalFallback := len(groupTokens) == 1
 	models := make([]model.SiteModel, 0)
+	results := make([]siteGroupSyncResult, 0, len(groupTokens))
 	seen := make(map[string]struct{})
-	var firstErr error
 
 	for _, token := range groupTokens {
 		result, err := fetcher(token, allowGlobalFallback)
-		if err != nil && firstErr == nil {
-			firstErr = err
+		groupResult := siteGroupSyncResult{
+			GroupKey:  model.NormalizeSiteGroupKey(token.GroupKey),
+			GroupName: model.NormalizeSiteGroupName(token.GroupKey, token.GroupName),
+			HasKey:    true,
+		}
+		if result.authoritative && len(result.names) == 0 {
+			groupResult.Status = siteGroupSyncStatusEmpty
+			groupResult.Authoritative = true
+			groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), "上游当前没有可用模型，已清空该分组历史模型")
+			results = append(results, groupResult)
+			continue
 		}
 		if len(result.names) == 0 {
+			if err != nil {
+				groupResult.Status = siteGroupSyncStatusFailed
+				groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), err.Error())
+			} else {
+				groupResult.Status = siteGroupSyncStatusUnresolved
+				groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), "本次未能确认该分组模型，已保留历史模型")
+			}
+			results = append(results, groupResult)
 			continue
 		}
 
@@ -447,10 +483,11 @@ func syncSiteModelsByGroup(
 			seen[key] = struct{}{}
 			models = append(models, item)
 		}
-	}
-
-	if len(models) == 0 {
-		return nil, firstErr
+		groupResult.Status = siteGroupSyncStatusSynced
+		groupResult.Authoritative = result.authoritative || len(groupModels) > 0
+		groupResult.ModelCount = len(groupModels)
+		groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), fmt.Sprintf("同步到 %d 个模型", len(groupModels)))
+		results = append(results, groupResult)
 	}
 
 	sort.Slice(models, func(i, j int) bool {
@@ -461,7 +498,7 @@ func syncSiteModelsByGroup(
 		}
 		return leftGroup < rightGroup
 	})
-	return models, nil
+	return models, results
 }
 
 func expandExplicitGroupModelsToGroups(

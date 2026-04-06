@@ -12,13 +12,15 @@ import (
 )
 
 type syncSnapshot struct {
-	accessToken string
-	groups      []model.SiteUserGroup
-	tokens      []model.SiteToken
-	models      []model.SiteModel
-	balance     float64
-	balanceUsed float64
-	message     string
+	accessToken  string
+	groups       []model.SiteUserGroup
+	tokens       []model.SiteToken
+	models       []model.SiteModel
+	groupResults []siteGroupSyncResult
+	status       model.SiteExecutionStatus
+	balance      float64
+	balanceUsed  float64
+	message      string
 }
 
 func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, error) {
@@ -54,12 +56,14 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 	return &model.SiteSyncResult{
 		AccountID:       account.ID,
 		SiteID:          siteRecord.ID,
+		Status:          snapshot.status,
 		ChannelCount:    len(channelIDs),
 		GroupCount:      len(snapshot.groups),
 		TokenCount:      len(snapshot.tokens),
 		ModelCount:      len(snapshot.models),
 		ManagedChannels: channelIDs,
 		Models:          modelNames,
+		GroupResults:    exportSiteSyncGroupResults(snapshot.groupResults),
 		Message:         snapshot.message,
 	}, nil
 }

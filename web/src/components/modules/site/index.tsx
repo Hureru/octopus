@@ -173,6 +173,7 @@ type SiteSummary = {
   groupCount: number;
   balance: number;
   failedAccountCount: number;
+  partialAccountCount: number;
   disabledAccountCount: number;
   enabledAccountCount: number;
   healthLabel: string;
@@ -362,6 +363,8 @@ function formatDateTime(value?: string | null) {
 
 function statusLabel(status: string) {
   switch (status) {
+    case "partial":
+      return "部分成功";
     case "success":
       return "成功";
     case "failed":
@@ -456,6 +459,8 @@ function statusDotClass(status: string) {
   switch (status) {
     case "success":
       return "bg-emerald-500";
+    case "partial":
+      return "bg-amber-500";
     case "failed":
       return "bg-destructive";
     case "skipped":
@@ -499,6 +504,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
   let groupCount = 0;
   let balance = 0;
   let failedAccountCount = 0;
+  let partialAccountCount = 0;
   let disabledAccountCount = 0;
   let enabledAccountCount = 0;
 
@@ -513,6 +519,8 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
 
     if (accountHasHealthFailure(site, account)) {
       failedAccountCount += 1;
+    } else if (normalizedStatus(account.last_sync_status) === "partial") {
+      partialAccountCount += 1;
     }
   }
 
@@ -524,6 +532,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       groupCount,
       balance,
       failedAccountCount,
+      partialAccountCount,
       disabledAccountCount,
       enabledAccountCount,
       healthLabel: "站点停用",
@@ -539,6 +548,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       groupCount,
       balance,
       failedAccountCount,
+      partialAccountCount,
       disabledAccountCount,
       enabledAccountCount,
       healthLabel: `${failedAccountCount} 异常`,
@@ -554,10 +564,27 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       groupCount,
       balance,
       failedAccountCount,
+      partialAccountCount,
       disabledAccountCount,
       enabledAccountCount,
       healthLabel: `${disabledAccountCount} 已停用`,
       healthTone: "muted",
+    };
+  }
+
+  if (partialAccountCount > 0) {
+    return {
+      accountCount: site.accounts.length,
+      keyCount,
+      modelCount,
+      groupCount,
+      balance,
+      failedAccountCount,
+      partialAccountCount,
+      disabledAccountCount,
+      enabledAccountCount,
+      healthLabel: `${partialAccountCount} 部分同步`,
+      healthTone: "warning",
     };
   }
 
@@ -569,6 +596,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       groupCount,
       balance,
       failedAccountCount,
+      partialAccountCount,
       disabledAccountCount,
       enabledAccountCount,
       healthLabel: "待配置",
@@ -591,6 +619,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
     groupCount,
     balance,
     failedAccountCount,
+    partialAccountCount,
     disabledAccountCount,
     enabledAccountCount,
     healthLabel: allIdle ? "未执行" : "正常",
@@ -607,6 +636,7 @@ function matchesSiteFilter(
     case "abnormal":
       return (
         summary.failedAccountCount > 0 ||
+        summary.partialAccountCount > 0 ||
         !site.enabled ||
         summary.disabledAccountCount > 0
       );
@@ -1303,9 +1333,12 @@ export function Site() {
     setSyncingAccountIds((current) => new Set(current).add(account.id));
     try {
       const result = await syncSiteAccount.mutateAsync(account.id);
-      toast.success(
-        `同步完成：${result.group_count} 个分组，${result.token_count} 个 key，${result.model_count} 个模型`,
-      );
+      const summary = `${result.message}（${result.group_count} 个分组，${result.token_count} 个 Key，${result.model_count} 个模型）`;
+      if (result.status === "partial") {
+        toast.warning(summary);
+      } else {
+        toast.success(summary);
+      }
     } catch (syncError) {
       toast.error(translateSiteMessage(locale, getErrorMessage(syncError), t));
     } finally {

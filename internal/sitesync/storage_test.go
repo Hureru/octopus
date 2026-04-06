@@ -1,10 +1,13 @@
 package sitesync
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 )
 
 func TestSiteMaskedTokenMatchesIgnoresOptionalSKPrefix(t *testing.T) {
@@ -188,5 +191,77 @@ func TestMergePersistedSiteTokensDoesNotOverwriteReadyTokenOnNameOnlyMaskedFallb
 	}
 	if merged[0].ValueStatus != model.SiteTokenValueStatusReady {
 		t.Fatalf("expected ready token to stay ready, got %q", merged[0].ValueStatus)
+	}
+}
+
+func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	vipGroup := model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: "vip", Name: "VIP"}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&vipGroup).Error; err != nil {
+		t.Fatalf("create vip group failed: %v", err)
+	}
+	vipToken := model.SiteToken{SiteAccountID: account.ID, Name: "vip", Token: "key-vip", GroupKey: "vip", GroupName: "VIP", Enabled: true}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&vipToken).Error; err != nil {
+		t.Fatalf("create vip token failed: %v", err)
+	}
+	vipModel := model.SiteModel{SiteAccountID: account.ID, GroupKey: "vip", ModelName: "gpt-4o-vip-old", Source: "sync", RouteType: model.SiteModelRouteTypeOpenAIChat, RouteSource: model.SiteModelRouteSourceSyncInferred}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&vipModel).Error; err != nil {
+		t.Fatalf("create vip model failed: %v", err)
+	}
+
+	snapshot := &syncSnapshot{
+		accessToken: account.AccessToken,
+		groups: []model.SiteUserGroup{
+			{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName},
+			{GroupKey: "vip", Name: "VIP"},
+		},
+		tokens: []model.SiteToken{
+			{Name: "primary", Token: "key-primary-new", GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "sync"},
+			{Name: "vip", Token: "key-vip-new", GroupKey: "vip", GroupName: "VIP", Enabled: true, Source: "sync"},
+		},
+		models: []model.SiteModel{
+			{GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4.1", Source: "sync", RouteType: model.SiteModelRouteTypeOpenAIChat, RouteSource: model.SiteModelRouteSourceSyncInferred},
+		},
+		groupResults: []siteGroupSyncResult{
+			{GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, HasKey: true, Status: siteGroupSyncStatusSynced, Authoritative: true, ModelCount: 1, Message: "同步到 1 个模型"},
+			{GroupKey: "vip", GroupName: "VIP", HasKey: true, Status: siteGroupSyncStatusFailed, Authoritative: false, Message: "unauthorized"},
+		},
+		status:  model.SiteExecutionStatusPartial,
+		message: "部分分组同步完成：更新 1 个分组，保留 1 个分组的历史模型",
+	}
+
+	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
+		t.Fatalf("persistSyncSnapshot returned error: %v", err)
+	}
+
+	var models []model.SiteModel
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ?", account.ID).Order("group_key ASC, model_name ASC").Find(&models).Error; err != nil {
+		t.Fatalf("query models failed: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected one refreshed default model and one preserved vip model, got %+v", models)
+	}
+	modelsByGroup := make(map[string][]string)
+	for _, item := range models {
+		modelsByGroup[item.GroupKey] = append(modelsByGroup[item.GroupKey], item.ModelName)
+	}
+	if len(modelsByGroup[model.SiteDefaultGroupKey]) != 1 || modelsByGroup[model.SiteDefaultGroupKey][0] != "gpt-4.1" {
+		t.Fatalf("expected default group to be fully replaced, got %+v", modelsByGroup)
+	}
+	if len(modelsByGroup["vip"]) != 1 || modelsByGroup["vip"][0] != "gpt-4o-vip-old" {
+		t.Fatalf("expected vip group to keep historical model, got %+v", modelsByGroup)
+	}
+
+	reloaded, err := op.SiteAccountGet(account.ID, context.Background())
+	if err != nil {
+		t.Fatalf("SiteAccountGet failed: %v", err)
+	}
+	if reloaded.LastSyncStatus != model.SiteExecutionStatusPartial {
+		t.Fatalf("expected partial last_sync_status, got %q", reloaded.LastSyncStatus)
+	}
+	if reloaded.LastSyncMessage != snapshot.message {
+		t.Fatalf("expected last_sync_message %q, got %q", snapshot.message, reloaded.LastSyncMessage)
 	}
 }
