@@ -97,6 +97,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Power,
   Plus,
   RefreshCw,
   Square,
@@ -404,6 +405,14 @@ function getErrorMessage(error: unknown) {
     if (typeof message === "string") return message;
   }
   return "操作失败";
+}
+
+function getSiteErrorMessage(
+  locale: ReturnType<typeof useSettingStore.getState>["locale"],
+  error: unknown,
+  t?: ReturnType<typeof useTranslations>,
+) {
+  return translateSiteMessage(locale, getErrorMessage(error), t);
 }
 
 function formatBalance(value: number) {
@@ -1134,7 +1143,7 @@ export function Site() {
         openCreateAccountDialog(createdSite);
       }
     } catch (submitError) {
-      toast.error(getErrorMessage(submitError));
+      toast.error(getSiteErrorMessage(locale, submitError, t));
     }
   }
   async function submitAccountForm(event: FormEvent<HTMLFormElement>) {
@@ -1205,7 +1214,7 @@ export function Site() {
         accountForm.token_expires_at,
       );
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      toast.error(getSiteErrorMessage(locale, error, t));
       return;
     }
 
@@ -1257,7 +1266,7 @@ export function Site() {
       }
       closeAccountDialog(false);
     } catch (submitError) {
-      toast.error(getErrorMessage(submitError));
+      toast.error(getSiteErrorMessage(locale, submitError, t));
     }
   }
 
@@ -1266,7 +1275,7 @@ export function Site() {
       await enableSite.mutateAsync({ id: site.id, enabled: !site.enabled });
       toast.success(site.enabled ? "站点已停用" : "站点已启用");
     } catch (toggleError) {
-      toast.error(getErrorMessage(toggleError));
+      toast.error(getSiteErrorMessage(locale, toggleError, t));
     }
   }
 
@@ -1282,7 +1291,7 @@ export function Site() {
       });
       toast.success(account.enabled ? "站点账号已停用" : "站点账号已启用");
     } catch (toggleError) {
-      toast.error(getErrorMessage(toggleError));
+      toast.error(getSiteErrorMessage(locale, toggleError, t));
     }
   }
 
@@ -1320,7 +1329,7 @@ export function Site() {
         toast.success(message);
       }
     } catch (checkinError) {
-      toast.error(getErrorMessage(checkinError));
+      toast.error(getSiteErrorMessage(locale, checkinError, t));
     } finally {
       setCheckinAccountIds((current) => {
         const next = new Set(current);
@@ -1350,7 +1359,7 @@ export function Site() {
         `导入完成：新增 ${result.created_sites} 个站点，新增 ${result.created_accounts} 个账号，更新 ${result.updated_accounts} 个账号`,
       );
     } catch (importError) {
-      toast.error(getErrorMessage(importError));
+      toast.error(getSiteErrorMessage(locale, importError, t));
     }
   }
 
@@ -1373,7 +1382,7 @@ export function Site() {
         toast.success("站点账号已删除");
       }
     } catch (deleteError) {
-      toast.error(getErrorMessage(deleteError));
+      toast.error(getSiteErrorMessage(locale, deleteError, t));
     }
     setDeleteConfirm(null);
   }
@@ -1403,7 +1412,7 @@ export function Site() {
         setSelectedSiteIds([]);
       }
     } catch (batchError) {
-      toast.error(getErrorMessage(batchError));
+      toast.error(getSiteErrorMessage(locale, batchError, t));
     }
   }
 
@@ -1412,7 +1421,7 @@ export function Site() {
       await updateSite.mutateAsync({ id: site.id, is_pinned: !site.is_pinned });
       toast.success(site.is_pinned ? "已取消置顶" : "已置顶");
     } catch (pinError) {
-      toast.error(getErrorMessage(pinError));
+      toast.error(getSiteErrorMessage(locale, pinError, t));
     }
   }
 
@@ -1451,13 +1460,13 @@ export function Site() {
       syncAll: () => {
         syncAllSites.mutate(undefined, {
           onSuccess: () => toast.success("已触发后台全量同步，页面会自动刷新"),
-          onError: (error) => toast.error(getErrorMessage(error)),
+          onError: (error) => toast.error(getSiteErrorMessage(locale, error, t)),
         });
       },
       checkinAll: () => {
         checkinAllSites.mutate(undefined, {
           onSuccess: () => toast.success("已触发后台全量签到，页面会自动刷新"),
-          onError: (error) => toast.error(getErrorMessage(error)),
+          onError: (error) => toast.error(getSiteErrorMessage(locale, error, t)),
         });
       },
     });
@@ -1465,7 +1474,7 @@ export function Site() {
     return () => {
       resetSiteHandlers();
     };
-  }, [setSiteHandlers, resetSiteHandlers, syncAllSites, checkinAllSites]);
+  }, [setSiteHandlers, resetSiteHandlers, syncAllSites, checkinAllSites, locale, t]);
 
   useEffect(() => {
     const updateDayKey = () => {
@@ -1730,6 +1739,7 @@ export function Site() {
                         className={MENU_BUTTON_CLASS}
                         onClick={() => handleToggleSite(site)}
                       >
+                        <Power className="size-4" />
                         <span>{site.enabled ? "停用站点" : "启用站点"}</span>
                       </button>
                       <button
@@ -1813,65 +1823,171 @@ export function Site() {
                                   "ring-2 ring-primary/35 ring-offset-2 ring-offset-background",
                               )}
                             >
-                              <div className="flex items-start gap-3">
-                                <div className="min-w-0 flex-1 space-y-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <div className="text-sm font-semibold">
-                                      {account.name}
+                              <div className="space-y-3">
+                                <div className="flex items-start gap-3">
+                                  <div className="min-w-0 flex-1 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="text-sm font-semibold">
+                                        {account.name}
+                                      </div>
+                                      <Badge variant="outline">
+                                        {
+                                          CREDENTIAL_LABELS[
+                                            account.credential_type
+                                          ]
+                                        }
+                                      </Badge>
+                                      <Badge
+                                        variant="outline"
+                                        className={
+                                          account.enabled
+                                            ? "text-emerald-600"
+                                            : "text-muted-foreground"
+                                        }
+                                      >
+                                        {account.enabled ? "启用中" : "已停用"}
+                                      </Badge>
                                     </div>
-                                    <Badge variant="outline">
-                                      {
-                                        CREDENTIAL_LABELS[
-                                          account.credential_type
-                                        ]
-                                      }
-                                    </Badge>
-                                    <Badge
-                                      variant="outline"
-                                      className={
-                                        account.enabled
-                                          ? "text-emerald-600"
-                                          : "text-muted-foreground"
-                                      }
-                                    >
-                                      {account.enabled ? "启用中" : "已停用"}
-                                    </Badge>
-                                  </div>
 
-                                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                                    <CompactMetric
-                                      label="分组"
-                                      value={account.user_groups.length}
-                                    />
-                                    <CompactMetric
-                                      label="模型"
-                                      value={account.models.length}
-                                    />
-                                    <CompactMetric
-                                      label="余额"
-                                      value={formatBalance(account.balance)}
-                                    />
-                                  </div>
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                      <CompactMetric
+                                        label="分组"
+                                        value={account.user_groups.length}
+                                      />
+                                      <CompactMetric
+                                        label="模型"
+                                        value={account.models.length}
+                                      />
+                                      <CompactMetric
+                                        label="余额"
+                                        value={formatBalance(account.balance)}
+                                      />
+                                    </div>
 
-                                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                                    <span>
-                                      {account.auto_sync ? "自动同步" : "手动同步"}
-                                    </span>
-                                    <span>
-                                      {account.auto_checkin
-                                        ? account.random_checkin
-                                          ? "随机签到"
-                                          : "自动签到"
-                                        : "手动签到"}
-                                    </span>
-                                    {account.account_proxy ? (
-                                      <span className="truncate">
-                                        代理 {account.account_proxy}
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                      <span>
+                                        {account.auto_sync ? "自动同步" : "手动同步"}
                                       </span>
-                                    ) : null}
+                                      <span>
+                                        {account.auto_checkin
+                                          ? account.random_checkin
+                                            ? "随机签到"
+                                            : "自动签到"
+                                          : "手动签到"}
+                                      </span>
+                                      {account.account_proxy ? (
+                                        <span className="truncate">
+                                          代理 {account.account_proxy}
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   </div>
 
-                                  <div className="space-y-1">
+                                  <div className="flex shrink-0 items-center gap-2 self-start">
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span>
+                                          <Switch
+                                            checked={account.enabled}
+                                            disabled={enableSiteAccount.isPending}
+                                            onCheckedChange={() =>
+                                              handleToggleAccount(account)
+                                            }
+                                          />
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        {account.enabled ? "停用账号" : "启用账号"}
+                                      </TooltipContent>
+                                    </Tooltip>
+
+                                    <IconActionButton
+                                      label="同步账号"
+                                      disabled={syncingAccountIds.has(account.id)}
+                                      onClick={() => handleSyncAccount(account)}
+                                    >
+                                      <RefreshCw
+                                        className={cn(
+                                          "size-4",
+                                          syncingAccountIds.has(account.id) &&
+                                            "animate-spin",
+                                        )}
+                                      />
+                                    </IconActionButton>
+
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          size="icon-sm"
+                                          variant="outline"
+                                          className="rounded-xl"
+                                          aria-label="更多账号操作"
+                                          title="更多账号操作"
+                                        >
+                                          <MoreHorizontal className="size-4" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent
+                                        align="end"
+                                        className="w-44 rounded-2xl border border-border/60 bg-card p-2"
+                                      >
+                                        <div className="grid gap-1">
+                                          <button
+                                            type="button"
+                                            className={MENU_BUTTON_CLASS}
+                                            onClick={() =>
+                                              jumpToSiteChannelAccount(site.id, account.id)
+                                            }
+                                          >
+                                            <Waypoints className="size-4" />
+                                            <span>查看站点渠道</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={cn(
+                                              MENU_BUTTON_CLASS,
+                                              "disabled:cursor-not-allowed disabled:opacity-50",
+                                            )}
+                                            onClick={() =>
+                                              handleCheckinAccount(account)
+                                            }
+                                            disabled={checkinAccountIds.has(account.id)}
+                                            hidden={!canShowManualCheckin}
+                                          >
+                                            <CalendarCheck2 className="size-4" />
+                                            <span>立即签到</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={MENU_BUTTON_CLASS}
+                                            onClick={() =>
+                                              openEditAccountDialog(site, account)
+                                            }
+                                          >
+                                            <Pencil className="size-4" />
+                                            <span>编辑账号</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={cn(
+                                              MENU_BUTTON_CLASS,
+                                              "text-destructive",
+                                            )}
+                                            onClick={() =>
+                                              handleDeleteAccount(account)
+                                            }
+                                          >
+                                            <Trash2 className="size-4" />
+                                            <span>删除账号</span>
+                                          </button>
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1">
                                     <ExecutionSummary
                                       label="同步"
                                       status={normalizedStatus(
@@ -1879,7 +1995,7 @@ export function Site() {
                                       )}
                                       at={account.last_sync_at}
                                       message={
-                                        translateSiteMessage(locale, account.last_sync_message) || "等待首次同步"
+                                        translateSiteMessage(locale, account.last_sync_message, t) || "等待首次同步"
                                       }
                                     />
                                     {supportsCheckin ? (
@@ -1921,109 +2037,6 @@ export function Site() {
                                         {account.checkin_random_window_minutes} 分钟
                                       </div>
                                     ) : null}
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  <IconActionButton
-                                    label="查看站点渠道"
-                                    onClick={() =>
-                                      jumpToSiteChannelAccount(site.id, account.id)
-                                    }
-                                  >
-                                    <Waypoints className="size-4" />
-                                  </IconActionButton>
-
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span>
-                                        <Switch
-                                          checked={account.enabled}
-                                          disabled={enableSiteAccount.isPending}
-                                          onCheckedChange={() =>
-                                            handleToggleAccount(account)
-                                          }
-                                        />
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                      {account.enabled ? "停用账号" : "启用账号"}
-                                    </TooltipContent>
-                                  </Tooltip>
-
-                                  <IconActionButton
-                                    label="同步账号"
-                                    disabled={syncingAccountIds.has(account.id)}
-                                    onClick={() => handleSyncAccount(account)}
-                                  >
-                                    <RefreshCw
-                                      className={cn(
-                                        "size-4",
-                                        syncingAccountIds.has(account.id) &&
-                                          "animate-spin",
-                                      )}
-                                    />
-                                  </IconActionButton>
-
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button
-                                        type="button"
-                                        size="icon-sm"
-                                        variant="outline"
-                                        className="rounded-xl"
-                                        aria-label="更多账号操作"
-                                        title="更多账号操作"
-                                      >
-                                        <MoreHorizontal className="size-4" />
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent
-                                      align="end"
-                                      className="w-44 rounded-2xl border border-border/60 bg-card p-2"
-                                    >
-                                      <div className="grid gap-1">
-                                        <button
-                                          type="button"
-                                          className={cn(
-                                            MENU_BUTTON_CLASS,
-                                            "disabled:cursor-not-allowed disabled:opacity-50",
-                                          )}
-                                          onClick={() =>
-                                            handleCheckinAccount(account)
-                                          }
-                                          disabled={checkinAccountIds.has(account.id)}
-                                          hidden={!canShowManualCheckin}
-                                        >
-                                          <CalendarCheck2 className="size-4" />
-                                          <span>立即签到</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className={MENU_BUTTON_CLASS}
-                                          onClick={() =>
-                                            openEditAccountDialog(site, account)
-                                          }
-                                        >
-                                          <Pencil className="size-4" />
-                                          <span>编辑账号</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className={cn(
-                                            MENU_BUTTON_CLASS,
-                                            "text-destructive",
-                                          )}
-                                          onClick={() =>
-                                            handleDeleteAccount(account)
-                                          }
-                                        >
-                                          <Trash2 className="size-4" />
-                                          <span>删除账号</span>
-                                        </button>
-                                      </div>
-                                    </PopoverContent>
-                                  </Popover>
                                 </div>
                               </div>
                             </article>
@@ -2132,7 +2145,7 @@ export function Site() {
 
         {error ? (
           <section className="rounded-3xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-            站点列表加载失败：{getErrorMessage(error)}
+            站点列表加载失败：{getSiteErrorMessage(locale, error, t)}
           </section>
         ) : null}
 

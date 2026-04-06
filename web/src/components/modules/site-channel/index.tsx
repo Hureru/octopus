@@ -1361,6 +1361,11 @@ function SiteAccountPanel({
     const disabledMutation = useUpdateSiteChannelModelDisabled();
     const resetMutation = useResetSiteChannelModelRoutes(siteId, account.account_id);
 
+    const translateSiteError = useCallback(
+        (error: unknown, fallback: string) => translateSiteMessage(locale, getErrorMessage(error, fallback), t),
+        [locale, t],
+    );
+
     const registerModelRef = useCallback((modelKey: string, node: HTMLElement | null) => {
         if (node) {
             modelElementRefs.current.set(modelKey, node);
@@ -1570,13 +1575,13 @@ function SiteAccountPanel({
             },
             onError: (error) => {
                 setPendingRouteOverrides((current) => removeKeys(current, modelKeys));
-                toast.error(getErrorMessage(error, '更新模型请求端点格式失败'));
+                toast.error(translateSiteError(error, '更新模型请求端点格式失败'));
             },
             onSettled: () => {
                 setPendingModelKeys((current) => removePendingKeys(current, modelKeys));
             },
         });
-    }, [pendingModelKeys, routeMutation]);
+    }, [pendingModelKeys, routeMutation, translateSiteError]);
 
     const applyDisabledChange = useCallback((models: SiteModelView[], nextDisabled: boolean) => {
         const eligibleModels = models.filter((model) => {
@@ -1609,13 +1614,13 @@ function SiteAccountPanel({
             },
             onError: (error) => {
                 setPendingDisabledOverrides((current) => removeKeys(current, modelKeys));
-                toast.error(getErrorMessage(error, '更新模型禁用状态失败'));
+                toast.error(translateSiteError(error, '更新模型禁用状态失败'));
             },
             onSettled: () => {
                 setPendingModelKeys((current) => removePendingKeys(current, modelKeys));
             },
         });
-    }, [pendingModelKeys, disabledMutation, siteId, account.account_id]);
+    }, [pendingModelKeys, disabledMutation, siteId, account.account_id, translateSiteError]);
 
     const handleOpenCreateKey = (group: SiteChannelGroup) => {
         setCreatingGroup(group);
@@ -1643,7 +1648,7 @@ function SiteAccountPanel({
                     setQuickCreateName('');
                 },
                 onError: (error) => {
-                    toast.error(translateSiteMessage(locale, getErrorMessage(error, '快捷创建 Key 失败'), t));
+                    toast.error(translateSiteError(error, '快捷创建 Key 失败'));
                 },
             },
         );
@@ -1709,7 +1714,7 @@ function SiteAccountPanel({
                 setVisibleSourceKeyRows({});
             },
             onError: (error) => {
-                toast.error(translateSiteMessage(locale, getErrorMessage(error, '更新站点 Key 失败'), t));
+                toast.error(translateSiteError(error, '更新站点 Key 失败'));
             },
         });
     };
@@ -1763,7 +1768,7 @@ function SiteAccountPanel({
                 toast.success('模型请求端点格式已重置');
             },
             onError: (error) => {
-                toast.error(getErrorMessage(error, '重置模型端点格式失败'));
+                toast.error(translateSiteError(error, '重置模型端点格式失败'));
             },
         });
     };

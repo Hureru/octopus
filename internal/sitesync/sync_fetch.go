@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	siteModelSourceSync         = "sync"
-	siteModelSourceSyncFallback = "sync_fallback"
+	siteModelSourceSync               = "sync"
+	siteModelSourceSyncFallback       = "sync_fallback"
+	siteSyncMissingGroupModelsMessage = "site sync could not resolve models for group %q; create a key for that group on the site and sync again"
 )
 
 type siteModelFetchResult struct {
@@ -215,10 +216,20 @@ func fetchManagementModels(
 		}
 		return fallbackResult, nil
 	}
+	if isSiteSyncMissingGroupModelsError(fallbackErr) {
+		return siteModelFetchResult{}, fallbackErr
+	}
 	if err != nil {
 		return siteModelFetchResult{}, err
 	}
 	return siteModelFetchResult{}, fallbackErr
+}
+
+func isSiteSyncMissingGroupModelsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "site sync could not resolve models for group ")
 }
 
 func fetchManagedSessionModels(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) ([]string, error) {
@@ -259,7 +270,7 @@ func filterSessionFallbackModelsByGroup(
 		normalizedGroupKey = model.SiteDefaultGroupKey
 	}
 	if len(detections) == 0 {
-		return siteModelFetchResult{}, fmt.Errorf("site sync could not resolve models for group %q; create a key for that group on the site and sync again", normalizedGroupKey)
+		return siteModelFetchResult{}, fmt.Errorf(siteSyncMissingGroupModelsMessage, normalizedGroupKey)
 	}
 
 	filteredNames := make([]string, 0, len(names))
@@ -281,7 +292,7 @@ func filterSessionFallbackModelsByGroup(
 		filteredDetections[lookupKey] = detection
 	}
 	if len(filteredNames) == 0 {
-		return siteModelFetchResult{}, fmt.Errorf("site sync could not resolve models for group %q; create a key for that group on the site and sync again", normalizedGroupKey)
+		return siteModelFetchResult{}, fmt.Errorf(siteSyncMissingGroupModelsMessage, normalizedGroupKey)
 	}
 
 	return siteModelFetchResult{

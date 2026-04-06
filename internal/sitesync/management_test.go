@@ -345,6 +345,57 @@ func TestSyncManagementPlatformDoesNotFallbackWithoutExplicitGroupMatch(t *testi
 	}
 }
 
+func TestSyncManagementPlatformPrefersStableGroupErrorOverHTMLSummary(t *testing.T) {
+	platformUserID := 7788
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/token/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[{"name":"primary","key":"managed-key","group":"default","status":1}]}}`))
+		case r.URL.Path == "/api/user/self/groups":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
+		case r.URL.Path == "/models":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<!doctype html><html><head><title>New API</title></head><body>site home</body></html>`))
+		case r.URL.Path == "/api/user/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":["gpt-4o-mini"]}`))
+		case r.URL.Path == "/api/pricing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"model_name":"gpt-4o-mini","supported_endpoint_types":["/v1/chat/completions"]}]}`))
+		case r.URL.Path == "/api/available_model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := syncManagementPlatform(context.Background(), &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  server.URL,
+	}, &model.SiteAccount{
+		Name:           "managed-user",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "test-access-token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+	})
+	if err == nil {
+		t.Fatalf("expected syncManagementPlatform to fail when explicit group metadata is missing")
+	}
+	if strings.Contains(err.Error(), `decode response failed: New API`) {
+		t.Fatalf("expected stable group guidance instead of HTML summary, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `site sync could not resolve models for group "default"; create a key for that group on the site and sync again`) {
+		t.Fatalf("expected stable group guidance error, got %v", err)
+	}
+}
+
 func TestSyncManagementPlatformReturnsStableMissingGroupKeyError(t *testing.T) {
 	platformUserID := 7788
 

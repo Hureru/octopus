@@ -1,14 +1,32 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { CalendarCheck2, Clock3, Globe2, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { useCheckinAllSites, useSyncAllSites } from '@/api/endpoints/site';
 import { toast } from '@/components/common/Toast';
+import { useSettingStore } from '@/stores/setting';
+import { translateSiteMessage } from '@/components/modules/site/site-message';
+
+function getErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message.trim()) {
+        return error.message;
+    }
+    if (error && typeof error === 'object' && 'message' in error) {
+        const message = (error as { message?: unknown }).message;
+        if (typeof message === 'string' && message.trim()) {
+            return message;
+        }
+    }
+    return fallback;
+}
 
 export function SettingSiteAutomation() {
+    const t = useTranslations();
+    const locale = useSettingStore((state) => state.locale);
     const { data: settings } = useSettingList();
     const setSetting = useSetSetting();
     const syncAllSites = useSyncAllSites();
@@ -44,7 +62,7 @@ export function SettingSiteAutomation() {
                 toast.success('已保存');
             },
             onError: (error) => {
-                toast.error(error instanceof Error ? error.message : '保存失败');
+                toast.error(translateSiteMessage(locale, getErrorMessage(error, '保存失败'), t));
             },
         });
     }
@@ -55,7 +73,7 @@ export function SettingSiteAutomation() {
                 toast.success('已触发后台站点全量同步');
             },
             onError: (error) => {
-                toast.error(error instanceof Error ? error.message : '触发同步失败');
+                toast.error(translateSiteMessage(locale, getErrorMessage(error, '触发同步失败'), t));
             },
         });
     }
@@ -66,7 +84,7 @@ export function SettingSiteAutomation() {
                 toast.success('已触发后台站点全量签到');
             },
             onError: (error) => {
-                toast.error(error instanceof Error ? error.message : '触发签到失败');
+                toast.error(translateSiteMessage(locale, getErrorMessage(error, '触发签到失败'), t));
             },
         });
     }

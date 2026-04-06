@@ -27,7 +27,7 @@ function matchSiteMessage(message: string): MatchResult | null {
     const fallbackMatch = trimmed.match(missingGroupKeyFallbackPattern);
     if (fallbackMatch) {
         return {
-            key: 'siteSync.errors.missingGroupKey',
+            key: 'siteSync.errors.missingGroupModelsOrKey',
             values: { groupKey: fallbackMatch[1] },
         };
     }
@@ -53,6 +53,16 @@ function fallbackTranslate(locale: Locale, key: string, values?: Record<string, 
                 case 'zh_hans':
                 default:
                     return interpolate('分组「{groupKey}」没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。', values);
+            }
+        case 'siteSync.errors.missingGroupModelsOrKey':
+            switch (locale) {
+                case 'en':
+                    return 'Failed to fetch models: the current group has no available models or key.';
+                case 'zh_hant':
+                    return '獲取模型失敗：當前分組沒有可用模型或可用 Key';
+                case 'zh_hans':
+                default:
+                    return '获取模型失败：当前分组没有可用模型或可用 Key';
             }
         default:
             return '';
@@ -83,4 +93,3 @@ export function translateSiteMessage(
 
     return fallbackTranslate(locale, matched.key, matched.values) || raw;
 }
-
