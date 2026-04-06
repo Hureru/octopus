@@ -18,6 +18,7 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
+	"github.com/bestruirui/octopus/internal/utils/tokenizer"
 	"github.com/gin-gonic/gin"
 )
 
@@ -132,6 +133,71 @@ func TestRelayMetricsUsesResponseModelForCostLookup(t *testing.T) {
 	}
 	if metrics.Stats.OutputCost <= 0 {
 		t.Fatalf("expected output cost to be computed from response model price, got %f", metrics.Stats.OutputCost)
+	}
+}
+
+func TestRelayMetricsCapturesOpenAICompatibleInputBreakdown(t *testing.T) {
+	metrics := NewRelayMetrics(0, "alias-model", &transformerModel.InternalLLMRequest{Model: "alias-model"})
+	payload := []byte(`{"model":"gpt-4o-mini","input":"hello world"}`)
+	metrics.SetTransportRequestPayload(payload, "gpt-4o-mini")
+	metrics.SetInternalResponse(&transformerModel.InternalLLMResponse{
+		Model: "gpt-4o-mini",
+		Usage: &transformerModel.Usage{
+			PromptTokens:     1200,
+			CompletionTokens: 300,
+			PromptTokensDetails: &transformerModel.PromptTokensDetails{
+				CachedTokens: 900,
+			},
+		},
+	}, "gpt-4o-mini")
+
+	if metrics.TransportInputTokens == nil || *metrics.TransportInputTokens != tokenizer.CountTokens(string(payload), "gpt-4o-mini") {
+		t.Fatalf("expected transport input tokens to be estimated from payload, got %#v", metrics.TransportInputTokens)
+	}
+	if metrics.BillInputTokens == nil || *metrics.BillInputTokens != 300 {
+		t.Fatalf("expected billed input tokens to exclude cache read tokens, got %#v", metrics.BillInputTokens)
+	}
+	if metrics.CacheReadTokens == nil || *metrics.CacheReadTokens != 900 {
+		t.Fatalf("expected cache read tokens to be captured, got %#v", metrics.CacheReadTokens)
+	}
+	if metrics.CacheWriteTokens == nil || *metrics.CacheWriteTokens != 0 {
+		t.Fatalf("expected cache write tokens to default to zero, got %#v", metrics.CacheWriteTokens)
+	}
+}
+
+func TestRelayMetricsCapturesAnthropicInputBreakdown(t *testing.T) {
+	metrics := NewRelayMetrics(0, "alias-model", &transformerModel.InternalLLMRequest{Model: "alias-model"})
+	metrics.SetInternalResponse(&transformerModel.InternalLLMResponse{
+		Model: "claude-sonnet-4-5",
+		Usage: &transformerModel.Usage{
+			PromptTokens:             400,
+			CompletionTokens:         180,
+			AnthropicUsage:           true,
+			CacheCreationInputTokens: 250,
+			PromptTokensDetails: &transformerModel.PromptTokensDetails{
+				CachedTokens: 1200,
+			},
+		},
+	}, "claude-sonnet-4-5")
+
+	if metrics.BillInputTokens == nil || *metrics.BillInputTokens != 400 {
+		t.Fatalf("expected anthropic billed input tokens to keep prompt tokens as-is, got %#v", metrics.BillInputTokens)
+	}
+	if metrics.CacheReadTokens == nil || *metrics.CacheReadTokens != 1200 {
+		t.Fatalf("expected anthropic cache read tokens to be captured, got %#v", metrics.CacheReadTokens)
+	}
+	if metrics.CacheWriteTokens == nil || *metrics.CacheWriteTokens != 250 {
+		t.Fatalf("expected anthropic cache write tokens to be captured, got %#v", metrics.CacheWriteTokens)
+	}
+}
+
+func TestDefaultWSModeForRequest(t *testing.T) {
+	previousResponseID := "resp_123"
+	if got := defaultWSModeForRequest(&transformerModel.InternalLLMRequest{PreviousResponseID: &previousResponseID}); got != model.RelayLogWSModeContinuation {
+		t.Fatalf("expected previous_response_id request to be marked as continuation, got %q", got)
+	}
+	if got := defaultWSModeForRequest(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}); got != model.RelayLogWSModeFresh {
+		t.Fatalf("expected ordinary request to be marked as fresh, got %q", got)
 	}
 }
 

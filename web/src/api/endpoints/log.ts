@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  */
 export type AttemptStatus = 'success' | 'failed' | 'circuit_break' | 'skipped';
 
+export type RelayLogWSMode = 'fresh' | 'continuation' | 'replay';
+
 /**
  * 单次渠道尝试信息
  */
@@ -36,6 +38,10 @@ export interface RelayLog {
     channel_name: string;        // 渠道名称
     actual_model_name: string;   // 实际使用模型名称
     input_tokens: number;        // 输入Token
+    transport_input_tokens?: number | null; // 实际发送到上游请求体的 Token 估算
+    bill_input_tokens?: number | null; // 按常规输入价格计费的 Token
+    cache_read_tokens?: number | null; // 从缓存读取的 Token
+    cache_write_tokens?: number | null; // 写入缓存的 Token
     output_tokens: number;       // 输出Token
     ftut: number;                // 首字时间(毫秒)
     use_time: number;            // 总用时(毫秒)
@@ -46,6 +52,7 @@ export interface RelayLog {
     attempts?: ChannelAttempt[]; // 所有尝试记录
     total_attempts?: number;     // 总尝试次数
     used_ws?: boolean;           // 是否使用了上游WebSocket
+    ws_mode?: RelayLogWSMode | null; // 上游 WebSocket 模式
 }
 
 /**

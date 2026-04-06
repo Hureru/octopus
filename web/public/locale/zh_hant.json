@@ -460,7 +460,17 @@
             "disableModel": "停用模型",
             "disabling": "停用中",
             "disabled": "已停用",
-            "ws": "WS"
+            "ws": "WS",
+            "wsContinuation": "續傳",
+            "wsReplay": "回放",
+            "wsFreshHint": "本次請求走了上游 WebSocket 新會話。",
+            "wsContinuationHint": "本次請求直接續上了上游 WebSocket 會話。",
+            "wsReplayHint": "本次請求走了上游 WebSocket，但為了恢復上下文回放了歷史內容。",
+            "inputDetails": "輸入明細",
+            "transportInput": "傳輸輸入",
+            "billInput": "計費輸入",
+            "cacheRead": "快取讀取",
+            "cacheWrite": "快取寫入"
         }
     },
     "channel": {
@@ -565,5 +575,4 @@
         }
     }
 }
-
 

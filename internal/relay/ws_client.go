@@ -197,6 +197,7 @@ func processWSResponseCreate(
 		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
 		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest)
 		if replayErr == nil {
+			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 			req = replayReq
 			group = replayGroup
 			result = runWSRelay(ctx, req, group)

@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Wifi } from 'lucide-react';
+import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Info, Waypoints } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 import { useTheme } from 'next-themes';
-import { type RelayLog, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
+import { type RelayLog, type RelayLogWSMode, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,7 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/animate-ui/components/animate/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from '@/components/common/Toast';
 import { useUpdateSiteChannelModelDisabled } from '@/api/endpoints/site-channel';
 
@@ -75,6 +76,46 @@ function formatDuration(ms: number): string {
 function makeDisableTargetKey(target: LogSiteActionTarget | null | undefined) {
     if (!target) return '';
     return `${target.siteId}\u0000${target.accountId}\u0000${target.groupKey}\u0000${target.modelName}`;
+}
+
+function formatOptionalTokenCount(value: number | null | undefined) {
+    if (typeof value !== 'number') return '—';
+    return value.toLocaleString();
+}
+
+function hasInputTokenDetails(log: RelayLog) {
+    return (
+        log.transport_input_tokens != null ||
+        log.bill_input_tokens != null ||
+        log.cache_read_tokens != null ||
+        log.cache_write_tokens != null
+    );
+}
+
+function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
+    if (!usedWS && !mode) return null;
+
+    switch (mode) {
+        case 'continuation':
+            return {
+                label: t('wsContinuation'),
+                className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                description: t('wsContinuationHint'),
+            };
+        case 'replay':
+            return {
+                label: t('wsReplay'),
+                className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                description: t('wsReplayHint'),
+            };
+        case 'fresh':
+        default:
+            return {
+                label: t('ws'),
+                className: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
+                description: t('wsFreshHint'),
+            };
+    }
 }
 
 function getAttemptStatusMeta(status: AttemptStatus, t: ReturnType<typeof useTranslations<'log.card'>>) {
@@ -166,6 +207,71 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                 })}
             </TooltipContent>
         </Tooltip>
+    );
+}
+
+function WSModeBadge({ log }: { log: RelayLog }) {
+    const t = useTranslations('log.card');
+    const meta = getWSBadgeMeta(log.ws_mode, log.used_ws, t);
+
+    if (!meta) return null;
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Badge
+                    variant="secondary"
+                    className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', meta.className)}
+                >
+                    <Waypoints className="size-3.5 shrink-0" />
+                    {meta.label}
+                </Badge>
+            </TooltipTrigger>
+            <TooltipContent>{meta.description}</TooltipContent>
+        </Tooltip>
+    );
+}
+
+function InputTokenDetailsPopover({ log }: { log: RelayLog }) {
+    const t = useTranslations('log.card');
+
+    if (!hasInputTokenDetails(log)) return null;
+
+    return (
+        <Popover>
+            <PopoverTrigger asChild>
+                <button
+                    type="button"
+                    aria-label={t('inputDetails')}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-muted/70 hover:text-foreground"
+                >
+                    <Info className="size-3.5" />
+                </button>
+            </PopoverTrigger>
+            <PopoverContent
+                side="top"
+                align="start"
+                onOpenAutoFocus={(event) => event.preventDefault()}
+                className="w-56 rounded-2xl border border-border/70 bg-card p-3 shadow-xl"
+            >
+                <div className="space-y-2">
+                    <div className="text-xs font-semibold text-foreground">{t('inputDetails')}</div>
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+                        <span className="text-muted-foreground">{t('transportInput')}</span>
+                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.transport_input_tokens)}</span>
+                        <span className="text-muted-foreground">{t('billInput')}</span>
+                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.bill_input_tokens)}</span>
+                        <span className="text-muted-foreground">{t('cacheRead')}</span>
+                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.cache_read_tokens)}</span>
+                        <span className="text-muted-foreground">{t('cacheWrite')}</span>
+                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.cache_write_tokens)}</span>
+                    </div>
+                </div>
+            </PopoverContent>
+        </Popover>
     );
 }
 
@@ -421,15 +527,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                         <Pin className="size-3.5 shrink-0 text-amber-500" />
                                     ) : null}
                                 </div>
-                                {log.used_ws ? (
-                                    <Badge
-                                        variant="secondary"
-                                        className="shrink-0 gap-1 px-1.5 py-0 text-xs bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
-                                    >
-                                        <Wifi className="size-3.5 shrink-0" />
-                                        {t('ws')}
-                                    </Badge>
-                                ) : null}
+                                <WSModeBadge log={log} />
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-7 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
@@ -454,7 +552,10 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <ArrowDownToLine className="size-3.5 shrink-0 text-green-500" />
-                                    <span>{t('input')} {log.input_tokens.toLocaleString()}</span>
+                                    <span className="flex items-center gap-1">
+                                        <span>{t('input')} {log.input_tokens.toLocaleString()}</span>
+                                        <InputTokenDetailsPopover log={log} />
+                                    </span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <ArrowUpFromLine className="size-3.5 shrink-0 text-purple-500" />
@@ -504,15 +605,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     <Pin className="size-3.5 shrink-0 text-amber-500" />
                                 ) : null}
                             </div>
-                            {log.used_ws ? (
-                                <Badge
-                                    variant="secondary"
-                                    className="shrink-0 gap-1 px-1.5 py-0 text-xs bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
-                                >
-                                    <Wifi className="size-3.5 shrink-0" />
-                                    {t('ws')}
-                                </Badge>
-                            ) : null}
+                            <WSModeBadge log={log} />
                         </MorphingDialogTitle>
 
                         <MorphingDialogDescription className="flex-1 min-h-0">

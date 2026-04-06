@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -384,6 +385,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		wsUpstreamPool.Put(ra.channel.ID, ra.usedKey.ID, pc)
 		return -1, nil // fall through to HTTP
 	}
+	ra.metrics.SetTransportRequestPayload(reqBody, ra.internalRequest.Model)
 
 	// Send response.create message
 	if err := wsUpstreamPool.SendResponseCreate(ctx, pc, reqBody); err != nil {
@@ -395,6 +397,9 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 
 	// Read events from WS and process through the transform pipeline
 	ra.metrics.UsedWS = true
+	if ra.metrics.WSMode == nil {
+		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
+	}
 	reader := newWSUpstreamReader(pc, ra.channel.ID, ra.usedKey.ID)
 	err = ra.handleWSStreamResponse(ctx, reader)
 	if err != nil {
@@ -489,6 +494,9 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 		log.Warnf("failed to create request: %v", err)
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
+	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
+		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	}
 
 	// 复制请求头
 	ra.copyHeaders(outboundRequest)
@@ -522,6 +530,34 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return response.StatusCode, nil
+}
+
+func defaultWSModeForRequest(req *model.InternalLLMRequest) dbmodel.RelayLogWSMode {
+	if requiresUpstreamWSContinuation(req) {
+		return dbmodel.RelayLogWSModeContinuation
+	}
+	return dbmodel.RelayLogWSModeFresh
+}
+
+func readOutboundRequestBody(req *http.Request) ([]byte, error) {
+	if req == nil || req.Body == nil {
+		return nil, nil
+	}
+	if req.GetBody != nil {
+		bodyReader, err := req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		defer bodyReader.Close()
+		return io.ReadAll(bodyReader)
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	return body, nil
 }
 
 // getStreamWriter returns the appropriate stream writer for the current request.

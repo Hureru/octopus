@@ -460,7 +460,17 @@
             "disableModel": "禁用模型",
             "disabling": "禁用中",
             "disabled": "已禁用",
-            "ws": "WS"
+            "ws": "WS",
+            "wsContinuation": "续传",
+            "wsReplay": "回放",
+            "wsFreshHint": "本次请求走了上游 WebSocket 新会话。",
+            "wsContinuationHint": "本次请求直接续上了上游 WebSocket 会话。",
+            "wsReplayHint": "本次请求走了上游 WebSocket，但为了恢复上下文回放了历史内容。",
+            "inputDetails": "输入明细",
+            "transportInput": "传输输入",
+            "billInput": "计费输入",
+            "cacheRead": "缓存读取",
+            "cacheWrite": "缓存写入"
         }
     },
     "channel": {
@@ -565,4 +575,3 @@
         }
     }
 }
-

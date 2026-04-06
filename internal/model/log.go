@@ -23,23 +23,37 @@ type ChannelAttempt struct {
 	Msg          string        `json:"msg,omitempty"`
 }
 
+// RelayLogWSMode 表示本次上游 WebSocket 的使用方式。
+type RelayLogWSMode string
+
+const (
+	RelayLogWSModeFresh        RelayLogWSMode = "fresh"        // 新建 WS 会话
+	RelayLogWSModeContinuation RelayLogWSMode = "continuation" // 直接续传上游会话
+	RelayLogWSModeReplay       RelayLogWSMode = "replay"       // 续传失败后回放上下文
+)
+
 type RelayLog struct {
-	ID                int64            `json:"id" gorm:"primaryKey;autoIncrement:false"` // Snowflake ID
-	Time              int64            `json:"time"`                                     // 时间戳（秒）
-	RequestModelName  string           `json:"request_model_name"`                       // 请求模型名称
-	RequestAPIKeyName string           `json:"request_api_key_name"`                     // 请求使用的 API Key 名称
-	ChannelId         int              `json:"channel" gorm:"index"`                     // 实际使用的渠道ID
-	ChannelName       string           `json:"channel_name"`                             // 渠道名称
-	ActualModelName   string           `json:"actual_model_name"`                        // 实际使用模型名称
-	InputTokens       int              `json:"input_tokens"`                             // 输入Token
-	OutputTokens      int              `json:"output_tokens"`                            // 输出 Token
-	Ftut              int              `json:"ftut"`                                     // 首字时间(毫秒)
-	UseTime           int              `json:"use_time"`                                 // 总用时(毫秒)
-	Cost              float64          `json:"cost"`                                     // 消耗费用
-	RequestContent    string           `json:"request_content"`                          // 请求内容
-	ResponseContent   string           `json:"response_content"`                         // 响应内容
-	Error             string           `json:"error"`                                    // 错误信息
-	Attempts          []ChannelAttempt `json:"attempts" gorm:"serializer:json"`          // 所有尝试记录
-	TotalAttempts     int              `json:"total_attempts"`                           // 总尝试次数
-	UsedWS            bool             `json:"used_ws" gorm:"default:false"`             // 是否使用了上游WebSocket
+	ID                   int64            `json:"id" gorm:"primaryKey;autoIncrement:false"` // Snowflake ID
+	Time                 int64            `json:"time"`                                     // 时间戳（秒）
+	RequestModelName     string           `json:"request_model_name"`                       // 请求模型名称
+	RequestAPIKeyName    string           `json:"request_api_key_name"`                     // 请求使用的 API Key 名称
+	ChannelId            int              `json:"channel" gorm:"index"`                     // 实际使用的渠道ID
+	ChannelName          string           `json:"channel_name"`                             // 渠道名称
+	ActualModelName      string           `json:"actual_model_name"`                        // 实际使用模型名称
+	InputTokens          int              `json:"input_tokens"`                             // 输入Token
+	TransportInputTokens *int             `json:"transport_input_tokens,omitempty"`         // 实际发送到上游请求体的 Token 估算
+	BillInputTokens      *int             `json:"bill_input_tokens,omitempty"`              // 按常规输入价格计费的 Token
+	CacheReadTokens      *int             `json:"cache_read_tokens,omitempty"`              // 从缓存读取的 Token
+	CacheWriteTokens     *int             `json:"cache_write_tokens,omitempty"`             // 写入缓存的 Token
+	OutputTokens         int              `json:"output_tokens"`                            // 输出 Token
+	Ftut                 int              `json:"ftut"`                                     // 首字时间(毫秒)
+	UseTime              int              `json:"use_time"`                                 // 总用时(毫秒)
+	Cost                 float64          `json:"cost"`                                     // 消耗费用
+	RequestContent       string           `json:"request_content"`                          // 请求内容
+	ResponseContent      string           `json:"response_content"`                         // 响应内容
+	Error                string           `json:"error"`                                    // 错误信息
+	Attempts             []ChannelAttempt `json:"attempts" gorm:"serializer:json"`          // 所有尝试记录
+	TotalAttempts        int              `json:"total_attempts"`                           // 总尝试次数
+	UsedWS               bool             `json:"used_ws" gorm:"default:false"`             // 是否使用了上游WebSocket
+	WSMode               *RelayLogWSMode  `json:"ws_mode,omitempty"`                        // 上游 WebSocket 模式
 }

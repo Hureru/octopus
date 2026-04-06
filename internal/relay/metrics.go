@@ -12,6 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/price"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/tokenizer"
 )
 
 // RelayMetrics 负责最终的日志收集与持久化
@@ -31,6 +32,12 @@ type RelayMetrics struct {
 	ActualModel string
 	Stats       model.StatsMetrics
 	UsedWS      bool
+	WSMode      *model.RelayLogWSMode
+
+	TransportInputTokens *int
+	BillInputTokens      *int
+	CacheReadTokens      *int
+	CacheWriteTokens     *int
 }
 
 func NewRelayMetrics(apiKeyID int, requestModel string, req *transformerModel.InternalLLMRequest) *RelayMetrics {
@@ -46,6 +53,21 @@ func (m *RelayMetrics) SetFirstTokenTime(t time.Time) {
 	m.FirstTokenTime = t
 }
 
+func (m *RelayMetrics) SetTransportRequestPayload(payload []byte, modelName string) {
+	if len(payload) == 0 {
+		return
+	}
+	count := tokenizer.CountTokens(string(payload), modelName)
+	m.TransportInputTokens = intPtr(count)
+}
+
+func (m *RelayMetrics) SetWSMode(mode model.RelayLogWSMode) {
+	if mode == "" {
+		return
+	}
+	m.WSMode = wsModePtr(mode)
+}
+
 func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMResponse, actualModel string) {
 	m.InternalResponse = resp
 	m.ActualModel = actualModel
@@ -55,6 +77,20 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	}
 
 	usage := resp.Usage
+	cachedTokens := int64(0)
+	if usage.PromptTokensDetails != nil {
+		cachedTokens = usage.PromptTokensDetails.CachedTokens
+	}
+	billInputTokens := usage.PromptTokens
+	if !usage.AnthropicUsage {
+		billInputTokens -= cachedTokens
+		if billInputTokens < 0 {
+			billInputTokens = 0
+		}
+	}
+	m.BillInputTokens = intPtr(int(billInputTokens))
+	m.CacheReadTokens = intPtr(int(cachedTokens))
+	m.CacheWriteTokens = intPtr(int(usage.CacheCreationInputTokens))
 	m.Stats.InputToken = usage.PromptTokens
 	m.Stats.OutputToken = usage.CompletionTokens
 
@@ -158,6 +194,11 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 		relayLog.OutputTokens = int(m.InternalResponse.Usage.CompletionTokens)
 		relayLog.Cost = m.Stats.InputCost + m.Stats.OutputCost
 	}
+	relayLog.TransportInputTokens = m.TransportInputTokens
+	relayLog.BillInputTokens = m.BillInputTokens
+	relayLog.CacheReadTokens = m.CacheReadTokens
+	relayLog.CacheWriteTokens = m.CacheWriteTokens
+	relayLog.WSMode = m.WSMode
 
 	// 请求内容
 	if m.InternalRequest != nil {
@@ -188,6 +229,14 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)
 	}
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func wsModePtr(value model.RelayLogWSMode) *model.RelayLogWSMode {
+	return &value
 }
 
 // filterResponseForLog 创建响应的浅拷贝，过滤掉 images、MultipleContent 中的图片数据和 Audio.Data 以减少存储压力

@@ -460,7 +460,17 @@
             "disableModel": "Disable Model",
             "disabling": "Disabling",
             "disabled": "Disabled",
-            "ws": "WS"
+            "ws": "WS",
+            "wsContinuation": "Continue",
+            "wsReplay": "Replay",
+            "wsFreshHint": "This request used a fresh upstream WebSocket session.",
+            "wsContinuationHint": "This request continued the upstream WebSocket session directly.",
+            "wsReplayHint": "This request used upstream WebSocket, but replayed history to recover the context.",
+            "inputDetails": "Input Details",
+            "transportInput": "Transport Input",
+            "billInput": "Billed Input",
+            "cacheRead": "Cache Read",
+            "cacheWrite": "Cache Write"
         }
     },
     "channel": {
@@ -565,4 +575,3 @@
         }
     }
 }
-
