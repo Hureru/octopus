@@ -2534,7 +2534,7 @@ function SiteChannelDialog({
                         ) : null}
                     </div>
 
-                    <div className="max-w-full overflow-x-auto pb-1">
+                    <div className="mr-12 max-w-full overflow-x-auto pb-1">
                         <div className="flex min-w-max gap-2">
                             {card.accounts.map((account) => (
                                 <button
