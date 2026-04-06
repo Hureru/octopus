@@ -121,6 +121,11 @@ func processWSResponseCreate(
 	if genRaw, ok := reqBody["generate"]; ok {
 		var generate bool
 		if json.Unmarshal(genRaw, &generate) == nil && !generate {
+			if err := bestEffortWarmupUpstreamWS(ctx, apiKeyID, supportedModels, reqBody); err != nil {
+				log.Warnf("ws warmup failed (apikey=%d): %v", apiKeyID, err)
+			} else {
+				log.Infof("ws warmup ready (apikey=%d)", apiKeyID)
+			}
 			delete(reqBody, "generate")
 			writeWSEvent(ctx, conn, map[string]interface{}{
 				"type": "response.created",
@@ -211,6 +216,114 @@ func processWSResponseCreate(
 	}
 
 	return conversationState
+}
+
+func bestEffortWarmupUpstreamWS(
+	ctx context.Context,
+	apiKeyID int,
+	supportedModels string,
+	reqBody map[string]json.RawMessage,
+) error {
+	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
+	if requestModel == "" {
+		return fmt.Errorf("warmup request missing model")
+	}
+
+	if supportedModels != "" {
+		supportedModelsArray := strings.Split(supportedModels, ",")
+		found := false
+		for _, modelName := range supportedModelsArray {
+			if modelName == requestModel {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("model not supported")
+		}
+	}
+
+	group, err := op.GroupGetEnabledMap(requestModel, ctx)
+	if err != nil {
+		return fmt.Errorf("model not found")
+	}
+
+	iter := balancer.NewIterator(group, apiKeyID, requestModel)
+	if iter.Len() == 0 {
+		return fmt.Errorf("no available channel")
+	}
+
+	var lastErr error
+	for iter.Next() {
+		item := iter.Item()
+
+		channel, err := op.ChannelGet(item.ChannelID, ctx)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !channel.Enabled || channel.Type != outbound.OutboundTypeOpenAIResponse {
+			continue
+		}
+
+		selectOpts := dbmodel.ChannelKeySelectOptions{
+			ExcludeKeyIDs:  make(map[int]struct{}),
+			PreferredKeyID: iter.StickyKeyID(),
+		}
+
+		for {
+			usedKey := channel.GetChannelKey(selectOpts)
+			if usedKey.ChannelKey == "" {
+				break
+			}
+			if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
+				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
+				continue
+			}
+
+			if err := warmupUpstreamWSConnection(ctx, channel, usedKey); err != nil {
+				lastErr = err
+				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
+				continue
+			}
+
+			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
+			return nil
+		}
+	}
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("no ws-capable channel available for warmup")
+}
+
+func extractWSRequestModel(reqBody map[string]json.RawMessage) string {
+	if len(reqBody) == 0 {
+		return ""
+	}
+	modelRaw, ok := reqBody["model"]
+	if !ok {
+		return ""
+	}
+	var requestModel string
+	if err := json.Unmarshal(modelRaw, &requestModel); err != nil {
+		return ""
+	}
+	return requestModel
+}
+
+func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, usedKey dbmodel.ChannelKey) error {
+	warmupCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ChannelKey, usedKey.ID)
+	if pc == nil {
+		return fmt.Errorf("upstream ws unavailable")
+	}
+
+	wsUpstreamPool.Put(channel.ID, usedKey.ID, pc)
+	return nil
 }
 
 func newWSRelayRequest(
