@@ -28,6 +28,7 @@ var wsUpstreamPool = newWSPool()
 type wsPoolKey struct {
 	channelID int
 	keyID     int
+	headerSig string
 }
 
 type pooledConn struct {
@@ -35,6 +36,7 @@ type pooledConn struct {
 	createdAt time.Time
 	lastUsed  time.Time
 	busy      bool
+	headerSig string
 }
 
 type wsPool struct {
@@ -60,11 +62,11 @@ func newWSPool() *wsPool {
 }
 
 // Get returns an existing idle connection or nil.
-func (p *wsPool) Get(channelID, keyID int) *pooledConn {
+func (p *wsPool) Get(channelID, keyID int, headerSig string) *pooledConn {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	key := wsPoolKey{channelID, keyID}
+	key := wsPoolKey{channelID: channelID, keyID: keyID, headerSig: headerSig}
 	pc, ok := p.conns[key]
 	if !ok || pc.busy {
 		return nil
@@ -87,18 +89,21 @@ func (p *wsPool) Put(channelID, keyID int, pc *pooledConn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	key := wsPoolKey{channelID, keyID}
+	if pc == nil {
+		return
+	}
+	key := wsPoolKey{channelID: channelID, keyID: keyID, headerSig: pc.headerSig}
 	pc.busy = false
 	pc.lastUsed = time.Now()
 	p.conns[key] = pc
 }
 
 // Remove removes and closes a connection.
-func (p *wsPool) Remove(channelID, keyID int) {
+func (p *wsPool) Remove(channelID, keyID int, headerSig string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	key := wsPoolKey{channelID, keyID}
+	key := wsPoolKey{channelID: channelID, keyID: keyID, headerSig: headerSig}
 	if pc, ok := p.conns[key]; ok {
 		pc.conn.Close(websocket.StatusNormalClosure, "")
 		delete(p.conns, key)
@@ -126,7 +131,7 @@ func (p *wsPool) MarkUnsupported(channelID int) {
 }
 
 // Dial creates a new WebSocket connection to the upstream.
-func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string) (*pooledConn, bool, error) {
+func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl string, headers http.Header, headerSig string) (*pooledConn, bool, error) {
 	// Build WS URL
 	wsURL, err := buildWSURL(baseUrl)
 	if err != nil {
@@ -144,9 +149,7 @@ func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, ke
 
 	opts := &websocket.DialOptions{
 		HTTPClient: httpClient,
-		HTTPHeader: http.Header{
-			"Authorization": []string{"Bearer " + key},
-		},
+		HTTPHeader: headers,
 	}
 
 	conn, response, err := websocket.Dial(dialCtx, wsURL, opts)
@@ -162,6 +165,7 @@ func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, ke
 		createdAt: time.Now(),
 		lastUsed:  time.Now(),
 		busy:      true,
+		headerSig: headerSig,
 	}
 
 	return pc, false, nil
@@ -300,24 +304,25 @@ func (p *wsPool) Close() {
 
 // TryUpstreamWS attempts to get or create a WS connection for an upstream channel.
 // Returns nil if the channel doesn't support WS or connection fails.
-func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int, forceRedial ...bool) *pooledConn {
+func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl string, keyID int, headers http.Header, forceRedial ...bool) *pooledConn {
 	if wsUpstreamPool.IsUnsupported(channel.ID) {
 		return nil
 	}
+	headerSig := headerSignature(headers)
 
 	redial := len(forceRedial) > 0 && forceRedial[0]
 
 	// Try existing connection first
 	if !redial {
-		if pc := wsUpstreamPool.Get(channel.ID, keyID); pc != nil {
+		if pc := wsUpstreamPool.Get(channel.ID, keyID, headerSig); pc != nil {
 			return pc
 		}
 	} else {
-		wsUpstreamPool.Remove(channel.ID, keyID)
+		wsUpstreamPool.Remove(channel.ID, keyID, headerSig)
 	}
 
 	// Try to dial new connection
-	pc, unsupported, err := wsUpstreamPool.Dial(ctx, channel, baseUrl, key)
+	pc, unsupported, err := wsUpstreamPool.Dial(ctx, channel, baseUrl, headers, headerSig)
 	if err != nil {
 		if unsupported {
 			log.Infof("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)

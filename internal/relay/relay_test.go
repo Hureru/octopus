@@ -23,6 +23,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func testWSUpstreamHeaders(channel *model.Channel, key model.ChannelKey, headers http.Header) http.Header {
+	return buildUpstreamHeaders(headers, channel, "Bearer "+key.ChannelKey, true)
+}
+
 func TestHandlerFallsBackToNextChannelAfterFirstFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
@@ -273,8 +277,9 @@ func TestHandlerStopsFailoverWhenContinuationTransportIsUnavailable(t *testing.T
 	if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: firstChannel.ID, BaseUrls: &firstChannel.BaseUrls}, ctx); err != nil {
 		t.Fatalf("ChannelUpdate first channel failed: %v", err)
 	}
+	headers := testWSUpstreamHeaders(firstChannel, firstChannel.Keys[0], c.Request.Header)
 
-	pc := TryUpstreamWS(context.Background(), firstChannel, firstChannel.GetBaseUrl(), firstChannel.Keys[0].ChannelKey, firstChannel.Keys[0].ID, true)
+	pc := TryUpstreamWS(context.Background(), firstChannel, firstChannel.GetBaseUrl(), firstChannel.Keys[0].ID, headers, true)
 	if pc == nil {
 		t.Fatalf("expected initial ws dial to succeed")
 	}
@@ -295,8 +300,8 @@ func TestHandlerStopsFailoverWhenContinuationTransportIsUnavailable(t *testing.T
 	if sticky := balancer.GetSticky(77, "relay-ws-continuation-group", time.Minute); sticky != nil {
 		t.Fatalf("expected sticky to be cleared after continuation failure, got %#v", sticky)
 	}
-	wsUpstreamPool.Remove(firstChannel.ID, firstChannel.Keys[0].ID)
-	wsUpstreamPool.Remove(secondChannel.ID, secondChannel.Keys[0].ID)
+	wsUpstreamPool.Remove(firstChannel.ID, firstChannel.Keys[0].ID, pc.headerSig)
+	wsUpstreamPool.Remove(secondChannel.ID, secondChannel.Keys[0].ID, headerSignature(testWSUpstreamHeaders(secondChannel, secondChannel.Keys[0], nil)))
 }
 
 func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T) {
@@ -334,8 +339,9 @@ func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T)
 	if err := op.ChannelCreate(channel, ctx); err != nil {
 		t.Fatalf("ChannelCreate failed: %v", err)
 	}
+	headers := testWSUpstreamHeaders(channel, channel.Keys[0], nil)
 
-	stale := TryUpstreamWS(context.Background(), channel, channel.GetBaseUrl(), channel.Keys[0].ChannelKey, channel.Keys[0].ID, true)
+	stale := TryUpstreamWS(context.Background(), channel, channel.GetBaseUrl(), channel.Keys[0].ID, headers, true)
 	if stale == nil {
 		t.Fatalf("expected initial ws dial to succeed")
 	}
@@ -371,7 +377,190 @@ func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T)
 	if accepted.Load() < 2 {
 		t.Fatalf("expected stale connection plus forced redial, got %d accepted connections", accepted.Load())
 	}
-	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID)
+	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID, stale.headerSig)
+}
+
+func TestHTTPResponsesRequestPassesThroughHeadersToUpstreamWS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
+		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
+	}
+
+	var observedUserAgent atomic.Value
+	var observedRequestID atomic.Value
+	var observedConnection atomic.Value
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedUserAgent.Store(r.Header.Get("User-Agent"))
+		observedRequestID.Store(r.Header.Get("X-Request-Id"))
+		observedConnection.Store(r.Header.Get("Connection"))
+
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		_, _, err = conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_http_ws","model":"gpt-4o"}}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"ok"}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_http_ws","model":"gpt-4o","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`))
+	}))
+	defer wsServer.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-ws-http-header-pass",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: wsServer.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "header-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	group := &model.Group{Name: "relay-ws-http-header-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"relay-ws-http-header-group","input":"hello","stream":true}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "octopus-http-client/1.0")
+	c.Request.Header.Set("X-Request-Id", "req-http-ws-1")
+	c.Request.Header.Set("Connection", "keep-alive")
+
+	Handler(inbound.InboundTypeOpenAIResponse, c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected ws upstream relay to succeed, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if got, _ := observedUserAgent.Load().(string); got != "octopus-http-client/1.0" {
+		t.Fatalf("expected User-Agent to be passed through, got %q", got)
+	}
+	if got, _ := observedRequestID.Load().(string); got != "req-http-ws-1" {
+		t.Fatalf("expected X-Request-Id to be passed through, got %q", got)
+	}
+	if got, _ := observedConnection.Load().(string); got == "keep-alive" {
+		t.Fatalf("expected client Connection header to be filtered from WS handshake, got %q", got)
+	}
+
+	headers := testWSUpstreamHeaders(channel, channel.Keys[0], c.Request.Header)
+	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID, headerSignature(headers))
+}
+
+func TestWSResponsesRequestPassesThroughHeadersToUpstreamWS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	var observedUserAgent atomic.Value
+	var observedRequestID atomic.Value
+	var observedProtocol atomic.Value
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedUserAgent.Store(r.Header.Get("User-Agent"))
+		observedRequestID.Store(r.Header.Get("X-Request-Id"))
+		observedProtocol.Store(r.Header.Get("Sec-WebSocket-Protocol"))
+
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		_, _, err = conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_ws_ws","model":"gpt-4o"}}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"ok"}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_ws_ws","model":"gpt-4o","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`))
+	}))
+	defer wsServer.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-ws-ws-header-pass",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: wsServer.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "header-key-ws"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	group := &model.Group{Name: "relay-ws-ws-header-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	serverHandler := gin.New()
+	serverHandler.Use(func(c *gin.Context) {
+		c.Set("api_key_id", 1)
+		c.Set("supported_models", "")
+		c.Next()
+	})
+	serverHandler.GET("/v1/responses", func(c *gin.Context) {
+		HandleWSResponse(c)
+	})
+
+	server := httptest.NewServer(serverHandler)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/responses"
+	clientHeaders := http.Header{
+		"User-Agent":             []string{"octopus-ws-client/1.0"},
+		"X-Request-Id":           []string{"req-ws-ws-1"},
+		"Sec-WebSocket-Protocol": []string{"should-not-pass"},
+	}
+	clientConn, _, err := websocket.Dial(context.Background(), wsURL, &websocket.DialOptions{HTTPHeader: clientHeaders})
+	if err != nil {
+		t.Fatalf("websocket dial failed: %v", err)
+	}
+	defer clientConn.Close(websocket.StatusNormalClosure, "")
+
+	msg := []byte(`{"type":"response.create","model":"relay-ws-ws-header-group","input":"hello"}`)
+	if err := clientConn.Write(context.Background(), websocket.MessageText, msg); err != nil {
+		t.Fatalf("client ws write failed: %v", err)
+	}
+
+	readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		_, data, err := clientConn.Read(readCtx)
+		if err != nil {
+			t.Fatalf("client ws read failed: %v", err)
+		}
+		if strings.Contains(string(data), `"type":"response.completed"`) {
+			break
+		}
+	}
+
+	if got, _ := observedUserAgent.Load().(string); got != "octopus-ws-client/1.0" {
+		t.Fatalf("expected WS User-Agent to be passed through, got %q", got)
+	}
+	if got, _ := observedRequestID.Load().(string); got != "req-ws-ws-1" {
+		t.Fatalf("expected WS X-Request-Id to be passed through, got %q", got)
+	}
+	if got, _ := observedProtocol.Load().(string); got != "" {
+		t.Fatalf("expected Sec-WebSocket-Protocol to be filtered from upstream handshake, got %q", got)
+	}
+
+	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID, headerSignature(testWSUpstreamHeaders(channel, channel.Keys[0], clientHeaders)))
 }
 
 func TestHandlerRetryEnabledDoesNotTurnRecent429IntoNoAvailableKey(t *testing.T) {
@@ -618,6 +807,11 @@ func TestSoftRateLimitFailureDoesNotTripOrAmplifyCircuitBreaker(t *testing.T) {
 func setupRelayTestDB(t *testing.T) context.Context {
 	t.Helper()
 
+	if wsUpstreamPool != nil {
+		wsUpstreamPool.Close()
+	}
+	wsUpstreamPool = newWSPool()
+
 	if dbpkg.GetDB() != nil {
 		_ = dbpkg.Close()
 	}
@@ -631,6 +825,9 @@ func setupRelayTestDB(t *testing.T) context.Context {
 		t.Fatalf("InitCache failed: %v", err)
 	}
 	t.Cleanup(func() {
+		if wsUpstreamPool != nil {
+			wsUpstreamPool.Close()
+		}
 		balancer.Reset()
 		_ = dbpkg.Close()
 	})

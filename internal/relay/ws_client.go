@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type wsRelayResult struct {
 
 // HandleWSResponse handles WebSocket upgrade for /v1/responses.
 func HandleWSResponse(c *gin.Context) {
+	requestHeaders := c.Request.Header.Clone()
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true, // Allow cross-origin
 	})
@@ -96,7 +98,7 @@ func HandleWSResponse(c *gin.Context) {
 			continue
 		}
 
-		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, conversationState)
+		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, requestHeaders, conversationState)
 	}
 }
 
@@ -106,6 +108,7 @@ func processWSResponseCreate(
 	data []byte,
 	apiKeyID int,
 	supportedModels string,
+	requestHeaders http.Header,
 	conversationState *wsConversationState,
 ) *wsConversationState {
 	var reqBody map[string]json.RawMessage
@@ -121,7 +124,7 @@ func processWSResponseCreate(
 	if genRaw, ok := reqBody["generate"]; ok {
 		var generate bool
 		if json.Unmarshal(genRaw, &generate) == nil && !generate {
-			if err := bestEffortWarmupUpstreamWS(ctx, apiKeyID, supportedModels, reqBody); err != nil {
+			if err := bestEffortWarmupUpstreamWS(ctx, apiKeyID, supportedModels, requestHeaders, reqBody); err != nil {
 				log.Warnf("ws warmup failed (apikey=%d): %v", apiKeyID, err)
 			} else {
 				log.Infof("ws warmup ready (apikey=%d)", apiKeyID)
@@ -178,7 +181,7 @@ func processWSResponseCreate(
 	}
 
 	requestModel := internalRequest.Model
-	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(internalRequest), originalRequest)
+	req, group, err := newWSRelayRequest(ctx, conn, requestHeaders, inAdapter, apiKeyID, requestModel, cloneInternalRequest(internalRequest), originalRequest)
 	if err != nil {
 		status := 404
 		code := "model_not_found"
@@ -195,7 +198,7 @@ func processWSResponseCreate(
 	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
 		balancer.DeleteSticky(apiKeyID, requestModel)
 		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest)
+		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, requestHeaders, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest)
 		if replayErr == nil {
 			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 			req = replayReq
@@ -223,6 +226,7 @@ func bestEffortWarmupUpstreamWS(
 	ctx context.Context,
 	apiKeyID int,
 	supportedModels string,
+	requestHeaders http.Header,
 	reqBody map[string]json.RawMessage,
 ) error {
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
@@ -282,7 +286,7 @@ func bestEffortWarmupUpstreamWS(
 				continue
 			}
 
-			if err := warmupUpstreamWSConnection(ctx, channel, usedKey); err != nil {
+			if err := warmupUpstreamWSConnection(ctx, channel, usedKey, requestHeaders); err != nil {
 				lastErr = err
 				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
 				continue
@@ -314,11 +318,12 @@ func extractWSRequestModel(reqBody map[string]json.RawMessage) string {
 	return requestModel
 }
 
-func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, usedKey dbmodel.ChannelKey) error {
+func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, usedKey dbmodel.ChannelKey, requestHeaders http.Header) error {
 	warmupCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ChannelKey, usedKey.ID)
+	headers := buildUpstreamHeaders(requestHeaders, channel, "Bearer "+usedKey.ChannelKey, true)
+	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ID, headers)
 	if pc == nil {
 		return fmt.Errorf("upstream ws unavailable")
 	}
@@ -330,6 +335,7 @@ func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, u
 func newWSRelayRequest(
 	ctx context.Context,
 	conn *websocket.Conn,
+	requestHeaders http.Header,
 	inAdapter transformerModel.Inbound,
 	apiKeyID int,
 	requestModel string,
@@ -349,6 +355,7 @@ func newWSRelayRequest(
 	return &relayRequest{
 		c:               nil,
 		ctx:             ctx,
+		requestHeaders:  requestHeaders.Clone(),
 		inAdapter:       inAdapter,
 		internalRequest: executionRequest,
 		metrics:         NewRelayMetrics(apiKeyID, requestModel, metricsRequest),

@@ -124,5 +124,5 @@ func (r *wsUpstreamReader) CloseWithError() {
 	}
 	r.closed = true
 	r.pc.conn.Close(websocket.StatusGoingAway, "error")
-	wsUpstreamPool.Remove(r.channelID, r.keyID)
+	wsUpstreamPool.Remove(r.channelID, r.keyID, r.pc.headerSig)
 }

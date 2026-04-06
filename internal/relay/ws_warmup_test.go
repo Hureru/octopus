@@ -61,8 +61,9 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 		"model":    json.RawMessage(`"relay-warmup-group"`),
 		"generate": json.RawMessage(`false`),
 	}
+	requestHeaders := http.Header{"User-Agent": []string{"warmup-client/1.0"}}
 
-	if err := bestEffortWarmupUpstreamWS(context.Background(), 321, "", reqBody); err != nil {
+	if err := bestEffortWarmupUpstreamWS(context.Background(), 321, "", requestHeaders, reqBody); err != nil {
 		t.Fatalf("bestEffortWarmupUpstreamWS failed: %v", err)
 	}
 	if accepted.Load() != 1 {
@@ -77,10 +78,10 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 		t.Fatalf("expected sticky to target warmed channel/key, got %#v", sticky)
 	}
 
-	pc := wsUpstreamPool.Get(channel.ID, channel.Keys[0].ID)
+	pc := wsUpstreamPool.Get(channel.ID, channel.Keys[0].ID, headerSignature(buildUpstreamHeaders(requestHeaders, channel, "Bearer "+channel.Keys[0].ChannelKey, true)))
 	if pc == nil {
 		t.Fatalf("expected warmed upstream ws connection to be stored in pool")
 	}
 	wsUpstreamPool.Put(channel.ID, channel.Keys[0].ID, pc)
-	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID)
+	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID, pc.headerSig)
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +58,90 @@ var hopByHopHeaders = map[string]bool{
 	"x-cluster-client-ip": true,
 }
 
+var wsHandshakeHeaders = map[string]bool{
+	"sec-websocket-accept":     true,
+	"sec-websocket-extensions": true,
+	"sec-websocket-key":        true,
+	"sec-websocket-protocol":   true,
+	"sec-websocket-version":    true,
+}
+
+func shouldSkipUpstreamHeader(key string, wsHandshake bool) bool {
+	lowerKey := strings.ToLower(key)
+	if hopByHopHeaders[lowerKey] {
+		return true
+	}
+	if wsHandshake && wsHandshakeHeaders[lowerKey] {
+		return true
+	}
+	return false
+}
+
+func overwriteHeader(dst http.Header, key string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	dst.Del(key)
+	for _, value := range values {
+		dst.Add(key, value)
+	}
+}
+
+func copyHeaderMap(dst http.Header, src http.Header) {
+	if len(src) == 0 {
+		return
+	}
+	for key, values := range src {
+		overwriteHeader(dst, key, values)
+	}
+}
+
+func buildUpstreamHeaders(source http.Header, channel *dbmodel.Channel, authorization string, wsHandshake bool) http.Header {
+	headers := make(http.Header)
+	for key, values := range source {
+		if shouldSkipUpstreamHeader(key, wsHandshake) {
+			continue
+		}
+		overwriteHeader(headers, key, values)
+	}
+	if channel != nil {
+		for _, header := range channel.CustomHeader {
+			headers.Set(header.HeaderKey, header.HeaderValue)
+		}
+	}
+	if authorization != "" {
+		headers.Set("Authorization", authorization)
+	}
+	return headers
+}
+
+func headerSignature(headers http.Header) string {
+	if len(headers) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(headers))
+	canonicalValues := make(map[string][]string, len(headers))
+	for key, values := range headers {
+		lowerKey := strings.ToLower(key)
+		keys = append(keys, lowerKey)
+		cloned := append([]string(nil), values...)
+		canonicalValues[lowerKey] = cloned
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	for _, key := range keys {
+		builder.WriteString(key)
+		builder.WriteByte(':')
+		for _, value := range canonicalValues[key] {
+			builder.WriteString(value)
+			builder.WriteByte('\x00')
+		}
+		builder.WriteByte('\n')
+	}
+	return builder.String()
+}
+
 // StreamWriter abstracts writing responses to the client (HTTP SSE or WebSocket).
 type StreamWriter interface {
 	Write(data []byte) (int, error)
@@ -82,6 +167,7 @@ type UpstreamReader interface {
 type relayRequest struct {
 	c               *gin.Context
 	ctx             context.Context // used when c is nil (WebSocket mode)
+	requestHeaders  http.Header
 	inAdapter       model.Inbound
 	internalRequest *model.InternalLLMRequest
 	metrics         *RelayMetrics
@@ -99,6 +185,16 @@ func (r *relayRequest) requestContext() context.Context {
 		return r.c.Request.Context()
 	}
 	return r.ctx
+}
+
+func (r *relayRequest) sourceRequestHeaders() http.Header {
+	if r == nil {
+		return nil
+	}
+	if r.c != nil && r.c.Request != nil {
+		return r.c.Request.Header
+	}
+	return r.requestHeaders
 }
 
 // relayAttempt 尝试级上下文
