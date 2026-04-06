@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Info, Link } from 'lucide-react';
+import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Info, Link, Unlink } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -97,6 +97,7 @@ function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean
 
     if (!usedWS) {
         return {
+            Icon: Unlink,
             label: t('wsFallback'),
             className: 'bg-slate-500/10 text-slate-600 dark:text-slate-300',
             description: t('wsFallbackHint'),
@@ -106,12 +107,14 @@ function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean
     switch (mode) {
         case 'continuation':
             return {
+                Icon: Link,
                 label: t('wsContinuation'),
                 className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
                 description: t('wsContinuationHint'),
             };
         case 'replay':
             return {
+                Icon: Link,
                 label: t('wsReplay'),
                 className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
                 description: t('wsReplayHint'),
@@ -119,6 +122,7 @@ function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean
         case 'fresh':
         default:
             return {
+                Icon: Link,
                 label: t('ws'),
                 className: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
                 description: t('wsFreshHint'),
@@ -223,6 +227,7 @@ function WSModeBadge({ log }: { log: RelayLog }) {
     const meta = getWSBadgeMeta(log.ws_mode, log.used_ws, t);
 
     if (!meta) return null;
+    const Icon = meta.Icon;
 
     return (
         <Tooltip>
@@ -231,7 +236,7 @@ function WSModeBadge({ log }: { log: RelayLog }) {
                     variant="secondary"
                     className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', meta.className)}
                 >
-                    <Link className="size-3.5 shrink-0" />
+                    <Icon className="size-3.5 shrink-0" />
                     {meta.label}
                 </Badge>
             </TooltipTrigger>
