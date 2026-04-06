@@ -459,6 +459,19 @@ func TestHTTPResponsesRequestPassesThroughHeadersToUpstreamWS(t *testing.T) {
 	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID, headerSignature(headers))
 }
 
+func TestBuildUpstreamHeadersAddsDefaultUserAgentWhenMissing(t *testing.T) {
+	headers := buildUpstreamHeaders(http.Header{
+		"X-Request-Id": []string{"req-no-ua"},
+	}, nil, "", false)
+
+	if got := headers.Get("User-Agent"); got != defaultRelayUserAgent {
+		t.Fatalf("expected default relay user-agent, got %q", got)
+	}
+	if got := headers.Get("X-Request-Id"); got != "req-no-ua" {
+		t.Fatalf("expected custom header to be preserved, got %q", got)
+	}
+}
+
 func TestWSResponsesRequestPassesThroughHeadersToUpstreamWS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)

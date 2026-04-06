@@ -95,6 +95,14 @@ function hasInputTokenDetails(log: RelayLog) {
 function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
     if (!usedWS && !mode) return null;
 
+    if (!usedWS) {
+        return {
+            label: t('wsFallback'),
+            className: 'bg-slate-500/10 text-slate-600 dark:text-slate-300',
+            description: t('wsFallbackHint'),
+        };
+    }
+
     switch (mode) {
         case 'continuation':
             return {

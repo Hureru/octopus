@@ -66,6 +66,8 @@ var wsHandshakeHeaders = map[string]bool{
 	"sec-websocket-version":    true,
 }
 
+const defaultRelayUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+
 func shouldSkipUpstreamHeader(key string, wsHandshake bool) bool {
 	lowerKey := strings.ToLower(key)
 	if hopByHopHeaders[lowerKey] {
@@ -111,6 +113,9 @@ func buildUpstreamHeaders(source http.Header, channel *dbmodel.Channel, authoriz
 	}
 	if authorization != "" {
 		headers.Set("Authorization", authorization)
+	}
+	if headers.Get("User-Agent") == "" {
+		headers.Set("User-Agent", defaultRelayUserAgent)
 	}
 	return headers
 }
