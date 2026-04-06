@@ -19,12 +19,12 @@ export function SettingSystem() {
     const [statsSaveInterval, setStatsSaveInterval] = useState('');
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
-    const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(true);
+    const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(false);
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
-    const initialWsUpgradeEnabled = useRef(true);
+    const initialWsUpgradeEnabled = useRef(false);
 
     useEffect(() => {
         if (settings) {
@@ -245,10 +245,17 @@ export function SettingSystem() {
             <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <Wifi className="h-5 w-5 text-muted-foreground" />
-                    <div className="flex flex-col">
-                        <span className="text-sm font-medium">{t('wsUpgrade.label')}</span>
-                        <span className="text-xs text-muted-foreground">{t('wsUpgrade.description')}</span>
-                    </div>
+                    <span className="text-sm font-medium">{t('wsUpgrade.label')}</span>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {t('wsUpgrade.description')}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
                 </div>
                 <Switch
                     checked={wsUpgradeEnabled}

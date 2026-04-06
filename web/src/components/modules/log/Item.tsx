@@ -393,31 +393,42 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                     <div className={cn('p-4 grid grid-cols-[auto_1fr] gap-4', hasError ? 'items-start' : 'items-center')}>
                         <ModelAvatar size={40} />
                         <div className="min-w-0 flex flex-col gap-3">
-                            <div className="flex items-center gap-2 min-w-0 text-sm">
-                                <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
-                                    {log.request_model_name}
-                                </span>
-                                <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
-                                {hasMultipleAttempts ? (
-                                    <RetryBadgeWithTooltip
-                                        channelName={log.channel_name}
-                                        brandColor={brandColor}
-                                        attempts={log.attempts!}
-                                    />
-                                ) : (
+                            <div className="flex items-start gap-3 min-w-0">
+                                <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                                    <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
+                                        {log.request_model_name}
+                                    </span>
+                                    <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
+                                    {hasMultipleAttempts ? (
+                                        <RetryBadgeWithTooltip
+                                            channelName={log.channel_name}
+                                            brandColor={brandColor}
+                                            attempts={log.attempts!}
+                                        />
+                                    ) : (
+                                        <Badge
+                                            variant="secondary"
+                                            className="shrink-0 text-xs px-1.5 py-0"
+                                            style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                                        >
+                                            {log.channel_name}
+                                        </Badge>
+                                    )}
+                                    <span className="text-muted-foreground truncate" title={displayActualModelName}>
+                                        {displayActualModelName}
+                                    </span>
+                                    {log.attempts?.some((attempt) => attempt.sticky) ? (
+                                        <Pin className="size-3.5 shrink-0 text-amber-500" />
+                                    ) : null}
+                                </div>
+                                {log.used_ws ? (
                                     <Badge
                                         variant="secondary"
-                                        className="shrink-0 text-xs px-1.5 py-0"
-                                        style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                                        className="shrink-0 gap-1 px-1.5 py-0 text-xs bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
                                     >
-                                        {log.channel_name}
+                                        <Wifi className="size-3.5 shrink-0" />
+                                        {t('ws')}
                                     </Badge>
-                                )}
-                                <span className="text-muted-foreground truncate" title={displayActualModelName}>
-                                    {displayActualModelName}
-                                </span>
-                                {log.attempts?.some((attempt) => attempt.sticky) ? (
-                                    <Pin className="size-3.5 shrink-0 text-amber-500" />
                                 ) : null}
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-7 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
@@ -455,14 +466,6 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                         {t('cost')} {Number(log.cost).toFixed(6)}
                                     </span>
                                 </div>
-                                {log.used_ws ? (
-                                    <div className="flex items-center gap-1.5">
-                                        <Wifi className="size-3.5 shrink-0 text-cyan-500" />
-                                        <span className="font-medium text-cyan-600 dark:text-cyan-400">
-                                            {t('ws')}
-                                        </span>
-                                    </div>
-                                ) : null}
                             </div>
                             {hasError ? (
                                 <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 overflow-hidden">
@@ -476,28 +479,39 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                 <MorphingDialogContainer>
                     <MorphingDialogContent className="relative w-[calc(100vw-2rem)] md:w-[80vw] bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
                         <MorphingDialogClose className="top-4 right-5 text-muted-foreground hover:text-foreground transition-colors" />
-                        <MorphingDialogTitle className="flex items-center gap-2 mb-3 text-sm">
-                            <ModelAvatar size={28} />
-                            <span className="font-semibold text-card-foreground">{log.request_model_name}</span>
-                            <ArrowRight className="size-3.5 text-muted-foreground/50" />
-                            {hasMultipleAttempts ? (
-                                <RetryBadgeWithTooltip
-                                    channelName={log.channel_name}
-                                    brandColor={brandColor}
-                                    attempts={log.attempts!}
-                                />
-                            ) : (
+                        <MorphingDialogTitle className="mb-3 flex min-w-0 items-start gap-3 text-sm">
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                                <ModelAvatar size={28} />
+                                <span className="font-semibold text-card-foreground truncate">{log.request_model_name}</span>
+                                <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
+                                {hasMultipleAttempts ? (
+                                    <RetryBadgeWithTooltip
+                                        channelName={log.channel_name}
+                                        brandColor={brandColor}
+                                        attempts={log.attempts!}
+                                    />
+                                ) : (
+                                    <Badge
+                                        variant="secondary"
+                                        className="shrink-0 text-xs px-1.5 py-0"
+                                        style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                                    >
+                                        {log.channel_name}
+                                    </Badge>
+                                )}
+                                <span className="text-muted-foreground truncate">{displayActualModelName}</span>
+                                {log.attempts?.some((attempt) => attempt.sticky) ? (
+                                    <Pin className="size-3.5 shrink-0 text-amber-500" />
+                                ) : null}
+                            </div>
+                            {log.used_ws ? (
                                 <Badge
                                     variant="secondary"
-                                    className="text-xs px-1.5 py-0"
-                                    style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                                    className="shrink-0 gap-1 px-1.5 py-0 text-xs bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
                                 >
-                                    {log.channel_name}
+                                    <Wifi className="size-3.5 shrink-0" />
+                                    {t('ws')}
                                 </Badge>
-                            )}
-                            <span className="text-muted-foreground">{displayActualModelName}</span>
-                            {log.attempts?.some((attempt) => attempt.sticky) ? (
-                                <Pin className="size-3.5 shrink-0 text-amber-500" />
                             ) : null}
                         </MorphingDialogTitle>
 
@@ -705,14 +719,6 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     {t('cost')}: {Number(log.cost).toFixed(6)}
                                 </span>
                             </div>
-                            {log.used_ws ? (
-                                <div className="flex items-center gap-1.5">
-                                    <Wifi className="size-3.5 text-cyan-500" />
-                                    <span className="font-medium text-cyan-600 dark:text-cyan-400">
-                                        {t('ws')}
-                                    </span>
-                                </div>
-                            ) : null}
                         </div>
                     </MorphingDialogContent>
                 </MorphingDialogContainer>
