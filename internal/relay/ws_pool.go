@@ -20,6 +20,7 @@ const (
 	wsConnMaxAge       = 55 * time.Minute // slightly less than 60-min limit
 	wsConnIdleTimeout  = 5 * time.Minute
 	wsPoolCleanupEvery = 1 * time.Minute
+	wsHTTPFallbackTTL  = 10 * time.Minute
 )
 
 // wsUpstreamPool manages persistent WebSocket connections to upstream providers.
@@ -47,15 +48,20 @@ type wsPool struct {
 	unsupported   map[int]time.Time
 	unsupportedMu sync.RWMutex
 
+	// Track channels that recently fell back to HTTP so follow-up requests skip WS.
+	httpFallback   map[int]time.Time
+	httpFallbackMu sync.RWMutex
+
 	stopCh chan struct{}
 	once   sync.Once
 }
 
 func newWSPool() *wsPool {
 	p := &wsPool{
-		conns:       make(map[wsPoolKey]*pooledConn),
-		unsupported: make(map[int]time.Time),
-		stopCh:      make(chan struct{}),
+		conns:        make(map[wsPoolKey]*pooledConn),
+		unsupported:  make(map[int]time.Time),
+		httpFallback: make(map[int]time.Time),
+		stopCh:       make(chan struct{}),
 	}
 	go p.cleanupLoop()
 	return p
@@ -128,6 +134,32 @@ func (p *wsPool) MarkUnsupported(channelID int) {
 	p.unsupportedMu.Lock()
 	defer p.unsupportedMu.Unlock()
 	p.unsupported[channelID] = time.Now()
+}
+
+// ShouldUseHTTPFallback checks if a channel should temporarily skip upstream WS.
+func (p *wsPool) ShouldUseHTTPFallback(channelID int) bool {
+	p.httpFallbackMu.RLock()
+	defer p.httpFallbackMu.RUnlock()
+
+	t, ok := p.httpFallback[channelID]
+	if !ok {
+		return false
+	}
+	return time.Since(t) < wsHTTPFallbackTTL
+}
+
+// MarkHTTPFallback marks a channel to temporarily skip upstream WS and use HTTP directly.
+func (p *wsPool) MarkHTTPFallback(channelID int) {
+	p.httpFallbackMu.Lock()
+	defer p.httpFallbackMu.Unlock()
+	p.httpFallback[channelID] = time.Now()
+}
+
+// ClearHTTPFallback clears the temporary HTTP-only mark after a successful WS round.
+func (p *wsPool) ClearHTTPFallback(channelID int) {
+	p.httpFallbackMu.Lock()
+	defer p.httpFallbackMu.Unlock()
+	delete(p.httpFallback, channelID)
 }
 
 // Dial creates a new WebSocket connection to the upstream.
@@ -285,6 +317,15 @@ func (p *wsPool) cleanup() {
 		}
 	}
 	p.unsupportedMu.Unlock()
+
+	// Clean up old HTTP fallback entries
+	p.httpFallbackMu.Lock()
+	for id, t := range p.httpFallback {
+		if now.Sub(t) > wsHTTPFallbackTTL {
+			delete(p.httpFallback, id)
+		}
+	}
+	p.httpFallbackMu.Unlock()
 }
 
 // Close shuts down the pool and all connections.
@@ -306,6 +347,9 @@ func (p *wsPool) Close() {
 // Returns nil if the channel doesn't support WS or connection fails.
 func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl string, keyID int, headers http.Header, forceRedial ...bool) *pooledConn {
 	if wsUpstreamPool.IsUnsupported(channel.ID) {
+		return nil
+	}
+	if wsUpstreamPool.ShouldUseHTTPFallback(channel.ID) {
 		return nil
 	}
 	headerSig := headerSignature(headers)

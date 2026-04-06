@@ -21,6 +21,7 @@ type ResponseInbound struct {
 	hasContentPartStarted   bool
 	hasFinished             bool
 	responseCompleted       bool
+	terminalStatus          string
 
 	// Response metadata
 	responseID string
@@ -87,7 +88,12 @@ func (i *ResponseInbound) TransformResponse(ctx context.Context, response *model
 func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.InternalLLMResponse) ([]byte, error) {
 	// Handle [DONE] marker
 	if stream.Object == "[DONE]" {
-		return []byte("data: [DONE]\n\n"), nil
+		var result []byte
+		if terminal := i.enqueueTerminalEvent(nil); terminal != nil {
+			result = append(result, terminal...)
+		}
+		result = append(result, []byte("data: [DONE]\n\n")...)
+		return result, nil
 	}
 
 	// Store the chunk for aggregation
@@ -175,33 +181,24 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		// Handle finish reason
 		if choice.FinishReason != nil && !i.hasFinished {
 			i.hasFinished = true
+			i.terminalStatus = terminalStatusFromFinishReason(*choice.FinishReason)
 
 			// Close any open content parts and output items
 			events = append(events, i.closeCurrentContentPart()...)
 			events = append(events, i.closeCurrentOutputItem()...)
+
+			if i.terminalStatus == "failed" || i.terminalStatus == "incomplete" {
+				events = append(events, i.enqueueTerminalEvent(stream.Usage))
+			}
 		}
 	}
 
 	// Handle final usage chunk and complete response
-	if stream.Usage != nil && i.hasFinished && !i.responseCompleted {
-		i.responseCompleted = true
+	if stream.Usage != nil {
 		i.usage = stream.Usage
-
-		status := "completed"
-		response := &ResponsesResponse{
-			Object:    "response",
-			ID:        i.responseID,
-			Model:     i.model,
-			CreatedAt: i.createdAt,
-			Status:    &status,
-			Output:    []ResponsesItem{},
-			Usage:     convertUsageToResponses(i.usage),
-		}
-
-		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:     "response.completed",
-			Response: response,
-		}))
+	}
+	if stream.Usage != nil && i.hasFinished && !i.responseCompleted {
+		events = append(events, i.enqueueTerminalEvent(stream.Usage))
 	}
 
 	if len(events) == 0 {
@@ -217,6 +214,57 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 	}
 
 	return result, nil
+}
+
+func (i *ResponseInbound) enqueueTerminalEvent(usage *model.Usage) []byte {
+	if i.responseCompleted || !i.hasFinished {
+		return nil
+	}
+
+	status := i.terminalStatus
+	if status == "" {
+		status = "completed"
+	}
+
+	i.responseCompleted = true
+	response := &ResponsesResponse{
+		Object:    "response",
+		ID:        i.responseID,
+		Model:     i.model,
+		CreatedAt: i.createdAt,
+		Status:    &status,
+		Output:    []ResponsesItem{},
+	}
+
+	if usage != nil {
+		response.Usage = convertUsageToResponses(usage)
+	} else if i.usage != nil {
+		response.Usage = convertUsageToResponses(i.usage)
+	}
+
+	eventType := "response.completed"
+	switch status {
+	case "failed":
+		eventType = "response.failed"
+	case "incomplete":
+		eventType = "response.incomplete"
+	}
+
+	return i.enqueueEvent(&ResponsesStreamEvent{
+		Type:     eventType,
+		Response: response,
+	})
+}
+
+func terminalStatusFromFinishReason(finishReason string) string {
+	switch finishReason {
+	case "length":
+		return "incomplete"
+	case "error":
+		return "failed"
+	default:
+		return "completed"
+	}
 }
 
 func (i *ResponseInbound) enqueueEvent(ev *ResponsesStreamEvent) []byte {

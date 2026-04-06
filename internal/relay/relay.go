@@ -368,11 +368,22 @@ func (ra *relayAttempt) forward() (int, error) {
 		}
 
 		if shouldTryWS {
+			wsFallbackOnly := wsUpstreamPool.ShouldUseHTTPFallback(ra.channel.ID)
+			if wsFallbackOnly {
+				if ra.metrics.WSMode == nil {
+					ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
+				}
+				return ra.forwardViaHTTP(ctx)
+			}
+
 			statusCode, err := ra.forwardViaWS(ctx)
 			if statusCode != -1 {
 				return statusCode, err
 			}
-			if requiresUpstreamWSContinuation(ra.internalRequest) {
+			if ra.metrics.WSMode == nil {
+				ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
+			}
+			if requiresUpstreamWSContinuation(ra.internalRequest) && !wsUpstreamPool.ShouldUseHTTPFallback(ra.channel.ID) {
 				balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 				return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
 			}
@@ -389,6 +400,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 	headers := buildUpstreamHeaders(ra.sourceRequestHeaders(), ra.channel, "Bearer "+ra.usedKey.ChannelKey, true)
 	pc := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ID, headers)
 	if pc == nil {
+		wsUpstreamPool.MarkHTTPFallback(ra.channel.ID)
 		return -1, nil // WS not available
 	}
 
@@ -409,6 +421,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		pc.conn.Close(websocket.StatusGoingAway, "send failed")
 		wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID, pc.headerSig)
 		if requiresUpstreamWSContinuation(ra.internalRequest) && isUpstreamWSConnectionBroken(err) {
+			wsUpstreamPool.MarkHTTPFallback(ra.channel.ID)
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
 		}
@@ -425,16 +438,20 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 					err = ra.handleWSStreamResponse(ctx, reader)
 					if err != nil {
 						reader.CloseWithError()
+						wsUpstreamPool.MarkHTTPFallback(ra.channel.ID)
 						return reader.StatusCode(), err
 					}
 					reader.Close()
+					wsUpstreamPool.ClearHTTPFallback(ra.channel.ID)
 					return 200, nil
 				}
 				log.Warnf("upstream WS redial send failed for channel %s: %v", ra.channel.Name, retryErr)
 				redialed.conn.Close(websocket.StatusGoingAway, "send failed after redial")
 				wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID, redialed.headerSig)
+				wsUpstreamPool.MarkHTTPFallback(ra.channel.ID)
 			}
 		}
+		wsUpstreamPool.MarkHTTPFallback(ra.channel.ID)
 		return -1, nil // fall through to HTTP
 	}
 
@@ -447,10 +464,12 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 	err = ra.handleWSStreamResponse(ctx, reader)
 	if err != nil {
 		reader.CloseWithError()
+		wsUpstreamPool.MarkHTTPFallback(ra.channel.ID)
 		return reader.StatusCode(), err
 	}
 
 	reader.Close()
+	wsUpstreamPool.ClearHTTPFallback(ra.channel.ID)
 	return 200, nil
 }
 

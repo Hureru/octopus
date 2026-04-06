@@ -380,6 +380,86 @@ func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T)
 	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID, stale.headerSig)
 }
 
+func TestHandlerSkipsRepeatedWSAttemptsAfterHTTPFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
+		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
+	}
+
+	var wsHits atomic.Int32
+	var httpHits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			wsHits.Add(1)
+			http.Error(w, `{"error":"ws temporarily unavailable"}`, http.StatusServiceUnavailable)
+		case http.MethodPost:
+			httpHits.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_http_fallback\",\"model\":\"gpt-4o\"}}\n\n"))
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"))
+			_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_http_fallback\",\"model\":\"gpt-4o\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"))
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer upstream.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-http-fallback-cache",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: upstream.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "fallback-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	group := &model.Group{Name: "relay-http-fallback-cache-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	makeRequest := func(body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		Handler(inbound.InboundTypeOpenAIResponse, c)
+		return recorder
+	}
+
+	recorder1 := makeRequest(`{"model":"relay-http-fallback-cache-group","input":"hello","stream":true}`)
+	if recorder1.Code != http.StatusOK {
+		t.Fatalf("expected first request to succeed via HTTP fallback, got %d body %s", recorder1.Code, recorder1.Body.String())
+	}
+	if wsHits.Load() != 1 || httpHits.Load() != 1 {
+		t.Fatalf("expected first request to try WS once then fall back to HTTP once, got ws=%d http=%d", wsHits.Load(), httpHits.Load())
+	}
+
+	recorder2 := makeRequest(`{"model":"relay-http-fallback-cache-group","input":"again","stream":true}`)
+	if recorder2.Code != http.StatusOK {
+		t.Fatalf("expected second request to keep using HTTP fallback, got %d body %s", recorder2.Code, recorder2.Body.String())
+	}
+	if wsHits.Load() != 1 {
+		t.Fatalf("expected second request to skip repeated WS attempt, got ws=%d", wsHits.Load())
+	}
+	if httpHits.Load() != 2 {
+		t.Fatalf("expected second request to go straight to HTTP, got http=%d", httpHits.Load())
+	}
+}
+
 func TestHTTPResponsesRequestPassesThroughHeadersToUpstreamWS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)

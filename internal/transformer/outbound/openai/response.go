@@ -235,7 +235,15 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 			}
 		}
 
-	case "response.failed", "response.incomplete", "error":
+	case "response.incomplete":
+		resp.Choices = []model.Choice{
+			{
+				Index:        0,
+				FinishReason: lo.ToPtr("length"),
+			},
+		}
+
+	case "response.failed", "error":
 		resp.Choices = []model.Choice{
 			{
 				Index:        0,
