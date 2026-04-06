@@ -185,13 +185,13 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			}
 
 			result = ra.attempt()
-			if result.Success || result.Written || result.Canceled || !isRetryableStatus(result.StatusCode) {
+			if result.Success || result.Written || result.Canceled || result.ResetConversation || !isRetryableStatus(result.StatusCode) {
 				break
 			}
 		}
 
 		// 同通道重试耗尽后记录熔断器失败
-		if !result.Success && !result.Written && !result.Canceled {
+		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
 			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model, failureKind)
 			if failureKind == balancer.FailureHard {
@@ -205,6 +205,15 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		}
 		if result.Canceled {
 			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
+			return
+		}
+		if result.ResetConversation {
+			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
+			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
+				resp.Error(c, publicErr.Status, publicErr.Message)
+			} else {
+				resp.Error(c, result.StatusCode, result.Err.Error())
+			}
 			return
 		}
 		if result.Written {
@@ -300,11 +309,12 @@ func (ra *relayAttempt) attempt() attemptResult {
 		ra.collectResponse()
 	}
 	return attemptResult{
-		Success:    false,
-		Written:    written,
-		Err:        fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
-		StatusCode: statusCode,
-		RetryAfter: ra.retryAfter,
+		Success:           false,
+		Written:           written,
+		ResetConversation: statusCode == http.StatusConflict && needsConversationRestart(relayErrorMessage(fwdErr)),
+		Err:               fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
+		StatusCode:        statusCode,
+		RetryAfter:        ra.retryAfter,
 	}
 }
 
@@ -392,6 +402,33 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		log.Warnf("upstream WS send failed for channel %s: %v", ra.channel.Name, err)
 		pc.conn.Close(websocket.StatusGoingAway, "send failed")
 		wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID)
+		if requiresUpstreamWSContinuation(ra.internalRequest) && isUpstreamWSConnectionBroken(err) {
+			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
+			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
+		}
+		if !requiresUpstreamWSContinuation(ra.internalRequest) && isUpstreamWSConnectionBroken(err) {
+			redialed := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, true)
+			if redialed != nil {
+				retryErr := wsUpstreamPool.SendResponseCreate(ctx, redialed, reqBody)
+				if retryErr == nil {
+					ra.metrics.UsedWS = true
+					if ra.metrics.WSMode == nil {
+						ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
+					}
+					reader := newWSUpstreamReader(redialed, ra.channel.ID, ra.usedKey.ID)
+					err = ra.handleWSStreamResponse(ctx, reader)
+					if err != nil {
+						reader.CloseWithError()
+						return reader.StatusCode(), err
+					}
+					reader.Close()
+					return 200, nil
+				}
+				log.Warnf("upstream WS redial send failed for channel %s: %v", ra.channel.Name, retryErr)
+				redialed.conn.Close(websocket.StatusGoingAway, "send failed after redial")
+				wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID)
+			}
+		}
 		return -1, nil // fall through to HTTP
 	}
 

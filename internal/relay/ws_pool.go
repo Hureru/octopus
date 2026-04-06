@@ -300,14 +300,20 @@ func (p *wsPool) Close() {
 
 // TryUpstreamWS attempts to get or create a WS connection for an upstream channel.
 // Returns nil if the channel doesn't support WS or connection fails.
-func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int) *pooledConn {
+func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int, forceRedial ...bool) *pooledConn {
 	if wsUpstreamPool.IsUnsupported(channel.ID) {
 		return nil
 	}
 
+	redial := len(forceRedial) > 0 && forceRedial[0]
+
 	// Try existing connection first
-	if pc := wsUpstreamPool.Get(channel.ID, keyID); pc != nil {
-		return pc
+	if !redial {
+		if pc := wsUpstreamPool.Get(channel.ID, keyID); pc != nil {
+			return pc
+		}
+	} else {
+		wsUpstreamPool.Remove(channel.ID, keyID)
 	}
 
 	// Try to dial new connection

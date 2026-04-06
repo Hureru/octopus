@@ -19,6 +19,7 @@ import (
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/tokenizer"
+	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
 
@@ -199,6 +200,178 @@ func TestDefaultWSModeForRequest(t *testing.T) {
 	if got := defaultWSModeForRequest(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}); got != model.RelayLogWSModeFresh {
 		t.Fatalf("expected ordinary request to be marked as fresh, got %q", got)
 	}
+}
+
+func TestHandlerStopsFailoverWhenContinuationTransportIsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
+		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
+	}
+
+	var secondHits atomic.Int32
+	firstChannel := &model.Channel{
+		Name:     "relay-ws-continuation-first",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: "https://first.example/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "first-key"}},
+	}
+	if err := op.ChannelCreate(firstChannel, ctx); err != nil {
+		t.Fatalf("ChannelCreate first channel failed: %v", err)
+	}
+
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondHits.Add(1)
+		http.Error(w, `{"error":"should not be reached"}`, http.StatusServiceUnavailable)
+	}))
+	defer secondServer.Close()
+
+	secondChannel := &model.Channel{
+		Name:     "relay-ws-continuation-second",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: secondServer.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "second-key"}},
+	}
+	if err := op.ChannelCreate(secondChannel, ctx); err != nil {
+		t.Fatalf("ChannelCreate second channel failed: %v", err)
+	}
+
+	group := &model.Group{Name: "relay-ws-continuation-group", Mode: model.GroupModeFailover, SessionKeepTime: 60}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: firstChannel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd first item failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: secondChannel.ID, ModelName: "gpt-4o", Priority: 2, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd second item failed: %v", err)
+	}
+
+	balancer.SetSticky(77, "relay-ws-continuation-group", firstChannel.ID, firstChannel.Keys[0].ID)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("api_key_id", 77)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"relay-ws-continuation-group","previous_response_id":"resp_prev","input":"hello","stream":true}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	// 创建并立即关闭一个连接，模拟池里残留的失效上游 WS。
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer wsServer.Close()
+
+	firstChannel.BaseUrls = []model.BaseUrl{{URL: wsServer.URL + "/v1"}}
+	if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: firstChannel.ID, BaseUrls: &firstChannel.BaseUrls}, ctx); err != nil {
+		t.Fatalf("ChannelUpdate first channel failed: %v", err)
+	}
+
+	pc := TryUpstreamWS(context.Background(), firstChannel, firstChannel.GetBaseUrl(), firstChannel.Keys[0].ChannelKey, firstChannel.Keys[0].ID, true)
+	if pc == nil {
+		t.Fatalf("expected initial ws dial to succeed")
+	}
+	pc.conn.Close(websocket.StatusNormalClosure, "")
+	wsUpstreamPool.Put(firstChannel.ID, firstChannel.Keys[0].ID, pc)
+
+	Handler(inbound.InboundTypeOpenAIResponse, c)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("expected continuation transport failure to return 409, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "上游连续会话已中断") {
+		t.Fatalf("expected conversation reset error response body, got %s", recorder.Body.String())
+	}
+	if secondHits.Load() != 0 {
+		t.Fatalf("expected failover to stop before hitting second channel, got %d hits", secondHits.Load())
+	}
+	if sticky := balancer.GetSticky(77, "relay-ws-continuation-group", time.Minute); sticky != nil {
+		t.Fatalf("expected sticky to be cleared after continuation failure, got %#v", sticky)
+	}
+	wsUpstreamPool.Remove(firstChannel.ID, firstChannel.Keys[0].ID)
+	wsUpstreamPool.Remove(secondChannel.ID, secondChannel.Keys[0].ID)
+}
+
+func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	var accepted atomic.Int32
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		accepted.Add(1)
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		_, _, err = conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_new","model":"gpt-4o"}}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"ok"}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_new","model":"gpt-4o","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`))
+	}))
+	defer wsServer.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-ws-redial",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: wsServer.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "fresh-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	stale := TryUpstreamWS(context.Background(), channel, channel.GetBaseUrl(), channel.Keys[0].ChannelKey, channel.Keys[0].ID, true)
+	if stale == nil {
+		t.Fatalf("expected initial ws dial to succeed")
+	}
+	stale.conn.Close(websocket.StatusNormalClosure, "")
+	wsUpstreamPool.Put(channel.ID, channel.Keys[0].ID, stale)
+
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	internalReq := &transformerModel.InternalLLMRequest{Model: "gpt-4o", Stream: boolPtr(true)}
+	req := &relayRequest{
+		c:               c,
+		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
+		internalRequest: internalReq,
+		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		apiKeyID:        1,
+		requestModel:    "gpt-4o",
+	}
+	ra := &relayAttempt{
+		relayRequest: req,
+		outAdapter:   outbound.Get(channel.Type),
+		channel:      channel,
+		usedKey:      channel.Keys[0],
+	}
+
+	statusCode, err := ra.forwardViaWS(context.Background())
+	if err != nil {
+		t.Fatalf("expected fresh ws request to recover by redial, got err %v", err)
+	}
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected fresh ws request to succeed after redial, got %d", statusCode)
+	}
+	if accepted.Load() < 2 {
+		t.Fatalf("expected stale connection plus forced redial, got %d accepted connections", accepted.Load())
+	}
+	wsUpstreamPool.Remove(channel.ID, channel.Keys[0].ID)
 }
 
 func TestHandlerRetryEnabledDoesNotTurnRecent429IntoNoAvailableKey(t *testing.T) {

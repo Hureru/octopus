@@ -452,12 +452,12 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			}
 
 			result = ra.attempt()
-			if result.Success || result.Written || result.Canceled || !isRetryableStatus(result.StatusCode) {
+			if result.Success || result.Written || result.Canceled || result.ResetConversation || !isRetryableStatus(result.StatusCode) {
 				break
 			}
 		}
 
-		if !result.Success && !result.Written && !result.Canceled {
+		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
 			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, failureKind)
 		}
@@ -468,6 +468,12 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 				respID = req.metrics.InternalResponse.ID
 			}
 			return wsRelayResult{Success: true, ResponseID: respID}
+		}
+		if result.ResetConversation {
+			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
+				return wsRelayResult{ResetConversation: publicErr.ResetConversation, Err: result.Err, PublicError: &publicErr}
+			}
+			return wsRelayResult{ResetConversation: true, Err: result.Err}
 		}
 		if result.Canceled || result.Written {
 			return wsRelayResult{Written: result.Written, Canceled: result.Canceled, Err: result.Err}

@@ -103,6 +103,21 @@ func TestShouldMarkWSUnsupported(t *testing.T) {
 	}
 }
 
+func TestIsUpstreamWSConnectionBroken(t *testing.T) {
+	for _, err := range []error{
+		fmt.Errorf("failed to write frame payload: write: broken pipe"),
+		fmt.Errorf("failed to get reader: failed to read frame header: EOF"),
+		fmt.Errorf("use of closed network connection"),
+	} {
+		if !isUpstreamWSConnectionBroken(err) {
+			t.Fatalf("expected %q to be treated as broken upstream ws", err)
+		}
+	}
+	if isUpstreamWSConnectionBroken(fmt.Errorf("temporary upstream unavailable")) {
+		t.Fatalf("expected unrelated error to not be treated as broken upstream ws")
+	}
+}
+
 func TestRequiresUpstreamWSContinuation(t *testing.T) {
 	if !requiresUpstreamWSContinuation(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_123")}) {
 		t.Fatalf("expected previous_response_id request to require upstream ws continuation")

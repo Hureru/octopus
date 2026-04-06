@@ -66,6 +66,19 @@ func relayErrorMessage(err error) string {
 	return strings.ToLower(err.Error())
 }
 
+func isUpstreamWSConnectionBroken(err error) bool {
+	message := relayErrorMessage(err)
+	if message == "" {
+		return false
+	}
+	return strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "failed to read frame header: eof") ||
+		strings.Contains(message, "use of closed network connection") ||
+		strings.Contains(message, "websocket: close sent") ||
+		strings.Contains(message, "failed to get reader: eof") ||
+		strings.Contains(message, "connection reset by peer")
+}
+
 func needsConversationRestart(message string) bool {
 	return strings.Contains(message, "please restart the conversation") ||
 		strings.Contains(message, "continuation connection is unavailable") ||
