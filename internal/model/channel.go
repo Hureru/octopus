@@ -67,6 +67,7 @@ type ChannelKey struct {
 type ChannelKeySelectOptions struct {
 	IgnoreRecent429Cooldown bool
 	ExcludeKeyIDs           map[int]struct{}
+	PreferredKeyID          int
 }
 
 // ChannelUpdateRequest 渠道更新请求 - 仅包含变更的数据
@@ -148,6 +149,22 @@ func (c *Channel) GetChannelKey(opts ...ChannelKeySelectOptions) ChannelKey {
 	}
 
 	nowSec := time.Now().Unix()
+	if selectOpts.PreferredKeyID > 0 {
+		for _, k := range c.Keys {
+			if k.ID != selectOpts.PreferredKeyID || !k.Enabled || k.ChannelKey == "" {
+				continue
+			}
+			if _, excluded := selectOpts.ExcludeKeyIDs[k.ID]; excluded {
+				break
+			}
+			if !selectOpts.IgnoreRecent429Cooldown && k.StatusCode == 429 && k.LastUseTimeStamp > 0 {
+				if nowSec-k.LastUseTimeStamp < int64(5*time.Minute/time.Second) {
+					break
+				}
+			}
+			return k
+		}
+	}
 
 	best := ChannelKey{}
 	bestCost := 0.0

@@ -44,6 +44,16 @@ func (r *wsUpstreamReader) ReadEvent(ctx context.Context) ([]byte, error) {
 		if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway {
 			return nil, io.EOF
 		}
+		switch closeStatus {
+		case websocket.StatusPolicyViolation:
+			r.statusCode = http.StatusConflict
+		case websocket.StatusTryAgainLater:
+			r.statusCode = http.StatusServiceUnavailable
+		default:
+			if r.statusCode < 400 {
+				r.statusCode = http.StatusBadGateway
+			}
+		}
 		return nil, fmt.Errorf("ws read error: %w", err)
 	}
 
@@ -72,18 +82,6 @@ func (r *wsUpstreamReader) ReadEvent(ctx context.Context) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("%s (code=%s, status=%d)", errMsg,
 			errCode, event.Status)
-	}
-
-	// Check for response.completed to capture response ID for chaining
-	if event.Type == "response.completed" {
-		var completed struct {
-			Response struct {
-				ID string `json:"id"`
-			} `json:"response"`
-		}
-		if json.Unmarshal(data, &completed) == nil && completed.Response.ID != "" {
-			r.pc.lastRespID = completed.Response.ID
-		}
 	}
 
 	// Check for terminal events — mark done so next ReadEvent returns EOF

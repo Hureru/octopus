@@ -49,3 +49,7 @@ func SetSticky(apiKeyID int, requestModel string, channelID, keyID int) {
 		Timestamp:    time.Now(),
 	})
 }
+
+func DeleteSticky(apiKeyID int, requestModel string) {
+	globalSession.Delete(sessionKey(apiKeyID, requestModel))
+}

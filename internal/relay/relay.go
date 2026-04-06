@@ -136,6 +136,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		selectOpts := dbmodel.ChannelKeySelectOptions{
 			IgnoreRecent429Cooldown: group.RetryEnabled,
 			ExcludeKeyIDs:           make(map[int]struct{}),
+			PreferredKeyID:          iter.StickyKeyID(),
 		}
 		var usedKey dbmodel.ChannelKey
 		for {
@@ -355,6 +356,10 @@ func (ra *relayAttempt) forward() (int, error) {
 			if statusCode != -1 {
 				return statusCode, err
 			}
+			if requiresUpstreamWSContinuation(ra.internalRequest) {
+				balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
+				return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
+			}
 			// statusCode == -1 means WS not available, fall through to HTTP
 		}
 	}
@@ -502,7 +507,8 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 		if err != nil {
 			return response.StatusCode, fmt.Errorf("failed to read response body: %w", err)
 		}
-		return response.StatusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
 	}
 
 	// 处理响应

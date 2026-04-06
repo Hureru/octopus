@@ -10,10 +10,11 @@ import (
 // Iterator 统一的负载均衡迭代器
 // 内部编排：策略排序 + 粘性优先 + 决策追踪
 type Iterator struct {
-	candidates []model.GroupItem
-	index      int
-	stickyIdx  int    // 粘性通道在 candidates 中的位置，-1 表示无
-	modelName  string // 请求模型名（用于熔断检查）
+	candidates  []model.GroupItem
+	index       int
+	stickyIdx   int // 粘性通道在 candidates 中的位置，-1 表示无
+	stickyKeyID int
+	modelName   string // 请求模型名（用于熔断检查）
 
 	// 内嵌追踪
 	attempts []model.ChannelAttempt
@@ -27,6 +28,7 @@ func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator
 	candidates := b.Candidates(group.Items)
 
 	stickyIdx := -1
+	stickyKeyID := 0
 	if group.SessionKeepTime > 0 {
 		stickyTTL := time.Duration(group.SessionKeepTime) * time.Second
 		if sticky := GetSticky(apiKeyID, requestModel, stickyTTL); sticky != nil {
@@ -39,6 +41,7 @@ func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator
 						candidates[0] = stickyItem
 					}
 					stickyIdx = 0
+					stickyKeyID = sticky.ChannelKeyID
 					break
 				}
 			}
@@ -46,10 +49,11 @@ func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator
 	}
 
 	return &Iterator{
-		candidates: candidates,
-		index:      -1,
-		stickyIdx:  stickyIdx,
-		modelName:  requestModel,
+		candidates:  candidates,
+		index:       -1,
+		stickyIdx:   stickyIdx,
+		stickyKeyID: stickyKeyID,
+		modelName:   requestModel,
 	}
 }
 
@@ -67,6 +71,13 @@ func (it *Iterator) Item() model.GroupItem {
 // IsSticky 当前候选是否为粘性通道
 func (it *Iterator) IsSticky() bool {
 	return it.stickyIdx >= 0 && it.index == it.stickyIdx
+}
+
+func (it *Iterator) StickyKeyID() int {
+	if !it.IsSticky() {
+		return 0
+	}
+	return it.stickyKeyID
 }
 
 // Len 返回候选列表长度

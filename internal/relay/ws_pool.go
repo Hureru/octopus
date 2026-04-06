@@ -31,11 +31,10 @@ type wsPoolKey struct {
 }
 
 type pooledConn struct {
-	conn       *websocket.Conn
-	createdAt  time.Time
-	lastUsed   time.Time
-	busy       bool
-	lastRespID string // for previous_response_id chaining
+	conn      *websocket.Conn
+	createdAt time.Time
+	lastUsed  time.Time
+	busy      bool
 }
 
 type wsPool struct {
@@ -127,17 +126,17 @@ func (p *wsPool) MarkUnsupported(channelID int) {
 }
 
 // Dial creates a new WebSocket connection to the upstream.
-func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string) (*pooledConn, error) {
+func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string) (*pooledConn, bool, error) {
 	// Build WS URL
 	wsURL, err := buildWSURL(baseUrl)
 	if err != nil {
-		return nil, fmt.Errorf("invalid base url for ws: %w", err)
+		return nil, false, fmt.Errorf("invalid base url for ws: %w", err)
 	}
 
 	// Get HTTP client for proxy settings
 	httpClient, err := helper.ChannelHttpClient(channel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get http client: %w", err)
+		return nil, false, fmt.Errorf("failed to get http client: %w", err)
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -150,9 +149,9 @@ func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, ke
 		},
 	}
 
-	conn, _, err := websocket.Dial(dialCtx, wsURL, opts)
+	conn, response, err := websocket.Dial(dialCtx, wsURL, opts)
 	if err != nil {
-		return nil, err
+		return nil, shouldMarkWSUnsupported(response, err), err
 	}
 
 	// Set read limit high for large responses (e.g., image generation)
@@ -165,15 +164,24 @@ func (p *wsPool) Dial(ctx context.Context, channel *dbmodel.Channel, baseUrl, ke
 		busy:      true,
 	}
 
-	return pc, nil
+	return pc, false, nil
 }
 
 // SendResponseCreate sends a response.create message on a WS connection.
 func (p *wsPool) SendResponseCreate(ctx context.Context, pc *pooledConn, requestBody json.RawMessage) error {
+	merged, err := buildWSResponseCreateMessage(requestBody)
+	if err != nil {
+		return err
+	}
+
+	return pc.conn.Write(ctx, websocket.MessageText, merged)
+}
+
+func buildWSResponseCreateMessage(requestBody json.RawMessage) ([]byte, error) {
 	// Merge type field into the request body
 	var bodyMap map[string]json.RawMessage
 	if err := json.Unmarshal(requestBody, &bodyMap); err != nil {
-		return fmt.Errorf("failed to parse request body: %w", err)
+		return nil, fmt.Errorf("failed to parse request body: %w", err)
 	}
 	bodyMap["type"] = json.RawMessage(`"response.create"`)
 
@@ -181,19 +189,12 @@ func (p *wsPool) SendResponseCreate(ctx context.Context, pc *pooledConn, request
 	delete(bodyMap, "stream")
 	delete(bodyMap, "background")
 
-	// Add previous_response_id if available
-	if pc.lastRespID != "" {
-		if _, exists := bodyMap["previous_response_id"]; !exists {
-			bodyMap["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", pc.lastRespID))
-		}
-	}
-
 	merged, err := json.Marshal(bodyMap)
 	if err != nil {
-		return fmt.Errorf("failed to marshal ws message: %w", err)
+		return nil, fmt.Errorf("failed to marshal ws message: %w", err)
 	}
 
-	return pc.conn.Write(ctx, websocket.MessageText, merged)
+	return merged, nil
 }
 
 func buildWSURL(baseUrl string) (string, error) {
@@ -216,6 +217,31 @@ func buildWSURL(baseUrl string) (string, error) {
 
 	parsed.Path = parsed.Path + "/responses"
 	return parsed.String(), nil
+}
+
+func shouldMarkWSUnsupported(response *http.Response, err error) bool {
+	statusCode := 0
+	if response != nil {
+		statusCode = response.StatusCode
+	}
+	switch statusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUpgradeRequired, http.StatusNotImplemented:
+		return true
+	}
+
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "status code 404") ||
+		strings.Contains(message, "status code 405") ||
+		strings.Contains(message, "status code 426") ||
+		strings.Contains(message, "status code 501") ||
+		strings.Contains(message, " got 404") ||
+		strings.Contains(message, " got 405") ||
+		strings.Contains(message, " got 426") ||
+		strings.Contains(message, " got 501")
 }
 
 func (p *wsPool) cleanupLoop() {
@@ -285,10 +311,14 @@ func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key s
 	}
 
 	// Try to dial new connection
-	pc, err := wsUpstreamPool.Dial(ctx, channel, baseUrl, key)
+	pc, unsupported, err := wsUpstreamPool.Dial(ctx, channel, baseUrl, key)
 	if err != nil {
-		log.Infof("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)
-		wsUpstreamPool.MarkUnsupported(channel.ID)
+		if unsupported {
+			log.Infof("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)
+			wsUpstreamPool.MarkUnsupported(channel.ID)
+		} else {
+			log.Infof("upstream WS dial failed for channel %d: %v", channel.ID, err)
+		}
 		return nil
 	}
 

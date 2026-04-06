@@ -27,6 +27,12 @@ type cachedWSResponse struct {
 	ID string
 }
 
+type wsRelayResult struct {
+	Success           bool
+	ResponseID        string
+	ResetConversation bool
+}
+
 // HandleWSResponse handles WebSocket upgrade for /v1/responses.
 func HandleWSResponse(c *gin.Context) {
 	conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
@@ -130,17 +136,7 @@ func processWSResponseCreate(
 		delete(reqBody, "generate")
 	}
 
-	// Handle previous_response_id
-	if prevIDRaw, ok := reqBody["previous_response_id"]; ok {
-		var prevID string
-		if json.Unmarshal(prevIDRaw, &prevID) == nil && prevID != "" {
-			if lastCache == nil || lastCache.ID != prevID {
-				writeWSError(ctx, conn, 400, "previous_response_not_found",
-					fmt.Sprintf("Previous response with id '%s' not found.", prevID))
-				return lastCache
-			}
-		}
-	}
+	injectWSPreviousResponseID(reqBody, lastCache)
 
 	// Force stream mode
 	reqBody["stream"] = json.RawMessage("true")
@@ -204,16 +200,19 @@ func processWSResponseCreate(
 		streamWriter:    wsWriter,
 	}
 
-	success, respID := executeWSRelay(ctx, conn, req, &group)
+	result := executeWSRelay(ctx, conn, req, &group)
 
-	if success && respID != "" {
-		return &cachedWSResponse{ID: respID}
+	if result.Success && result.ResponseID != "" {
+		return &cachedWSResponse{ID: result.ResponseID}
+	}
+	if result.ResetConversation {
+		return nil
 	}
 
 	return lastCache
 }
 
-func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, group *dbmodel.Group) (bool, string) {
+func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, group *dbmodel.Group) wsRelayResult {
 	maxSameChannelRetries := 1
 	if group.RetryEnabled {
 		maxSameChannelRetries = group.MaxRetries
@@ -223,11 +222,12 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 	}
 
 	var lastErr error
+	var lastResult attemptResult
 
 	for req.iter.Next() {
 		select {
 		case <-ctx.Done():
-			return false, ""
+			return wsRelayResult{}
 		default:
 		}
 
@@ -260,6 +260,7 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 		selectOpts := dbmodel.ChannelKeySelectOptions{
 			IgnoreRecent429Cooldown: group.RetryEnabled,
 			ExcludeKeyIDs:           make(map[int]struct{}),
+			PreferredKeyID:          req.iter.StickyKeyID(),
 		}
 
 		var usedKey dbmodel.ChannelKey
@@ -290,7 +291,7 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 				delay := computeBackoff(retryNum, result.RetryAfter)
 				select {
 				case <-ctx.Done():
-					return false, ""
+					return wsRelayResult{}
 				case <-time.After(delay):
 				}
 			}
@@ -321,18 +322,36 @@ func executeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest
 			if req.metrics.InternalResponse != nil {
 				respID = req.metrics.InternalResponse.ID
 			}
-			return true, respID
+			return wsRelayResult{Success: true, ResponseID: respID}
 		}
 		if result.Canceled || result.Written {
 			req.metrics.Save(ctx, false, result.Err, req.iter.Attempts())
-			return false, ""
+			return wsRelayResult{}
 		}
 		lastErr = result.Err
+		lastResult = result
 	}
 
 	req.metrics.Save(ctx, false, lastErr, req.iter.Attempts())
+	if publicErr, ok := classifyWSPublicError(lastErr, lastResult.StatusCode); ok {
+		if publicErr.ResetConversation {
+			balancer.DeleteSticky(req.apiKeyID, req.requestModel)
+		}
+		writeWSError(ctx, conn, publicErr.Status, publicErr.Code, publicErr.Message)
+		return wsRelayResult{ResetConversation: publicErr.ResetConversation}
+	}
 	writeWSError(ctx, conn, 502, "all_channels_failed", "All channels failed")
-	return false, ""
+	return wsRelayResult{}
+}
+
+func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, lastCache *cachedWSResponse) {
+	if lastCache == nil || strings.TrimSpace(lastCache.ID) == "" {
+		return
+	}
+	if _, exists := reqBody["previous_response_id"]; exists {
+		return
+	}
+	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", lastCache.ID))
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {
