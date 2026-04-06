@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Monitor, Globe, Clock, Shield, HelpCircle, X, Wifi } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, HelpCircle, X, Link } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -244,7 +244,7 @@ export function SettingSystem() {
             {/* WebSocket 上游升级 */}
             <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                    <Wifi className="h-5 w-5 text-muted-foreground" />
+                    <Link className="h-5 w-5 text-muted-foreground" />
                     <span className="text-sm font-medium">{t('wsUpgrade.label')}</span>
                     <TooltipProvider>
                         <Tooltip>

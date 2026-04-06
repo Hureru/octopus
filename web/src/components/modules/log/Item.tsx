@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Info, Waypoints } from 'lucide-react';
+import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Info, Link } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -223,7 +223,7 @@ function WSModeBadge({ log }: { log: RelayLog }) {
                     variant="secondary"
                     className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', meta.className)}
                 >
-                    <Waypoints className="size-3.5 shrink-0" />
+                    <Link className="size-3.5 shrink-0" />
                     {meta.label}
                 </Badge>
             </TooltipTrigger>
