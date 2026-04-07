@@ -6,6 +6,7 @@ import (
 
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
 func TestResolveWSConversationStateFallsBackToStoredState(t *testing.T) {
@@ -20,7 +21,7 @@ func TestResolveWSConversationStateFallsBackToStoredState(t *testing.T) {
 	}
 	storeWSConversationState(7, "gpt-5.4", stored, time.Minute)
 
-	resolved := resolveWSConversationState(7, "gpt-5.4", nil)
+	resolved := resolveWSConversationState(7, "gpt-5.4", nil, true)
 	if resolved == nil {
 		t.Fatalf("expected stored conversation state to be resolved")
 	}
@@ -39,9 +40,51 @@ func TestResolveWSConversationStatePrefersMatchingLocalState(t *testing.T) {
 	storeWSConversationState(7, "gpt-5.4", &wsConversationState{RequestModel: "gpt-5.4", LastResponseID: "resp_saved"}, time.Minute)
 	local := &wsConversationState{RequestModel: "gpt-5.4", LastResponseID: "resp_local"}
 
-	resolved := resolveWSConversationState(7, "gpt-5.4", local)
+	resolved := resolveWSConversationState(7, "gpt-5.4", local, true)
 	if resolved != local {
 		t.Fatalf("expected matching local state to be reused")
+	}
+}
+
+func TestResolveWSConversationStateDoesNotRestoreStoredStateForFreshConnection(t *testing.T) {
+	resetWSConversationStateStore()
+	t.Cleanup(resetWSConversationStateStore)
+
+	storeWSConversationState(7, "gpt-5.4", &wsConversationState{
+		RequestModel:   "gpt-5.4",
+		LastResponseID: "resp_saved",
+		Transcript:     []transformerModel.Message{{Role: "assistant"}},
+	}, time.Minute)
+
+	resolved := resolveWSConversationState(7, "gpt-5.4", nil, false)
+	if resolved != nil {
+		t.Fatalf("expected fresh connection to ignore stored continuation state, got %#v", resolved)
+	}
+}
+
+func TestResolveWSConversationStateRestoresStoredStateForContinuation(t *testing.T) {
+	resetWSConversationStateStore()
+	t.Cleanup(resetWSConversationStateStore)
+
+	storeWSConversationState(7, "gpt-5.4", &wsConversationState{
+		RequestModel:   "gpt-5.4",
+		LastResponseID: "resp_saved",
+		Transcript:     []transformerModel.Message{{Role: "assistant"}},
+	}, time.Minute)
+
+	local := &wsConversationState{RequestModel: "other-model"}
+	resolved := resolveWSConversationState(7, "gpt-5.4", local, true)
+	if resolved == nil {
+		t.Fatalf("expected stored continuation state to be restored")
+	}
+	if resolved.LastResponseID != "resp_saved" || len(resolved.Transcript) != 1 {
+		t.Fatalf("unexpected restored state: %#v", resolved)
+	}
+}
+
+func TestShouldRestoreStoredWSConversationState(t *testing.T) {
+	if resolveWSConversationState(7, "", nil, true) != nil {
+		t.Fatalf("expected empty request model to skip restore")
 	}
 }
 

@@ -117,7 +117,8 @@ func processWSResponseCreate(
 	// Remove WS-only fields
 	delete(reqBody, "type")
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
-	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState)
+	allowStoredRestore := wsRequestExplicitlyRequestsContinuation(reqBody)
+	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore)
 	preferredSticky := wsConversationStateToSticky(conversationState)
 
 	// Check for generate: false (warmup)
@@ -527,6 +528,22 @@ func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsCon
 		return
 	}
 	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
+}
+
+func wsRequestExplicitlyRequestsContinuation(reqBody map[string]json.RawMessage) bool {
+	if len(reqBody) == 0 {
+		return false
+	}
+	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
+		var previousResponseID string
+		if err := json.Unmarshal(raw, &previousResponseID); err == nil && strings.TrimSpace(previousResponseID) != "" {
+			return true
+		}
+	}
+	if raw, ok := reqBody["conversation"]; ok && len(raw) > 0 && string(raw) != "null" {
+		return true
+	}
+	return false
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {

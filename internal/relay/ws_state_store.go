@@ -73,13 +73,16 @@ func deleteWSConversationState(apiKeyID int, requestModel string) {
 	wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel))
 }
 
-func resolveWSConversationState(apiKeyID int, requestModel string, localState *wsConversationState) *wsConversationState {
+func resolveWSConversationState(apiKeyID int, requestModel string, localState *wsConversationState, allowStoredRestore bool) *wsConversationState {
 	requestModel = strings.TrimSpace(requestModel)
 	if requestModel == "" {
 		return localState
 	}
 	if localState != nil && localState.MatchesRequestModel(requestModel) {
 		return localState
+	}
+	if !allowStoredRestore {
+		return nil
 	}
 	return loadWSConversationState(apiKeyID, requestModel)
 }

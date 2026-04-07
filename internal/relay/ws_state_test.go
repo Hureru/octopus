@@ -51,6 +51,21 @@ func TestInjectWSPreviousResponseIDOnlyWhenMissing(t *testing.T) {
 	}
 }
 
+func TestWSRequestExplicitlyRequestsContinuation(t *testing.T) {
+	if wsRequestExplicitlyRequestsContinuation(nil) {
+		t.Fatalf("expected nil request body to be fresh")
+	}
+	if wsRequestExplicitlyRequestsContinuation(map[string]json.RawMessage{"previous_response_id": json.RawMessage(`""`)}) {
+		t.Fatalf("expected empty previous_response_id to be treated as fresh")
+	}
+	if !wsRequestExplicitlyRequestsContinuation(map[string]json.RawMessage{"previous_response_id": json.RawMessage(`"resp_prev"`)}) {
+		t.Fatalf("expected previous_response_id to request continuation")
+	}
+	if !wsRequestExplicitlyRequestsContinuation(map[string]json.RawMessage{"conversation": json.RawMessage(`{"id":"conv_1"}`)}) {
+		t.Fatalf("expected conversation payload to request continuation")
+	}
+}
+
 func TestClassifyWSPublicErrorRecognizesConversationRestart(t *testing.T) {
 	err := fmt.Errorf("ws stream read error: ws read error: failed to get reader: received close frame: status = StatusPolicyViolation and reason = \"upstream continuation connection is unavailable; please restart the conversation\"")
 	publicErr, ok := classifyWSPublicError(err, http.StatusConflict)
