@@ -118,7 +118,20 @@ func processWSResponseCreate(
 	delete(reqBody, "type")
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
 	allowStoredRestore := wsRequestExplicitlyRequestsContinuation(reqBody)
+	requestedPreviousResponseID := ""
+	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &requestedPreviousResponseID)
+		requestedPreviousResponseID = strings.TrimSpace(requestedPreviousResponseID)
+	}
+	hadLocalState := conversationState != nil
 	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore)
+	hasResolvedState := conversationState != nil
+	resolvedLastResponseID := ""
+	if conversationState != nil {
+		resolvedLastResponseID = strings.TrimSpace(conversationState.LastResponseID)
+	}
+	log.Debugf("ws response.create state resolved (apikey=%d, request_model=%s, requested_prev=%s, explicit_continuation=%t, had_local_state=%t, resolved_state=%t, resolved_last_response_id=%s)",
+		apiKeyID, requestModel, requestedPreviousResponseID, allowStoredRestore, hadLocalState, hasResolvedState, resolvedLastResponseID)
 	rewriteWSPreviousResponseID(reqBody, conversationState)
 	preferredSticky := wsConversationStateToSticky(conversationState)
 
@@ -197,8 +210,24 @@ func processWSResponseCreate(
 
 	autoRestart := conversationState != nil && conversationState.CanAutoRestart(originalRequest)
 	failedPreviousResponseID := currentPreviousResponseID(originalRequest)
+	log.Debugf("ws relay prepared (apikey=%d, request_model=%s, previous_response_id=%s, auto_replay=%t, preferred_channel=%d, preferred_key=%d)",
+		apiKeyID, requestModel, failedPreviousResponseID, autoRestart,
+		func() int {
+			if preferredSticky == nil {
+				return 0
+			}
+			return preferredSticky.ChannelID
+		}(),
+		func() int {
+			if preferredSticky == nil {
+				return 0
+			}
+			return preferredSticky.ChannelKeyID
+		}())
 	result := runWSRelay(ctx, req, group)
 	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
+		log.Debugf("ws relay switching to replay (apikey=%d, request_model=%s, failed_previous_response_id=%s, reset_conversation=%t)",
+			apiKeyID, requestModel, failedPreviousResponseID, result.ResetConversation)
 		balancer.DeleteSticky(apiKeyID, requestModel)
 		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
 		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky)
@@ -225,9 +254,13 @@ func processWSResponseCreate(
 		}
 		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
 		storeWSConversationState(apiKeyID, requestModel, conversationState, wsConversationStateTTL(group.SessionKeepTime))
+		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, ws_mode=%v, ws_recovery=%v, last_response_id=%s, channel=%d, key=%d)",
+			apiKeyID, requestModel, req.metrics.WSMode, req.metrics.WSRecovery,
+			strings.TrimSpace(conversationState.LastResponseID), conversationState.ChannelID, conversationState.ChannelKeyID)
 		return conversationState
 	}
 	if result.ResetConversation {
+		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
 		deleteWSConversationState(apiKeyID, requestModel)
 		return nil
 	}

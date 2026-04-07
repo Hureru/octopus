@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
+	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 type wsPublicError struct {
@@ -84,8 +85,12 @@ func shouldReconnectUpstreamWSBeforeReplay(err error) bool {
 	if message == "" {
 		return false
 	}
-	return isUpstreamWSConnectionBroken(err) ||
+	shouldReconnect := isUpstreamWSConnectionBroken(err) ||
 		strings.Contains(message, "ws stream ended before first event")
+	if shouldReconnect {
+		log.Debugf("ws continuation error marked reconnectable before replay: %v", err)
+	}
+	return shouldReconnect
 }
 
 func needsConversationRestart(message string) bool {
