@@ -79,6 +79,15 @@ func isUpstreamWSConnectionBroken(err error) bool {
 		strings.Contains(message, "connection reset by peer")
 }
 
+func shouldReconnectUpstreamWSBeforeReplay(err error) bool {
+	message := relayErrorMessage(err)
+	if message == "" {
+		return false
+	}
+	return isUpstreamWSConnectionBroken(err) ||
+		strings.Contains(message, "ws stream ended before first event")
+}
+
 func needsConversationRestart(message string) bool {
 	return strings.Contains(message, "please restart the conversation") ||
 		strings.Contains(message, "continuation connection is unavailable") ||

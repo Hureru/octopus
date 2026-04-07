@@ -378,6 +378,85 @@ func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T)
 	wsUpstreamPool.Remove(stale.poolKey)
 }
 
+func TestForwardViaWSReconnectsContinuationAfterReadFailureBeforeFirstEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	var accepted atomic.Int32
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		accepted.Add(1)
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		_, _, err = conn.Read(r.Context())
+		if err != nil {
+			return
+		}
+
+		if accepted.Load() == 1 {
+			conn.Close(websocket.StatusNormalClosure, "")
+			return
+		}
+
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_cont_new","model":"gpt-4o"}}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"ok"}`))
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_cont_new","model":"gpt-4o","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`))
+	}))
+	defer wsServer.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-ws-cont-read-reconnect",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: wsServer.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "cont-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	internalReq := &transformerModel.InternalLLMRequest{Model: "gpt-4o", Stream: boolPtr(true), PreviousResponseID: stringPtr("resp_prev")}
+	req := &relayRequest{
+		c:               c,
+		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
+		internalRequest: internalReq,
+		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		apiKeyID:        1,
+		requestModel:    "gpt-4o",
+	}
+	ra := &relayAttempt{
+		relayRequest: req,
+		outAdapter:   outbound.Get(channel.Type),
+		channel:      channel,
+		usedKey:      channel.Keys[0],
+	}
+
+	statusCode, err := ra.forwardViaWS(context.Background())
+	if err != nil {
+		t.Fatalf("expected continuation ws request to recover by redial, got err %v", err)
+	}
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected continuation ws request to succeed after redial, got %d", statusCode)
+	}
+	if accepted.Load() < 2 {
+		t.Fatalf("expected initial continuation attempt plus forced redial, got %d accepted connections", accepted.Load())
+	}
+	if req.metrics.WSRecovery == nil || *req.metrics.WSRecovery != model.RelayLogWSRecoveryReconnect {
+		t.Fatalf("expected ws reconnect recovery to be recorded, got %#v", req.metrics.WSRecovery)
+	}
+	if !strings.Contains(writer.Body.String(), `"response.completed"`) {
+		t.Fatalf("expected ws reconnect stream to complete, got %s", writer.Body.String())
+	}
+	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Header, channel, channel.Keys[0].ChannelKey)))
+}
+
 func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)

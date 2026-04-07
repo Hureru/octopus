@@ -425,6 +425,12 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 	err = ra.handleWSStreamResponse(ctx, reader)
 	if err != nil {
 		reader.CloseWithError()
+		if requiresUpstreamWSContinuation(ra.internalRequest) && !ra.getStreamWriter().Written() && shouldReconnectUpstreamWSBeforeReplay(err) {
+			statusCode, redialErr, recovered := ra.retryViaFreshUpstreamWS(ctx, reqBody)
+			if recovered || redialErr != nil {
+				return statusCode, redialErr
+			}
+		}
 		if requiresUpstreamWSContinuation(ra.internalRequest) && isContinuationTransportFailure(err) {
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
