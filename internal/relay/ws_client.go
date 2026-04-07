@@ -328,12 +328,12 @@ func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, u
 	warmupCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ChannelKey, usedKey.ID)
+	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ChannelKey, usedKey.ID, nil)
 	if pc == nil {
 		return fmt.Errorf("upstream ws unavailable")
 	}
 
-	wsUpstreamPool.Put(channel.ID, usedKey.ID, pc)
+	wsUpstreamPool.Put(pc)
 	return nil
 }
 

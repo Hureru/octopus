@@ -381,7 +381,7 @@ func (ra *relayAttempt) forward() (int, error) {
 // forwardViaWS attempts to forward via upstream WebSocket.
 // Returns statusCode=-1 if WS is not available (caller should fall through to HTTP).
 func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
-	pc := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID)
+	pc := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, ra.clientRequestHeaders())
 	if pc == nil {
 		return -1, nil // WS not available
 	}
@@ -392,7 +392,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 	responsesReq := openaiOutbound.ConvertToResponsesRequest(ra.internalRequest)
 	reqBody, err := json.Marshal(responsesReq)
 	if err != nil {
-		wsUpstreamPool.Put(ra.channel.ID, ra.usedKey.ID, pc)
+		wsUpstreamPool.Put(pc)
 		return -1, nil // fall through to HTTP
 	}
 	ra.metrics.SetTransportRequestPayload(reqBody, ra.internalRequest.Model)
@@ -401,13 +401,13 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 	if err := wsUpstreamPool.SendResponseCreate(ctx, pc, reqBody); err != nil {
 		log.Warnf("upstream WS send failed for channel %s: %v", ra.channel.Name, err)
 		pc.conn.Close(websocket.StatusGoingAway, "send failed")
-		wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID)
+		wsUpstreamPool.Remove(pc.poolKey)
 		if requiresUpstreamWSContinuation(ra.internalRequest) && isUpstreamWSConnectionBroken(err) {
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
 		}
 		if !requiresUpstreamWSContinuation(ra.internalRequest) && isUpstreamWSConnectionBroken(err) {
-			redialed := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, true)
+			redialed := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, ra.clientRequestHeaders(), true)
 			if redialed != nil {
 				retryErr := wsUpstreamPool.SendResponseCreate(ctx, redialed, reqBody)
 				if retryErr == nil {
@@ -426,7 +426,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 				}
 				log.Warnf("upstream WS redial send failed for channel %s: %v", ra.channel.Name, retryErr)
 				redialed.conn.Close(websocket.StatusGoingAway, "send failed after redial")
-				wsUpstreamPool.Remove(ra.channel.ID, ra.usedKey.ID)
+				wsUpstreamPool.Remove(redialed.poolKey)
 			}
 		}
 		return -1, nil // fall through to HTTP
@@ -446,6 +446,13 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 
 	reader.Close()
 	return 200, nil
+}
+
+func (ra *relayAttempt) clientRequestHeaders() http.Header {
+	if ra == nil || ra.c == nil || ra.c.Request == nil {
+		return nil
+	}
+	return ra.c.Request.Header
 }
 
 // handleWSStreamResponse processes events from an upstream WebSocket reader.

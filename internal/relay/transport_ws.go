@@ -112,7 +112,7 @@ func (r *wsUpstreamReader) Close() error {
 	}
 	r.closed = true
 	// Return connection to pool (don't close it)
-	wsUpstreamPool.Put(r.channelID, r.keyID, r.pc)
+	wsUpstreamPool.Put(r.pc)
 	log.Infof("upstream WS connection returned to pool (channel=%d, key=%d)", r.channelID, r.keyID)
 	return nil
 }
@@ -124,5 +124,5 @@ func (r *wsUpstreamReader) CloseWithError() {
 	}
 	r.closed = true
 	r.pc.conn.Close(websocket.StatusGoingAway, "error")
-	wsUpstreamPool.Remove(r.channelID, r.keyID)
+	wsUpstreamPool.Remove(r.pc.poolKey)
 }
