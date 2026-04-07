@@ -8,7 +8,7 @@ import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 import { useTheme } from 'next-themes';
-import { type RelayLog, type RelayLogWSMode, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
+import { type RelayLog, type RelayLogWSMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -118,6 +118,31 @@ function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean
     }
 }
 
+function getWSRecoveryBadgeMeta(recovery: RelayLogWSRecovery | null | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
+    switch (recovery) {
+        case 'reconnect':
+            return {
+                label: t('wsReconnect'),
+                className: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+                description: t('wsReconnectHint'),
+            };
+        case 'replay':
+            return {
+                label: t('wsReplayRecovery'),
+                className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                description: t('wsReplayRecoveryHint'),
+            };
+        case 'downgrade':
+            return {
+                label: t('wsDowngrade'),
+                className: 'bg-slate-500/10 text-slate-700 dark:text-slate-300',
+                description: t('wsDowngradeHint'),
+            };
+        default:
+            return null;
+    }
+}
+
 function getAttemptStatusMeta(status: AttemptStatus, t: ReturnType<typeof useTranslations<'log.card'>>) {
     switch (status) {
         case 'success':
@@ -212,23 +237,42 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
 
 function WSModeBadge({ log }: { log: RelayLog }) {
     const t = useTranslations('log.card');
-    const meta = getWSBadgeMeta(log.ws_mode, log.used_ws, t);
+    const modeMeta = getWSBadgeMeta(log.ws_mode, log.used_ws, t);
+    const recoveryMeta = getWSRecoveryBadgeMeta(log.ws_recovery, t);
 
-    if (!meta) return null;
+    if (!modeMeta && !recoveryMeta) return null;
 
     return (
-        <Tooltip>
-            <TooltipTrigger asChild>
-                <Badge
-                    variant="secondary"
-                    className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', meta.className)}
-                >
-                    <Link className="size-3.5 shrink-0" />
-                    {meta.label}
-                </Badge>
-            </TooltipTrigger>
-            <TooltipContent>{meta.description}</TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1.5 shrink-0">
+            {modeMeta ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Badge
+                            variant="secondary"
+                            className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', modeMeta.className)}
+                        >
+                            <Link className="size-3.5 shrink-0" />
+                            {modeMeta.label}
+                        </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>{modeMeta.description}</TooltipContent>
+                </Tooltip>
+            ) : null}
+            {recoveryMeta ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Badge
+                            variant="secondary"
+                            className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', recoveryMeta.className)}
+                        >
+                            <RotateCw className="size-3.5 shrink-0" />
+                            {recoveryMeta.label}
+                        </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>{recoveryMeta.description}</TooltipContent>
+                </Tooltip>
+            ) : null}
+        </div>
     );
 }
 

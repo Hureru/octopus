@@ -16,6 +16,7 @@ type wsConversationState struct {
 	ChannelKeyID   int
 	LastResponseID string
 	Transcript     []transformerModel.Message
+	ReplayAliases  []string
 }
 
 func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
@@ -39,7 +40,65 @@ func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRe
 		return true
 	}
 	prevID := strings.TrimSpace(*req.PreviousResponseID)
-	return prevID == "" || prevID == strings.TrimSpace(s.LastResponseID)
+	return prevID == "" || s.MatchesPreviousResponseID(prevID)
+}
+
+func (s *wsConversationState) MatchesPreviousResponseID(responseID string) bool {
+	if s == nil {
+		return false
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" {
+		return false
+	}
+	if responseID == strings.TrimSpace(s.LastResponseID) {
+		return true
+	}
+	for _, alias := range s.ReplayAliases {
+		if responseID == strings.TrimSpace(alias) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *wsConversationState) ShouldRewritePreviousResponseID(responseID string) bool {
+	if s == nil {
+		return false
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" || responseID == strings.TrimSpace(s.LastResponseID) {
+		return false
+	}
+	for _, alias := range s.ReplayAliases {
+		if responseID == strings.TrimSpace(alias) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *wsConversationState) RememberReplayAlias(responseID string) {
+	if s == nil {
+		return
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" || responseID == strings.TrimSpace(s.LastResponseID) {
+		return
+	}
+	filtered := make([]string, 0, len(s.ReplayAliases)+1)
+	filtered = append(filtered, responseID)
+	for _, alias := range s.ReplayAliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" || alias == responseID {
+			continue
+		}
+		filtered = append(filtered, alias)
+		if len(filtered) >= 8 {
+			break
+		}
+	}
+	s.ReplayAliases = filtered
 }
 
 func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalLLMRequest) *transformerModel.InternalLLMRequest {
@@ -80,6 +139,7 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 		ChannelKeyID:   state.ChannelKeyID,
 		LastResponseID: strings.TrimSpace(state.LastResponseID),
 		Transcript:     cloneMessages(state.Transcript),
+		ReplayAliases:  append([]string(nil), state.ReplayAliases...),
 	}
 }
 

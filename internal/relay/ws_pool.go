@@ -433,3 +433,10 @@ func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key s
 func CloseUpstreamWSPool() {
 	wsUpstreamPool.Close()
 }
+
+func resetWSUpstreamPool() {
+	if wsUpstreamPool != nil {
+		wsUpstreamPool.Close()
+	}
+	wsUpstreamPool = newWSPool()
+}

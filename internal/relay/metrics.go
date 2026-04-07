@@ -33,6 +33,7 @@ type RelayMetrics struct {
 	Stats       model.StatsMetrics
 	UsedWS      bool
 	WSMode      *model.RelayLogWSMode
+	WSRecovery  *model.RelayLogWSRecovery
 
 	TransportInputTokens *int
 	BillInputTokens      *int
@@ -66,6 +67,13 @@ func (m *RelayMetrics) SetWSMode(mode model.RelayLogWSMode) {
 		return
 	}
 	m.WSMode = wsModePtr(mode)
+}
+
+func (m *RelayMetrics) SetWSRecovery(recovery model.RelayLogWSRecovery) {
+	if recovery == "" {
+		return
+	}
+	m.WSRecovery = wsRecoveryPtr(recovery)
 }
 
 func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMResponse, actualModel string) {
@@ -199,6 +207,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 	relayLog.CacheReadTokens = m.CacheReadTokens
 	relayLog.CacheWriteTokens = m.CacheWriteTokens
 	relayLog.WSMode = m.WSMode
+	relayLog.WSRecovery = m.WSRecovery
 
 	// 请求内容
 	if m.InternalRequest != nil {
@@ -236,6 +245,10 @@ func intPtr(value int) *int {
 }
 
 func wsModePtr(value model.RelayLogWSMode) *model.RelayLogWSMode {
+	return &value
+}
+
+func wsRecoveryPtr(value model.RelayLogWSRecovery) *model.RelayLogWSRecovery {
 	return &value
 }
 

@@ -372,7 +372,71 @@ func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T)
 	if accepted.Load() < 2 {
 		t.Fatalf("expected stale connection plus forced redial, got %d accepted connections", accepted.Load())
 	}
+	if req.metrics.WSRecovery == nil || *req.metrics.WSRecovery != model.RelayLogWSRecoveryReconnect {
+		t.Fatalf("expected ws reconnect recovery to be recorded, got %#v", req.metrics.WSRecovery)
+	}
 	wsUpstreamPool.Remove(stale.poolKey)
+}
+
+func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
+		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
+	}
+
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			w.WriteHeader(http.StatusUpgradeRequired)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_http","object":"response","created":1,"model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}`))
+	}))
+	defer httpServer.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-ws-downgrade",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: httpServer.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "downgrade-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o","input":"hello"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	internalReq := &transformerModel.InternalLLMRequest{Model: "gpt-4o", Stream: boolPtr(false), RawAPIFormat: transformerModel.APIFormatOpenAIResponse}
+	req := &relayRequest{
+		c:               c,
+		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
+		internalRequest: internalReq,
+		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		apiKeyID:        1,
+		requestModel:    "gpt-4o",
+	}
+	ra := &relayAttempt{
+		relayRequest: req,
+		outAdapter:   outbound.Get(channel.Type),
+		channel:      channel,
+		usedKey:      channel.Keys[0],
+	}
+
+	statusCode, err := ra.forward()
+	if err != nil {
+		t.Fatalf("expected http downgrade path to succeed, got err %v", err)
+	}
+	if statusCode != http.StatusOK {
+		t.Fatalf("expected downgrade request to succeed via http, got %d", statusCode)
+	}
+	if req.metrics.WSRecovery == nil || *req.metrics.WSRecovery != model.RelayLogWSRecoveryDowngrade {
+		t.Fatalf("expected ws downgrade recovery to be recorded, got %#v", req.metrics.WSRecovery)
+	}
 }
 
 func TestForwardViaWSPreservesClientUserAgentHeaders(t *testing.T) {
@@ -852,6 +916,7 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	}
 	balancer.Reset()
 	resetWSConversationStateStore()
+	resetWSUpstreamPool()
 
 	dbPath := filepath.Join(t.TempDir(), "octopus-relay-test.db")
 	if err := dbpkg.InitDB("sqlite", dbPath, false); err != nil {
@@ -863,6 +928,7 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	t.Cleanup(func() {
 		balancer.Reset()
 		resetWSConversationStateStore()
+		resetWSUpstreamPool()
 		_ = dbpkg.Close()
 	})
 

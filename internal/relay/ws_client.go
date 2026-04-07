@@ -119,6 +119,7 @@ func processWSResponseCreate(
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
 	allowStoredRestore := wsRequestExplicitlyRequestsContinuation(reqBody)
 	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore)
+	rewriteWSPreviousResponseID(reqBody, conversationState)
 	preferredSticky := wsConversationStateToSticky(conversationState)
 
 	// Check for generate: false (warmup)
@@ -195,6 +196,7 @@ func processWSResponseCreate(
 	}
 
 	autoRestart := conversationState != nil && conversationState.CanAutoRestart(originalRequest)
+	failedPreviousResponseID := currentPreviousResponseID(originalRequest)
 	result := runWSRelay(ctx, req, group)
 	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
 		balancer.DeleteSticky(apiKeyID, requestModel)
@@ -202,6 +204,7 @@ func processWSResponseCreate(
 		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky)
 		if replayErr == nil {
 			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
+			replayReq.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
 			req = replayReq
 			group = replayGroup
 			result = runWSRelay(ctx, req, group)
@@ -216,6 +219,9 @@ func processWSResponseCreate(
 		if channelID, keyID := finalChannelKey(req.iter.Attempts()); channelID > 0 {
 			conversationState.ChannelID = channelID
 			conversationState.ChannelKeyID = keyID
+		}
+		if req.metrics.WSMode != nil && *req.metrics.WSMode == dbmodel.RelayLogWSModeReplay {
+			conversationState.RememberReplayAlias(failedPreviousResponseID)
 		}
 		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
 		storeWSConversationState(apiKeyID, requestModel, conversationState, wsConversationStateTTL(group.SessionKeepTime))
@@ -528,6 +534,31 @@ func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsCon
 		return
 	}
 	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
+}
+
+func rewriteWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
+	if state == nil || len(reqBody) == 0 {
+		return
+	}
+	raw, ok := reqBody["previous_response_id"]
+	if !ok || len(raw) == 0 {
+		return
+	}
+	var previousResponseID string
+	if err := json.Unmarshal(raw, &previousResponseID); err != nil {
+		return
+	}
+	if !state.ShouldRewritePreviousResponseID(previousResponseID) {
+		return
+	}
+	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
+}
+
+func currentPreviousResponseID(req *transformerModel.InternalLLMRequest) string {
+	if req == nil || req.PreviousResponseID == nil {
+		return ""
+	}
+	return strings.TrimSpace(*req.PreviousResponseID)
 }
 
 func wsRequestExplicitlyRequestsContinuation(reqBody map[string]json.RawMessage) bool {

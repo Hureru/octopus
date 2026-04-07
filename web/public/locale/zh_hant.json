@@ -463,9 +463,15 @@
             "ws": "WS",
             "wsContinuation": "續傳",
             "wsReplay": "回放",
+            "wsReconnect": "重連恢復",
+            "wsReplayRecovery": "回放恢復",
+            "wsDowngrade": "降級",
             "wsFreshHint": "本次請求走了上游 WebSocket 新會話。",
             "wsContinuationHint": "本次請求直接續上了上游 WebSocket 會話。",
             "wsReplayHint": "本次請求走了上游 WebSocket，但為了恢復上下文回放了歷史內容。",
+            "wsReconnectHint": "本次請求原本的上游 WebSocket 鏈路已中斷，重新建立連線後恢復成功。",
+            "wsReplayRecoveryHint": "本次請求先嘗試續傳失敗，隨後自動回放歷史內容恢復了上下文，並建立了新的續傳錨點。",
+            "wsDowngradeHint": "本次請求原本嘗試走上游 WebSocket，但因上游不可用已自動降級為 HTTP。",
             "inputDetails": "輸入明細",
             "transportInput": "傳輸輸入",
             "billInput": "計費輸入",
@@ -575,4 +581,3 @@
         }
     }
 }
-

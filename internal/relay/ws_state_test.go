@@ -167,6 +167,7 @@ func TestRequiresUpstreamWSContinuation(t *testing.T) {
 func TestWSConversationStateCanAutoRestart(t *testing.T) {
 	state := &wsConversationState{
 		LastResponseID: "resp_prev",
+		ReplayAliases:  []string{"resp_old"},
 		Transcript: []transformerModel.Message{{
 			Role: "assistant",
 		}},
@@ -174,8 +175,38 @@ func TestWSConversationStateCanAutoRestart(t *testing.T) {
 	if !state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_prev")}) {
 		t.Fatalf("expected latest previous_response_id to be auto-restartable")
 	}
+	if !state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_old")}) {
+		t.Fatalf("expected replay alias previous_response_id to be auto-restartable")
+	}
 	if state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_other")}) {
 		t.Fatalf("expected mismatched previous_response_id to skip auto restart")
+	}
+}
+
+func TestRewriteWSPreviousResponseIDUsesLatestAnchorForReplayAlias(t *testing.T) {
+	reqBody := map[string]json.RawMessage{
+		"previous_response_id": json.RawMessage(`"resp_old"`),
+	}
+
+	rewriteWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_new", ReplayAliases: []string{"resp_old"}})
+	if got := string(reqBody["previous_response_id"]); got != `"resp_new"` {
+		t.Fatalf("expected previous_response_id to be rewritten to latest anchor, got %s", got)
+	}
+}
+
+func TestWSConversationStateRememberReplayAlias(t *testing.T) {
+	state := &wsConversationState{LastResponseID: "resp_new", ReplayAliases: []string{"resp_old_1", "resp_old_2"}}
+	state.RememberReplayAlias("resp_old_2")
+	state.RememberReplayAlias("resp_old_3")
+
+	if len(state.ReplayAliases) != 3 {
+		t.Fatalf("expected replay aliases to stay deduplicated, got %#v", state.ReplayAliases)
+	}
+	if state.ReplayAliases[0] != "resp_old_3" {
+		t.Fatalf("expected newest replay alias to be promoted to front, got %#v", state.ReplayAliases)
+	}
+	if !state.ShouldRewritePreviousResponseID("resp_old_1") {
+		t.Fatalf("expected known replay alias to be rewritten")
 	}
 }
 
