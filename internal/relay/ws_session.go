@@ -17,6 +17,7 @@ type wsConversationState struct {
 	LastResponseID string
 	Transcript     []transformerModel.Message
 	ReplayAliases  []string
+	ReplayPending  bool
 }
 
 func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
@@ -28,6 +29,9 @@ func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
 
 func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRequest) bool {
 	if s == nil || req == nil {
+		return false
+	}
+	if s.ReplayPending && requestContainsToolOutputs(req) {
 		return false
 	}
 	if strings.TrimSpace(s.LastResponseID) == "" || len(s.Transcript) == 0 {
@@ -76,6 +80,33 @@ func (s *wsConversationState) ShouldRewritePreviousResponseID(responseID string)
 		}
 	}
 	return false
+}
+
+func (s *wsConversationState) ShouldUseNativeContinuation(req *transformerModel.InternalLLMRequest) bool {
+	if s == nil {
+		return false
+	}
+	if strings.TrimSpace(s.LastResponseID) == "" {
+		return false
+	}
+	if s.ReplayPending && requestContainsToolOutputs(req) {
+		return false
+	}
+	return true
+}
+
+func (s *wsConversationState) MarkReplayRecovered(req *transformerModel.InternalLLMRequest) {
+	if s == nil {
+		return
+	}
+	s.ReplayPending = requestContainsToolOutputs(req)
+}
+
+func (s *wsConversationState) MarkNativeContinuationReady() {
+	if s == nil {
+		return
+	}
+	s.ReplayPending = false
 }
 
 func (s *wsConversationState) RememberReplayAlias(responseID string) {
@@ -140,6 +171,7 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 		LastResponseID: strings.TrimSpace(state.LastResponseID),
 		Transcript:     cloneMessages(state.Transcript),
 		ReplayAliases:  append([]string(nil), state.ReplayAliases...),
+		ReplayPending:  state.ReplayPending,
 	}
 }
 
@@ -272,6 +304,18 @@ func cloneBoolPointer(value *bool) *bool {
 
 func boolPtr(value bool) *bool {
 	return &value
+}
+
+func requestContainsToolOutputs(req *transformerModel.InternalLLMRequest) bool {
+	if req == nil {
+		return false
+	}
+	for _, msg := range req.Messages {
+		if msg.Role == "tool" && msg.ToolCallID != nil && strings.TrimSpace(*msg.ToolCallID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildReplayRawInputItems(transcript []transformerModel.Message, currentRawInputItems json.RawMessage) (json.RawMessage, bool) {

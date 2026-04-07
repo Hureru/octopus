@@ -177,6 +177,12 @@ func processWSResponseCreate(
 		writeWSError(ctx, conn, 400, "invalid_request", err.Error())
 		return conversationState
 	}
+	if conversationState != nil && !conversationState.ShouldUseNativeContinuation(internalRequest) {
+		replayedRequest := conversationState.BuildReplayRequest(internalRequest)
+		if replayedRequest != nil {
+			internalRequest = replayedRequest
+		}
+	}
 	originalRequest := cloneInternalRequest(internalRequest)
 
 	// Check supported models
@@ -251,6 +257,9 @@ func processWSResponseCreate(
 		}
 		if req.metrics.WSMode != nil && *req.metrics.WSMode == dbmodel.RelayLogWSModeReplay {
 			conversationState.RememberReplayAlias(failedPreviousResponseID)
+			conversationState.MarkReplayRecovered(originalRequest)
+		} else {
+			conversationState.MarkNativeContinuationReady()
 		}
 		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
 		storeWSConversationState(apiKeyID, requestModel, conversationState, wsConversationStateTTL(group.SessionKeepTime))
@@ -564,6 +573,18 @@ func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsCon
 		return
 	}
 	if _, exists := reqBody["previous_response_id"]; exists {
+		return
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return
+	}
+	inAdapter := inbound.Get(inbound.InboundTypeOpenAIResponse)
+	internalRequest, err := inAdapter.TransformRequest(context.Background(), bodyBytes)
+	if err != nil {
+		return
+	}
+	if !state.ShouldUseNativeContinuation(internalRequest) {
 		return
 	}
 	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))

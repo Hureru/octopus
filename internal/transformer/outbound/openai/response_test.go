@@ -70,6 +70,36 @@ func TestMarshalResponsesInputItemsBuildsArrayInput(t *testing.T) {
 	}
 }
 
+func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
+	outbound := &ResponseOutbound{}
+
+	first, err := outbound.TransformStream(nil, []byte(`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_123","name":"lookup"}}`))
+	if err != nil {
+		t.Fatalf("first function call stream transform failed: %v", err)
+	}
+	if first == nil || len(first.Choices) != 1 || first.Choices[0].Delta == nil {
+		t.Fatalf("expected initial function call delta, got %#v", first)
+	}
+	if got := first.Choices[0].Delta.ToolCalls[0].ID; got != "call_123" {
+		t.Fatalf("expected initial function call id to be preserved, got %q", got)
+	}
+
+	second, err := outbound.TransformStream(nil, []byte(`{"type":"response.function_call_arguments.delta","output_index":0,"call_id":"call_123","name":"lookup","delta":"{}"}`))
+	if err != nil {
+		t.Fatalf("second function call stream transform failed: %v", err)
+	}
+	if second == nil || len(second.Choices) != 1 || second.Choices[0].Delta == nil {
+		t.Fatalf("expected function call arguments delta, got %#v", second)
+	}
+	toolCall := second.Choices[0].Delta.ToolCalls[0]
+	if toolCall.ID != "call_123" {
+		t.Fatalf("expected function call id to survive argument delta, got %q", toolCall.ID)
+	}
+	if toolCall.Function.Arguments != "{}" {
+		t.Fatalf("expected function call arguments delta to be preserved, got %q", toolCall.Function.Arguments)
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }
