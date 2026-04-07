@@ -23,6 +23,10 @@ func init() {
 				Handle(response),
 		).
 		AddRoute(
+			router.NewRoute("/responses/compact", http.MethodPost).
+				Handle(responseCompact),
+		).
+		AddRoute(
 			router.NewRoute("/messages", http.MethodPost).
 				Handle(message),
 		).
@@ -40,12 +44,14 @@ func init() {
 		)
 }
 
-
 func chat(c *gin.Context) {
 	relay.Handler(inbound.InboundTypeOpenAIChat, c)
 }
 func response(c *gin.Context) {
 	relay.Handler(inbound.InboundTypeOpenAIResponse, c)
+}
+func responseCompact(c *gin.Context) {
+	relay.HandleResponsesCompact(c)
 }
 func message(c *gin.Context) {
 	relay.Handler(inbound.InboundTypeAnthropic, c)
