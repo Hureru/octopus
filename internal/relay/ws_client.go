@@ -116,6 +116,9 @@ func processWSResponseCreate(
 
 	// Remove WS-only fields
 	delete(reqBody, "type")
+	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
+	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState)
+	preferredSticky := wsConversationStateToSticky(conversationState)
 
 	// Check for generate: false (warmup)
 	if genRaw, ok := reqBody["generate"]; ok {
@@ -177,8 +180,8 @@ func processWSResponseCreate(
 		}
 	}
 
-	requestModel := internalRequest.Model
-	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(internalRequest), originalRequest)
+	requestModel = internalRequest.Model
+	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(internalRequest), originalRequest, preferredSticky)
 	if err != nil {
 		status := 404
 		code := "model_not_found"
@@ -195,7 +198,7 @@ func processWSResponseCreate(
 	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
 		balancer.DeleteSticky(apiKeyID, requestModel)
 		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest)
+		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky)
 		if replayErr == nil {
 			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 			req = replayReq
@@ -209,10 +212,16 @@ func processWSResponseCreate(
 		if conversationState == nil {
 			conversationState = &wsConversationState{}
 		}
+		if channelID, keyID := finalChannelKey(req.iter.Attempts()); channelID > 0 {
+			conversationState.ChannelID = channelID
+			conversationState.ChannelKeyID = keyID
+		}
 		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
+		storeWSConversationState(apiKeyID, requestModel, conversationState, wsConversationStateTTL(group.SessionKeepTime))
 		return conversationState
 	}
 	if result.ResetConversation {
+		deleteWSConversationState(apiKeyID, requestModel)
 		return nil
 	}
 
@@ -335,13 +344,14 @@ func newWSRelayRequest(
 	requestModel string,
 	executionRequest *transformerModel.InternalLLMRequest,
 	metricsRequest *transformerModel.InternalLLMRequest,
+	preferredSticky *balancer.SessionEntry,
 ) (*relayRequest, *dbmodel.Group, error) {
 	group, err := op.GroupGetEnabledMap(requestModel, ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("model not found")
 	}
 
-	iter := balancer.NewIterator(group, apiKeyID, requestModel)
+	iter := balancer.NewIteratorWithPreference(group, apiKeyID, requestModel, preferredSticky)
 	if iter.Len() == 0 {
 		return nil, nil, fmt.Errorf("no available channel")
 	}
@@ -538,4 +548,20 @@ func writeWSEvent(ctx context.Context, conn *websocket.Conn, event interface{}) 
 		return
 	}
 	conn.Write(ctx, websocket.MessageText, data)
+}
+
+func finalChannelKey(attempts []dbmodel.ChannelAttempt) (int, int) {
+	var lastChannelID int
+	var lastChannelKeyID int
+	for i := len(attempts) - 1; i >= 0; i-- {
+		attempt := attempts[i]
+		if attempt.Status == dbmodel.AttemptSuccess {
+			return attempt.ChannelID, attempt.ChannelKeyID
+		}
+		if attempt.Status == dbmodel.AttemptFailed && lastChannelID == 0 {
+			lastChannelID = attempt.ChannelID
+			lastChannelKeyID = attempt.ChannelKeyID
+		}
+	}
+	return lastChannelID, lastChannelKeyID
 }

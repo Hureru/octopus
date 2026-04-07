@@ -622,6 +622,7 @@ func setupRelayTestDB(t *testing.T) context.Context {
 		_ = dbpkg.Close()
 	}
 	balancer.Reset()
+	resetWSConversationStateStore()
 
 	dbPath := filepath.Join(t.TempDir(), "octopus-relay-test.db")
 	if err := dbpkg.InitDB("sqlite", dbPath, false); err != nil {
@@ -632,6 +633,7 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	}
 	t.Cleanup(func() {
 		balancer.Reset()
+		resetWSConversationStateStore()
 		_ = dbpkg.Close()
 	})
 

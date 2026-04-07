@@ -24,12 +24,32 @@ type Iterator struct {
 // NewIterator 创建负载均衡迭代器
 // 自动处理：策略排序 + 粘性通道提前
 func NewIterator(group model.Group, apiKeyID int, requestModel string) *Iterator {
+	return NewIteratorWithPreference(group, apiKeyID, requestModel, nil)
+}
+
+// NewIteratorWithPreference 创建带优先通道偏好的负载均衡迭代器。
+// preferred 非空时，会优先把指定通道提前到候选列表最前面。
+func NewIteratorWithPreference(group model.Group, apiKeyID int, requestModel string, preferred *SessionEntry) *Iterator {
 	b := GetBalancer(group.Mode)
 	candidates := b.Candidates(group.Items)
 
 	stickyIdx := -1
 	stickyKeyID := 0
-	if group.SessionKeepTime > 0 {
+	if preferred != nil && preferred.ChannelID > 0 {
+		for i, item := range candidates {
+			if item.ChannelID == preferred.ChannelID {
+				if i > 0 {
+					preferredItem := candidates[i]
+					copy(candidates[1:i+1], candidates[0:i])
+					candidates[0] = preferredItem
+				}
+				stickyIdx = 0
+				stickyKeyID = preferred.ChannelKeyID
+				break
+			}
+		}
+	}
+	if stickyIdx < 0 && group.SessionKeepTime > 0 {
 		stickyTTL := time.Duration(group.SessionKeepTime) * time.Second
 		if sticky := GetSticky(apiKeyID, requestModel, stickyTTL); sticky != nil {
 			for i, item := range candidates {

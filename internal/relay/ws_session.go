@@ -11,8 +11,18 @@ import (
 )
 
 type wsConversationState struct {
+	RequestModel   string
+	ChannelID      int
+	ChannelKeyID   int
 	LastResponseID string
 	Transcript     []transformerModel.Message
+}
+
+func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
+	if s == nil {
+		return false
+	}
+	return strings.TrimSpace(s.RequestModel) == strings.TrimSpace(requestModel)
 }
 
 func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRequest) bool {
@@ -52,10 +62,24 @@ func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.Internal
 	if s == nil || req == nil || resp == nil {
 		return
 	}
+	s.RequestModel = strings.TrimSpace(req.Model)
 	s.Transcript = append(s.Transcript, cloneMessages(req.Messages)...)
 	s.Transcript = append(s.Transcript, assistantMessagesFromResponse(resp)...)
 	if respID := strings.TrimSpace(resp.ID); respID != "" {
 		s.LastResponseID = respID
+	}
+}
+
+func cloneWSConversationState(state *wsConversationState) *wsConversationState {
+	if state == nil {
+		return nil
+	}
+	return &wsConversationState{
+		RequestModel:   strings.TrimSpace(state.RequestModel),
+		ChannelID:      state.ChannelID,
+		ChannelKeyID:   state.ChannelKeyID,
+		LastResponseID: strings.TrimSpace(state.LastResponseID),
+		Transcript:     cloneMessages(state.Transcript),
 	}
 }
 
