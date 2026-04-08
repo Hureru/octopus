@@ -34,14 +34,14 @@ func TestBuildWSResponseCreateMessageRemovesWSOnlyFields(t *testing.T) {
 	}
 }
 
-func TestInjectWSPreviousResponseIDOnlyWhenMissing(t *testing.T) {
+func TestInjectWSPreviousResponseIDDoesNotInjectImplicitContinuation(t *testing.T) {
 	reqBody := map[string]json.RawMessage{
 		"model": json.RawMessage(`"gpt-4o"`),
 	}
 
 	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached"})
-	if got := string(reqBody["previous_response_id"]); got != `"resp_cached"` {
-		t.Fatalf("expected cached previous_response_id to be injected, got %s", got)
+	if _, ok := reqBody["previous_response_id"]; ok {
+		t.Fatalf("expected implicit previous_response_id injection to stay disabled, got %#v", reqBody)
 	}
 
 	reqBody["previous_response_id"] = json.RawMessage(`"resp_explicit"`)
@@ -222,17 +222,16 @@ func TestWSConversationStateRememberReplayAlias(t *testing.T) {
 }
 
 func TestWSConversationStateShouldUseNativeContinuation(t *testing.T) {
-	state := &wsConversationState{LastResponseID: "resp_latest"}
+	state := &wsConversationState{LastResponseID: "resp_latest", ReplayWindowItems: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`)}
 	toolReq := &transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "tool", ToolCallID: stringPtr("call_123")}}}
-	if !state.ShouldUseNativeContinuation(toolReq) {
-		t.Fatalf("expected native continuation to allow tool output before replay fallback")
-	}
-	state.ReplayPending = true
 	if state.ShouldUseNativeContinuation(toolReq) {
-		t.Fatalf("expected replay-pending tool output request to avoid native continuation")
+		t.Fatalf("expected pooled native continuation to stay disabled")
 	}
-	if !state.ShouldUseNativeContinuation(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}) {
-		t.Fatalf("expected replay-pending text request to still use native continuation")
+	if !state.ShouldUseLocalReplay(toolReq) {
+		t.Fatalf("expected exact replay window to handle tool output request")
+	}
+	if !state.ShouldUseLocalReplay(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}) {
+		t.Fatalf("expected exact replay window to also handle plain text continuation")
 	}
 	state.MarkNativeContinuationReady()
 	if state.ReplayPending {
@@ -248,7 +247,7 @@ func TestWSConversationStateShouldUseNativeContinuation(t *testing.T) {
 	}
 }
 
-func TestInjectWSPreviousResponseIDSkipsReplayPendingToolOutputs(t *testing.T) {
+func TestInjectWSPreviousResponseIDLeavesReplayPendingToolOutputsUntouched(t *testing.T) {
 	reqBody := map[string]json.RawMessage{
 		"model": json.RawMessage(`"gpt-4o"`),
 		"input": json.RawMessage(`[
@@ -258,13 +257,16 @@ func TestInjectWSPreviousResponseIDSkipsReplayPendingToolOutputs(t *testing.T) {
 
 	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached", ReplayPending: true})
 	if _, ok := reqBody["previous_response_id"]; ok {
-		t.Fatalf("expected replay-pending tool output request to skip previous_response_id injection")
+		t.Fatalf("expected replay-pending tool output request to remain without injected previous_response_id")
 	}
 }
 
 func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	state := &wsConversationState{
 		LastResponseID: "resp_prev",
+		ReplayWindowItems: json.RawMessage(`[
+			{"type":"function_call","call_id":"call_123","name":"lookup","arguments":"{}"}
+		]`),
 		Transcript: []transformerModel.Message{{
 			Role: "assistant",
 			ToolCalls: []transformerModel.ToolCall{{
@@ -300,8 +302,17 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	if replayed.PreviousResponseID != nil {
 		t.Fatalf("expected replay request to clear previous_response_id")
 	}
-	if len(replayed.Messages) != 2 {
-		t.Fatalf("expected replay transcript plus current turn, got %d messages", len(replayed.Messages))
+	if replayed.Conversation != nil {
+		t.Fatalf("expected replay request to clear conversation state")
+	}
+	if len(replayed.Messages) != 0 {
+		t.Fatalf("expected replay request to rely on raw item window instead of transcript messages, got %d messages", len(replayed.Messages))
+	}
+	if replayed.TransformOptions.ArrayInputs == nil || !*replayed.TransformOptions.ArrayInputs {
+		t.Fatalf("expected replay request to force array input semantics")
+	}
+	if replayed.TransformerMetadata["octopus_ws_execution_mode"] != "replay_exact" {
+		t.Fatalf("expected replay request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
 	}
 	if requiresUpstreamWSContinuation(replayed) {
 		t.Fatalf("expected replay request to be self-contained")
@@ -311,10 +322,10 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 		t.Fatalf("expected replay raw input items to be valid json, got %v", err)
 	}
 	if len(rawItems) != 3 {
-		t.Fatalf("expected transcript item plus original raw items, got %d items", len(rawItems))
+		t.Fatalf("expected replay window plus original raw items, got %d items", len(rawItems))
 	}
 	if rawItems[0]["type"] != "function_call" {
-		t.Fatalf("expected transcript assistant tool call to be preserved, got %#v", rawItems[0])
+		t.Fatalf("expected replay window tool call to be preserved, got %#v", rawItems[0])
 	}
 	if _, ok := rawItems[2]["native_meta"]; !ok {
 		t.Fatalf("expected original raw input item native fields to be preserved, got %#v", rawItems[2])
@@ -324,6 +335,9 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *testing.T) {
 	state := &wsConversationState{
 		LastResponseID: "resp_replayed",
+		ReplayWindowItems: json.RawMessage(`[
+			{"type":"function_call","call_id":"call_123","name":"lookup","arguments":"{}"}
+		]`),
 		ReplayPending:  true,
 		Transcript: []transformerModel.Message{
 			{
@@ -355,7 +369,10 @@ func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *test
 	}
 
 	if state.ShouldUseNativeContinuation(req) {
-		t.Fatalf("expected replay-pending tool output request to avoid native continuation")
+		t.Fatalf("expected native continuation to stay disabled")
+	}
+	if !state.ShouldUseLocalReplay(req) {
+		t.Fatalf("expected replay window to accept replay-pending tool output request")
 	}
 	replayed := state.BuildReplayRequest(req)
 	if replayed == nil {
@@ -364,14 +381,18 @@ func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *test
 	if replayed.PreviousResponseID != nil {
 		t.Fatalf("expected replay request to clear previous_response_id")
 	}
-	if len(replayed.Messages) != 2 {
-		t.Fatalf("expected replay request to contain transcript and tool output, got %d", len(replayed.Messages))
+	if len(replayed.Messages) != 0 {
+		t.Fatalf("expected replay request to avoid transcript messages once replay window exists, got %d", len(replayed.Messages))
+	}
+	if replayed.TransformerMetadata["octopus_ws_execution_mode"] != "replay_exact" {
+		t.Fatalf("expected replay-pending request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
 	}
 }
 
 func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 	state := &wsConversationState{}
 	request := &transformerModel.InternalLLMRequest{
+		Model: "gpt-4o",
 		Messages: []transformerModel.Message{{
 			Role:    "user",
 			Content: transformerModel.MessageContent{Content: stringPtr("hello")},
@@ -392,8 +413,41 @@ func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 	if state.LastResponseID != "resp_new" {
 		t.Fatalf("expected last response id to be updated, got %q", state.LastResponseID)
 	}
+	if state.RequestModel != "gpt-4o" {
+		t.Fatalf("expected request model to be remembered, got %q", state.RequestModel)
+	}
+	if len(state.ReplayWindowItems) == 0 {
+		t.Fatalf("expected exact replay window to be built on success")
+	}
 	if len(state.Transcript) != 2 {
 		t.Fatalf("expected transcript to contain request and response, got %d messages", len(state.Transcript))
+	}
+}
+
+func TestBuildReplayRequestRetainsInstructionMessages(t *testing.T) {
+	state := &wsConversationState{
+		LastResponseID:    "resp_prev",
+		ReplayWindowItems: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`),
+	}
+	req := &transformerModel.InternalLLMRequest{
+		Model:              "gpt-4o",
+		PreviousResponseID: stringPtr("resp_prev"),
+		Messages: []transformerModel.Message{
+			{Role: "system", Content: transformerModel.MessageContent{Content: stringPtr("keep system")}},
+			{Role: "developer", Content: transformerModel.MessageContent{Content: stringPtr("keep developer")}},
+			{Role: "user", Content: transformerModel.MessageContent{Content: stringPtr("drop from messages")}},
+		},
+	}
+
+	replayed := state.BuildReplayRequest(req)
+	if replayed == nil {
+		t.Fatalf("expected replay request to be built")
+	}
+	if len(replayed.Messages) != 2 {
+		t.Fatalf("expected replay request to retain only instruction messages, got %#v", replayed.Messages)
+	}
+	if replayed.Messages[0].Role != "system" || replayed.Messages[1].Role != "developer" {
+		t.Fatalf("expected replay instruction ordering to be preserved, got %#v", replayed.Messages)
 	}
 }
 

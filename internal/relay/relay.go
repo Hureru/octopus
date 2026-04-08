@@ -353,6 +353,9 @@ func (ra *relayAttempt) forward() (int, error) {
 		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 
 		shouldTryWS := false
+		if ra.internalRequest.TransformerMetadata != nil && strings.TrimSpace(ra.internalRequest.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact" {
+			shouldTryWS = false
+		} else {
 		wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
 		if wsUpgradeEnabled {
 			// 设置启用：无论客户端协议都主动尝试 WS 上游
@@ -360,6 +363,7 @@ func (ra *relayAttempt) forward() (int, error) {
 		} else {
 			// 设置禁用：仅当客户端也是 WS 时才尝试 WS 上游
 			shouldTryWS = (ra.c == nil)
+		}
 		}
 
 		if shouldTryWS {
@@ -540,6 +544,9 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 	for {
 		select {
 		case <-ctx.Done():
+			if isLocalRelayBudgetExceeded(ctx, contextError(ctx)) {
+				return contextError(ctx)
+			}
 			log.Infof("client disconnected during ws stream")
 			return nil
 		case <-firstTokenC:
@@ -762,6 +769,9 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 	for {
 		select {
 		case <-ctx.Done():
+			if isLocalRelayBudgetExceeded(ctx, contextError(ctx)) {
+				return contextError(ctx)
+			}
 			log.Infof("client disconnected, stopping stream")
 			return nil
 		case <-firstTokenC:

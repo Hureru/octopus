@@ -14,30 +14,31 @@ type wsConversationStateEntry struct {
 	expiresAt time.Time
 }
 
-var wsConversationStore sync.Map // key: apiKeyID:requestModel -> *wsConversationStateEntry
+var wsConversationStore sync.Map // key: apiKeyID:requestModel:downstreamSessionID -> *wsConversationStateEntry
 
-func wsConversationStateKey(apiKeyID int, requestModel string) string {
-	return fmt.Sprintf("%d:%s", apiKeyID, strings.TrimSpace(requestModel))
+func wsConversationStateKey(apiKeyID int, requestModel, downstreamSessionID string) string {
+	return fmt.Sprintf("%d:%s:%s", apiKeyID, strings.TrimSpace(requestModel), strings.TrimSpace(downstreamSessionID))
 }
 
-func loadWSConversationState(apiKeyID int, requestModel string) *wsConversationState {
+func loadWSConversationState(apiKeyID int, requestModel, downstreamSessionID string) *wsConversationState {
 	requestModel = strings.TrimSpace(requestModel)
-	if requestModel == "" {
+	downstreamSessionID = strings.TrimSpace(downstreamSessionID)
+	if requestModel == "" || downstreamSessionID == "" {
 		return nil
 	}
 
-	v, ok := wsConversationStore.Load(wsConversationStateKey(apiKeyID, requestModel))
+	v, ok := wsConversationStore.Load(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID))
 	if !ok {
 		return nil
 	}
 
 	entry, ok := v.(*wsConversationStateEntry)
 	if !ok || entry == nil || entry.state == nil {
-		wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel))
+		wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID))
 		return nil
 	}
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-		wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel))
+		wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID))
 		return nil
 	}
 
@@ -46,7 +47,11 @@ func loadWSConversationState(apiKeyID int, requestModel string) *wsConversationS
 
 func storeWSConversationState(apiKeyID int, requestModel string, state *wsConversationState, ttl time.Duration) {
 	requestModel = strings.TrimSpace(requestModel)
-	if requestModel == "" || state == nil {
+	downstreamSessionID := ""
+	if state != nil {
+		downstreamSessionID = strings.TrimSpace(state.DownstreamSessionID)
+	}
+	if requestModel == "" || state == nil || downstreamSessionID == "" {
 		return
 	}
 	if ttl <= 0 {
@@ -59,22 +64,24 @@ func storeWSConversationState(apiKeyID int, requestModel string, state *wsConver
 	}
 	cloned.RequestModel = requestModel
 
-	wsConversationStore.Store(wsConversationStateKey(apiKeyID, requestModel), &wsConversationStateEntry{
+	wsConversationStore.Store(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID), &wsConversationStateEntry{
 		state:     cloned,
 		expiresAt: time.Now().Add(ttl),
 	})
 }
 
-func deleteWSConversationState(apiKeyID int, requestModel string) {
+func deleteWSConversationState(apiKeyID int, requestModel, downstreamSessionID string) {
 	requestModel = strings.TrimSpace(requestModel)
-	if requestModel == "" {
+	downstreamSessionID = strings.TrimSpace(downstreamSessionID)
+	if requestModel == "" || downstreamSessionID == "" {
 		return
 	}
-	wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel))
+	wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID))
 }
 
-func resolveWSConversationState(apiKeyID int, requestModel string, localState *wsConversationState, allowStoredRestore bool) *wsConversationState {
+func resolveWSConversationState(apiKeyID int, requestModel string, localState *wsConversationState, allowStoredRestore bool, downstreamSessionID string) *wsConversationState {
 	requestModel = strings.TrimSpace(requestModel)
+	downstreamSessionID = strings.TrimSpace(downstreamSessionID)
 	if requestModel == "" {
 		return localState
 	}
@@ -84,7 +91,7 @@ func resolveWSConversationState(apiKeyID int, requestModel string, localState *w
 	if !allowStoredRestore {
 		return nil
 	}
-	return loadWSConversationState(apiKeyID, requestModel)
+	return loadWSConversationState(apiKeyID, requestModel, downstreamSessionID)
 }
 
 func wsConversationStateToSticky(state *wsConversationState) *balancer.SessionEntry {

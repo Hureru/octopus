@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ func HandleWSResponse(c *gin.Context) {
 
 	log.Infof("ws client connected (apikey=%d)", apiKeyID)
 
+	downstreamSessionID := fmt.Sprintf("ws_%d", time.Now().UnixNano())
 	var conversationState *wsConversationState
 
 	// Message loop
@@ -96,7 +98,7 @@ func HandleWSResponse(c *gin.Context) {
 			continue
 		}
 
-		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, conversationState)
+		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, downstreamSessionID, conversationState)
 	}
 }
 
@@ -106,6 +108,7 @@ func processWSResponseCreate(
 	data []byte,
 	apiKeyID int,
 	supportedModels string,
+	downstreamSessionID string,
 	conversationState *wsConversationState,
 ) *wsConversationState {
 	var reqBody map[string]json.RawMessage
@@ -124,7 +127,7 @@ func processWSResponseCreate(
 		requestedPreviousResponseID = strings.TrimSpace(requestedPreviousResponseID)
 	}
 	hadLocalState := conversationState != nil
-	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore)
+	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore, downstreamSessionID)
 	hasResolvedState := conversationState != nil
 	resolvedLastResponseID := ""
 	if conversationState != nil {
@@ -132,6 +135,9 @@ func processWSResponseCreate(
 	}
 	log.Debugf("ws response.create state resolved (apikey=%d, request_model=%s, requested_prev=%s, explicit_continuation=%t, had_local_state=%t, resolved_state=%t, resolved_last_response_id=%s)",
 		apiKeyID, requestModel, requestedPreviousResponseID, allowStoredRestore, hadLocalState, hasResolvedState, resolvedLastResponseID)
+	if conversationState != nil {
+		conversationState.DownstreamSessionID = downstreamSessionID
+	}
 	rewriteWSPreviousResponseID(reqBody, conversationState)
 	preferredSticky := wsConversationStateToSticky(conversationState)
 
@@ -177,20 +183,27 @@ func processWSResponseCreate(
 		writeWSError(ctx, conn, 400, "invalid_request", err.Error())
 		return conversationState
 	}
-	if conversationState != nil && !conversationState.ShouldUseNativeContinuation(internalRequest) {
-		replayedRequest := conversationState.BuildReplayRequest(internalRequest)
+	originalRequest := cloneInternalRequest(internalRequest)
+	continuationRequested := allowStoredRestore || requestContainsToolOutputs(originalRequest)
+	if !continuationRequested {
+		deleteWSConversationState(apiKeyID, requestModel, downstreamSessionID)
+		conversationState = nil
+		preferredSticky = nil
+	}
+	executionRequest := originalRequest
+	if conversationState != nil && continuationRequested && conversationState.ShouldUseLocalReplay(originalRequest) {
+		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
 		if replayedRequest != nil {
-			internalRequest = replayedRequest
+			executionRequest = replayedRequest
 		}
 	}
-	originalRequest := cloneInternalRequest(internalRequest)
 
 	// Check supported models
 	if supportedModels != "" {
 		supportedModelsArray := strings.Split(supportedModels, ",")
 		found := false
 		for _, m := range supportedModelsArray {
-			if m == internalRequest.Model {
+			if m == executionRequest.Model {
 				found = true
 				break
 			}
@@ -201,8 +214,8 @@ func processWSResponseCreate(
 		}
 	}
 
-	requestModel = internalRequest.Model
-	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(internalRequest), originalRequest, preferredSticky)
+	requestModel = executionRequest.Model
+	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky)
 	if err != nil {
 		status := 404
 		code := "model_not_found"
@@ -214,7 +227,7 @@ func processWSResponseCreate(
 		return conversationState
 	}
 
-	autoRestart := conversationState != nil && conversationState.CanAutoRestart(originalRequest)
+	autoRestart := conversationState != nil && continuationRequested && conversationState.CanAutoRestart(originalRequest)
 	failedPreviousResponseID := currentPreviousResponseID(originalRequest)
 	log.Debugf("ws relay prepared (apikey=%d, request_model=%s, previous_response_id=%s, auto_replay=%t, preferred_channel=%d, preferred_key=%d)",
 		apiKeyID, requestModel, failedPreviousResponseID, autoRestart,
@@ -249,8 +262,9 @@ func processWSResponseCreate(
 	result = finalizeWSRelay(ctx, conn, req, result)
 	if result.Success {
 		if conversationState == nil {
-			conversationState = &wsConversationState{}
+			conversationState = &wsConversationState{DownstreamSessionID: downstreamSessionID}
 		}
+		conversationState.DownstreamSessionID = downstreamSessionID
 		if channelID, keyID := finalChannelKey(req.iter.Attempts()); channelID > 0 {
 			conversationState.ChannelID = channelID
 			conversationState.ChannelKeyID = keyID
@@ -270,7 +284,7 @@ func processWSResponseCreate(
 	}
 	if result.ResetConversation {
 		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
-		deleteWSConversationState(apiKeyID, requestModel)
+		deleteWSConversationState(apiKeyID, requestModel, downstreamSessionID)
 		return nil
 	}
 
@@ -419,6 +433,23 @@ func newWSRelayRequest(
 }
 
 func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) wsRelayResult {
+	replayExact := req != nil && req.internalRequest != nil && isExactReplayRequest(req.internalRequest)
+	relayCtx := ctx
+	if replayExact {
+		budget := 15 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining > 0 && remaining < budget {
+				budget = remaining
+			}
+		}
+		var cancel context.CancelFunc
+		relayCtx, cancel = context.WithTimeoutCause(ctx, budget, errLocalRelayBudgetExceeded)
+		defer cancel()
+		if req != nil {
+			req.ctx = relayCtx
+		}
+	}
+
 	maxSameChannelRetries := 1
 	if group.RetryEnabled {
 		maxSameChannelRetries = group.MaxRetries
@@ -429,11 +460,26 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 
 	var lastErr error
 	var lastResult attemptResult
+	maxChannelAttempts := req.iter.Len()
+	if replayExact && maxChannelAttempts > 3 {
+		maxChannelAttempts = 3
+	}
 
 	for req.iter.Next() {
+		if req.iter.Index() >= maxChannelAttempts {
+			break
+		}
 		select {
-		case <-ctx.Done():
-			return wsRelayResult{Canceled: true, Err: ctx.Err()}
+		case <-relayCtx.Done():
+			if isLocalRelayBudgetExceeded(relayCtx, contextError(relayCtx)) {
+				publicErr := wsPublicError{
+					Status:  http.StatusGatewayTimeout,
+					Code:    "replay_recovery_timeout",
+					Message: "exact replay 恢复超过本地 15 秒预算，请重试",
+				}
+				return wsRelayResult{Err: contextError(relayCtx), PublicError: &publicErr}
+			}
+			return wsRelayResult{Canceled: true, Err: relayCtx.Err()}
 		default:
 		}
 
@@ -496,8 +542,16 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			if retryNum > 0 {
 				delay := computeBackoff(retryNum, result.RetryAfter)
 				select {
-				case <-ctx.Done():
-					return wsRelayResult{Canceled: true, Err: ctx.Err()}
+				case <-relayCtx.Done():
+					if isLocalRelayBudgetExceeded(relayCtx, contextError(relayCtx)) {
+						publicErr := wsPublicError{
+							Status:  http.StatusGatewayTimeout,
+							Code:    "replay_recovery_timeout",
+							Message: "exact replay 恢复超过本地 15 秒预算，请重试",
+						}
+						return wsRelayResult{Err: contextError(relayCtx), PublicError: &publicErr}
+					}
+					return wsRelayResult{Canceled: true, Err: relayCtx.Err()}
 				case <-time.After(delay):
 				}
 			}
@@ -518,6 +572,9 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 
 		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
+			if replayExact && result.StatusCode == http.StatusServiceUnavailable && isNoAvailableAccountError(relayErrorMessage(result.Err)) {
+				failureKind = balancer.FailureHard
+			}
 			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, failureKind)
 		}
 
@@ -569,25 +626,8 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 }
 
 func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
-	if state == nil || strings.TrimSpace(state.LastResponseID) == "" {
-		return
-	}
-	if _, exists := reqBody["previous_response_id"]; exists {
-		return
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return
-	}
-	inAdapter := inbound.Get(inbound.InboundTypeOpenAIResponse)
-	internalRequest, err := inAdapter.TransformRequest(context.Background(), bodyBytes)
-	if err != nil {
-		return
-	}
-	if !state.ShouldUseNativeContinuation(internalRequest) {
-		return
-	}
-	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
+	// Local continuation now prefers exact replay over implicit previous_response_id injection.
+	// Explicit client-supplied previous_response_id is still preserved elsewhere.
 }
 
 func rewriteWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {

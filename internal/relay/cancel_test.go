@@ -31,3 +31,13 @@ func TestIsClientCancellationIgnoresOrdinaryErrors(t *testing.T) {
 		t.Fatalf("expected ordinary upstream error to not be treated as client cancellation")
 	}
 }
+
+func TestIsClientCancellationIgnoresLocalRelayBudgetTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 0, errLocalRelayBudgetExceeded)
+	defer cancel()
+
+	<-ctx.Done()
+	if isClientCancellation(ctx, contextError(ctx)) {
+		t.Fatalf("expected local relay budget timeout to not be treated as client cancellation")
+	}
+}

@@ -98,6 +98,41 @@ func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
 	if toolCall.Function.Arguments != "{}" {
 		t.Fatalf("expected function call arguments delta to be preserved, got %q", toolCall.Function.Arguments)
 	}
+
+	completed, err := outbound.TransformStream(nil, []byte(`{"type":"response.completed","response":{"id":"resp_123","model":"gpt-4o","status":"completed"}}`))
+	if err != nil {
+		t.Fatalf("completed stream transform failed: %v", err)
+	}
+	if completed == nil || len(completed.RawResponsesOutputItems) == 0 {
+		t.Fatalf("expected completed stream response to preserve exact output items, got %#v", completed)
+	}
+}
+
+func TestConvertToLLMResponseFromResponsesPreservesRawOutputItems(t *testing.T) {
+	resp := &ResponsesResponse{
+		ID:        "resp_123",
+		Object:    "response",
+		Model:     "gpt-4o",
+		CreatedAt: 1,
+		Output: []ResponsesItem{{
+			Type:      "function_call",
+			CallID:    "call_123",
+			Name:      "lookup",
+			Arguments: `{}`,
+		}},
+	}
+
+	internalResp := convertToLLMResponseFromResponses(resp)
+	if len(internalResp.RawResponsesOutputItems) == 0 {
+		t.Fatalf("expected raw responses output items to be preserved")
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(internalResp.RawResponsesOutputItems, &items); err != nil {
+		t.Fatalf("unmarshal raw output items failed: %v", err)
+	}
+	if len(items) != 1 || items[0]["type"] != "function_call" {
+		t.Fatalf("expected original output items to be kept, got %#v", items)
+	}
 }
 
 func stringPtr(value string) *string {

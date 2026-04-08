@@ -21,6 +21,7 @@ type ResponseOutbound struct {
 	streamID    string
 	streamModel string
 	initialized bool
+	outputItems map[int]ResponsesItem
 }
 
 func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.InternalLLMRequest, baseUrl, key string) (*http.Request, error) {
@@ -110,6 +111,7 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 	// Initialize state if needed
 	if !o.initialized {
 		o.initialized = true
+		o.outputItems = make(map[int]ResponsesItem)
 	}
 
 	// Parse the streaming event
@@ -143,6 +145,7 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 		}
 
 	case "response.output_text.delta":
+		o.mergeOutputTextDelta(streamEvent)
 		resp.Choices = []model.Choice{
 			{
 				Index: 0,
@@ -156,6 +159,7 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 		}
 
 	case "response.function_call_arguments.delta":
+		o.mergeFunctionCallDelta(streamEvent)
 		resp.Choices = []model.Choice{
 			{
 				Index: 0,
@@ -177,6 +181,7 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 		}
 
 	case "response.output_item.added":
+		o.mergeOutputItemAdded(streamEvent)
 		if streamEvent.Item != nil && streamEvent.Item.Type == "function_call" {
 			resp.Choices = []model.Choice{
 				{
@@ -201,6 +206,7 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 		}
 
 	case "response.reasoning_summary_text.delta":
+		o.mergeReasoningDelta(streamEvent)
 		resp.Choices = []model.Choice{
 			{
 				Index: 0,
@@ -213,6 +219,13 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 
 	case "response.completed":
 		if streamEvent.Response != nil {
+			if len(streamEvent.Response.Output) > 0 {
+				if rawOutput, marshalErr := json.Marshal(streamEvent.Response.Output); marshalErr == nil {
+					resp.RawResponsesOutputItems = rawOutput
+				}
+			} else if rawOutput, ok := o.marshalTrackedOutputItems(); ok {
+				resp.RawResponsesOutputItems = rawOutput
+			}
 			var finishReason *string
 			if streamEvent.Response.Status != nil {
 				switch *streamEvent.Response.Status {
@@ -795,6 +808,11 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 		Model:   resp.Model,
 		Created: resp.CreatedAt,
 	}
+	if len(resp.Output) > 0 {
+		if rawOutput, err := json.Marshal(resp.Output); err == nil {
+			result.RawResponsesOutputItems = rawOutput
+		}
+	}
 
 	var (
 		contentParts     []model.MessageContentPart
@@ -899,6 +917,123 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 	result.Usage = convertResponsesUsage(resp.Usage)
 
 	return result
+}
+
+func (o *ResponseOutbound) mergeOutputItemAdded(event ResponsesStreamEvent) {
+	if o == nil || event.Item == nil {
+		return
+	}
+	if o.outputItems == nil {
+		o.outputItems = make(map[int]ResponsesItem)
+	}
+	cloned := *event.Item
+	if cloned.Content != nil {
+		contentCopy := *cloned.Content
+		contentCopy.Items = append([]ResponsesItem(nil), contentCopy.Items...)
+		cloned.Content = &contentCopy
+	}
+	if cloned.Output != nil {
+		outputCopy := *cloned.Output
+		outputCopy.Items = append([]ResponsesItem(nil), outputCopy.Items...)
+		cloned.Output = &outputCopy
+	}
+	o.outputItems[event.OutputIndex] = cloned
+}
+
+func (o *ResponseOutbound) mergeOutputTextDelta(event ResponsesStreamEvent) {
+	if o == nil {
+		return
+	}
+	item, ok := o.outputItems[event.OutputIndex]
+	if !ok {
+		return
+	}
+	if item.Type != "message" {
+		return
+	}
+	if item.Content == nil {
+		item.Content = &ResponsesInput{}
+	}
+	if len(item.Content.Items) == 0 {
+		item.Content.Items = []ResponsesItem{{Type: "output_text", Text: lo.ToPtr("")}}
+	}
+	if item.Content.Items[0].Text == nil {
+		item.Content.Items[0].Text = lo.ToPtr("")
+	}
+	*item.Content.Items[0].Text += event.Delta
+	o.outputItems[event.OutputIndex] = item
+}
+
+func (o *ResponseOutbound) mergeFunctionCallDelta(event ResponsesStreamEvent) {
+	if o == nil {
+		return
+	}
+	item, ok := o.outputItems[event.OutputIndex]
+	if !ok {
+		return
+	}
+	if item.Type != "function_call" {
+		return
+	}
+	item.CallID = firstNonEmpty(item.CallID, event.CallID)
+	item.Name = firstNonEmpty(item.Name, event.Name)
+	item.Arguments += event.Delta
+	o.outputItems[event.OutputIndex] = item
+}
+
+func (o *ResponseOutbound) mergeReasoningDelta(event ResponsesStreamEvent) {
+	if o == nil {
+		return
+	}
+	item, ok := o.outputItems[event.OutputIndex]
+	if !ok {
+		return
+	}
+	if item.Type != "reasoning" {
+		return
+	}
+	if len(item.Summary) == 0 {
+		item.Summary = []ResponsesReasoningSummary{{Type: "summary_text", Text: ""}}
+	}
+	item.Summary[0].Text += event.Delta
+	o.outputItems[event.OutputIndex] = item
+}
+
+func (o *ResponseOutbound) marshalTrackedOutputItems() (json.RawMessage, bool) {
+	if o == nil || len(o.outputItems) == 0 {
+		return nil, false
+	}
+	maxIdx := -1
+	for idx := range o.outputItems {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	items := make([]ResponsesItem, 0, len(o.outputItems))
+	for idx := 0; idx <= maxIdx; idx++ {
+		item, ok := o.outputItems[idx]
+		if !ok {
+			continue
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, false
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func convertResponsesUsage(usage *ResponsesUsage) *model.Usage {

@@ -11,10 +11,12 @@ import (
 )
 
 type wsConversationState struct {
+	DownstreamSessionID string
 	RequestModel   string
 	ChannelID      int
 	ChannelKeyID   int
 	LastResponseID string
+	ReplayWindowItems json.RawMessage
 	Transcript     []transformerModel.Message
 	ReplayAliases  []string
 	ReplayPending  bool
@@ -30,6 +32,16 @@ func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
 func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRequest) bool {
 	if s == nil || req == nil {
 		return false
+	}
+	if len(s.ReplayWindowItems) > 0 {
+		if strings.TrimSpace(s.LastResponseID) == "" {
+			return false
+		}
+		if req.PreviousResponseID == nil {
+			return true
+		}
+		prevID := strings.TrimSpace(*req.PreviousResponseID)
+		return prevID == "" || s.MatchesPreviousResponseID(prevID)
 	}
 	if s.ReplayPending && requestContainsToolOutputs(req) {
 		return false
@@ -83,16 +95,21 @@ func (s *wsConversationState) ShouldRewritePreviousResponseID(responseID string)
 }
 
 func (s *wsConversationState) ShouldUseNativeContinuation(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil {
+	return false
+}
+
+func (s *wsConversationState) ShouldUseLocalReplay(req *transformerModel.InternalLLMRequest) bool {
+	if s == nil || req == nil {
 		return false
 	}
-	if strings.TrimSpace(s.LastResponseID) == "" {
+	if len(s.ReplayWindowItems) == 0 || strings.TrimSpace(s.LastResponseID) == "" {
 		return false
 	}
-	if s.ReplayPending && requestContainsToolOutputs(req) {
-		return false
+	if req.PreviousResponseID == nil {
+		return true
 	}
-	return true
+	prevID := strings.TrimSpace(*req.PreviousResponseID)
+	return prevID == "" || s.MatchesPreviousResponseID(prevID)
 }
 
 func (s *wsConversationState) MarkReplayRecovered(req *transformerModel.InternalLLMRequest) {
@@ -137,14 +154,18 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 		return nil
 	}
 	replayed := cloneInternalRequest(req)
-	replayed.Messages = append(cloneMessages(s.Transcript), cloneMessages(req.Messages)...)
 	replayed.PreviousResponseID = nil
 	replayed.Conversation = nil
 	replayed.RawInputItems = nil
-	if mergedRawInputItems, ok := buildReplayRawInputItems(s.Transcript, req.RawInputItems); ok {
+	replayed.Messages = retainInstructionMessages(req.Messages)
+	if mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.RawInputItems, req.Messages); ok {
 		replayed.RawInputItems = mergedRawInputItems
 		replayed.TransformOptions.ArrayInputs = boolPtr(true)
 	}
+	if replayed.TransformerMetadata == nil {
+		replayed.TransformerMetadata = map[string]string{}
+	}
+	replayed.TransformerMetadata["octopus_ws_execution_mode"] = "replay_exact"
 	return replayed
 }
 
@@ -153,6 +174,9 @@ func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.Internal
 		return
 	}
 	s.RequestModel = strings.TrimSpace(req.Model)
+	if replayWindowItems, ok := buildNextReplayWindow(s.ReplayWindowItems, req, resp); ok {
+		s.ReplayWindowItems = replayWindowItems
+	}
 	s.Transcript = append(s.Transcript, cloneMessages(req.Messages)...)
 	s.Transcript = append(s.Transcript, assistantMessagesFromResponse(resp)...)
 	if respID := strings.TrimSpace(resp.ID); respID != "" {
@@ -165,10 +189,12 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 		return nil
 	}
 	return &wsConversationState{
+		DownstreamSessionID: strings.TrimSpace(state.DownstreamSessionID),
 		RequestModel:   strings.TrimSpace(state.RequestModel),
 		ChannelID:      state.ChannelID,
 		ChannelKeyID:   state.ChannelKeyID,
 		LastResponseID: strings.TrimSpace(state.LastResponseID),
+		ReplayWindowItems: append(json.RawMessage(nil), state.ReplayWindowItems...),
 		Transcript:     cloneMessages(state.Transcript),
 		ReplayAliases:  append([]string(nil), state.ReplayAliases...),
 		ReplayPending:  state.ReplayPending,
@@ -306,6 +332,19 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
+func retainInstructionMessages(messages []transformerModel.Message) []transformerModel.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	kept := make([]transformerModel.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == "system" || msg.Role == "developer" {
+			kept = append(kept, cloneMessage(msg))
+		}
+	}
+	return kept
+}
+
 func requestContainsToolOutputs(req *transformerModel.InternalLLMRequest) bool {
 	if req == nil {
 		return false
@@ -318,38 +357,96 @@ func requestContainsToolOutputs(req *transformerModel.InternalLLMRequest) bool {
 	return false
 }
 
-func buildReplayRawInputItems(transcript []transformerModel.Message, currentRawInputItems json.RawMessage) (json.RawMessage, bool) {
-	if len(currentRawInputItems) == 0 {
+func buildReplayRawInputItems(
+	replayWindowItems json.RawMessage,
+	transcript []transformerModel.Message,
+	currentRawInputItems json.RawMessage,
+	currentMessages []transformerModel.Message,
+) (json.RawMessage, bool) {
+	currentItems, ok := buildRequestInputItems(currentRawInputItems, currentMessages)
+	if !ok {
 		return nil, false
 	}
-
-	mergedItems := make([]json.RawMessage, 0)
-	if len(transcript) > 0 {
-		transcriptItems, err := openaiOutbound.MarshalResponsesInputItems(transcript)
-		if err != nil {
-			return nil, false
-		}
-		decodedTranscriptItems, err := decodeRawJSONArray(transcriptItems)
-		if err != nil {
-			return nil, false
-		}
-		mergedItems = append(mergedItems, decodedTranscriptItems...)
+	if len(replayWindowItems) > 0 {
+		return mergeRawJSONArray(replayWindowItems, currentItems)
 	}
-
-	decodedCurrentItems, err := decodeRawJSONArray(currentRawInputItems)
+	if len(transcript) == 0 {
+		return append(json.RawMessage(nil), currentItems...), true
+	}
+	transcriptItems, err := openaiOutbound.MarshalResponsesInputItems(transcript)
 	if err != nil {
 		return nil, false
 	}
-	mergedItems = append(mergedItems, decodedCurrentItems...)
+	return mergeRawJSONArray(transcriptItems, currentItems)
+}
+
+func buildRequestInputItems(currentRawInputItems json.RawMessage, currentMessages []transformerModel.Message) (json.RawMessage, bool) {
+	if len(currentRawInputItems) > 0 {
+		return append(json.RawMessage(nil), currentRawInputItems...), true
+	}
+	currentItems, err := openaiOutbound.MarshalResponsesInputItems(currentMessages)
+	if err != nil || len(currentItems) == 0 {
+		return nil, false
+	}
+	return currentItems, true
+}
+
+func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.InternalLLMRequest, resp *transformerModel.InternalLLMResponse) (json.RawMessage, bool) {
+	if req == nil || resp == nil {
+		return nil, false
+	}
+	var base json.RawMessage
+	if isExactReplayRequest(req) && len(req.RawInputItems) > 0 {
+		base = append(json.RawMessage(nil), req.RawInputItems...)
+	} else if currentItems, ok := buildRequestInputItems(req.RawInputItems, req.Messages); ok {
+		if len(existing) > 0 {
+			merged, ok := mergeRawJSONArray(existing, currentItems)
+			if !ok {
+				return nil, false
+			}
+			base = merged
+		} else {
+			base = currentItems
+		}
+	} else if len(existing) > 0 {
+		base = append(json.RawMessage(nil), existing...)
+	}
+	if len(base) == 0 {
+		return nil, false
+	}
+	if len(resp.RawResponsesOutputItems) == 0 {
+		return base, true
+	}
+	return mergeRawJSONArray(base, resp.RawResponsesOutputItems)
+}
+
+func mergeRawJSONArray(parts ...json.RawMessage) (json.RawMessage, bool) {
+	mergedItems := make([]json.RawMessage, 0)
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		decoded, err := decodeRawJSONArray(part)
+		if err != nil {
+			return nil, false
+		}
+		mergedItems = append(mergedItems, decoded...)
+	}
 	if len(mergedItems) == 0 {
 		return nil, false
 	}
-
 	data, err := json.Marshal(mergedItems)
 	if err != nil {
 		return nil, false
 	}
 	return data, true
+}
+
+func isExactReplayRequest(req *transformerModel.InternalLLMRequest) bool {
+	if req == nil || req.TransformerMetadata == nil {
+		return false
+	}
+	return strings.TrimSpace(req.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact"
 }
 
 func decodeRawJSONArray(data json.RawMessage) ([]json.RawMessage, error) {
