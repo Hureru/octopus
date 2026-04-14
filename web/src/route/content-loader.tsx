@@ -1,8 +1,11 @@
 'use client';
 
+import { Suspense } from 'react';
 import { CONTENT_MAP } from './config';
+import { ErrorBoundary } from './error-boundary';
+import type { NavItem } from '@/components/modules/navbar/nav-store';
 
-export function ContentLoader({ activeRoute }: { activeRoute: string }) {
+export function ContentLoader({ activeRoute }: { activeRoute: NavItem }) {
     const Component = CONTENT_MAP[activeRoute];
 
     if (!Component) {
@@ -13,5 +16,15 @@ export function ContentLoader({ activeRoute }: { activeRoute: string }) {
         );
     }
 
-    return <Component />;
+    return (
+        <ErrorBoundary>
+            <Suspense fallback={
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-pulse text-muted-foreground">Loading...</div>
+                </div>
+            }>
+                <Component />
+            </Suspense>
+        </ErrorBoundary>
+    );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { useSettingStore, type Locale } from '@/stores/setting';
 
@@ -16,20 +16,14 @@ const messages: Record<Locale, typeof zh_hansMessages> = {
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
     const { locale } = useSettingStore();
-    const [currentLocale, setCurrentLocale] = useState<Locale>('zh_hans');
-
-    useEffect(() => {
-        setCurrentLocale(locale);
-    }, [locale]);
 
     return (
         <NextIntlClientProvider
-            locale={currentLocale}
-            messages={messages[currentLocale]}
+            locale={locale}
+            messages={messages[locale]}
             timeZone="Asia/Shanghai"
         >
             {children}
         </NextIntlClientProvider>
     );
 }
-
