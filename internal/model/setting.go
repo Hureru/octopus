@@ -22,6 +22,7 @@ const (
 	SettingKeyCircuitBreakerCooldown    SettingKey = "circuit_breaker_cooldown"     // 熔断基础冷却时间（秒）
 	SettingKeyCircuitBreakerMaxCooldown SettingKey = "circuit_breaker_max_cooldown" // 熔断最大冷却时间（秒），指数退避上限
 	SettingKeyRelayWSUpgradeEnabled     SettingKey = "relay_ws_upgrade_enabled"     // 是否主动尝试WS上游连接（双向降级）
+	SettingKeyJWTSecret                 SettingKey = "jwt_secret"                   // JWT 签名密钥（自动生成）
 )
 
 type Setting struct {
@@ -44,6 +45,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},     // 默认基础冷却60秒
 		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"}, // 默认最大冷却600秒（10分钟）
 		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "false"},   // 默认关闭主动WS上游升级
+		{Key: SettingKeyJWTSecret, Value: ""},                     // 为空时自动生成
 	}
 }
 
