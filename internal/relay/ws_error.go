@@ -1,6 +1,9 @@
 package relay
 
 import (
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -68,15 +71,25 @@ func relayErrorMessage(err error) string {
 }
 
 func isUpstreamWSConnectionBroken(err error) bool {
-	message := relayErrorMessage(err)
-	if message == "" {
+	if err == nil {
 		return false
 	}
+	// Prefer type-based checks for reliable detection across library versions.
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// Fallback to string matching for errors from libraries that don't export typed errors
+	// (e.g., nhooyr/websocket close frames, gorilla/websocket internal messages).
+	message := relayErrorMessage(err)
 	return strings.Contains(message, "broken pipe") ||
-		strings.Contains(message, "failed to read frame header: eof") ||
+		strings.Contains(message, "failed to read frame header") ||
 		strings.Contains(message, "use of closed network connection") ||
 		strings.Contains(message, "websocket: close sent") ||
-		strings.Contains(message, "failed to get reader: eof") ||
+		strings.Contains(message, "failed to get reader") ||
 		strings.Contains(message, "connection reset by peer")
 }
 

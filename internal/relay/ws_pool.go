@@ -355,18 +355,23 @@ func (p *wsPool) cleanupLoop() {
 }
 
 func (p *wsPool) cleanup() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	var toClose []*pooledConn
 
+	p.mu.Lock()
 	now := time.Now()
 	for key, pc := range p.conns {
 		if pc.busy {
 			continue
 		}
 		if now.Sub(pc.createdAt) > wsConnMaxAge || now.Sub(pc.lastUsed) > wsConnIdleTimeout {
-			pc.conn.Close(websocket.StatusGoingAway, "cleanup")
+			toClose = append(toClose, pc)
 			delete(p.conns, key)
 		}
+	}
+	p.mu.Unlock()
+
+	for _, pc := range toClose {
+		pc.conn.Close(websocket.StatusGoingAway, "cleanup")
 	}
 
 	// Clean up old unsupported entries
