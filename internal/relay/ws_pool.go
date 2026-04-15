@@ -21,6 +21,10 @@ const (
 	wsConnMaxAge       = 55 * time.Minute // slightly less than 60-min limit
 	wsConnIdleTimeout  = 5 * time.Minute
 	wsPoolCleanupEvery = 1 * time.Minute
+
+	wsHealthBackoffBase = 1 * time.Minute  // 首次失败退避
+	wsHealthBackoffMax  = 5 * time.Minute  // 退避上限
+	wsHealthStaleAfter  = 10 * time.Minute // 无失败多久后清理健康条目
 )
 
 // wsUpstreamPool manages persistent WebSocket connections to upstream providers.
@@ -40,6 +44,15 @@ type pooledConn struct {
 	poolKey   wsPoolKey
 }
 
+// wsChannelHealth tracks transient WS failures per channel for exponential backoff.
+// Unlike the "unsupported" mechanism (for definitive 404/405/426/501), this handles
+// unstable connections, timeouts, and other transient failures.
+type wsChannelHealth struct {
+	consecutiveFailures int
+	lastFailure         time.Time
+	skipUntil           time.Time
+}
+
 type wsPool struct {
 	mu    sync.Mutex
 	conns map[wsPoolKey]*pooledConn
@@ -47,6 +60,10 @@ type wsPool struct {
 	// Track channels that don't support WS to avoid repeated attempts
 	unsupported   map[int]time.Time
 	unsupportedMu sync.RWMutex
+
+	// Track transient WS failures per channel for exponential backoff
+	health   map[int]*wsChannelHealth
+	healthMu sync.RWMutex
 
 	stopCh chan struct{}
 	once   sync.Once
@@ -56,6 +73,7 @@ func newWSPool() *wsPool {
 	p := &wsPool{
 		conns:       make(map[wsPoolKey]*pooledConn),
 		unsupported: make(map[int]time.Time),
+		health:      make(map[int]*wsChannelHealth),
 		stopCh:      make(chan struct{}),
 	}
 	go p.cleanupLoop()
@@ -126,6 +144,56 @@ func (p *wsPool) MarkUnsupported(channelID int) {
 	p.unsupportedMu.Lock()
 	defer p.unsupportedMu.Unlock()
 	p.unsupported[channelID] = time.Now()
+}
+
+// ShouldSkipWS returns true if the channel is in a health backoff period
+// due to recent consecutive WS failures (transient errors, not definitive unsupported).
+func (p *wsPool) ShouldSkipWS(channelID int) bool {
+	p.healthMu.RLock()
+	defer p.healthMu.RUnlock()
+
+	h, ok := p.health[channelID]
+	if !ok {
+		return false
+	}
+	return time.Now().Before(h.skipUntil)
+}
+
+// RecordWSFailure increments the consecutive failure count for a channel
+// and sets an exponential backoff period during which WS attempts are skipped.
+func (p *wsPool) RecordWSFailure(channelID int) {
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+
+	h, ok := p.health[channelID]
+	if !ok {
+		h = &wsChannelHealth{}
+		p.health[channelID] = h
+	}
+	h.consecutiveFailures++
+	now := time.Now()
+	h.lastFailure = now
+	h.skipUntil = now.Add(wsFailureBackoff(h.consecutiveFailures))
+	log.Debugf("ws health: channel %d failure #%d, backoff until %v", channelID, h.consecutiveFailures, h.skipUntil.Format(time.TimeOnly))
+}
+
+// RecordWSSuccess resets the failure counter for a channel after a successful WS stream.
+func (p *wsPool) RecordWSSuccess(channelID int) {
+	p.healthMu.Lock()
+	defer p.healthMu.Unlock()
+	delete(p.health, channelID)
+}
+
+// wsFailureBackoff returns the backoff duration based on consecutive failure count.
+func wsFailureBackoff(failures int) time.Duration {
+	switch {
+	case failures <= 1:
+		return wsHealthBackoffBase // 1min
+	case failures == 2:
+		return 2 * wsHealthBackoffBase // 2min
+	default:
+		return wsHealthBackoffMax // 5min cap
+	}
 }
 
 // Dial creates a new WebSocket connection to the upstream.
@@ -382,6 +450,15 @@ func (p *wsPool) cleanup() {
 		}
 	}
 	p.unsupportedMu.Unlock()
+
+	// Clean up stale health entries (no failure for wsHealthStaleAfter)
+	p.healthMu.Lock()
+	for id, h := range p.health {
+		if now.Sub(h.lastFailure) > wsHealthStaleAfter {
+			delete(p.health, id)
+		}
+	}
+	p.healthMu.Unlock()
 }
 
 // Close shuts down the pool and all connections.
@@ -403,6 +480,10 @@ func (p *wsPool) Close() {
 // Returns nil if the channel doesn't support WS or connection fails.
 func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int, clientHeaders http.Header, forceRedial ...bool) *pooledConn {
 	if wsUpstreamPool.IsUnsupported(channel.ID) {
+		return nil
+	}
+	if wsUpstreamPool.ShouldSkipWS(channel.ID) {
+		log.Debugf("skipping upstream WS for channel %d (health backoff)", channel.ID)
 		return nil
 	}
 
@@ -427,6 +508,7 @@ func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key s
 			wsUpstreamPool.MarkUnsupported(channel.ID)
 		} else {
 			log.Infof("upstream WS dial failed for channel %d: %v", channel.ID, err)
+			wsUpstreamPool.RecordWSFailure(channel.ID)
 		}
 		return nil
 	}

@@ -20,6 +20,7 @@ import (
 func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
+	resetWSUpstreamPool()
 
 	var accepted atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

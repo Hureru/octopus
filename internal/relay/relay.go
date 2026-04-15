@@ -425,6 +425,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 				return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
 			}
 		}
+		wsUpstreamPool.RecordWSFailure(ra.channel.ID)
 		return -1, nil // fall through to HTTP
 	}
 
@@ -451,10 +452,14 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
 		}
+		if ra.requestContext().Err() == nil {
+			wsUpstreamPool.RecordWSFailure(ra.channel.ID)
+		}
 		return reader.StatusCode(), err
 	}
 
 	reader.Close()
+	wsUpstreamPool.RecordWSSuccess(ra.channel.ID)
 	return 200, nil
 }
 
@@ -473,6 +478,7 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 		log.Debugf("fresh upstream WS redial send failed (channel=%s, key=%d, err=%v)", ra.channel.Name, ra.usedKey.ID, retryErr)
 		redialed.conn.Close(websocket.StatusGoingAway, "send failed after redial")
 		wsUpstreamPool.Remove(redialed.poolKey)
+		wsUpstreamPool.RecordWSFailure(ra.channel.ID)
 		if requiresUpstreamWSContinuation(ra.internalRequest) {
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation"), true
@@ -495,11 +501,15 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
 			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation"), true
 		}
+		if ra.requestContext().Err() == nil {
+			wsUpstreamPool.RecordWSFailure(ra.channel.ID)
+		}
 		return reader.StatusCode(), streamErr, true
 	}
 	log.Debugf("fresh upstream WS redial succeeded (channel=%s, key=%d, previous_response_id=%s)",
 		ra.channel.Name, ra.usedKey.ID, currentPreviousResponseID(ra.internalRequest))
 	reader.Close()
+	wsUpstreamPool.RecordWSSuccess(ra.channel.ID)
 	return http.StatusOK, nil, true
 }
 
