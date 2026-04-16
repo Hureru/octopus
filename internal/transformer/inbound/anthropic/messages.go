@@ -164,16 +164,15 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 					}
 				case "tool_result":
 					hasToolResult = true
-					// TODO: support other result types
-					if block.Content != nil {
-						toolMsg := model.Message{
-							Role:            "tool",
-							MessageIndex:    lo.ToPtr(msgIndex),
-							ToolCallID:      block.ToolUseID,
-							CacheControl:    convertToLLMCacheControl(block.CacheControl),
-							ToolCallIsError: block.IsError,
-						}
+					toolMsg := model.Message{
+						Role:            "tool",
+						MessageIndex:    lo.ToPtr(msgIndex),
+						ToolCallID:      block.ToolUseID,
+						CacheControl:    convertToLLMCacheControl(block.CacheControl),
+						ToolCallIsError: block.IsError,
+					}
 
+					if block.Content != nil {
 						if block.Content.Content != nil {
 							toolMsg.Content = model.MessageContent{
 								Content: block.Content.Content,
@@ -196,9 +195,9 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 								MultipleContent: toolContentParts,
 							}
 						}
-
-						messages = append(messages, toolMsg)
 					}
+
+					messages = append(messages, toolMsg)
 				case "tool_use":
 					chatMsg.ToolCalls = append(chatMsg.ToolCalls, model.ToolCall{
 						ID:   block.ID,

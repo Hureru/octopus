@@ -2,11 +2,13 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -92,7 +94,15 @@ func clonedDefaultTransport() (*http.Transport, error) {
 	if !ok {
 		return nil, fmt.Errorf("default transport is not *http.Transport")
 	}
-	return transport.Clone(), nil
+	cloned := transport.Clone()
+	// Disable HTTP/2 to prevent connection multiplexing issues.
+	// HTTP/2 shares a single TCP connection for all requests to the same host;
+	// when that connection degrades, ALL concurrent and future requests fail
+	// with "stream error: INTERNAL_ERROR". HTTP/1.1 uses separate connections,
+	// isolating failures to individual requests.
+	cloned.TLSNextProto = make(map[string]func(authority string, c *tls.Conn) http.RoundTripper)
+	cloned.ForceAttemptHTTP2 = false
+	return cloned, nil
 }
 
 func newHTTPClientNoProxy() (*http.Client, error) {
@@ -101,7 +111,7 @@ func newHTTPClientNoProxy() (*http.Client, error) {
 		return nil, err
 	}
 	cloned.Proxy = nil
-	return &http.Client{Transport: cloned}, nil
+	return &http.Client{Transport: cloned, Timeout: 5 * time.Minute}, nil
 }
 
 func newHTTPClientCustomProxy(proxyURLStr string) (*http.Client, error) {
@@ -131,5 +141,5 @@ func newHTTPClientCustomProxy(proxyURLStr string) (*http.Client, error) {
 		return nil, fmt.Errorf("unsupported proxy scheme: %s", proxyURL.Scheme)
 	}
 
-	return &http.Client{Transport: cloned}, nil
+	return &http.Client{Transport: cloned, Timeout: 5 * time.Minute}, nil
 }

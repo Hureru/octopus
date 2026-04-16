@@ -173,6 +173,9 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 					return
 				case <-time.After(delay):
 				}
+
+				// 重建 outAdapter 以重置流式状态（toolIndex, toolCalls 等）
+				outAdapter = outbound.Get(channel.Type)
 			}
 
 			// 构造尝试级上下文
@@ -638,6 +641,7 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 			return response.StatusCode, fmt.Errorf("failed to read response body: %w", err)
 		}
 		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
 		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
 	}
 
