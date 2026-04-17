@@ -19,6 +19,7 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
+	outAnthropic "github.com/bestruirui/octopus/internal/transformer/outbound/anthropic"
 	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/safe"
@@ -30,7 +31,7 @@ import (
 // Handler 处理入站请求并转发到上游服务
 func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	// 解析请求
-	internalRequest, inAdapter, err := parseRequest(inboundType, c)
+	rawBody, internalRequest, inAdapter, err := parseRequest(inboundType, c)
 	if err != nil {
 		return
 	}
@@ -72,6 +73,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		apiKeyID:        apiKeyID,
 		requestModel:    requestModel,
 		iter:            iter,
+		rawBody:         rawBody,
 	}
 
 	var lastErr error
@@ -322,18 +324,19 @@ func (ra *relayAttempt) attempt() attemptResult {
 }
 
 // parseRequest 解析并验证入站请求
-func parseRequest(inboundType inbound.InboundType, c *gin.Context) (*model.InternalLLMRequest, model.Inbound, error) {
+// 返回值中的 rawBody 为客户端原始请求字节，供同格式直通路径重用。
+func parseRequest(inboundType inbound.InboundType, c *gin.Context) ([]byte, *model.InternalLLMRequest, model.Inbound, error) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	inAdapter := inbound.Get(inboundType)
 	internalRequest, err := inAdapter.TransformRequest(c.Request.Context(), body)
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Pass through the original query parameters
@@ -341,10 +344,10 @@ func parseRequest(inboundType inbound.InboundType, c *gin.Context) (*model.Inter
 
 	if err := internalRequest.Validate(); err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return internalRequest, inAdapter, nil
+	return body, internalRequest, inAdapter, nil
 }
 
 // forward 转发请求到上游服务
@@ -608,6 +611,12 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 
 // forwardViaHTTP forwards the request using traditional HTTP.
 func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
+	// Anthropic→Anthropic 同格式直通：绕过 Internal model 往返转换，避免字段丢失、
+	// 内容块重排、thinking 签名错位等在长上下文下触发上游 520 的问题。
+	if ra.shouldPassthroughAnthropic() {
+		return ra.forwardViaHTTPPassthroughAnthropic(ctx)
+	}
+
 	// 构建出站请求
 	outboundRequest, err := ra.outAdapter.TransformRequest(
 		ctx,
@@ -878,4 +887,254 @@ func (ra *relayAttempt) collectResponse() {
 	}
 	ra.metrics.SetSelectedChannel(ra.channel.ID)
 	ra.metrics.SetInternalResponse(internalResponse, actualModel)
+}
+
+// shouldPassthroughAnthropic 判定是否走 Anthropic→Anthropic 原生直通路径。
+// 条件：客户端以 Anthropic Messages 格式到达、通道出站类型为 Anthropic、原始 body 已保留。
+func (ra *relayAttempt) shouldPassthroughAnthropic() bool {
+	if ra == nil || ra.internalRequest == nil || ra.channel == nil {
+		return false
+	}
+	if len(ra.rawBody) == 0 {
+		return false
+	}
+	if ra.internalRequest.RawAPIFormat != model.APIFormatAnthropicMessage {
+		return false
+	}
+	return ra.channel.Type == outbound.OutboundTypeAnthropic
+}
+
+// forwardViaHTTPPassthroughAnthropic 直通路径：客户端原始 body 原样转发；上游响应原样写回客户端；
+// 旁路解析 SSE/JSON 仅用于 metrics（token 统计、计费），不参与写回客户端的字节流。
+func (ra *relayAttempt) forwardViaHTTPPassthroughAnthropic(ctx context.Context) (int, error) {
+	anthropicOut, ok := ra.outAdapter.(*outAnthropic.MessageOutbound)
+	if !ok {
+		// 通道注册异常，回退到标准路径
+		return ra.forwardViaHTTPStandard(ctx)
+	}
+
+	outboundRequest, err := anthropicOut.TransformRequestRaw(
+		ctx,
+		ra.rawBody,
+		ra.channel.GetBaseUrl(),
+		ra.usedKey.ChannelKey,
+		ra.internalRequest.Query,
+	)
+	if err != nil {
+		log.Warnf("failed to create passthrough request: %v", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// 记录上行 payload（用 rawBody 估算 token），与标准路径保持一致
+	ra.metrics.SetTransportRequestPayload(ra.rawBody, ra.internalRequest.Model)
+
+	// 复制客户端请求头（hop-by-hop 过滤保证 x-api-key/authorization/host/content-length
+	// /accept-encoding 不会覆盖出站设置的关键头；anthropic-beta / anthropic-version /
+	// user-agent / x-stainless-* 等原样透传）
+	ra.copyHeaders(outboundRequest)
+
+	// 发送请求
+	response, err := ra.sendRequest(outboundRequest)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
+		body, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
+		}
+		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
+		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+	}
+
+	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
+		if err := ra.handleStreamResponsePassthroughAnthropic(ctx, response); err != nil {
+			return 0, err
+		}
+		return response.StatusCode, nil
+	}
+	if err := ra.handleResponsePassthroughAnthropic(ctx, response); err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
+}
+
+// forwardViaHTTPStandard 是 forwardViaHTTP 的原路径（直通判定失败时的兜底）。
+// 留作显式出口，避免 passthrough 失败时的递归。
+func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error) {
+	outboundRequest, err := ra.outAdapter.TransformRequest(
+		ctx,
+		ra.internalRequest,
+		ra.channel.GetBaseUrl(),
+		ra.usedKey.ChannelKey,
+	)
+	if err != nil {
+		log.Warnf("failed to create request: %v", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
+		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	}
+	ra.copyHeaders(outboundRequest)
+
+	response, err := ra.sendRequest(outboundRequest)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
+		body, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
+		}
+		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
+		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+	}
+
+	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
+		if err := ra.handleStreamResponse(ctx, response); err != nil {
+			return 0, err
+		}
+		return response.StatusCode, nil
+	}
+	if err := ra.handleResponse(ctx, response); err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
+}
+
+// handleStreamResponsePassthroughAnthropic 将上游 SSE 事件**原样**转发给客户端（不经过
+// outbound→inbound 双向转换），同时用 outbound.TransformStream 旁路解析事件供 metrics 聚合使用。
+func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Context, response *http.Response) error {
+	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
+		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
+	}
+
+	writer := ra.getStreamWriter()
+
+	// 设置 SSE 响应头
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.Header().Set("Connection", "keep-alive")
+	writer.Header().Set("X-Accel-Buffering", "no")
+
+	firstToken := true
+
+	type sseReadResult struct {
+		eventType string
+		data      string
+		err       error
+	}
+	results := make(chan sseReadResult, 1)
+	safe.Go("relay-stream-read", func() {
+		defer close(results)
+		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+		for ev, err := range sse.Read(response.Body, readCfg) {
+			if err != nil {
+				results <- sseReadResult{err: err}
+				return
+			}
+			results <- sseReadResult{eventType: ev.Type, data: ev.Data}
+		}
+	})
+
+	var firstTokenTimer *time.Timer
+	var firstTokenC <-chan time.Time
+	if firstToken && ra.firstTokenTimeOutSec > 0 {
+		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
+		firstTokenC = firstTokenTimer.C
+		defer func() {
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
+		}()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			if isLocalRelayBudgetExceeded(ctx, contextError(ctx)) {
+				return contextError(ctx)
+			}
+			log.Infof("client disconnected, stopping stream")
+			return nil
+		case <-firstTokenC:
+			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
+			_ = response.Body.Close()
+			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+		case r, ok := <-results:
+			if !ok {
+				log.Infof("stream end")
+				return nil
+			}
+			if r.err != nil {
+				log.Warnf("failed to read event: %v", r.err)
+				return fmt.Errorf("failed to read stream event: %w", r.err)
+			}
+
+			// 1) 原样写回客户端（兼容不带 space 的格式，与其余代码风格一致）
+			raw := fmt.Sprintf("event:%s\ndata:%s\n\n", r.eventType, r.data)
+			if _, werr := writer.Write([]byte(raw)); werr != nil {
+				return werr
+			}
+			writer.Flush()
+
+			// 2) 旁路解析供 metrics 聚合：复用 outbound + inbound 的 TransformStream
+			//    inbound.TransformStream 会把 internalStream 追加进 streamChunks，
+			//    collectResponse() 在成功收尾时通过 GetInternalResponse 聚合得到最终 usage。
+			//    忽略 inbound 生成的字节，防止重复写回客户端。
+			if internalStream, terr := ra.outAdapter.TransformStream(ctx, []byte(r.data)); terr == nil && internalStream != nil {
+				_, _ = ra.inAdapter.TransformStream(ctx, internalStream)
+			}
+
+			if firstToken {
+				ra.metrics.SetFirstTokenTime(time.Now())
+				firstToken = false
+				if firstTokenTimer != nil {
+					if !firstTokenTimer.Stop() {
+						select {
+						case <-firstTokenTimer.C:
+						default:
+						}
+					}
+					firstTokenTimer = nil
+					firstTokenC = nil
+				}
+			}
+		}
+	}
+}
+
+// handleResponsePassthroughAnthropic 非流式直通：upstream JSON 原样写回客户端；旁路解析用于 metrics。
+func (ra *relayAttempt) handleResponsePassthroughAnthropic(ctx context.Context, response *http.Response) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	contentType := response.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	ra.c.Data(http.StatusOK, contentType, body)
+
+	// 旁路解析：复用 outbound.TransformResponse → inbound.TransformResponse 的 storedResponse
+	// 写入，以便 collectResponse 收集 usage 与成本。
+	sidecarResp := &http.Response{
+		StatusCode: response.StatusCode,
+		Header:     response.Header.Clone(),
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}
+	if internalResponse, terr := ra.outAdapter.TransformResponse(ctx, sidecarResp); terr == nil && internalResponse != nil {
+		_, _ = ra.inAdapter.TransformResponse(ctx, internalResponse)
+	}
+	return nil
 }

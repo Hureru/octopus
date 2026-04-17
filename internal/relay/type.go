@@ -89,6 +89,10 @@ type relayRequest struct {
 	requestModel    string
 	iter            *balancer.Iterator
 
+	// rawBody 保存客户端原始请求 body，用于同格式（如 Anthropic→Anthropic）直通转发时
+	// 绕过内部模型来回转换，以保证 beta 字段、内容块顺序、thinking 签名等完全透传。
+	rawBody []byte
+
 	// streamWriter allows overriding the response writer (nil = use c.Writer)
 	streamWriter StreamWriter
 }

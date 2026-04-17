@@ -72,6 +72,50 @@ func (o *MessageOutbound) TransformRequest(ctx context.Context, request *model.I
 	return req, nil
 }
 
+// TransformRequestRaw 把客户端原始 Anthropic 请求字节直接转发给上游，不做字段白名单解析与重序列化。
+// 用于 Anthropic → Anthropic 的同协议直通路径，保证 anthropic-beta 相关字段（context_management、
+// betas 等）、内容块原始顺序、extended thinking 签名等信息完整传递到上游。
+//
+// 仅设置上游必需的鉴权/URL；Accept、Content-Type、Anthropic-Version、anthropic-beta 等请求头由
+// 上层 copyHeaders 从客户端透传（已被 hop-by-hop 过滤保护，x-api-key/authorization 不会覆盖）。
+// 注意：为了 HTTP/2 与 401/429/5xx 重试时可以重放 body，同时设置 ContentLength 与 GetBody。
+func (o *MessageOutbound) TransformRequestRaw(ctx context.Context, rawBody []byte, baseUrl, key string, query url.Values) (*http.Request, error) {
+	if len(rawBody) == 0 {
+		return nil, fmt.Errorf("raw body is empty")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(rawBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.ContentLength = int64(len(rawBody))
+	bodyBytes := rawBody
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+	}
+
+	// 默认请求头：上层 copyHeaders 随后会用客户端真实值覆盖 Content-Type / Accept /
+	// Anthropic-Version / anthropic-beta；x-api-key 与 authorization 被 hop-by-hop 过滤，
+	// 因此 Set 的上游密钥不会被客户端请求头覆盖。
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Anthropic-Version", "2023-06-01")
+	req.Header.Set("X-API-Key", key)
+
+	parsedUrl, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base url: %w", err)
+	}
+	parsedUrl.Path = parsedUrl.Path + "/messages"
+	if query != nil {
+		parsedUrl.RawQuery = query.Encode()
+	}
+	req.URL = parsedUrl
+
+	return req, nil
+}
+
 func (o *MessageOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {
 	if response == nil {
 		return nil, fmt.Errorf("response is nil")
