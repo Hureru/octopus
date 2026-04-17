@@ -131,8 +131,9 @@ export function useLogs(options: { pageSize?: number } = {}) {
             if (!lastPage || lastPage.length < pageSize) return undefined;
             return allPages.length + 1;
         },
-        staleTime: Infinity,
+        staleTime: 0,
         refetchOnMount: 'always',
+        refetchOnWindowFocus: true,
     });
 
     const logs = useMemo(() => {
@@ -165,8 +166,20 @@ export function useLogs(options: { pageSize?: number } = {}) {
 
     useEffect(() => {
         let cancelled = false;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
+        let retryAttempt = 0;
 
-        const connect = async () => {
+        const scheduleReconnect = () => {
+            if (cancelled) return;
+            const delay = Math.min(30000, 1000 * 2 ** retryAttempt);
+            retryAttempt += 1;
+            retryTimer = setTimeout(() => {
+                retryTimer = null;
+                connect(true);
+            }, delay);
+        };
+
+        const connect = async (isReconnect = false) => {
             try {
                 const { token } = await apiClient.get<{ token: string }>('/api/v1/log/stream-token');
                 if (cancelled) return;
@@ -175,8 +188,12 @@ export function useLogs(options: { pageSize?: number } = {}) {
                 eventSourceRef.current = eventSource;
 
                 eventSource.onopen = () => {
+                    retryAttempt = 0;
                     setIsConnected(true);
                     setError(null);
+                    if (isReconnect) {
+                        queryClient.invalidateQueries({ queryKey: logsInfiniteQueryKey(pageSize) });
+                    }
                 };
 
                 eventSource.onmessage = (event) => {
@@ -193,7 +210,16 @@ export function useLogs(options: { pageSize?: number } = {}) {
                                 if (exists) return old;
 
                                 const firstPage = old.pages[0] ?? [];
-                                return { ...old, pages: [[log, ...firstPage], ...old.pages.slice(1)] };
+                                const prepended = [log, ...firstPage];
+                                if (prepended.length > pageSize && old.pages.length > 1) {
+                                    // 首页溢出：截断到 pageSize，后续分页可能已偏移，触发重拉
+                                    queryClient.invalidateQueries({ queryKey: logsInfiniteQueryKey(pageSize) });
+                                    return {
+                                        ...old,
+                                        pages: [prepended.slice(0, pageSize), ...old.pages.slice(1)],
+                                    };
+                                }
+                                return { ...old, pages: [prepended, ...old.pages.slice(1)] };
                             }
                         );
                     } catch (e) {
@@ -206,18 +232,21 @@ export function useLogs(options: { pageSize?: number } = {}) {
                     setError(new Error('SSE 连接断开'));
                     eventSource.close();
                     eventSourceRef.current = null;
+                    scheduleReconnect();
                 };
             } catch (e) {
                 if (cancelled) return;
                 setError(e instanceof Error ? e : new Error('获取 stream token 失败'));
                 logger.error('获取 stream token 失败:', e);
+                scheduleReconnect();
             }
         };
 
-        connect();
+        connect(false);
 
         return () => {
             cancelled = true;
+            if (retryTimer) clearTimeout(retryTimer);
             eventSourceRef.current?.close();
             eventSourceRef.current = null;
             setIsConnected(false);

@@ -73,6 +73,66 @@ function formatDuration(ms: number): string {
     return `${(ms / 1000).toFixed(2)}s`;
 }
 
+function sanitizeErrorMessage(raw: string | undefined | null): string {
+    if (!raw) return '';
+    let text = raw.replace(/^upstream error:\s*(\d+):\s*/i, (_m, code) => `[HTTP ${code}] `);
+    if (/<\/?(html|body|head|title|div|p|h[1-6]|br|script|style)[\s>]/i.test(text)) {
+        const titleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const h1Match = text.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+        const summarySource = titleMatch?.[1] || h1Match?.[1] || '';
+        const summary = summarySource
+            ? summarySource.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+            : '(HTML response)';
+        const stripped = text
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const detail = stripped.length > 500 ? `${stripped.slice(0, 500)}…` : stripped;
+        text = summary && detail && detail !== summary ? `${summary} — ${detail}` : (summary || detail || '(HTML response)');
+    }
+    return text;
+}
+
+interface MergedAttempt extends ChannelAttempt {
+    repeat: number;
+    lastAttemptNum: number;
+    totalDuration: number;
+}
+
+function mergeAdjacentAttempts(attempts: ChannelAttempt[]): MergedAttempt[] {
+    const out: MergedAttempt[] = [];
+    for (const a of attempts) {
+        const last = out[out.length - 1];
+        if (
+            last
+            && last.channel_id === a.channel_id
+            && last.channel_key_id === a.channel_key_id
+            && last.model_name === a.model_name
+            && last.status === a.status
+            && (last.msg ?? '') === (a.msg ?? '')
+        ) {
+            last.repeat += 1;
+            last.lastAttemptNum = a.attempt_num;
+            last.totalDuration += a.duration;
+            continue;
+        }
+        out.push({
+            ...a,
+            repeat: 1,
+            lastAttemptNum: a.attempt_num,
+            totalDuration: a.duration,
+        });
+    }
+    return out;
+}
+
 function makeDisableTargetKey(target: LogSiteActionTarget | null | undefined) {
     if (!target) return '';
     return `${target.siteId}\u0000${target.accountId}\u0000${target.groupKey}\u0000${target.modelName}`;
@@ -185,6 +245,7 @@ interface RetryBadgeWithTooltipProps {
 
 function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadgeWithTooltipProps) {
     const t = useTranslations('log.card');
+    const merged = useMemo(() => mergeAdjacentAttempts(attempts), [attempts]);
 
     return (
         <Tooltip>
@@ -199,7 +260,7 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                 </Badge>
             </TooltipTrigger>
             <TooltipContent className="border bg-card p-2 min-w-[280px] shadow-sm rounded-3xl flex flex-col gap-1">
-                {attempts.map((attempt, idx) => {
+                {merged.map((attempt, idx) => {
                     const statusMeta = getAttemptStatusMeta(attempt.status, t);
 
                     return (
@@ -218,11 +279,16 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                                         {attempt.channel_name}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground">
-                                        {attempt.model_name} • {formatDuration(attempt.duration)}
+                                        {attempt.model_name} • {formatDuration(attempt.totalDuration)}
                                     </span>
                                 </div>
+                                {attempt.repeat > 1 ? (
+                                    <Badge variant="outline" className="shrink-0 h-5 px-1.5 text-[10px] font-semibold tabular-nums">
+                                        ×{attempt.repeat}
+                                    </Badge>
+                                ) : null}
                             </div>
-                            {idx < attempts.length - 1 ? (
+                            {idx < merged.length - 1 ? (
                                 <div className="flex justify-center py-0.5">
                                     <ArrowDown className="size-3 text-muted-foreground/30" />
                                 </div>
@@ -614,7 +680,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                             </div>
                             {hasError ? (
                                 <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 overflow-hidden">
-                                    <p className="text-xs text-destructive line-clamp-2">{log.error}</p>
+                                    <p className="text-xs text-destructive line-clamp-2">{sanitizeErrorMessage(log.error)}</p>
                                 </div>
                             ) : null}
                         </div>
@@ -717,7 +783,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                                     />
                                                                 </div>
                                                                 <p className="text-sm text-destructive whitespace-pre-wrap wrap-break-word pr-8 leading-relaxed">
-                                                                    {log.error}
+                                                                    {sanitizeErrorMessage(log.error)}
                                                                 </p>
                                                                 {!hasAttempts && legacyErrorTarget ? (
                                                                     <div className="mt-3 flex justify-end">
@@ -733,62 +799,96 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
 
                                                         {hasAttempts ? (
                                                             <div className="flex flex-col gap-2">
-                                                                {log.attempts!.map((attempt, idx) => {
-                                                                    const statusMeta = getAttemptStatusMeta(attempt.status, t);
-                                                                    const attemptTarget = attemptTargets[idx] ?? null;
-                                                                    const canDisableAttempt = attempt.status === 'failed' && !!attemptTarget?.canDisableModel;
+                                                                {(() => {
+                                                                    const attemptsArr = log.attempts!;
+                                                                    const merged: Array<MergedAttempt & { originalIndex: number }> = [];
+                                                                    for (let i = 0; i < attemptsArr.length; i++) {
+                                                                        const a = attemptsArr[i];
+                                                                        const last = merged[merged.length - 1];
+                                                                        if (
+                                                                            last
+                                                                            && last.channel_id === a.channel_id
+                                                                            && last.channel_key_id === a.channel_key_id
+                                                                            && last.model_name === a.model_name
+                                                                            && last.status === a.status
+                                                                            && (last.msg ?? '') === (a.msg ?? '')
+                                                                        ) {
+                                                                            last.repeat += 1;
+                                                                            last.lastAttemptNum = a.attempt_num;
+                                                                            last.totalDuration += a.duration;
+                                                                            continue;
+                                                                        }
+                                                                        merged.push({
+                                                                            ...a,
+                                                                            repeat: 1,
+                                                                            lastAttemptNum: a.attempt_num,
+                                                                            totalDuration: a.duration,
+                                                                            originalIndex: i,
+                                                                        });
+                                                                    }
+                                                                    return merged.map((attempt, idx) => {
+                                                                        const statusMeta = getAttemptStatusMeta(attempt.status, t);
+                                                                        const attemptTarget = attemptTargets[attempt.originalIndex] ?? null;
+                                                                        const canDisableAttempt = attempt.status === 'failed' && !!attemptTarget?.canDisableModel;
+                                                                        const sanitizedMsg = sanitizeErrorMessage(attempt.msg);
 
-                                                                    return (
-                                                                        <div
-                                                                            key={`${attempt.attempt_num || idx}-${attempt.channel_id}-${attempt.model_name}-${idx}`}
-                                                                            className={cn(
-                                                                                'text-xs p-2.5 rounded-xl border transition-colors flex flex-col gap-2',
-                                                                                statusMeta.containerClassName,
-                                                                            )}
-                                                                        >
-                                                                            <div className="flex items-start gap-2">
-                                                                                <Badge
-                                                                                    className={cn(
-                                                                                        'h-5 shrink-0 px-1.5 text-[10px] font-bold uppercase shadow-none border-0',
-                                                                                        statusMeta.badgeClassName,
-                                                                                    )}
-                                                                                >
-                                                                                    {statusMeta.label}
-                                                                                </Badge>
-                                                                                <div className="min-w-0 flex-1">
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <span className="font-semibold text-foreground">
-                                                                                            {attempt.channel_name}
+                                                                        return (
+                                                                            <div
+                                                                                key={`${attempt.attempt_num || idx}-${attempt.channel_id}-${attempt.model_name}-${idx}`}
+                                                                                className={cn(
+                                                                                    'text-xs p-2.5 rounded-xl border transition-colors flex flex-col gap-2',
+                                                                                    statusMeta.containerClassName,
+                                                                                )}
+                                                                            >
+                                                                                <div className="flex items-start gap-2">
+                                                                                    <Badge
+                                                                                        className={cn(
+                                                                                            'h-5 shrink-0 px-1.5 text-[10px] font-bold uppercase shadow-none border-0',
+                                                                                            statusMeta.badgeClassName,
+                                                                                        )}
+                                                                                    >
+                                                                                        {statusMeta.label}
+                                                                                    </Badge>
+                                                                                    <div className="min-w-0 flex-1">
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            <span className="font-semibold text-foreground">
+                                                                                                {attempt.channel_name}
+                                                                                            </span>
+                                                                                            <span className="text-muted-foreground truncate">
+                                                                                                ({attempt.model_name})
+                                                                                            </span>
+                                                                                            {attempt.sticky ? (
+                                                                                                <Pin className="size-3.5 shrink-0 text-amber-500" />
+                                                                                            ) : null}
+                                                                                            {attempt.repeat > 1 ? (
+                                                                                                <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-semibold tabular-nums">
+                                                                                                    ×{attempt.repeat}
+                                                                                                </Badge>
+                                                                                            ) : null}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="ml-auto flex items-center gap-2 shrink-0">
+                                                                                        <span className="text-muted-foreground tabular-nums font-mono">
+                                                                                            {formatDuration(attempt.totalDuration)}
                                                                                         </span>
-                                                                                        <span className="text-muted-foreground truncate">
-                                                                                            ({attempt.model_name})
-                                                                                        </span>
-                                                                                        {attempt.sticky ? (
-                                                                                            <Pin className="size-3.5 shrink-0 text-amber-500" />
+                                                                                        {canDisableAttempt ? (
+                                                                                            <AttemptDisableButton
+                                                                                                target={attemptTarget}
+                                                                                                pending={isDisablePending(attemptTarget)}
+                                                                                                onDisable={openDisableDialog}
+                                                                                            />
                                                                                         ) : null}
                                                                                     </div>
                                                                                 </div>
-                                                                                <div className="ml-auto flex items-center gap-2 shrink-0">
-                                                                                    <span className="text-muted-foreground tabular-nums font-mono">
-                                                                                        {formatDuration(attempt.duration)}
-                                                                                    </span>
-                                                                                    {canDisableAttempt ? (
-                                                                                        <AttemptDisableButton
-                                                                                            target={attemptTarget}
-                                                                                            pending={isDisablePending(attemptTarget)}
-                                                                                            onDisable={openDisableDialog}
-                                                                                        />
-                                                                                    ) : null}
-                                                                                </div>
+                                                                                {sanitizedMsg ? (
+                                                                                    <div className={cn('pl-2 border-l-2 text-[11px] leading-relaxed whitespace-pre-wrap wrap-break-word', statusMeta.messageClassName)}>
+                                                                                        {sanitizedMsg}
+                                                                                    </div>
+                                                                                ) : null}
                                                                             </div>
-                                                                            {attempt.msg ? (
-                                                                                <div className={cn('pl-2 border-l-2 text-[11px] leading-relaxed', statusMeta.messageClassName)}>
-                                                                                    {attempt.msg}
-                                                                                </div>
-                                                                            ) : null}
-                                                                        </div>
-                                                                    );
-                                                                })}
+                                                                        );
+                                                                    });
+                                                                })()}
                                                             </div>
                                                         ) : null}
                                                     </div>
