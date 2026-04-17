@@ -164,6 +164,19 @@ func DeleteSite(ctx context.Context, siteID int) error {
 	return op.SiteDel(siteID, ctx)
 }
 
+func ArchiveSite(ctx context.Context, siteID int) error {
+	siteRecord, err := op.SiteGet(siteID, ctx)
+	if err != nil {
+		return err
+	}
+	for _, account := range siteRecord.Accounts {
+		if err := deleteManagedChannelsByAccount(ctx, account.ID); err != nil {
+			return err
+		}
+	}
+	return op.SiteArchive(siteID, ctx)
+}
+
 func DeleteSiteAccount(ctx context.Context, accountID int) error {
 	if err := deleteManagedChannelsByAccount(ctx, accountID); err != nil {
 		return err

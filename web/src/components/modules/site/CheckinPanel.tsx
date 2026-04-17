@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useMemo, type ReactNode } from "react";
-import { CalendarCheck2, ExternalLink, FilterX, Globe2, KeyRound, Layers3, Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarCheck2,
+  ExternalLink,
+  FilterX,
+  Layers3,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 import { type Site } from "@/api/endpoints/site";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,23 +64,37 @@ function statusLabel(status: CheckinFilterStatus) {
   return filter?.label ?? "全部";
 }
 
+function formatCurrency(value: number) {
+  const safe = Number.isFinite(value) ? value : 0;
+  return `$${safe.toFixed(2)}`;
+}
+
 function OverviewMetric({
   icon,
   label,
   value,
+  tone,
 }: {
   icon: ReactNode;
   label: string;
-  value: number;
+  value: string;
+  tone?: "default" | "warning";
 }) {
   return (
     <div className="flex items-center gap-3 rounded-2xl bg-muted/20 px-4 py-3">
-      <span className="flex size-9 items-center justify-center rounded-xl bg-background text-muted-foreground shadow-sm">
+      <span
+        className={cn(
+          "flex size-9 items-center justify-center rounded-xl bg-background shadow-sm",
+          tone === "warning"
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-muted-foreground",
+        )}
+      >
         {icon}
       </span>
       <div className="min-w-0">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="text-base font-semibold">{value}</div>
+        <div className="text-base font-semibold truncate">{value}</div>
       </div>
     </div>
   );
@@ -93,10 +115,10 @@ export function CheckinPanel({
 }: {
   sites: Site[] | undefined;
   inventory: {
-    siteCount: number;
-    accountCount: number;
-    tokenCount: number;
-    modelCount: number;
+    totalBalance: number;
+    totalBalanceUsed: number;
+    enabledAccounts: number;
+    totalAccounts: number;
   };
   statusDayKey: string;
   visibleSiteCount: number;
@@ -174,24 +196,25 @@ export function CheckinPanel({
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <OverviewMetric
-            icon={<Globe2 className="size-4" />}
-            label="站点"
-            value={inventory.siteCount}
+            icon={<Wallet className="size-4" />}
+            label="当前余额"
+            value={formatCurrency(inventory.totalBalance)}
+          />
+          <OverviewMetric
+            icon={<TrendingUp className="size-4" />}
+            label="累计消耗"
+            value={formatCurrency(inventory.totalBalanceUsed)}
           />
           <OverviewMetric
             icon={<Layers3 className="size-4" />}
-            label="账号"
-            value={inventory.accountCount}
+            label="启用账号"
+            value={`${inventory.enabledAccounts} / ${inventory.totalAccounts}`}
           />
           <OverviewMetric
-            icon={<KeyRound className="size-4" />}
-            label="Key"
-            value={inventory.tokenCount}
-          />
-          <OverviewMetric
-            icon={<Sparkles className="size-4" />}
-            label="模型"
-            value={inventory.modelCount}
+            icon={<AlertTriangle className="size-4" />}
+            label="今日异常"
+            value={`${summary.failed}`}
+            tone={summary.failed > 0 ? "warning" : "default"}
           />
         </div>
 

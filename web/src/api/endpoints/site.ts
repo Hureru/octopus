@@ -111,6 +111,8 @@ export type Site = {
   sort_order: number;
   global_weight: number;
   custom_header: CustomHeader[];
+  archived: boolean;
+  archived_at?: string | null;
   accounts: SiteAccount[];
 };
 
@@ -257,8 +259,9 @@ function extractResponseData<T>(payload: unknown): T | undefined {
 export function useCreateSite() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: Omit<Site, "id" | "accounts">) =>
-      apiClient.post<Site>("/api/v1/site/create", data),
+    mutationFn: async (
+      data: Omit<Site, "id" | "accounts" | "archived" | "archived_at">,
+    ) => apiClient.post<Site>("/api/v1/site/create", data),
     onSuccess: () => invalidateSiteQueries(queryClient),
     onError: (error) => logger.error("站点创建失败:", error),
   });
@@ -292,6 +295,16 @@ export function useDeleteSite() {
       apiClient.delete<null>(`/api/v1/site/delete/${id}`),
     onSuccess: () => invalidateSiteQueries(queryClient),
     onError: (error) => logger.error("站点删除失败:", error),
+  });
+}
+
+export function useArchiveSite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) =>
+      apiClient.post<null>(`/api/v1/site/archive/${id}`),
+    onSuccess: () => invalidateSiteQueries(queryClient),
+    onError: (error) => logger.error("站点归档失败:", error),
   });
 }
 

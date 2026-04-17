@@ -51,6 +51,7 @@ func init() {
 	router.NewGroupRouter("/api/v1/site").
 		Use(middleware.Auth()).
 		AddRoute(router.NewRoute("/delete/:id", http.MethodDelete).Handle(deleteSite)).
+		AddRoute(router.NewRoute("/archive/:id", http.MethodPost).Handle(archiveSite)).
 		AddRoute(router.NewRoute("/account/delete/:id", http.MethodDelete).Handle(deleteSiteAccount))
 }
 
@@ -178,6 +179,19 @@ func deleteSite(c *gin.Context) {
 		return
 	}
 	if err := sitesvc.DeleteSite(c.Request.Context(), idNum); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
+func archiveSite(c *gin.Context) {
+	idNum, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		return
+	}
+	if err := sitesvc.ArchiveSite(c.Request.Context(), idNum); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

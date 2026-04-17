@@ -81,6 +81,8 @@ type Site struct {
 	SortOrder          int            `json:"sort_order" gorm:"default:0"`
 	GlobalWeight       float64        `json:"global_weight" gorm:"default:1"`
 	CustomHeader       []CustomHeader `json:"custom_header" gorm:"serializer:json"`
+	Archived           bool           `json:"archived" gorm:"default:false;index"`
+	ArchivedAt         *time.Time     `json:"archived_at"`
 	Accounts           []SiteAccount  `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
 }
 

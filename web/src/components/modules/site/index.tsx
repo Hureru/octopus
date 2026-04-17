@@ -22,6 +22,7 @@ import {
   useCheckinSiteAccount,
   useCreateSite,
   useCreateSiteAccount,
+  useArchiveSite,
   useDeleteSite,
   useDeleteSiteAccount,
   useDetectSitePlatform,
@@ -101,6 +102,7 @@ import {
   Plus,
   RefreshCw,
   Square,
+  Archive,
   Trash2,
   TriangleAlert,
   Upload,
@@ -769,6 +771,7 @@ export function Site() {
   const updateSite = useUpdateSite();
   const enableSite = useEnableSite();
   const deleteSite = useDeleteSite();
+  const archiveSite = useArchiveSite();
   const createSiteAccount = useCreateSiteAccount();
   const updateSiteAccount = useUpdateSiteAccount();
   const enableSiteAccount = useEnableSiteAccount();
@@ -806,7 +809,7 @@ export function Site() {
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
-    type: "site" | "account";
+    type: "site" | "account" | "archive-site";
     id: number;
     name: string;
   } | null>(null);
@@ -952,25 +955,28 @@ export function Site() {
   );
 
   const inventory = useMemo(() => {
-    let siteCount = 0;
-    let accountCount = 0;
-    let tokenCount = 0;
-    let modelCount = 0;
+    let totalBalance = 0;
+    let totalBalanceUsed = 0;
+    let enabledAccounts = 0;
+    let totalAccounts = 0;
 
     for (const site of sites ?? []) {
-      siteCount += 1;
-      accountCount += site.accounts.length;
       for (const account of site.accounts) {
-        tokenCount += account.tokens.length;
-        modelCount += account.models.length;
+        totalAccounts += 1;
+        if (site.enabled && account.enabled) {
+          enabledAccounts += 1;
+        }
+        totalBalance += typeof account.balance === "number" ? account.balance : 0;
+        totalBalanceUsed +=
+          typeof account.balance_used === "number" ? account.balance_used : 0;
       }
     }
 
     return {
-      siteCount,
-      accountCount,
-      tokenCount,
-      modelCount,
+      totalBalance,
+      totalBalanceUsed,
+      enabledAccounts,
+      totalAccounts,
     };
   }, [sites]);
 
@@ -1313,6 +1319,10 @@ export function Site() {
     setDeleteConfirm({ type: "site", id: site.id, name: site.name });
   }
 
+  async function handleArchiveSite(site: SiteRecord) {
+    setDeleteConfirm({ type: "archive-site", id: site.id, name: site.name });
+  }
+
   async function handleToggleAccount(account: SiteAccount) {
     try {
       await enableSiteAccount.mutateAsync({
@@ -1402,6 +1412,17 @@ export function Site() {
       if (deleteConfirm.type === "site") {
         await deleteSite.mutateAsync(deleteConfirm.id);
         toast.success("站点已删除");
+        setSelectedSiteIds((prev) =>
+          prev.filter((id) => id !== deleteConfirm.id),
+        );
+        setExpandedSiteIds((current) => {
+          const next = new Set(current);
+          next.delete(deleteConfirm.id);
+          return next;
+        });
+      } else if (deleteConfirm.type === "archive-site") {
+        await archiveSite.mutateAsync(deleteConfirm.id);
+        toast.success("站点已归档");
         setSelectedSiteIds((prev) =>
           prev.filter((id) => id !== deleteConfirm.id),
         );
@@ -1774,6 +1795,14 @@ export function Site() {
                       >
                         <Power className="size-4" />
                         <span>{site.enabled ? "停用站点" : "启用站点"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={MENU_BUTTON_CLASS}
+                        onClick={() => handleArchiveSite(site)}
+                      >
+                        <Archive className="size-4" />
+                        <span>归档站点</span>
                       </button>
                       <button
                         type="button"
@@ -3109,11 +3138,15 @@ export function Site() {
       >
         <DialogContent className="max-w-md rounded-3xl">
           <DialogHeader>
-            <DialogTitle>确认删除</DialogTitle>
+            <DialogTitle>
+              {deleteConfirm?.type === "archive-site" ? "确认归档" : "确认删除"}
+            </DialogTitle>
             <DialogDescription>
               {deleteConfirm?.type === "site"
                 ? `确认删除站点「${deleteConfirm?.name}」及其所有账号和托管渠道？此操作不可撤销。`
-                : `确认删除账号「${deleteConfirm?.name}」及其托管渠道？此操作不可撤销。`}
+                : deleteConfirm?.type === "archive-site"
+                  ? `确认归档站点「${deleteConfirm?.name}」？归档后将从列表移除且不可恢复，站点关联的账号、Key、模型、托管渠道均会一并清除。`
+                  : `确认删除账号「${deleteConfirm?.name}」及其托管渠道？此操作不可撤销。`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -3128,11 +3161,19 @@ export function Site() {
               variant="destructive"
               className="rounded-xl"
               onClick={confirmDelete}
-              disabled={deleteSite.isPending || deleteSiteAccount.isPending}
+              disabled={
+                deleteSite.isPending ||
+                deleteSiteAccount.isPending ||
+                archiveSite.isPending
+              }
             >
-              {deleteSite.isPending || deleteSiteAccount.isPending
-                ? "删除中..."
-                : "确认删除"}
+              {deleteConfirm?.type === "archive-site"
+                ? archiveSite.isPending
+                  ? "归档中..."
+                  : "确认归档"
+                : deleteSite.isPending || deleteSiteAccount.isPending
+                  ? "删除中..."
+                  : "确认删除"}
             </Button>
           </DialogFooter>
         </DialogContent>
