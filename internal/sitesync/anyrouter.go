@@ -110,6 +110,7 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
 
+	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken)
 	return &syncSnapshot{
 		accessToken:  accessToken,
 		groups:       groups,
@@ -117,6 +118,8 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		models:       siteModels,
 		groupResults: groupResults,
 		status:       status,
+		balance:      balance,
+		balanceUsed:  balanceUsed,
 		message:      buildSyncSnapshotMessage(groupResults),
 	}, nil
 }

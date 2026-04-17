@@ -164,7 +164,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	if status == model.SiteExecutionStatusFailed {
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
-	balance, balanceUsed := fetchAccountBalance(ctx, siteRecord, account, accessToken)
+	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken)
 	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, message: buildSyncSnapshotMessage(groupResults)}, nil
 }
 
@@ -240,7 +240,8 @@ func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, acc
 	if status == model.SiteExecutionStatusFailed {
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, message: buildSyncSnapshotMessage(groupResults)}, nil
+	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken)
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, message: buildSyncSnapshotMessage(groupResults)}, nil
 }
 
 func syncOfficialPlatform(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {

@@ -593,30 +593,6 @@ func mergeSiteGroups(groups []model.SiteUserGroup, tokens []model.SiteToken) []m
 	return result
 }
 
-func fetchAccountBalance(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) (float64, float64) {
-	if accessToken == "" {
-		return 0, 0
-	}
-	payload, err := requestJSONWithManagedAccessToken(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/user/self"), nil, accessToken, account)
-	if err != nil {
-		return 0, 0
-	}
-	data, ok := payload["data"].(map[string]any)
-	if !ok {
-		data = payload
-	}
-	balance := jsonFloat(data["quota"])
-	balanceUsed := jsonFloat(data["used_quota"])
-	// Some platforms use different field names
-	if balance == 0 {
-		balance = jsonFloat(data["balance"])
-	}
-	if balanceUsed == 0 {
-		balanceUsed = jsonFloat(data["used_balance"])
-	}
-	return balance, balanceUsed
-}
-
 func jsonFloat(value any) float64 {
 	switch typed := value.(type) {
 	case float64:
