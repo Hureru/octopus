@@ -52,7 +52,8 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		return fmt.Errorf("sync snapshot is nil")
 	}
 	now := time.Now()
-	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	persistedPrices := preparePersistedSitePrices(accountID, snapshot.prices, now)
+	err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteUserGroup{}).Error; err != nil {
 			return err
 		}
@@ -118,8 +119,49 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 				return err
 			}
 		}
+		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SitePrice{}).Error; err != nil {
+			return err
+		}
+		if len(persistedPrices) > 0 {
+			if err := tx.Create(&persistedPrices).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	op.SitePriceCacheReplaceAccount(accountID, persistedPrices)
+	return nil
+}
+
+// preparePersistedSitePrices 规范化并去重 SitePrice 行，准备批量写入。
+func preparePersistedSitePrices(accountID int, prices []model.SitePrice, now time.Time) []model.SitePrice {
+	if len(prices) == 0 {
+		return nil
+	}
+	result := make([]model.SitePrice, 0, len(prices))
+	seen := make(map[string]struct{}, len(prices))
+	for _, p := range prices {
+		p.ID = 0
+		p.SiteAccountID = accountID
+		p.GroupKey = model.NormalizeSiteGroupKey(p.GroupKey)
+		p.ModelName = strings.TrimSpace(p.ModelName)
+		if p.ModelName == "" {
+			continue
+		}
+		if p.UpdatedAt.IsZero() {
+			p.UpdatedAt = now
+		}
+		key := p.GroupKey + "\x00" + strings.ToLower(p.ModelName)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, p)
+	}
+	return result
 }
 
 func preparePersistedSyncModels(accountID int, incoming []model.SiteModel, existingModelMap map[string]model.SiteModel, now time.Time) []model.SiteModel {

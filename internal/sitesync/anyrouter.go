@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 const anyRouterUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
@@ -111,11 +112,16 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	}
 
 	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken)
+	prices, priceErr := fetchPricing(ctx, siteRecord, account, accessToken, groups)
+	if priceErr != nil {
+		log.Warnf("site pricing fetch skipped (account=%d): %v", account.ID, priceErr)
+	}
 	return &syncSnapshot{
 		accessToken:  accessToken,
 		groups:       groups,
 		tokens:       tokens,
 		models:       siteModels,
+		prices:       prices,
 		groupResults: groupResults,
 		status:       status,
 		balance:      balance,

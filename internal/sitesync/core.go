@@ -16,6 +16,7 @@ type syncSnapshot struct {
 	groups       []model.SiteUserGroup
 	tokens       []model.SiteToken
 	models       []model.SiteModel
+	prices       []model.SitePrice
 	groupResults []siteGroupSyncResult
 	status       model.SiteExecutionStatus
 	balance      float64

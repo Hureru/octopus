@@ -29,11 +29,12 @@ type RelayMetrics struct {
 	InternalResponse *transformerModel.InternalLLMResponse
 
 	// 统计指标
-	ActualModel string
-	Stats       model.StatsMetrics
-	UsedWS      bool
-	WSMode      *model.RelayLogWSMode
-	WSRecovery  *model.RelayLogWSRecovery
+	ActualModel       string
+	Stats             model.StatsMetrics
+	UsedWS            bool
+	WSMode            *model.RelayLogWSMode
+	WSRecovery        *model.RelayLogWSRecovery
+	SelectedChannelID int
 
 	TransportInputTokens *int
 	BillInputTokens      *int
@@ -76,6 +77,11 @@ func (m *RelayMetrics) SetWSRecovery(recovery model.RelayLogWSRecovery) {
 	m.WSRecovery = wsRecoveryPtr(recovery)
 }
 
+// SetSelectedChannel 记录此次命中的通道 ID，用于 SetInternalResponse 时按站点 (账号, 分组) 查询价格。
+func (m *RelayMetrics) SetSelectedChannel(channelID int) {
+	m.SelectedChannelID = channelID
+}
+
 func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMResponse, actualModel string) {
 	m.InternalResponse = resp
 	m.ActualModel = actualModel
@@ -102,7 +108,7 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	m.Stats.InputToken = usage.PromptTokens
 	m.Stats.OutputToken = usage.CompletionTokens
 
-	modelPrice := price.GetLLMPrice(actualModel)
+	modelPrice := resolveModelPrice(m.SelectedChannelID, actualModel)
 	if modelPrice == nil {
 		return
 	}
@@ -242,6 +248,22 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 
 func intPtr(value int) *int {
 	return &value
+}
+
+// resolveModelPrice 优先从站点 (账号, 分组) 维度查价；缺失时回退到 models.dev 全局价格。
+// 保证与原 price.GetLLMPrice 相同的签名（*model.LLMPrice），不改变调用方计费数学。
+func resolveModelPrice(channelID int, actualModel string) *model.LLMPrice {
+	if channelID > 0 {
+		binding, err := op.SiteChannelBindingGetByChannelID(channelID, context.Background())
+		if err == nil && binding != nil {
+			baseGroupKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
+			if sitePrice, ok := op.SitePriceGet(binding.SiteAccountID, baseGroupKey, actualModel); ok {
+				resolved := sitePrice
+				return &resolved
+			}
+		}
+	}
+	return price.GetLLMPrice(actualModel)
 }
 
 func wsModePtr(value model.RelayLogWSMode) *model.RelayLogWSMode {

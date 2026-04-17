@@ -175,11 +175,13 @@ func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 }
 
 func SiteDel(id int, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var affectedAccountIDs []int
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var accountIDs []int
 		if err := tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Pluck("id", &accountIDs).Error; err != nil {
 			return err
 		}
+		affectedAccountIDs = accountIDs
 		if len(accountIDs) > 0 {
 			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteToken{}).Error; err != nil {
 				return err
@@ -193,12 +195,21 @@ func SiteDel(id int, ctx context.Context) error {
 			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
 				return err
 			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SitePrice{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
 				return err
 			}
 		}
 		return tx.Delete(&model.Site{}, id).Error
-	})
+	}); err != nil {
+		return err
+	}
+	for _, accountID := range affectedAccountIDs {
+		sitePriceClearCacheForAccount(accountID)
+	}
+	return nil
 }
 
 func SiteAccountGet(id int, ctx context.Context) (*model.SiteAccount, error) {
@@ -374,7 +385,7 @@ func SiteAccountEnabled(id int, enabled bool, ctx context.Context) error {
 }
 
 func SiteAccountDel(id int, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteToken{}).Error; err != nil {
 			return err
 		}
@@ -387,8 +398,15 @@ func SiteAccountDel(id int, ctx context.Context) error {
 		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteChannelBinding{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.SitePrice{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&model.SiteAccount{}, id).Error
-	})
+	}); err != nil {
+		return err
+	}
+	sitePriceClearCacheForAccount(id)
+	return nil
 }
 
 func SiteAvailableModels(siteID int, ctx context.Context) ([]string, error) {

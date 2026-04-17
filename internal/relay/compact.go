@@ -260,6 +260,7 @@ func forwardResponsesCompact(c *gin.Context, metrics *RelayMetrics, iter *balanc
 
 	var compactResp responsesCompactResponse
 	if err := json.Unmarshal(body, &compactResp); err == nil {
+		metrics.SetSelectedChannel(channel.ID)
 		metrics.SetInternalResponse(compactResponseToInternalResponse(&compactResp), metrics.RequestModel)
 	}
 

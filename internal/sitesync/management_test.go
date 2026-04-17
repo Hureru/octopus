@@ -800,8 +800,8 @@ func TestSyncManagementPlatformCachesFallbackUserModelsAcrossFailedGroups(t *tes
 	if userModelCalls != 1 {
 		t.Fatalf("expected fallback user models to be fetched once, got %d calls", userModelCalls)
 	}
-	if pricingCalls != 2 || availableModelCalls != 2 {
-		t.Fatalf("expected cached fallback route metadata probes to hit each endpoint twice (managed auth + unauthenticated), got pricing=%d available_model=%d", pricingCalls, availableModelCalls)
+	if pricingCalls != 3 || availableModelCalls != 2 {
+		t.Fatalf("expected cached fallback route metadata probes to hit each endpoint twice (managed auth + unauthenticated) plus one pricing sync, got pricing=%d available_model=%d", pricingCalls, availableModelCalls)
 	}
 	if len(snapshot.models) != 2 {
 		t.Fatalf("expected both failed groups to share cached fallback models, got %+v", snapshot.models)
