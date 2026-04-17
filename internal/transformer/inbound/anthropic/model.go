@@ -146,18 +146,26 @@ const (
 // Effort level constants for OutputConfig
 const (
 	EffortMax    = "max"
+	EffortXHigh  = "xhigh"
 	EffortHigh   = "high"
 	EffortMedium = "medium"
 	EffortLow    = "low"
 )
 
+// Thinking display constants
+const (
+	ThinkingDisplaySummarized = "summarized"
+	ThinkingDisplayOmitted    = "omitted"
+)
+
 type Thinking struct {
 	Type         string `json:"type"                    validate:"required,oneof=enabled disabled adaptive"`
 	BudgetTokens *int64 `json:"budget_tokens,omitempty" validate:"required_if=Type enabled"`
+	Display      string `json:"display,omitempty"       validate:"omitempty,oneof=summarized omitted"`
 }
 
 type OutputConfig struct {
-	Effort string `json:"effort,omitempty" validate:"omitempty,oneof=max high medium low"`
+	Effort string `json:"effort,omitempty" validate:"omitempty,oneof=max xhigh high medium low"`
 }
 
 type ToolChoice struct {

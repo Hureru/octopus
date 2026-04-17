@@ -293,6 +293,9 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 
 	// Convert thinking configuration to reasoning effort and preserve budget
 	if anthropicReq.Thinking != nil {
+		if anthropicReq.Thinking.Display != "" {
+			chatReq.ThinkingDisplay = anthropicReq.Thinking.Display
+		}
 		switch anthropicReq.Thinking.Type {
 		case ThinkingTypeEnabled:
 			if anthropicReq.Thinking.BudgetTokens != nil {

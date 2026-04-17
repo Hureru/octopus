@@ -188,6 +188,10 @@ type InternalLLMRequest struct {
 	// Help field, will not be sent to the llm service.
 	AdaptiveThinking bool `json:"-"`
 
+	// ThinkingDisplay passes through the Anthropic `thinking.display` value
+	// ("summarized" | "omitted"). Help field, will not be sent directly to the llm service.
+	ThinkingDisplay string `json:"-"`
+
 	// EnableThinking is used by Alibaba Qwen models to enable thinking/reasoning output.
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 
