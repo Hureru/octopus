@@ -468,6 +468,10 @@
         }
     },
     "channel": {
+        "tabs": {
+            "site": "站点渠道",
+            "manual": "普通渠道"
+        },
         "card": {
             "requestCount": "请求次数",
             "totalCost": "总成本",

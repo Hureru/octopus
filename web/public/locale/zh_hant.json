@@ -468,6 +468,10 @@
         }
     },
     "channel": {
+        "tabs": {
+            "site": "站點供應源",
+            "manual": "一般供應源"
+        },
         "card": {
             "requestCount": "請求次數",
             "totalCost": "總成本",

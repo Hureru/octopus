@@ -24,7 +24,7 @@ type ResponsiveColumns = Partial<Record<Breakpoint | 'default', number>>;
 interface VirtualizedGridProps<T> {
     items: T[];
     layout?: 'grid' | 'list';
-    columns: ResponsiveColumns;
+    columns: ResponsiveColumns | ((containerWidth: number) => number);
     estimateItemHeight: number;
     gap?: number;
     overscan?: number;
@@ -94,6 +94,9 @@ export function VirtualizedGrid<T>({
 
     const columnCount = useMemo(() => {
         if (layout === 'list') return 1;
+        if (typeof columns === 'function') {
+            return Math.max(1, columns(containerWidth));
+        }
         return Math.max(1, getColumnsForWidth(containerWidth, columns));
     }, [layout, containerWidth, columns]);
 

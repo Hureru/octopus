@@ -468,6 +468,10 @@
         }
     },
     "channel": {
+        "tabs": {
+            "site": "Site Channels",
+            "manual": "Manual Channels"
+        },
         "card": {
             "requestCount": "Requests",
             "totalCost": "Total Cost",
