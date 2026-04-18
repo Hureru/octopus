@@ -152,6 +152,12 @@ function hasInputTokenDetails(log: RelayLog) {
     );
 }
 
+function getHeadlineInputTokens(log: RelayLog) {
+    const hasCache = log.cache_read_tokens != null || log.cache_write_tokens != null;
+    if (!hasCache) return log.input_tokens;
+    return log.input_tokens + (log.cache_write_tokens ?? 0);
+}
+
 function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
     if (!usedWS && !mode) return null;
 
@@ -663,7 +669,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 <div className="flex items-center gap-1.5">
                                     <ArrowDownToLine className="size-3.5 shrink-0 text-green-500" />
                                     <span className="flex items-center gap-1">
-                                        <span>{t('input')} {log.input_tokens.toLocaleString()}</span>
+                                        <span>{t('input')} {getHeadlineInputTokens(log).toLocaleString()}</span>
                                         <InputTokenDetailsPopover log={log} />
                                     </span>
                                 </div>
@@ -905,7 +911,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                 <Send className="size-4 text-green-500" />
                                                 <span className="text-sm font-medium text-card-foreground">{t('requestContent')}</span>
                                                 <Badge variant="secondary" className="ml-auto text-xs">
-                                                    {log.input_tokens.toLocaleString()} {t('tokens')}
+                                                    {getHeadlineInputTokens(log).toLocaleString()} {t('tokens')}
                                                 </Badge>
                                             </div>
                                             <div className="flex-1 overflow-auto min-h-0">
