@@ -89,6 +89,7 @@ export function Toolbar() {
     const setModelFilter = useToolbarViewOptionsStore((s) => s.setModelFilter);
     const requestOpenCreateSite = useSiteUIStore((s) => s.requestOpenCreateDialog);
     const requestOpenImportDialog = useSiteUIStore((s) => s.requestOpenImportDialog);
+    const requestOpenArchivedDialog = useSiteUIStore((s) => s.requestOpenArchivedDialog);
     const requestSyncAll = useSiteUIStore((s) => s.requestSyncAll);
     const requestCheckinAll = useSiteUIStore((s) => s.requestCheckinAll);
     const [expandedSearchItem, setExpandedSearchItem] = useState<ToolbarPage | null>(null);
@@ -373,6 +374,13 @@ export function Toolbar() {
                                             className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
                                         >
                                             全量签到
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={requestOpenArchivedDialog}
+                                            className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                        >
+                                            归档站点
                                         </button>
                                     </div>
                                 </div>

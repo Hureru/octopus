@@ -28,6 +28,22 @@ func SiteList(ctx context.Context) ([]model.Site, error) {
 	return sites, nil
 }
 
+func SiteListArchived(ctx context.Context) ([]model.Site, error) {
+	var sites []model.Site
+	if err := db.GetDB().WithContext(ctx).
+		Preload("Accounts").
+		Preload("Accounts.Tokens").
+		Preload("Accounts.UserGroups").
+		Preload("Accounts.Models").
+		Preload("Accounts.ChannelBindings").
+		Where("archived = ?", true).
+		Order("archived_at DESC, id ASC").
+		Find(&sites).Error; err != nil {
+		return nil, err
+	}
+	return sites, nil
+}
+
 func SiteGet(id int, ctx context.Context) (*model.Site, error) {
 	var site model.Site
 	if err := db.GetDB().WithContext(ctx).
@@ -178,11 +194,31 @@ func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 func SiteDel(id int, ctx context.Context) error {
 	var affectedAccountIDs []int
 	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		accountIDs, err := siteCascadeDeleteAccounts(tx, id)
-		if err != nil {
+		var accountIDs []int
+		if err := tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Pluck("id", &accountIDs).Error; err != nil {
 			return err
 		}
 		affectedAccountIDs = accountIDs
+		if len(accountIDs) > 0 {
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteToken{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteUserGroup{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteModel{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SitePrice{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Delete(&model.Site{}, id).Error
 	}); err != nil {
 		return err
@@ -194,55 +230,26 @@ func SiteDel(id int, ctx context.Context) error {
 }
 
 func SiteArchive(id int, ctx context.Context) error {
-	var affectedAccountIDs []int
-	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		accountIDs, err := siteCascadeDeleteAccounts(tx, id)
-		if err != nil {
-			return err
-		}
-		affectedAccountIDs = accountIDs
-		now := time.Now()
-		return tx.Model(&model.Site{}).Where("id = ?", id).Updates(map[string]any{
+	now := time.Now()
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Site{}).Where("id = ?", id).Updates(map[string]any{
 			"archived":    true,
 			"archived_at": &now,
 			"enabled":     false,
-		}).Error
-	}); err != nil {
-		return err
-	}
-	for _, accountID := range affectedAccountIDs {
-		sitePriceClearCacheForAccount(accountID)
-	}
-	return nil
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Update("enabled", false).Error
+	})
 }
 
-func siteCascadeDeleteAccounts(tx *gorm.DB, siteID int) ([]int, error) {
-	var accountIDs []int
-	if err := tx.Model(&model.SiteAccount{}).Where("site_id = ?", siteID).Pluck("id", &accountIDs).Error; err != nil {
-		return nil, err
-	}
-	if len(accountIDs) == 0 {
-		return accountIDs, nil
-	}
-	if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteToken{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteUserGroup{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteModel{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SitePrice{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
-		return nil, err
-	}
-	return accountIDs, nil
+func SiteRestore(id int, ctx context.Context) error {
+	return db.GetDB().WithContext(ctx).Model(&model.Site{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"archived":    false,
+			"archived_at": gorm.Expr("NULL"),
+		}).Error
 }
 
 func SiteAccountGet(id int, ctx context.Context) (*model.SiteAccount, error) {

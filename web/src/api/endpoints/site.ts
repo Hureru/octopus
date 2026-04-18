@@ -175,57 +175,72 @@ export function useSiteList() {
   return useQuery({
     queryKey: ["sites", "list"],
     queryFn: async () => apiClient.get<SiteServer[]>("/api/v1/site/list"),
-    select: (data) =>
-      data.map((site) => ({
-        ...site,
-        custom_header: site.custom_header ?? [],
-        use_system_proxy: site.use_system_proxy ?? false,
-        external_checkin_url: site.external_checkin_url ?? null,
-        is_pinned: site.is_pinned ?? false,
-        sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
-        global_weight:
-          typeof site.global_weight === "number" && site.global_weight > 0
-            ? site.global_weight
-            : 1,
-        accounts: (site.accounts ?? []).map((account) => ({
-          ...account,
-          refresh_token:
-            typeof account.refresh_token === "string"
-              ? account.refresh_token
-              : "",
-          token_expires_at:
-            typeof account.token_expires_at === "number" &&
-            account.token_expires_at > 0
-              ? account.token_expires_at
-              : 0,
-          platform_user_id: account.platform_user_id ?? null,
-          account_proxy: account.account_proxy ?? null,
-          random_checkin: account.random_checkin ?? false,
-          checkin_interval_hours:
-            typeof account.checkin_interval_hours === "number" &&
-            account.checkin_interval_hours > 0
-              ? account.checkin_interval_hours
-              : 24,
-          checkin_random_window_minutes:
-            typeof account.checkin_random_window_minutes === "number" &&
-            account.checkin_random_window_minutes >= 0
-              ? account.checkin_random_window_minutes
-              : 120,
-          balance: typeof account.balance === "number" ? account.balance : 0,
-          balance_used:
-            typeof account.balance_used === "number" ? account.balance_used : 0,
-          tokens: account.tokens ?? [],
-          user_groups: account.user_groups ?? [],
-          models: account.models ?? [],
-          channel_bindings: account.channel_bindings ?? [],
-        })),
-      })) as Site[],
+    select: normalizeSiteServerList,
     refetchInterval: 30000,
   });
 }
 
+export function useArchivedSiteList(enabled = false) {
+  return useQuery({
+    queryKey: ["sites", "archived"],
+    queryFn: async () => apiClient.get<SiteServer[]>("/api/v1/site/archived"),
+    select: normalizeSiteServerList,
+    enabled,
+  });
+}
+
+function normalizeSiteServerList(data: SiteServer[]): Site[] {
+  return data.map((site) => ({
+    ...site,
+    custom_header: site.custom_header ?? [],
+    use_system_proxy: site.use_system_proxy ?? false,
+    external_checkin_url: site.external_checkin_url ?? null,
+    is_pinned: site.is_pinned ?? false,
+    sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
+    global_weight:
+      typeof site.global_weight === "number" && site.global_weight > 0
+        ? site.global_weight
+        : 1,
+    archived: site.archived ?? false,
+    archived_at: site.archived_at ?? null,
+    accounts: (site.accounts ?? []).map((account) => ({
+      ...account,
+      refresh_token:
+        typeof account.refresh_token === "string"
+          ? account.refresh_token
+          : "",
+      token_expires_at:
+        typeof account.token_expires_at === "number" &&
+        account.token_expires_at > 0
+          ? account.token_expires_at
+          : 0,
+      platform_user_id: account.platform_user_id ?? null,
+      account_proxy: account.account_proxy ?? null,
+      random_checkin: account.random_checkin ?? false,
+      checkin_interval_hours:
+        typeof account.checkin_interval_hours === "number" &&
+        account.checkin_interval_hours > 0
+          ? account.checkin_interval_hours
+          : 24,
+      checkin_random_window_minutes:
+        typeof account.checkin_random_window_minutes === "number" &&
+        account.checkin_random_window_minutes >= 0
+          ? account.checkin_random_window_minutes
+          : 120,
+      balance: typeof account.balance === "number" ? account.balance : 0,
+      balance_used:
+        typeof account.balance_used === "number" ? account.balance_used : 0,
+      tokens: account.tokens ?? [],
+      user_groups: account.user_groups ?? [],
+      models: account.models ?? [],
+      channel_bindings: account.channel_bindings ?? [],
+    })),
+  })) as Site[];
+}
+
 function invalidateSiteQueries(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["sites", "list"] });
+  queryClient.invalidateQueries({ queryKey: ["sites", "archived"] });
   queryClient.invalidateQueries({ queryKey: ["site-channel", "list"] });
   queryClient.invalidateQueries({ queryKey: ["channels", "list"] });
   queryClient.invalidateQueries({ queryKey: ["models", "channel"] });
@@ -305,6 +320,16 @@ export function useArchiveSite() {
       apiClient.post<null>(`/api/v1/site/archive/${id}`),
     onSuccess: () => invalidateSiteQueries(queryClient),
     onError: (error) => logger.error("站点归档失败:", error),
+  });
+}
+
+export function useRestoreSite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) =>
+      apiClient.post<null>(`/api/v1/site/restore/${id}`),
+    onSuccess: () => invalidateSiteQueries(queryClient),
+    onError: (error) => logger.error("站点恢复失败:", error),
   });
 }
 

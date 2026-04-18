@@ -177,6 +177,14 @@ func ArchiveSite(ctx context.Context, siteID int) error {
 	return op.SiteArchive(siteID, ctx)
 }
 
+func RestoreSite(ctx context.Context, siteID int) error {
+	return op.SiteRestore(siteID, ctx)
+}
+
+func ListArchivedSites(ctx context.Context) ([]model.Site, error) {
+	return op.SiteListArchived(ctx)
+}
+
 func DeleteSiteAccount(ctx context.Context, accountID int) error {
 	if err := deleteManagedChannelsByAccount(ctx, accountID); err != nil {
 		return err

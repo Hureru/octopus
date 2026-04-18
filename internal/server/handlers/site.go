@@ -29,6 +29,7 @@ func init() {
 	router.NewGroupRouter("/api/v1/site").
 		Use(middleware.Auth()).
 		AddRoute(router.NewRoute("/list", http.MethodGet).Handle(listSite)).
+		AddRoute(router.NewRoute("/archived", http.MethodGet).Handle(listArchivedSites)).
 		AddRoute(router.NewRoute("/import/all-api-hub", http.MethodPost).Handle(importAllAPIHub)).
 		AddRoute(router.NewRoute("/account/sync/:id", http.MethodPost).Handle(syncSiteAccount)).
 		AddRoute(router.NewRoute("/account/checkin/:id", http.MethodPost).Handle(checkinSiteAccount)).
@@ -52,6 +53,7 @@ func init() {
 		Use(middleware.Auth()).
 		AddRoute(router.NewRoute("/delete/:id", http.MethodDelete).Handle(deleteSite)).
 		AddRoute(router.NewRoute("/archive/:id", http.MethodPost).Handle(archiveSite)).
+		AddRoute(router.NewRoute("/restore/:id", http.MethodPost).Handle(restoreSite)).
 		AddRoute(router.NewRoute("/account/delete/:id", http.MethodDelete).Handle(deleteSiteAccount))
 }
 
@@ -196,6 +198,28 @@ func archiveSite(c *gin.Context) {
 		return
 	}
 	resp.Success(c, nil)
+}
+
+func restoreSite(c *gin.Context) {
+	idNum, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		return
+	}
+	if err := sitesvc.RestoreSite(c.Request.Context(), idNum); err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
+func listArchivedSites(c *gin.Context) {
+	sites, err := sitesvc.ListArchivedSites(c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, sites)
 }
 
 func createSiteAccount(c *gin.Context) {

@@ -23,12 +23,14 @@ import {
   useCreateSite,
   useCreateSiteAccount,
   useArchiveSite,
+  useArchivedSiteList,
   useDeleteSite,
   useDeleteSiteAccount,
   useDetectSitePlatform,
   useEnableSite,
   useEnableSiteAccount,
   useImportAllAPIHub,
+  useRestoreSite,
   useSiteBatchAction,
   useSiteList,
   useSyncAllSites,
@@ -103,6 +105,7 @@ import {
   RefreshCw,
   Square,
   Archive,
+  ArchiveRestore,
   Trash2,
   TriangleAlert,
   Upload,
@@ -772,6 +775,7 @@ export function Site() {
   const enableSite = useEnableSite();
   const deleteSite = useDeleteSite();
   const archiveSite = useArchiveSite();
+  const restoreSite = useRestoreSite();
   const createSiteAccount = useCreateSiteAccount();
   const updateSiteAccount = useUpdateSiteAccount();
   const enableSiteAccount = useEnableSiteAccount();
@@ -786,6 +790,12 @@ export function Site() {
 
   const [siteDialogOpen, setSiteDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [archivedDialogOpen, setArchivedDialogOpen] = useState(false);
+  const {
+    data: archivedSites,
+    isLoading: archivedLoading,
+    error: archivedError,
+  } = useArchivedSiteList(archivedDialogOpen);
   const [importPayloadText, setImportPayloadText] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [lastImportResult, setLastImportResult] =
@@ -1323,6 +1333,15 @@ export function Site() {
     setDeleteConfirm({ type: "archive-site", id: site.id, name: site.name });
   }
 
+  async function handleRestoreSite(siteId: number, siteName: string) {
+    try {
+      await restoreSite.mutateAsync(siteId);
+      toast.success(`站点「${siteName}」已恢复，请在列表中启用`);
+    } catch (err) {
+      toast.error(getSiteErrorMessage(locale, err, t));
+    }
+  }
+
   async function handleToggleAccount(account: SiteAccount) {
     try {
       await enableSiteAccount.mutateAsync({
@@ -1422,7 +1441,7 @@ export function Site() {
         });
       } else if (deleteConfirm.type === "archive-site") {
         await archiveSite.mutateAsync(deleteConfirm.id);
-        toast.success("站点已归档");
+        toast.success("站点已归档，可在『归档站点』中恢复");
         setSelectedSiteIds((prev) =>
           prev.filter((id) => id !== deleteConfirm.id),
         );
@@ -1511,6 +1530,7 @@ export function Site() {
         setSiteDialogOpen(true);
       },
       openImportDialog: () => setImportDialogOpen(true),
+      openArchivedDialog: () => setArchivedDialogOpen(true),
       syncAll: () => {
         syncAllSites.mutate(undefined, {
           onSuccess: () => toast.success("已触发后台全量同步，页面会自动刷新"),
@@ -3130,6 +3150,82 @@ export function Site() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={archivedDialogOpen} onOpenChange={setArchivedDialogOpen}>
+        <DialogContent className="max-w-3xl rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>归档站点</DialogTitle>
+            <DialogDescription>
+              归档的站点仍保留账号、Key 和模型配置，托管渠道会被下线。点击恢复会还原到主列表（默认保持禁用状态，启用后会自动重建托管渠道）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto">
+            {archivedLoading ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                正在加载归档站点...
+              </div>
+            ) : archivedError ? (
+              <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                加载失败：{getSiteErrorMessage(locale, archivedError, t)}
+              </div>
+            ) : !archivedSites || archivedSites.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                当前没有归档的站点。
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {archivedSites.map((site) => (
+                  <div
+                    key={site.id}
+                    className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card/60 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-medium">
+                          {site.name}
+                        </span>
+                        <Badge variant="outline" className="rounded-full text-xs">
+                          {site.platform}
+                        </Badge>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {site.base_url}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        归档于{" "}
+                        {site.archived_at
+                          ? new Date(site.archived_at).toLocaleString()
+                          : "-"}
+                        {" · "}
+                        {site.accounts.length} 个账号已保留
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl"
+                      onClick={() => handleRestoreSite(site.id, site.name)}
+                      disabled={restoreSite.isPending}
+                    >
+                      <ArchiveRestore className="size-4" />
+                      恢复
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setArchivedDialogOpen(false)}
+            >
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={!!deleteConfirm}
         onOpenChange={(open) => {
@@ -3145,7 +3241,7 @@ export function Site() {
               {deleteConfirm?.type === "site"
                 ? `确认删除站点「${deleteConfirm?.name}」及其所有账号和托管渠道？此操作不可撤销。`
                 : deleteConfirm?.type === "archive-site"
-                  ? `确认归档站点「${deleteConfirm?.name}」？归档后将从列表移除且不可恢复，站点关联的账号、Key、模型、托管渠道均会一并清除。`
+                  ? `确认归档站点「${deleteConfirm?.name}」？归档后将从主列表移除，托管渠道会被下线，账号和密钥会保留；可在『归档站点』中随时恢复。`
                   : `确认删除账号「${deleteConfirm?.name}」及其托管渠道？此操作不可撤销。`}
             </DialogDescription>
           </DialogHeader>

@@ -43,6 +43,14 @@ func ArchiveSite(ctx context.Context, siteID int) error {
 	return sitesync.ArchiveSite(ctx, siteID)
 }
 
+func RestoreSite(ctx context.Context, siteID int) error {
+	return sitesync.RestoreSite(ctx, siteID)
+}
+
+func ListArchivedSites(ctx context.Context) ([]model.Site, error) {
+	return sitesync.ListArchivedSites(ctx)
+}
+
 func DeleteSiteAccount(ctx context.Context, accountID int) error {
 	return sitesync.DeleteSiteAccount(ctx, accountID)
 }
