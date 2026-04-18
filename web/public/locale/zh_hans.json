@@ -563,6 +563,21 @@
             "remark": "备注"
         }
     },
+    "siteChannel": {
+        "card": {
+            "statusEnabled": "启用",
+            "statusDisabled": "停用",
+            "maskedPending": "{n} 待同步",
+            "noRouteDistribution": "暂无模型分布",
+            "metrics": {
+                "totalRequests": "请求",
+                "successRequests": "成功",
+                "failedRequests": "失败",
+                "totalCost": "成本",
+                "lastRequestAt": "最近使用"
+            }
+        }
+    },
     "siteSync": {
         "errors": {
             "missingGroupKey": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。"

@@ -563,6 +563,21 @@
             "remark": "Remark"
         }
     },
+    "siteChannel": {
+        "card": {
+            "statusEnabled": "Enabled",
+            "statusDisabled": "Disabled",
+            "maskedPending": "{n} pending",
+            "noRouteDistribution": "No model distribution",
+            "metrics": {
+                "totalRequests": "Requests",
+                "successRequests": "Success",
+                "failedRequests": "Failed",
+                "totalCost": "Cost",
+                "lastRequestAt": "Last used"
+            }
+        }
+    },
     "siteSync": {
         "errors": {
             "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."

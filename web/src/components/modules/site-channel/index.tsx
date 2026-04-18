@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/zh-cn';
+import 'dayjs/locale/zh-tw';
 import {
     DragDropContext,
     Draggable,
@@ -11,27 +15,37 @@ import {
 import {
     ArrowUpDown,
     Check,
+    CheckCircle2,
     CircleAlert,
     CircleOff,
+    Clock,
+    DollarSign,
     Eye,
     EyeOff,
     ExternalLink,
-    FolderTree,
     Globe2,
     GripVertical,
     History,
     KeyRound,
     LayoutGrid,
     List,
+    MessageSquare,
     MoreHorizontal,
     Power,
     RefreshCw,
     Search,
     SlidersHorizontal,
-    Sparkles,
-    UserRound,
     Waypoints,
+    XCircle,
 } from 'lucide-react';
+
+dayjs.extend(relativeTime);
+
+const DAYJS_LOCALE_MAP: Record<'zh_hans' | 'zh_hant' | 'en', string> = {
+    zh_hans: 'zh-cn',
+    zh_hant: 'zh-tw',
+    en: 'en',
+};
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -42,6 +56,15 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    MorphingDialog,
+    MorphingDialogTrigger,
+    MorphingDialogContainer,
+    MorphingDialogContent,
+    MorphingDialogTitle,
+    MorphingDialogDescription,
+    useMorphingDialog,
+} from '@/components/ui/morphing-dialog';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -55,7 +78,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { toast } from '@/components/common/Toast';
-import { cn } from '@/lib/utils';
+import { cn, formatCount, formatMoney } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
 import { useSettingStore } from '@/stores/setting';
 import {
@@ -535,6 +558,50 @@ function collectSiteSummary(card: SiteChannelCard) {
 
     return { groupCount, modelCount, totalKeys, enabledKeys, routeCounts };
 }
+
+function collectSiteRuntimeSummary(card: SiteChannelCard) {
+    let successCount = 0;
+    let failureCount = 0;
+    let totalCost = 0;
+    let lastRequestAt: number | null = null;
+    let maskedPendingKeys = 0;
+
+    for (const account of card.accounts) {
+        for (const group of account.groups) {
+            maskedPendingKeys += group.masked_pending_key_count;
+            for (const key of group.projected_keys) {
+                totalCost += key.total_cost;
+                if (key.last_use_time_stamp > 0) {
+                    lastRequestAt = Math.max(lastRequestAt ?? 0, key.last_use_time_stamp);
+                }
+            }
+            for (const m of group.models) {
+                const h = m.history;
+                if (!h) continue;
+                successCount += h.success_count;
+                failureCount += h.failure_count;
+                if (typeof h.last_request_at === 'number' && h.last_request_at > 0) {
+                    lastRequestAt = Math.max(lastRequestAt ?? 0, h.last_request_at);
+                }
+            }
+        }
+    }
+
+    return {
+        totalRequests: successCount + failureCount,
+        successCount,
+        failureCount,
+        totalCost,
+        lastRequestAt,
+        maskedPendingKeys,
+    };
+}
+
+const SHORT_ROUTE_LABEL: Partial<Record<SiteModelRouteType, string>> = {
+    openai_chat: 'Chat',
+    openai_response: 'Response',
+    openai_embedding: 'Embedding',
+};
 
 function getUnknownRouteReason(model: SiteModelView) {
     const metadata = model.route_metadata;
@@ -2423,9 +2490,17 @@ function SiteChannelDialog({
     onNavigateToSiteAccount: (accountId: number) => void;
     onNavigateToChannel: (channelId: number) => void;
 }) {
+    const { setIsOpen } = useMorphingDialog();
     const [activeAccountId, setActiveAccountId] = useState<number | null>(card.accounts[0]?.account_id ?? null);
     const [highlightedAccountId, setHighlightedAccountId] = useState<number | null>(null);
     const accountTabRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+
+    const closeAndNavigate = useCallback((navigate: () => void) => {
+        setIsOpen(false);
+        window.requestAnimationFrame(() => {
+            navigate();
+        });
+    }, [setIsOpen]);
 
     const handleOpenSiteBaseUrl = useCallback(() => {
         if (!card.base_url) return;
@@ -2482,14 +2557,14 @@ function SiteChannelDialog({
 
     return (
         <div className="flex max-h-[88vh] flex-col overflow-hidden">
-            <DialogHeader className="gap-3 border-b border-border/70 px-5 py-3.5 text-left sm:px-6">
-                <DialogDescription className="sr-only">
+            <header className="flex flex-col gap-3 border-b border-border/70 px-5 py-3.5 text-left sm:px-6">
+                <MorphingDialogDescription className="sr-only">
                     站点渠道管理面板
-                </DialogDescription>
+                </MorphingDialogDescription>
 
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 space-y-2">
-                        <DialogTitle className="flex flex-wrap items-center gap-2 text-xl sm:text-2xl">
+                        <MorphingDialogTitle className="flex flex-wrap items-center gap-2 text-xl sm:text-2xl">
                             <span className="truncate">{card.site_name}</span>
                             <Badge variant="outline" className="h-6 px-2 text-[11px]">
                                 {platformLabel(card.platform)}
@@ -2526,7 +2601,7 @@ function SiteChannelDialog({
                                     {resolvedAccount.enabled ? '账号启用' : '账号停用'}
                                 </button>
                             ) : null}
-                        </DialogTitle>
+                        </MorphingDialogTitle>
                         {resolvedAccount ? (
                             <div className="text-sm text-muted-foreground">
                                 当前账号：{resolvedAccount.account_name} · {resolvedAccount.model_count} 模型 / {resolvedAccount.group_count} 分组
@@ -2597,7 +2672,7 @@ function SiteChannelDialog({
                             variant="outline"
                             size="sm"
                             className="h-8 rounded-2xl px-3"
-                            onClick={onNavigateToSite}
+                            onClick={() => closeAndNavigate(onNavigateToSite)}
                         >
                             <Globe2 className="size-4" />
                             站点页
@@ -2608,7 +2683,7 @@ function SiteChannelDialog({
                                 variant="outline"
                                 size="sm"
                                 className="h-8 rounded-2xl px-3"
-                                onClick={() => onNavigateToSiteAccount(resolvedAccount.account_id)}
+                                onClick={() => closeAndNavigate(() => onNavigateToSiteAccount(resolvedAccount.account_id))}
                             >
                                 <Waypoints className="size-4" />
                                 站点页账号
@@ -2616,7 +2691,7 @@ function SiteChannelDialog({
                         ) : null}
                     </div>
                 </div>
-            </DialogHeader>
+            </header>
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
                 {resolvedAccount ? (
@@ -2627,7 +2702,7 @@ function SiteChannelDialog({
                             account={resolvedAccount}
                             jumpRequest={jumpRequest}
                             onJumpHandled={onJumpHandled}
-                            onNavigateToChannel={onNavigateToChannel}
+                            onNavigateToChannel={(channelId) => closeAndNavigate(() => onNavigateToChannel(channelId))}
                         />
                     </div>
                 ) : (
@@ -2661,30 +2736,21 @@ function SiteCard({
     onNavigateToSiteAccount: (accountId: number) => void;
     onNavigateToChannel: (channelId: number) => void;
 }) {
-    const [open, setOpen] = useState(false);
     const summary = useMemo(() => collectSiteSummary(card), [card]);
-    const isListLayout = layout === 'list';
-
-    const closeDialogAndNavigate = useCallback((navigate: () => void) => {
-        setOpen(false);
-        window.requestAnimationFrame(() => {
-            navigate();
-        });
-    }, []);
-
-    useEffect(() => {
-        if (!jumpRequest) return;
-        if (jumpRequest.target.siteId !== card.site_id) return;
-        if (jumpRequest.target.kind === 'site-channel-card' || open) return;
-
-        const frameId = window.requestAnimationFrame(() => {
-            setOpen(true);
-        });
-        return () => window.cancelAnimationFrame(frameId);
-    }, [jumpRequest, card.site_id, open]);
+    const runtime = useMemo(() => collectSiteRuntimeSummary(card), [card]);
+    const tCard = useTranslations('siteChannel.card');
+    const tMetrics = useTranslations('siteChannel.card.metrics');
+    const locale = useSettingStore((s) => s.locale);
+    const lastUsedText = runtime.lastRequestAt
+        ? dayjs(runtime.lastRequestAt * 1000).locale(DAYJS_LOCALE_MAP[locale]).fromNow()
+        : null;
+    const totalRequestsFmt = formatCount(runtime.totalRequests).formatted;
+    const successFmt = formatCount(runtime.successCount).formatted;
+    const failureFmt = formatCount(runtime.failureCount).formatted;
+    const costFmt = formatMoney(runtime.totalCost).formatted;
 
     return (
-        <>
+        <MorphingDialog>
             <div
                 ref={(node) => registerCardRef(card.site_id, node)}
                 className={cn(
@@ -2692,96 +2758,153 @@ function SiteCard({
                     highlighted && 'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
                 )}
             >
-                <article
-                    className={cn(
-                        'flex h-full flex-col gap-4 rounded-3xl border border-border/70 bg-card p-4 transition hover:border-primary/20 hover:bg-card/90',
-                        isListLayout && 'md:flex-row md:items-stretch',
-                    )}
-                    style={{
-                        contentVisibility: 'auto',
-                        containIntrinsicSize: isListLayout ? '200px' : '260px',
-                    }}
-                >
-                    <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setOpen(true)}
-                        onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                setOpen(true);
-                            }
+                <MorphingDialogTrigger className="w-full">
+                    <article
+                        className="flex h-full w-full flex-col gap-4 rounded-3xl border border-border/70 bg-card p-4 text-left transition hover:border-primary/20 hover:bg-card/90"
+                        style={{
+                            contentVisibility: 'auto',
+                            containIntrinsicSize: '280px',
                         }}
-                        className={cn('flex min-w-0 flex-1 flex-col gap-4 text-left outline-none', isListLayout && 'md:max-w-[24rem]')}
                     >
-                        <header className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                    <span
-                                        className={cn(
-                                            'inline-block size-2 shrink-0 rounded-full',
-                                            card.enabled
-                                                ? 'bg-emerald-500'
-                                                : 'bg-destructive',
-                                        )}
-                                        title={card.enabled ? '启用' : '停用'}
-                                    />
-                                    <div className="truncate text-lg font-bold">{card.site_name}</div>
-                                </div>
-                                <div className="mt-1 flex flex-wrap gap-2">
-                                    <Badge variant="outline" className="h-6 px-2 text-[11px]">
-                                        {platformLabel(card.platform)}
+                        <header className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                                <span
+                                    className={cn(
+                                        'inline-block size-2 shrink-0 rounded-full',
+                                        card.enabled
+                                            ? 'bg-emerald-500'
+                                            : 'bg-destructive',
+                                    )}
+                                    title={tCard(card.enabled ? 'statusEnabled' : 'statusDisabled')}
+                                />
+                                <div className="truncate text-lg font-bold">{card.site_name}</div>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                <Badge variant="outline" className="h-6 px-2 text-[11px]">
+                                    {platformLabel(card.platform)}
+                                </Badge>
+                                {runtime.maskedPendingKeys > 0 ? (
+                                    <Badge variant="outline" className="h-6 border-amber-500/30 bg-amber-500/10 px-2 text-[11px] text-amber-700 dark:text-amber-300">
+                                        {tCard('maskedPending', { n: runtime.maskedPendingKeys })}
                                     </Badge>
-                                </div>
+                                ) : null}
                             </div>
                         </header>
 
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1"><FolderTree className="size-3.5" />{summary.groupCount} 分组</span>
-                            <span className="flex items-center gap-1"><Sparkles className="size-3.5" />{summary.modelCount} 模型</span>
-                            <span className="flex items-center gap-1"><KeyRound className="size-3.5" />{summary.enabledKeys}/{summary.totalKeys} Key</span>
-                            <span className="flex items-center gap-1"><UserRound className="size-3.5" />{card.account_count} 账号</span>
-                        </div>
+                        <dl className={cn('grid gap-2', layout === 'list' ? 'grid-cols-5' : 'grid-cols-2')}>
+                            {layout === 'list' ? (
+                                <div className="rounded-2xl border border-border/70 bg-background/80 p-2">
+                                    <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                        <MessageSquare className="size-3.5 text-primary" />
+                                        {tMetrics('totalRequests')}
+                                    </dt>
+                                    <dd className="text-sm font-semibold tabular-nums">
+                                        {totalRequestsFmt.value}
+                                        {totalRequestsFmt.unit && (
+                                            <span className="ml-1 text-xs font-normal text-muted-foreground">{totalRequestsFmt.unit}</span>
+                                        )}
+                                    </dd>
+                                </div>
+                            ) : null}
+                            <div className="rounded-2xl border border-border/70 bg-background/80 p-2">
+                                <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                    <CheckCircle2 className="size-3.5 text-emerald-500" />
+                                    {tMetrics('successRequests')}
+                                </dt>
+                                <dd className="text-sm font-semibold tabular-nums">
+                                    {successFmt.value}
+                                    {successFmt.unit && (
+                                        <span className="ml-1 text-xs font-normal text-muted-foreground">{successFmt.unit}</span>
+                                    )}
+                                </dd>
+                            </div>
+                            <div className="rounded-2xl border border-border/70 bg-background/80 p-2">
+                                <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                    <XCircle className="size-3.5 text-destructive" />
+                                    {tMetrics('failedRequests')}
+                                </dt>
+                                <dd className="text-sm font-semibold tabular-nums">
+                                    {failureFmt.value}
+                                    {failureFmt.unit && (
+                                        <span className="ml-1 text-xs font-normal text-muted-foreground">{failureFmt.unit}</span>
+                                    )}
+                                </dd>
+                            </div>
+                            <div className="rounded-2xl border border-border/70 bg-background/80 p-2">
+                                <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                    <DollarSign className="size-3.5 text-primary" />
+                                    {tMetrics('totalCost')}
+                                </dt>
+                                <dd className="text-sm font-semibold tabular-nums">
+                                    {costFmt.value}
+                                    {costFmt.unit && (
+                                        <span className="ml-1 text-xs font-normal text-muted-foreground">{costFmt.unit}</span>
+                                    )}
+                                </dd>
+                            </div>
+                            <div className="rounded-2xl border border-border/70 bg-background/80 p-2">
+                                <dt className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                                    <Clock className="size-3.5 text-primary" />
+                                    {tMetrics('lastRequestAt')}
+                                </dt>
+                                <dd className="text-sm font-semibold tabular-nums">
+                                    {lastUsedText ?? <span className="text-muted-foreground">—</span>}
+                                </dd>
+                            </div>
+                        </dl>
 
-                        <div className={cn('space-y-2', isListLayout ? 'md:min-w-[18rem] md:max-w-[22rem]' : '')}>
-                        <div className="text-xs font-medium text-muted-foreground">端点格式分布</div>
-                        <div className="flex flex-wrap gap-2">
+                        {summary.routeCounts.size > 0 ? (
+                            <div className="flex flex-wrap gap-2">
                                 {SITE_ROUTE_DISPLAY_ORDER.filter((routeType) => (summary.routeCounts.get(routeType) ?? 0) > 0).map((routeType) => (
-                                    <Badge key={routeType} variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(routeType))}>
-                                        {routeTypeLabel(routeType)}
+                                    <Badge key={routeType} variant="outline" className={cn('h-6 shrink-0 px-2 text-[11px]', getRouteTypeTone(routeType))}>
+                                        {SHORT_ROUTE_LABEL[routeType] ?? routeTypeLabel(routeType)}
                                         <span className="ml-1">{summary.routeCounts.get(routeType)}</span>
                                     </Badge>
                                 ))}
-                                {summary.routeCounts.size === 0 ? (
-                                    <span className="text-xs text-muted-foreground">暂无模型分布</span>
-                                ) : null}
                             </div>
-                        </div>
-                    </div>
-
-                </article>
+                        ) : (
+                            <div className="text-xs text-muted-foreground">{tCard('noRouteDistribution')}</div>
+                        )}
+                    </article>
+                </MorphingDialogTrigger>
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
-                {open ? (
-                    <DialogContent className="max-w-[min(96vw,92rem)] w-[min(96vw,92rem)] rounded-[2rem] p-0 sm:max-w-[min(96vw,92rem)]">
-                        <SiteChannelDialog
-                            card={card}
-                            jumpRequest={jumpRequest?.target.siteId === card.site_id ? jumpRequest : null}
-                            onJumpHandled={onJumpHandled}
-                            onNavigateToSite={() => closeDialogAndNavigate(onNavigateToSite)}
-                            onNavigateToSiteAccount={(accountId) =>
-                                closeDialogAndNavigate(() => onNavigateToSiteAccount(accountId))
-                            }
-                            onNavigateToChannel={(channelId) => {
-                                closeDialogAndNavigate(() => onNavigateToChannel(channelId));
-                            }}
-                        />
-                    </DialogContent>
-                ) : null}
-            </Dialog>
-        </>
+            <MorphingDialogContainer>
+                <MorphingDialogContent className="max-w-[min(96vw,92rem)] w-[min(96vw,92rem)] overflow-hidden rounded-[2rem] bg-card max-h-[90vh]">
+                    <SiteChannelDialog
+                        card={card}
+                        jumpRequest={jumpRequest?.target.siteId === card.site_id ? jumpRequest : null}
+                        onJumpHandled={onJumpHandled}
+                        onNavigateToSite={onNavigateToSite}
+                        onNavigateToSiteAccount={onNavigateToSiteAccount}
+                        onNavigateToChannel={onNavigateToChannel}
+                    />
+                </MorphingDialogContent>
+            </MorphingDialogContainer>
+
+            <SiteCardJumpWatcher jumpRequest={jumpRequest} siteId={card.site_id} />
+        </MorphingDialog>
     );
+}
+
+function SiteCardJumpWatcher({
+    jumpRequest,
+    siteId,
+}: {
+    jumpRequest: SiteChannelPendingJump | null;
+    siteId: number;
+}) {
+    const { isOpen, setIsOpen } = useMorphingDialog();
+
+    useEffect(() => {
+        if (!jumpRequest) return;
+        if (jumpRequest.target.siteId !== siteId) return;
+        if (jumpRequest.target.kind === 'site-channel-card' || isOpen) return;
+        const frameId = window.requestAnimationFrame(() => setIsOpen(true));
+        return () => window.cancelAnimationFrame(frameId);
+    }, [jumpRequest, siteId, isOpen, setIsOpen]);
+
+    return null;
 }
 
 export function SiteChannelSection({
