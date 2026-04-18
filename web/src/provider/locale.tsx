@@ -14,12 +14,19 @@ const messages: Record<Locale, typeof zh_hansMessages> = {
     en: enMessages,
 };
 
+// next-intl 要求 BCP 47 标签（连字符 + 大小写），store 里的下划线形式需要映射。
+const bcp47: Record<Locale, string> = {
+    zh_hans: 'zh-Hans',
+    zh_hant: 'zh-Hant',
+    en: 'en',
+};
+
 export function LocaleProvider({ children }: { children: ReactNode }) {
     const { locale } = useSettingStore();
 
     return (
         <NextIntlClientProvider
-            locale={locale}
+            locale={bcp47[locale]}
             messages={messages[locale]}
             timeZone="Asia/Shanghai"
         >
