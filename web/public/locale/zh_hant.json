@@ -101,35 +101,23 @@
             "totalCost": "消耗費用",
             "noData": "無數據"
         },
-        "total": {
-            "requestStats": "請求統計",
-            "totalStats": "全部統計",
-            "inputStats": "輸入統計",
-            "outputStats": "輸出統計",
-            "requestCount": "請求次數",
-            "timeConsumed": "消耗時間",
-            "totalToken": "消耗 Token",
-            "totalCost": "消耗費用",
-            "inputTokens": "輸入 Tokens",
-            "inputCost": "輸入費用",
-            "outputTokens": "輸出 Tokens",
-            "outputCost": "輸出費用"
-        },
-        "chart": {
-            "title": "趨勢",
-            "totalRequests": "請求次數",
-            "totalCost": "消費金額",
-            "totalTokens": "Tokens 消耗",
-            "timePeriod": "時間週期",
-            "metricType": {
-                "cost": "金額",
-                "count": "次數",
-                "tokens": "Tokens"
+        "summary": {
+            "periods": {
+                "today": "今日",
+                "last7Days": "7 天",
+                "last30Days": "30 天",
+                "allTime": "累計"
             },
-            "period": {
-                "today": "今天",
-                "last7Days": "7天",
-                "last30Days": "30天"
+            "headline": {
+                "today": "今日花費",
+                "last7Days": "近 7 天花費",
+                "last30Days": "近 30 天花費",
+                "allTime": "累計總花費"
+            },
+            "metrics": {
+                "requests": "請求",
+                "tokens": "Token",
+                "waitTime": "耗時"
             }
         },
         "rank": {

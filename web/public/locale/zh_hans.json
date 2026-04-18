@@ -101,35 +101,23 @@
             "totalCost": "消耗费用",
             "noData": "无数据"
         },
-        "total": {
-            "requestStats": "请求统计",
-            "totalStats": "全部统计",
-            "inputStats": "输入统计",
-            "outputStats": "输出统计",
-            "requestCount": "请求次数",
-            "timeConsumed": "消耗时间",
-            "totalToken": "消耗 Token",
-            "totalCost": "消耗费用",
-            "inputTokens": "输入 Tokens",
-            "inputCost": "输入费用",
-            "outputTokens": "输出 Tokens",
-            "outputCost": "输出费用"
-        },
-        "chart": {
-            "title": "趋势",
-            "totalRequests": "请求次数",
-            "totalCost": "消费金额",
-            "totalTokens": "Tokens 消耗",
-            "timePeriod": "时间周期",
-            "metricType": {
-                "cost": "金额",
-                "count": "次数",
-                "tokens": "Tokens"
+        "summary": {
+            "periods": {
+                "today": "今日",
+                "last7Days": "7 天",
+                "last30Days": "30 天",
+                "allTime": "累计"
             },
-            "period": {
-                "today": "今天",
-                "last7Days": "7天",
-                "last30Days": "30天"
+            "headline": {
+                "today": "今日花费",
+                "last7Days": "近 7 天花费",
+                "last30Days": "近 30 天花费",
+                "allTime": "累计总花费"
+            },
+            "metrics": {
+                "requests": "请求",
+                "tokens": "Token",
+                "waitTime": "耗时"
             }
         },
         "rank": {

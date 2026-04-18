@@ -101,35 +101,23 @@
             "totalCost": "Total Cost",
             "noData": "No Data"
         },
-        "total": {
-            "requestStats": "Request Stats",
-            "totalStats": "Total Stats",
-            "inputStats": "Input Stats",
-            "outputStats": "Output Stats",
-            "requestCount": "Requests",
-            "timeConsumed": "Time Consumed",
-            "totalToken": "Tokens Used",
-            "totalCost": "Total Cost",
-            "inputTokens": "Input Tokens",
-            "inputCost": "Input Cost",
-            "outputTokens": "Output Tokens",
-            "outputCost": "Output Cost"
-        },
-        "chart": {
-            "title": "Trend",
-            "totalRequests": "Total Requests",
-            "totalCost": "Total Cost",
-            "totalTokens": "Total Tokens",
-            "timePeriod": "Time Period",
-            "metricType": {
-                "cost": "Cost",
-                "count": "Count",
-                "tokens": "Tokens"
-            },
-            "period": {
+        "summary": {
+            "periods": {
                 "today": "Today",
-                "last7Days": "7 Days",
-                "last30Days": "30 Days"
+                "last7Days": "7 days",
+                "last30Days": "30 days",
+                "allTime": "All time"
+            },
+            "headline": {
+                "today": "Today's cost",
+                "last7Days": "Last 7 days",
+                "last30Days": "Last 30 days",
+                "allTime": "Total cost"
+            },
+            "metrics": {
+                "requests": "Requests",
+                "tokens": "Tokens",
+                "waitTime": "Latency"
             }
         },
         "rank": {
