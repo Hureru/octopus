@@ -111,7 +111,7 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
 
-	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken)
+	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, userID)
 	prices, priceErr := fetchPricing(ctx, siteRecord, account, accessToken, groups)
 	if priceErr != nil {
 		log.Warnf("site pricing fetch skipped (account=%d): %v", account.ID, priceErr)
