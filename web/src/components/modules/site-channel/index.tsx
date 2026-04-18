@@ -80,6 +80,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui
 import { toast } from '@/components/common/Toast';
 import { cn, formatCount, formatMoney } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
+import { useMasonryColumns } from '@/lib/use-masonry-columns';
 import { useSettingStore } from '@/stores/setting';
 import {
     type SiteChannelAccount,
@@ -129,7 +130,7 @@ import {
     routeTypeLabel,
     summarizeHistory,
 } from './utils';
-import { useJumpStore, type PendingJump, type SiteChannelJumpTarget, isSiteChannelJumpTarget } from '@/stores/jump';
+import { useJumpStore, type JumpTarget, type PendingJump, type SiteChannelJumpTarget, isSiteChannelJumpTarget } from '@/stores/jump';
 import { useEnableSiteAccount } from '@/api/endpoints/site';
 import {
     DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES,
@@ -2564,7 +2565,7 @@ function SiteChannelDialog({
 
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 space-y-2">
-                        <MorphingDialogTitle className="flex flex-wrap items-center gap-2 text-xl sm:text-2xl">
+                        <MorphingDialogTitle className="flex flex-wrap items-center gap-2 text-xl font-semibold sm:text-2xl">
                             <span className="truncate">{card.site_name}</span>
                             <Badge variant="outline" className="h-6 px-2 text-[11px]">
                                 {platformLabel(card.platform)}
@@ -2870,7 +2871,7 @@ function SiteCard({
             </div>
 
             <MorphingDialogContainer>
-                <MorphingDialogContent className="max-w-[min(96vw,92rem)] w-[min(96vw,92rem)] overflow-hidden rounded-[2rem] bg-card max-h-[90vh]">
+                <MorphingDialogContent className="max-w-[min(96vw,92rem)] w-[min(96vw,92rem)] overflow-hidden rounded-[2rem] bg-background max-h-[90vh]">
                     <SiteChannelDialog
                         card={card}
                         jumpRequest={jumpRequest?.target.siteId === card.site_id ? jumpRequest : null}
@@ -2907,6 +2908,45 @@ function SiteCardJumpWatcher({
     return null;
 }
 
+export function SiteChannelCompletionAction() {
+    const { data } = useSiteChannelList();
+    const [completionDialogOpen, setCompletionDialogOpen] = useState(false);
+
+    const pendingCompletionSites = useMemo(
+        () => collectPendingCompletionSites(data ?? []),
+        [data],
+    );
+    const totalPendingCompletionCount = useMemo(
+        () => pendingCompletionSites.reduce((sum, site) => sum + site.pending_count, 0),
+        [pendingCompletionSites],
+    );
+    const effectiveCompletionDialogOpen = completionDialogOpen && totalPendingCompletionCount > 0;
+
+    if (totalPendingCompletionCount === 0) return null;
+
+    return (
+        <>
+            <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-2xl px-3"
+                onClick={() => setCompletionDialogOpen(true)}
+            >
+                <KeyRound className="size-4 text-primary" />
+                统一补全 Key
+                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                    {totalPendingCompletionCount}
+                </Badge>
+            </Button>
+            <UnifiedCompletionDialog
+                open={effectiveCompletionDialogOpen}
+                onOpenChange={setCompletionDialogOpen}
+                sites={pendingCompletionSites}
+            />
+        </>
+    );
+}
+
 export function SiteChannelSection({
     searchTerm,
     filter,
@@ -2926,7 +2966,6 @@ export function SiteChannelSection({
     const pendingJump = useJumpStore((state) => state.pending);
     const clearPending = useJumpStore((state) => state.clearPending);
     const requestJump = useJumpStore((state) => state.requestJump);
-    const [completionDialogOpen, setCompletionDialogOpen] = useState(false);
     const [highlightedSiteId, setHighlightedSiteId] = useState<number | null>(null);
     const siteCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
@@ -2968,16 +3007,6 @@ export function SiteChannelSection({
             });
     }, [data, searchTerm, filter, sortField, sortOrder, forcedSiteId]);
 
-    const pendingCompletionSites = useMemo(
-        () => collectPendingCompletionSites(data ?? []),
-        [data],
-    );
-    const totalPendingCompletionCount = useMemo(
-        () => pendingCompletionSites.reduce((sum, site) => sum + site.pending_count, 0),
-        [pendingCompletionSites],
-    );
-    const effectiveCompletionDialogOpen = completionDialogOpen && totalPendingCompletionCount > 0;
-
     useEffect(() => {
         if (!pendingSiteChannelJump) return;
         const node = siteCardRefs.current.get(pendingSiteChannelJump.target.siteId);
@@ -3002,16 +3031,10 @@ export function SiteChannelSection({
 
     if (isLoading) {
         return (
-            <section className="space-y-3">
-                <div className="px-1">
-                    <div className="text-sm font-semibold">站点渠道</div>
-                    <div className="text-xs text-muted-foreground">正在加载站点投影的渠道聚合视图</div>
-                </div>
-                <div className={cn('grid gap-4', layout === 'list' ? 'grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-3')}>
-                    {Array.from({ length: layout === 'list' ? 2 : 3 }).map((_, index) => (
-                        <div key={index} className="h-56 animate-pulse rounded-3xl border border-border/70 bg-muted/40" />
-                    ))}
-                </div>
+            <section className={cn('grid gap-4', layout === 'list' ? 'grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-3')}>
+                {Array.from({ length: layout === 'list' ? 2 : 3 }).map((_, index) => (
+                    <div key={index} className="h-56 animate-pulse rounded-3xl border border-border/70 bg-muted/40" />
+                ))}
             </section>
         );
     }
@@ -3028,59 +3051,99 @@ export function SiteChannelSection({
         return null;
     }
 
-    return (
-        <>
-            <section className="space-y-3">
-                <div className="flex flex-col gap-3 px-1 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                        <div className="text-sm font-semibold">站点渠道</div>
-                        <div className="text-xs text-muted-foreground">
-                            统一查看站点投影的分组、模型端点格式、请求历史和模型禁用状态
-                        </div>
-                    </div>
-                    {totalPendingCompletionCount > 0 ? (
-                        <Button
-                            type="button"
-                            variant="outline"
-                            className="h-9 rounded-2xl px-3"
-                            onClick={() => setCompletionDialogOpen(true)}
-                        >
-                            <KeyRound className="size-4 text-primary" />
-                            统一补全 Key
-                            <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                {totalPendingCompletionCount}
-                            </Badge>
-                        </Button>
-                    ) : null}
-                </div>
+    return <SiteChannelGrid
+        cards={cards}
+        layout={layout}
+        pendingSiteChannelJump={pendingSiteChannelJump}
+        highlightedSiteId={highlightedSiteId}
+        registerCardRef={registerCardRef}
+        clearPending={clearPending}
+        requestJump={requestJump}
+    />;
+}
 
-                <div className={cn('grid gap-4', layout === 'list' ? 'grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-3')}>
-                    {cards.map((card) => (
-                        <SiteCard
-                            key={card.site_id}
-                            card={card}
-                            layout={layout}
-                            jumpRequest={pendingSiteChannelJump?.target.siteId === card.site_id ? pendingSiteChannelJump : null}
-                            highlighted={highlightedSiteId === card.site_id}
-                            registerCardRef={registerCardRef}
-                            onJumpHandled={clearPending}
-                            onNavigateToSite={() => requestJump({ kind: 'site-card', siteId: card.site_id })}
-                            onNavigateToSiteAccount={(accountId) =>
-                                requestJump({ kind: 'site-account', siteId: card.site_id, accountId })
-                            }
-                            onNavigateToChannel={(channelId) =>
-                                requestJump({ kind: 'channel-card', channelId })
-                            }
-                        />
+function SiteChannelGrid({
+    cards,
+    layout,
+    pendingSiteChannelJump,
+    highlightedSiteId,
+    registerCardRef,
+    clearPending,
+    requestJump,
+}: {
+    cards: SiteChannelCard[];
+    layout: 'grid' | 'list';
+    pendingSiteChannelJump: SiteChannelPendingJump | null;
+    highlightedSiteId: number | null;
+    registerCardRef: (siteId: number, node: HTMLDivElement | null) => void;
+    clearPending: (requestId?: number) => void;
+    requestJump: (target: JumpTarget) => void;
+}) {
+    const columnCompute = useCallback((width: number) => {
+        if (layout === 'list') return 1;
+        const MIN_CARD_WIDTH = 320;
+        const GUTTER = 16;
+        const cols = Math.floor((width + GUTTER) / (MIN_CARD_WIDTH + GUTTER));
+        return Math.max(1, Math.min(6, cols));
+    }, [layout]);
+
+    const {
+        setContainerNode,
+        measureItem,
+        columns,
+        columnCount,
+    } = useMasonryColumns({
+        items: cards,
+        getId: (card) => card.site_id,
+        fallbackHeight: 260,
+        computeColumnCount: columnCompute,
+    });
+
+    const renderCard = (card: SiteChannelCard) => (
+        <SiteCard
+            card={card}
+            layout={layout}
+            jumpRequest={pendingSiteChannelJump?.target.siteId === card.site_id ? pendingSiteChannelJump : null}
+            highlighted={highlightedSiteId === card.site_id}
+            registerCardRef={registerCardRef}
+            onJumpHandled={clearPending}
+            onNavigateToSite={() => requestJump({ kind: 'site-card', siteId: card.site_id })}
+            onNavigateToSiteAccount={(accountId) =>
+                requestJump({ kind: 'site-account', siteId: card.site_id, accountId })
+            }
+            onNavigateToChannel={(channelId) =>
+                requestJump({ kind: 'channel-card', channelId })
+            }
+        />
+    );
+
+    if (columnCount === 1) {
+        return (
+            <section ref={setContainerNode} className="space-y-4">
+                {cards.map((card) => (
+                    <div key={card.site_id} ref={(node) => measureItem(card.site_id, node)}>
+                        {renderCard(card)}
+                    </div>
+                ))}
+            </section>
+        );
+    }
+
+    return (
+        <section
+            ref={setContainerNode}
+            className="grid items-start gap-4"
+            style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+        >
+            {columns.map((col, index) => (
+                <div key={index} className="space-y-4">
+                    {col.map((card) => (
+                        <div key={card.site_id} ref={(node) => measureItem(card.site_id, node)}>
+                            {renderCard(card)}
+                        </div>
                     ))}
                 </div>
-            </section>
-
-            <UnifiedCompletionDialog
-                open={effectiveCompletionDialogOpen}
-                onOpenChange={setCompletionDialogOpen}
-                sites={pendingCompletionSites}
-            />
-        </>
+            ))}
+        </section>
     );
 }
