@@ -61,13 +61,20 @@ func fetchManagementQuotaBalance(ctx context.Context, siteRecord *model.Site, ac
 	payload, _, err := anyRouterRequestJSONWithCookies(ctx, siteRecord, http.MethodGet, requestURL, nil,
 		anyRouterAuthHeaders(accessToken, userID), account)
 
-	// When the caller passed in a trusted userID, trust attempt 1. Only probe if we had to discover userID ourselves.
-	if !knownUserID && !isValidUserSelfPayload(payload, err) {
+	// Attempt 2: cookie-based fallback with the same userID. AnyRouter often stores the access_token
+	// as a raw session cookie value, so `Authorization: Bearer <cookie>` fails and only cookie auth works.
+	// This runs even when knownUserID=true because the userID stays stable and cookie auth is how
+	// shielded deployments expect requests to arrive.
+	if !isValidUserSelfPayload(payload, err) {
 		cookiePayload, _, cookieErr := anyRouterFetchUserSelfByCookie(ctx, siteRecord, account, accessToken, userID)
 		if isValidUserSelfPayload(cookiePayload, cookieErr) {
 			payload = cookiePayload
 			err = nil
 		} else if userID > 0 {
+			// Attempt 3: probe for an alternate userID (e.g., the real gob-encoded user inside the
+			// session cookie) when the passed-in userID doesn't match reality. Safe for multi-account:
+			// anyRouterProbeAlternateUserIDByCookie returns 0 when the probed ID matches the current
+			// one, and it only returns IDs that genuinely validate against the session.
 			if alt, _ := anyRouterProbeAlternateUserIDByCookie(ctx, siteRecord, account, accessToken, userID); alt > 0 {
 				altPayload, _, altErr := anyRouterRequestJSONWithCookies(ctx, siteRecord, http.MethodGet, requestURL, nil,
 					anyRouterAuthHeaders(accessToken, alt), account)
@@ -75,6 +82,13 @@ func fetchManagementQuotaBalance(ctx context.Context, siteRecord *model.Site, ac
 					payload = altPayload
 					err = nil
 					rememberManagedPlatformUserID(alt, account)
+				} else {
+					altCookiePayload, _, altCookieErr := anyRouterFetchUserSelfByCookie(ctx, siteRecord, account, accessToken, alt)
+					if isValidUserSelfPayload(altCookiePayload, altCookieErr) {
+						payload = altCookiePayload
+						err = nil
+						rememberManagedPlatformUserID(alt, account)
+					}
 				}
 			}
 		}
