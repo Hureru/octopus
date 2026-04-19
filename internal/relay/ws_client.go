@@ -215,7 +215,7 @@ func processWSResponseCreate(
 	}
 
 	requestModel = executionRequest.Model
-	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky)
+	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky, bodyBytes)
 	if err != nil {
 		status := 404
 		code := "model_not_found"
@@ -249,7 +249,7 @@ func processWSResponseCreate(
 			apiKeyID, requestModel, failedPreviousResponseID, result.ResetConversation)
 		balancer.DeleteSticky(apiKeyID, requestModel)
 		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky)
+		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky, bodyBytes)
 		if replayErr == nil {
 			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 			replayReq.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
@@ -408,6 +408,7 @@ func newWSRelayRequest(
 	executionRequest *transformerModel.InternalLLMRequest,
 	metricsRequest *transformerModel.InternalLLMRequest,
 	preferredSticky *balancer.SessionEntry,
+	rawBody []byte,
 ) (*relayRequest, *dbmodel.Group, error) {
 	group, err := op.GroupGetEnabledMap(requestModel, ctx)
 	if err != nil {
@@ -424,7 +425,7 @@ func newWSRelayRequest(
 		ctx:             ctx,
 		inAdapter:       inAdapter,
 		internalRequest: executionRequest,
-		metrics:         NewRelayMetrics(apiKeyID, requestModel, metricsRequest),
+		metrics:         NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest),
 		apiKeyID:        apiKeyID,
 		requestModel:    requestModel,
 		iter:            iter,

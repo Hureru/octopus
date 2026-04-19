@@ -25,6 +25,7 @@ type RelayMetrics struct {
 	FirstTokenTime time.Time
 
 	// 请求和响应内容
+	RawRequest       []byte
 	InternalRequest  *transformerModel.InternalLLMRequest
 	InternalResponse *transformerModel.InternalLLMResponse
 
@@ -42,11 +43,12 @@ type RelayMetrics struct {
 	CacheWriteTokens     *int
 }
 
-func NewRelayMetrics(apiKeyID int, requestModel string, req *transformerModel.InternalLLMRequest) *RelayMetrics {
+func NewRelayMetrics(apiKeyID int, requestModel string, rawBody []byte, req *transformerModel.InternalLLMRequest) *RelayMetrics {
 	return &RelayMetrics{
 		APIKeyID:        apiKeyID,
 		RequestModel:    requestModel,
 		StartTime:       time.Now(),
+		RawRequest:      rawBody,
 		InternalRequest: req,
 	}
 }
@@ -215,8 +217,10 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 	relayLog.WSMode = m.WSMode
 	relayLog.WSRecovery = m.WSRecovery
 
-	// 请求内容
-	if m.InternalRequest != nil {
+	// 请求内容：优先原始请求体，保留 provider 专有字段（如 Anthropic cache_control）
+	if len(m.RawRequest) > 0 {
+		relayLog.RequestContent = string(m.RawRequest)
+	} else if m.InternalRequest != nil {
 		if reqJSON, jsonErr := json.Marshal(m.InternalRequest); jsonErr == nil {
 			relayLog.RequestContent = string(reqJSON)
 		}

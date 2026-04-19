@@ -116,7 +116,7 @@ func TestHandlerFallsBackToNextChannelAfterFirstFailure(t *testing.T) {
 }
 
 func TestRelayMetricsUsesResponseModelForCostLookup(t *testing.T) {
-	metrics := NewRelayMetrics(0, "alias-model", &transformerModel.InternalLLMRequest{Model: "alias-model"})
+	metrics := NewRelayMetrics(0, "alias-model", nil, &transformerModel.InternalLLMRequest{Model: "alias-model"})
 	metrics.StartTime = time.Now()
 
 	metrics.SetInternalResponse(&transformerModel.InternalLLMResponse{
@@ -139,7 +139,7 @@ func TestRelayMetricsUsesResponseModelForCostLookup(t *testing.T) {
 }
 
 func TestRelayMetricsCapturesOpenAICompatibleInputBreakdown(t *testing.T) {
-	metrics := NewRelayMetrics(0, "alias-model", &transformerModel.InternalLLMRequest{Model: "alias-model"})
+	metrics := NewRelayMetrics(0, "alias-model", nil, &transformerModel.InternalLLMRequest{Model: "alias-model"})
 	payload := []byte(`{"model":"gpt-4o-mini","input":"hello world"}`)
 	metrics.SetTransportRequestPayload(payload, "gpt-4o-mini")
 	metrics.SetInternalResponse(&transformerModel.InternalLLMResponse{
@@ -168,7 +168,7 @@ func TestRelayMetricsCapturesOpenAICompatibleInputBreakdown(t *testing.T) {
 }
 
 func TestRelayMetricsCapturesAnthropicInputBreakdown(t *testing.T) {
-	metrics := NewRelayMetrics(0, "alias-model", &transformerModel.InternalLLMRequest{Model: "alias-model"})
+	metrics := NewRelayMetrics(0, "alias-model", nil, &transformerModel.InternalLLMRequest{Model: "alias-model"})
 	metrics.SetInternalResponse(&transformerModel.InternalLLMResponse{
 		Model: "claude-sonnet-4-5",
 		Usage: &transformerModel.Usage{
@@ -351,7 +351,7 @@ func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T)
 		c:               c,
 		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
 		internalRequest: internalReq,
-		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		metrics:         NewRelayMetrics(1, "gpt-4o", nil, internalReq),
 		apiKeyID:        1,
 		requestModel:    "gpt-4o",
 	}
@@ -427,7 +427,7 @@ func TestForwardViaWSReconnectsContinuationAfterReadFailureBeforeFirstEvent(t *t
 		c:               c,
 		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
 		internalRequest: internalReq,
-		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		metrics:         NewRelayMetrics(1, "gpt-4o", nil, internalReq),
 		apiKeyID:        1,
 		requestModel:    "gpt-4o",
 	}
@@ -495,7 +495,7 @@ func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
 		c:               c,
 		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
 		internalRequest: internalReq,
-		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		metrics:         NewRelayMetrics(1, "gpt-4o", nil, internalReq),
 		apiKeyID:        1,
 		requestModel:    "gpt-4o",
 	}
@@ -568,7 +568,7 @@ func TestForwardViaWSPreservesClientUserAgentHeaders(t *testing.T) {
 		c:               c,
 		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
 		internalRequest: internalReq,
-		metrics:         NewRelayMetrics(1, "gpt-4o", internalReq),
+		metrics:         NewRelayMetrics(1, "gpt-4o", nil, internalReq),
 		apiKeyID:        1,
 		requestModel:    "gpt-4o",
 	}
