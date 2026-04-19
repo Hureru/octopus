@@ -2,3 +2,7 @@ data
 build
 static/out/
 .vscode
+.claude/
+.codex
+.gocache/
+.impeccable.md
