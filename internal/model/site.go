@@ -107,6 +107,7 @@ type SiteAccount struct {
 	CheckinRandomWindowMinutes int                  `json:"checkin_random_window_minutes" gorm:"default:120"`
 	Balance                    float64              `json:"balance" gorm:"default:0"`
 	BalanceUsed                float64              `json:"balance_used" gorm:"default:0"`
+	TodayIncome                float64              `json:"today_income" gorm:"default:0"`
 	NextAutoCheckinAt          *time.Time           `json:"next_auto_checkin_at"`
 	LastSyncAt                 *time.Time           `json:"last_sync_at"`
 	LastCheckinAt              *time.Time           `json:"last_checkin_at"`

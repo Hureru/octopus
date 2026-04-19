@@ -177,6 +177,7 @@ type SiteSummary = {
   modelCount: number;
   groupCount: number;
   balance: number;
+  todayIncome: number;
   failedAccountCount: number;
   partialAccountCount: number;
   disabledAccountCount: number;
@@ -508,6 +509,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
   let modelCount = 0;
   let groupCount = 0;
   let balance = 0;
+  let todayIncome = 0;
   let failedAccountCount = 0;
   let partialAccountCount = 0;
   let disabledAccountCount = 0;
@@ -518,6 +520,8 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
     modelCount += account.models.length;
     groupCount += account.user_groups.length;
     balance += account.balance;
+    todayIncome +=
+      typeof account.today_income === "number" ? account.today_income : 0;
 
     if (account.enabled) enabledAccountCount += 1;
     else disabledAccountCount += 1;
@@ -536,6 +540,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       modelCount,
       groupCount,
       balance,
+      todayIncome,
       failedAccountCount,
       partialAccountCount,
       disabledAccountCount,
@@ -552,6 +557,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       modelCount,
       groupCount,
       balance,
+      todayIncome,
       failedAccountCount,
       partialAccountCount,
       disabledAccountCount,
@@ -568,6 +574,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       modelCount,
       groupCount,
       balance,
+      todayIncome,
       failedAccountCount,
       partialAccountCount,
       disabledAccountCount,
@@ -584,6 +591,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       modelCount,
       groupCount,
       balance,
+      todayIncome,
       failedAccountCount,
       partialAccountCount,
       disabledAccountCount,
@@ -600,6 +608,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
       modelCount,
       groupCount,
       balance,
+      todayIncome,
       failedAccountCount,
       partialAccountCount,
       disabledAccountCount,
@@ -623,6 +632,7 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
     modelCount,
     groupCount,
     balance,
+    todayIncome,
     failedAccountCount,
     partialAccountCount,
     disabledAccountCount,
@@ -1721,6 +1731,10 @@ export function Site() {
                   <CompactMetric label="Key" value={summary.keyCount} />
                   <CompactMetric label="模型" value={summary.modelCount} />
                   <CompactMetric label="余额" value={formatBalance(summary.balance)} />
+                  <CompactMetric
+                    label="今日收入"
+                    value={formatBalance(summary.todayIncome)}
+                  />
                 </div>
 
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -1943,6 +1957,10 @@ export function Site() {
                                       <CompactMetric
                                         label="余额"
                                         value={formatBalance(account.balance)}
+                                      />
+                                      <CompactMetric
+                                        label="今日收入"
+                                        value={formatBalance(account.today_income)}
                                       />
                                     </div>
 

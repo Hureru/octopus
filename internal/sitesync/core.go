@@ -21,6 +21,7 @@ type syncSnapshot struct {
 	status       model.SiteExecutionStatus
 	balance      float64
 	balanceUsed  float64
+	todayIncome  float64
 	message      string
 }
 

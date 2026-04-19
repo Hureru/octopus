@@ -79,6 +79,7 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 			"last_sync_message": snapshot.message,
 			"balance":           snapshot.balance,
 			"balance_used":      snapshot.balanceUsed,
+			"today_income":      snapshot.todayIncome,
 		}
 		if strings.TrimSpace(snapshot.accessToken) != "" {
 			updatePayload["access_token"] = strings.TrimSpace(snapshot.accessToken)

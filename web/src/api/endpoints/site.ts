@@ -91,6 +91,7 @@ export type SiteAccount = {
   last_checkin_message: string;
   balance: number;
   balance_used: number;
+  today_income: number;
   tokens: SiteToken[];
   user_groups: SiteUserGroup[];
   models: SiteModel[];
@@ -230,6 +231,8 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
       balance: typeof account.balance === "number" ? account.balance : 0,
       balance_used:
         typeof account.balance_used === "number" ? account.balance_used : 0,
+      today_income:
+        typeof account.today_income === "number" ? account.today_income : 0,
       tokens: account.tokens ?? [],
       user_groups: account.user_groups ?? [],
       models: account.models ?? [],
@@ -352,6 +355,7 @@ export function useCreateSiteAccount() {
         | "last_checkin_message"
         | "balance"
         | "balance_used"
+        | "today_income"
       >,
     ) => apiClient.post<SiteAccount>("/api/v1/site/account/create", data),
     onSuccess: () => invalidateSiteQueries(queryClient),

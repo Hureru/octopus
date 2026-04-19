@@ -165,12 +165,12 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	if status == model.SiteExecutionStatusFailed {
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
-	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, firstManagedPlatformUserID(account))
+	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, firstManagedPlatformUserID(account))
 	prices, priceErr := fetchPricing(ctx, siteRecord, account, accessToken, groups)
 	if priceErr != nil {
 		log.Warnf("site pricing fetch skipped (account=%d): %v", account.ID, priceErr)
 	}
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, prices: prices, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, message: buildSyncSnapshotMessage(groupResults)}, nil
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, prices: prices, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: buildSyncSnapshotMessage(groupResults)}, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -245,8 +245,8 @@ func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, acc
 	if status == model.SiteExecutionStatusFailed {
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
-	balance, balanceUsed := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, 0)
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, message: buildSyncSnapshotMessage(groupResults)}, nil
+	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, 0)
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: buildSyncSnapshotMessage(groupResults)}, nil
 }
 
 func syncOfficialPlatform(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
