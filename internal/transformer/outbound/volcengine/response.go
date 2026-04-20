@@ -28,6 +28,8 @@ func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.
 		return nil, fmt.Errorf("request is nil")
 	}
 
+	request.NormalizeMessages()
+
 	// Convert to Responses API request format
 	openaiReq := openai.ConvertToResponsesRequest(request)
 	openaiReq.Metadata = nil // volcengine not supported

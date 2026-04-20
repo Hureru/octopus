@@ -410,6 +410,25 @@ func (r *InternalLLMRequest) ClearHelpFields() {
 	r.Include = nil
 }
 
+// NormalizeMessages applies Message.Normalize to every message in the
+// request. Outbound transformers call this at the top of TransformRequest so
+// that subsequent conversion code can assume messages carry valid, non-empty
+// payloads.
+func (r *InternalLLMRequest) NormalizeMessages() {
+	for i := range r.Messages {
+		r.Messages[i].Normalize()
+	}
+}
+
+// EnforceMessageAlternation rewrites r.Messages so consecutive same-role
+// turns are merged and provider-specific opening requirements are met.
+// Intended to be called by outbound transformers whose upstream enforces
+// strict user/assistant alternation (Anthropic and Gemini). Callers for
+// lax providers (OpenAI) can safely skip this.
+func (r *InternalLLMRequest) EnforceMessageAlternation(provider AlternationProvider) {
+	r.Messages = EnforceAlternation(r.Messages, provider)
+}
+
 func (r *InternalLLMRequest) IsImageGenerationRequest() bool {
 	return len(r.Modalities) > 0 && slices.Contains(r.Modalities, "image")
 }
@@ -585,6 +604,83 @@ func (m *Message) ClearHelpFields() {
 	m.ReasoningSignature = nil
 	m.RedactedThinkingBlocks = nil
 	m.ReasoningBlocks = nil
+}
+
+// Normalize prepares the message for dispatch to upstream providers. It
+// performs two jobs:
+//  1. Drop empty text parts from MultipleContent. Image / audio / file /
+//     tool_use / tool_result / thinking parts are preserved verbatim.
+//  2. If the message ends up with no content-carrying payload at all
+//     (no text, no non-text parts, no tool_calls, no reasoning), insert a
+//     single-space placeholder into Content.Content. This matches
+//     Anthropic's strictest requirement — empty assistant / user messages
+//     elicit a 400 — while remaining harmless for OpenAI and Gemini.
+//
+// Normalize is idempotent and safe to call before every outbound dispatch.
+func (m *Message) Normalize() {
+	if m == nil {
+		return
+	}
+
+	if len(m.Content.MultipleContent) > 0 {
+		filtered := m.Content.MultipleContent[:0]
+		for _, part := range m.Content.MultipleContent {
+			if isEmptyTextPart(part) {
+				continue
+			}
+			filtered = append(filtered, part)
+		}
+		m.Content.MultipleContent = filtered
+	}
+
+	if m.hasAnyPayload() {
+		return
+	}
+
+	space := " "
+	m.Content.Content = &space
+	m.Content.MultipleContent = nil
+}
+
+// hasAnyPayload reports whether the message carries any information that
+// would reach the upstream provider. Used by Normalize to decide whether
+// the single-space placeholder is necessary.
+func (m *Message) hasAnyPayload() bool {
+	if m.Content.Content != nil && *m.Content.Content != "" {
+		return true
+	}
+	if len(m.Content.MultipleContent) > 0 {
+		return true
+	}
+	if len(m.ToolCalls) > 0 {
+		return true
+	}
+	if m.ToolCallID != nil && *m.ToolCallID != "" {
+		return true
+	}
+	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
+		return true
+	}
+	if m.Reasoning != nil && *m.Reasoning != "" {
+		return true
+	}
+	if len(m.ReasoningBlocks) > 0 {
+		return true
+	}
+	if len(m.RedactedThinkingBlocks) > 0 {
+		return true
+	}
+	return false
+}
+
+// isEmptyTextPart reports whether a MessageContentPart is a text-type entry
+// whose Text is nil or empty. Non-text parts always return false so image /
+// audio / file / tool_use payloads are never dropped.
+func isEmptyTextPart(p MessageContentPart) bool {
+	if p.Type != "" && p.Type != "text" {
+		return false
+	}
+	return p.Text == nil || *p.Text == ""
 }
 
 // GetReasoningContent returns the reasoning content from either ReasoningContent or Reasoning field.

@@ -29,6 +29,8 @@ func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.
 		return nil, fmt.Errorf("request is nil")
 	}
 
+	request.NormalizeMessages()
+
 	// Convert to Responses API request format
 	responsesReq := ConvertToResponsesRequest(request)
 

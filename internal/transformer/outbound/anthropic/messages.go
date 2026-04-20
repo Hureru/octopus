@@ -32,6 +32,9 @@ func (o *MessageOutbound) TransformRequest(ctx context.Context, request *model.I
 		return nil, fmt.Errorf("request is nil")
 	}
 
+	request.NormalizeMessages()
+	request.EnforceMessageAlternation(model.AlternationProviderAnthropic)
+
 	// Convert to Anthropic request format
 	anthropicReq := convertToAnthropicRequest(request)
 

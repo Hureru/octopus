@@ -20,6 +20,13 @@ import (
 type MessagesOutbound struct{}
 
 func (o *MessagesOutbound) TransformRequest(ctx context.Context, request *model.InternalLLMRequest, baseUrl, key string) (*http.Request, error) {
+	if request == nil {
+		return nil, fmt.Errorf("request is nil")
+	}
+
+	request.NormalizeMessages()
+	request.EnforceMessageAlternation(model.AlternationProviderGemini)
+
 	// Convert internal request to Gemini format
 	geminiReq := convertLLMToGeminiRequest(request)
 
