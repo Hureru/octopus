@@ -141,6 +141,34 @@ func audioTypeToMimeType(format string) string {
 	}
 }
 
+// collectGeminiSignatures flattens blocks that carry a Gemini thoughtSignature into the order
+// they were produced upstream. It accepts both dedicated signature blocks and thinking blocks
+// that happened to carry one (some SDK variants record them that way).
+func collectGeminiSignatures(blocks []model.ReasoningBlock) []string {
+	out := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Signature == "" {
+			continue
+		}
+		switch b.Kind {
+		case model.ReasoningBlockKindSignature, model.ReasoningBlockKindThinking:
+			out = append(out, b.Signature)
+		}
+	}
+	return out
+}
+
+// nextGeminiSignature pops the next signature string, advancing the caller-managed cursor.
+// Returns false when no more signatures are available for the current assistant turn.
+func nextGeminiSignature(sigs []string, cursor *int) (string, bool) {
+	if cursor == nil || *cursor >= len(sigs) {
+		return "", false
+	}
+	s := sigs[*cursor]
+	*cursor++
+	return s, true
+}
+
 func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiGenerateContentRequest {
 	geminiReq := &model.GeminiGenerateContentRequest{
 		Contents: []*model.GeminiContent{},
@@ -227,11 +255,21 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 				Role:  "model",
 				Parts: []*model.GeminiPart{},
 			}
+			// Gemini 3 requires Part-level thoughtSignature verbatim on multi-turn function
+			// calling. Pull the signatures captured from the upstream response; anything not
+			// tagged Provider="gemini" (e.g. Anthropic signatures) would be rejected and is
+			// therefore dropped.
+			geminiSigs := collectGeminiSignatures(msg.ReasoningBlocksByProvider("gemini"))
+			sigIdx := 0
 			// Handle text content
 			if msg.Content.Content != nil && *msg.Content.Content != "" {
-				content.Parts = append(content.Parts, &model.GeminiPart{
+				part := &model.GeminiPart{
 					Text: *msg.Content.Content,
-				})
+				}
+				if sig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
+					part.ThoughtSignature = sig
+				}
+				content.Parts = append(content.Parts, part)
 			}
 			// Handle tool calls
 			if len(msg.ToolCalls) > 0 {
@@ -240,13 +278,16 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 						log.Warnf("gemini: failed to unmarshal tool call arguments for %s: %v", toolCall.Function.Name, err)
 					}
-					content.Parts = append(content.Parts, &model.GeminiPart{
+					part := &model.GeminiPart{
 						FunctionCall: &model.GeminiFunctionCall{
 							Name: toolCall.Function.Name,
 							Args: args,
 						},
-						ThoughtSignature: "skip_thought_signature_validator",
-					})
+					}
+					if sig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
+						part.ThoughtSignature = sig
+					}
+					content.Parts = append(content.Parts, part)
 				}
 			}
 			geminiReq.Contents = append(geminiReq.Contents, content)
@@ -469,12 +510,24 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			var toolCalls []model.ToolCall
 			var reasoningContent *string
 			var hasInlineData bool
+			var reasoningBlocks []model.ReasoningBlock
 
 			for idx, part := range candidate.Content.Parts {
 				if part.Thought {
 					// Handle thinking/reasoning content
 					if part.Text != "" && reasoningContent == nil {
 						reasoningContent = &part.Text
+					}
+					// Thought Parts in Gemini 3 may carry a thoughtSignature that must be
+					// replayed verbatim on the next turn.
+					if part.Text != "" || part.ThoughtSignature != "" {
+						reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
+							Kind:      model.ReasoningBlockKindThinking,
+							Index:     len(reasoningBlocks),
+							Text:      part.Text,
+							Signature: part.ThoughtSignature,
+							Provider:  "gemini",
+						})
 					}
 				} else if part.Text != "" {
 					textParts = append(textParts, part.Text)
@@ -484,6 +537,14 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 						Type: "text",
 						Text: &text,
 					})
+					if part.ThoughtSignature != "" {
+						reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
+							Kind:      model.ReasoningBlockKindSignature,
+							Index:     len(reasoningBlocks),
+							Signature: part.ThoughtSignature,
+							Provider:  "gemini",
+						})
+					}
 				}
 				// Handle inline data (images, audio, etc.)
 				if part.InlineData != nil {
@@ -509,6 +570,14 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 						},
 					}
 					toolCalls = append(toolCalls, toolCall)
+					if part.ThoughtSignature != "" {
+						reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
+							Kind:      model.ReasoningBlockKindSignature,
+							Index:     len(reasoningBlocks),
+							Signature: part.ThoughtSignature,
+							Provider:  "gemini",
+						})
+					}
 				}
 			}
 
@@ -527,6 +596,12 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			// Set reasoning content
 			if reasoningContent != nil {
 				msg.ReasoningContent = reasoningContent
+			}
+
+			// Preserve Gemini thoughtSignatures in the order they arrived so outbound can
+			// replay them verbatim on the next turn (mandatory for Gemini 3 function calls).
+			if len(reasoningBlocks) > 0 {
+				msg.ReasoningBlocks = reasoningBlocks
 			}
 
 			// Set tool calls

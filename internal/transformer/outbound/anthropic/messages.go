@@ -249,6 +249,12 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 						Delta: &model.Message{
 							Role:                   "assistant",
 							RedactedThinkingBlocks: []string{streamEvent.ContentBlock.Data},
+							ReasoningBlocks: []model.ReasoningBlock{{
+								Kind:     model.ReasoningBlockKindRedacted,
+								Index:    -1,
+								Data:     streamEvent.ContentBlock.Data,
+								Provider: "anthropic",
+							}},
 						},
 					},
 				}
@@ -293,6 +299,14 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 			case "signature_delta":
 				if streamEvent.Delta.Signature != nil {
 					choice.Delta.ReasoningSignature = streamEvent.Delta.Signature
+					// Emit a standalone signature block so downstream aggregators can attach it
+					// to the correct thinking block even when multiple thinking blocks exist.
+					choice.Delta.ReasoningBlocks = []model.ReasoningBlock{{
+						Kind:      model.ReasoningBlockKindSignature,
+						Index:     -1,
+						Signature: *streamEvent.Delta.Signature,
+						Provider:  "anthropic",
+					}}
 				}
 			default:
 				return nil, nil
@@ -383,6 +397,11 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 			}
 		}
 	}
+
+	// Cap cache_control breakpoints to Anthropic's per-request ceiling. Excess markers are
+	// silently dropped rather than surfacing a 400 — the request still succeeds, just without
+	// caching on the trimmed blocks.
+	pruneCacheBreakpoints(result)
 
 	return result
 }
@@ -598,22 +617,9 @@ func convertAssistantMessage(msg model.Message) []anthropicModel.MessageParam {
 func convertAssistantWithToolCalls(msg model.Message) []anthropicModel.MessageParam {
 	var blocks []anthropicModel.MessageContentBlock
 
-	// Add thinking block if present
-	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
-		blocks = append(blocks, anthropicModel.MessageContentBlock{
-			Type:      "thinking",
-			Thinking:  msg.ReasoningContent,
-			Signature: msg.ReasoningSignature,
-		})
-	}
-
-	// Add redacted thinking blocks
-	for _, data := range msg.RedactedThinkingBlocks {
-		blocks = append(blocks, anthropicModel.MessageContentBlock{
-			Type: "redacted_thinking",
-			Data: data,
-		})
-	}
+	// Thinking + redacted_thinking blocks, emitted in their original order so Anthropic
+	// multi-turn signature verification does not fail on interleaved blocks.
+	blocks = append(blocks, emitThinkingBlocks(msg)...)
 
 	// Add text content if present
 	if msg.Content.Content != nil && *msg.Content.Content != "" {
@@ -676,7 +682,7 @@ func buildMessageContent(msg model.Message) anthropicModel.MessageContent {
 	}
 
 	// Handle reasoning-only messages (no text content, but has thinking/redacted thinking)
-	if hasThinkingContent(msg) || len(msg.RedactedThinkingBlocks) > 0 {
+	if hasThinkingContent(msg) || len(msg.RedactedThinkingBlocks) > 0 || len(msg.ReasoningBlocks) > 0 {
 		return buildMultipleContentWithThinking(msg)
 	}
 
@@ -684,27 +690,92 @@ func buildMessageContent(msg model.Message) anthropicModel.MessageContent {
 }
 
 func hasThinkingContent(msg model.Message) bool {
-	return msg.ReasoningContent != nil && *msg.ReasoningContent != ""
+	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+		return true
+	}
+	for _, rb := range msg.ReasoningBlocks {
+		if rb.Kind == model.ReasoningBlockKindThinking && (rb.Text != "" || rb.Signature != "") {
+			return true
+		}
+	}
+	return false
 }
 
-func buildMultipleContentWithThinking(msg model.Message) anthropicModel.MessageContent {
-	var blocks []anthropicModel.MessageContentBlock
+// emitThinkingBlocks reproduces Anthropic thinking / redacted_thinking blocks in their original
+// order so multi-turn extended-thinking requests pass signature verification. It prefers the
+// per-block ReasoningBlocks representation; when absent (e.g. the upstream was OpenRouter or
+// the turn predates this refactor), it falls back to the flat ReasoningContent/Signature pair.
+func emitThinkingBlocks(msg model.Message) []anthropicModel.MessageContentBlock {
+	anthropicBlocks := msg.ReasoningBlocksByProvider("anthropic")
+	if len(anthropicBlocks) == 0 {
+		// Some callers (e.g. Anthropic inbound parsed v1) may have populated ReasoningBlocks
+		// without tagging Provider. Treat untagged blocks as Anthropic as a safety net.
+		for _, rb := range msg.ReasoningBlocks {
+			if rb.Provider == "" {
+				anthropicBlocks = append(anthropicBlocks, rb)
+			}
+		}
+	}
 
+	if len(anthropicBlocks) == 0 {
+		return emitThinkingBlocksLegacy(msg)
+	}
+
+	out := make([]anthropicModel.MessageContentBlock, 0, len(anthropicBlocks))
+	// signature-only blocks attach to the most recent thinking block.
+	var lastThinking *anthropicModel.MessageContentBlock
+	for _, rb := range anthropicBlocks {
+		switch rb.Kind {
+		case model.ReasoningBlockKindThinking:
+			block := anthropicModel.MessageContentBlock{Type: "thinking"}
+			if rb.Text != "" {
+				t := rb.Text
+				block.Thinking = &t
+			}
+			if rb.Signature != "" {
+				s := rb.Signature
+				block.Signature = &s
+			}
+			out = append(out, block)
+			lastThinking = &out[len(out)-1]
+		case model.ReasoningBlockKindRedacted:
+			if rb.Data != "" {
+				out = append(out, anthropicModel.MessageContentBlock{
+					Type: "redacted_thinking",
+					Data: rb.Data,
+				})
+				lastThinking = nil
+			}
+		case model.ReasoningBlockKindSignature:
+			if rb.Signature != "" && lastThinking != nil && lastThinking.Signature == nil {
+				s := rb.Signature
+				lastThinking.Signature = &s
+			}
+		}
+	}
+	return out
+}
+
+func emitThinkingBlocksLegacy(msg model.Message) []anthropicModel.MessageContentBlock {
+	var out []anthropicModel.MessageContentBlock
 	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
-		blocks = append(blocks, anthropicModel.MessageContentBlock{
+		out = append(out, anthropicModel.MessageContentBlock{
 			Type:      "thinking",
 			Thinking:  msg.ReasoningContent,
 			Signature: msg.ReasoningSignature,
 		})
 	}
-
-	// Add redacted thinking blocks
 	for _, data := range msg.RedactedThinkingBlocks {
-		blocks = append(blocks, anthropicModel.MessageContentBlock{
+		out = append(out, anthropicModel.MessageContentBlock{
 			Type: "redacted_thinking",
 			Data: data,
 		})
 	}
+	return out
+}
+
+func buildMultipleContentWithThinking(msg model.Message) anthropicModel.MessageContent {
+	blocks := emitThinkingBlocks(msg)
 
 	// Only add text block if content is non-nil and non-empty
 	if msg.Content.Content != nil && *msg.Content.Content != "" {
@@ -721,22 +792,13 @@ func buildMultipleContentWithThinking(msg model.Message) anthropicModel.MessageC
 func convertMultiplePartContent(msg model.Message) anthropicModel.MessageContent {
 	blocks := make([]anthropicModel.MessageContentBlock, 0, len(msg.Content.MultipleContent)+2)
 
-	// Add thinking block if present with a valid signature
-	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" &&
-		msg.ReasoningSignature != nil && *msg.ReasoningSignature != "" {
-		blocks = append(blocks, anthropicModel.MessageContentBlock{
-			Type:      "thinking",
-			Thinking:  msg.ReasoningContent,
-			Signature: msg.ReasoningSignature,
-		})
-	}
-
-	// Add redacted thinking blocks
-	for _, data := range msg.RedactedThinkingBlocks {
-		blocks = append(blocks, anthropicModel.MessageContentBlock{
-			Type: "redacted_thinking",
-			Data: data,
-		})
+	// Only emit thinking blocks when they carry a signature; without one, Anthropic rejects the
+	// turn in subsequent extended-thinking rounds. emitThinkingBlocks already preserves order.
+	for _, b := range emitThinkingBlocks(msg) {
+		if b.Type == "thinking" && (b.Signature == nil || *b.Signature == "") {
+			continue
+		}
+		blocks = append(blocks, b)
 	}
 
 	for _, part := range msg.Content.MultipleContent {
@@ -844,9 +906,55 @@ func convertCacheControl(cc *model.CacheControl) *anthropicModel.CacheControl {
 	if cc == nil {
 		return nil
 	}
+	// Unknown values were already normalised at the inbound boundary; do a final safety check
+	// so a misbehaving intermediate cannot sneak a provider-rejected value past us.
+	if cc.Type != "" && cc.Type != model.CacheControlTypeEphemeral {
+		return nil
+	}
+	ttl := cc.TTL
+	if ttl != "" && ttl != model.CacheTTL5m && ttl != model.CacheTTL1h {
+		ttl = ""
+	}
 	return &anthropicModel.CacheControl{
 		Type: cc.Type,
-		TTL:  cc.TTL,
+		TTL:  ttl,
+	}
+}
+
+// pruneCacheBreakpoints walks the Anthropic request after conversion and drops cache_control
+// entries that exceed the provider-enforced ceiling. Anthropic currently allows up to 4
+// breakpoints per request; we keep the first N in encounter order (system → tools → messages)
+// because callers typically mark the most reusable prefixes first.
+func pruneCacheBreakpoints(req *anthropicModel.MessageRequest) {
+	if req == nil {
+		return
+	}
+
+	kept := 0
+	keepOrClear := func(cc **anthropicModel.CacheControl) {
+		if cc == nil || *cc == nil {
+			return
+		}
+		if kept >= model.AnthropicMaxCacheBreakpoints {
+			*cc = nil
+			return
+		}
+		kept++
+	}
+
+	if req.System != nil {
+		for i := range req.System.MultiplePrompts {
+			keepOrClear(&req.System.MultiplePrompts[i].CacheControl)
+		}
+	}
+	for i := range req.Tools {
+		keepOrClear(&req.Tools[i].CacheControl)
+	}
+	for i := range req.Messages {
+		msg := &req.Messages[i]
+		for j := range msg.Content.MultipleContent {
+			keepOrClear(&msg.Content.MultipleContent[j].CacheControl)
+		}
 	}
 }
 
@@ -892,6 +1000,7 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 		toolCalls         []model.ToolCall
 		textParts         []string
 		redactedBlocks    []string
+		reasoningBlocks   []model.ReasoningBlock
 	)
 
 	for _, block := range resp.Content {
@@ -924,9 +1033,27 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 				thinkingText = block.Thinking
 			}
 			thinkingSignature = block.Signature
+			rb := model.ReasoningBlock{
+				Kind:     model.ReasoningBlockKindThinking,
+				Index:    len(reasoningBlocks),
+				Provider: "anthropic",
+			}
+			if block.Thinking != nil {
+				rb.Text = *block.Thinking
+			}
+			if block.Signature != nil {
+				rb.Signature = *block.Signature
+			}
+			reasoningBlocks = append(reasoningBlocks, rb)
 		case "redacted_thinking":
 			if block.Data != "" {
 				redactedBlocks = append(redactedBlocks, block.Data)
+				reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
+					Kind:     model.ReasoningBlockKindRedacted,
+					Index:    len(reasoningBlocks),
+					Data:     block.Data,
+					Provider: "anthropic",
+				})
 			}
 		}
 	}
@@ -945,6 +1072,7 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 		ReasoningContent:       thinkingText,
 		ReasoningSignature:     thinkingSignature,
 		RedactedThinkingBlocks: redactedBlocks,
+		ReasoningBlocks:        reasoningBlocks,
 	}
 
 	choice := model.Choice{

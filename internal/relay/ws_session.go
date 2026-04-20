@@ -262,6 +262,7 @@ func cloneMessage(message transformerModel.Message) transformerModel.Message {
 	cloned.ToolCalls = append([]transformerModel.ToolCall(nil), message.ToolCalls...)
 	cloned.Images = cloneContentParts(message.Images)
 	cloned.RedactedThinkingBlocks = append([]string(nil), message.RedactedThinkingBlocks...)
+	cloned.ReasoningBlocks = append([]transformerModel.ReasoningBlock(nil), message.ReasoningBlocks...)
 	if message.Audio != nil {
 		audio := *message.Audio
 		cloned.Audio = &audio

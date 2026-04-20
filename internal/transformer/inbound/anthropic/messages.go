@@ -120,17 +120,37 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 				switch block.Type {
 				case "thinking":
 					// Keep thinking content in MultipleContent to preserve order
+					thinkingText := ""
 					if block.Thinking != nil && *block.Thinking != "" {
-						reasoningContent = *block.Thinking
+						thinkingText = *block.Thinking
+						reasoningContent = thinkingText
 						hasReasoningInContent = true
 					}
 
+					sig := ""
 					if block.Signature != nil && *block.Signature != "" {
-						reasoningSignature = *block.Signature
+						sig = *block.Signature
+						reasoningSignature = sig
 					}
+
+					// Preserve per-block provenance so multi-thinking-block assistant turns can
+					// be replayed to Anthropic without flattening to a single signature.
+					chatMsg.AppendReasoningBlock(model.ReasoningBlock{
+						Kind:      model.ReasoningBlockKindThinking,
+						Index:     -1,
+						Text:      thinkingText,
+						Signature: sig,
+						Provider:  "anthropic",
+					})
 				case "redacted_thinking":
 					if block.Data != "" {
 						chatMsg.RedactedThinkingBlocks = append(chatMsg.RedactedThinkingBlocks, block.Data)
+						chatMsg.AppendReasoningBlock(model.ReasoningBlock{
+							Kind:     model.ReasoningBlockKindRedacted,
+							Index:    -1,
+							Data:     block.Data,
+							Provider: "anthropic",
+						})
 						hasContent = true
 					}
 				case "text":
@@ -346,27 +366,55 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 		if message != nil {
 			var contentBlocks []MessageContentBlock
 
-			// Handle reasoning content (thinking) first if present
-			if message.ReasoningContent != nil && *message.ReasoningContent != "" {
-				thinkingBlock := MessageContentBlock{
-					Type:     "thinking",
-					Thinking: message.ReasoningContent,
+			// Prefer per-block reasoning provenance when available so multiple thinking /
+			// redacted_thinking blocks from the upstream can be replayed in order. Fall back to
+			// the legacy flat fields when ReasoningBlocks is empty (non-Anthropic upstream).
+			if len(message.ReasoningBlocks) > 0 {
+				for _, rb := range message.ReasoningBlocks {
+					switch rb.Kind {
+					case model.ReasoningBlockKindThinking:
+						block := MessageContentBlock{Type: "thinking"}
+						if rb.Text != "" {
+							t := rb.Text
+							block.Thinking = &t
+						}
+						if rb.Signature != "" {
+							s := rb.Signature
+							block.Signature = &s
+						}
+						contentBlocks = append(contentBlocks, block)
+					case model.ReasoningBlockKindRedacted:
+						if rb.Data != "" {
+							contentBlocks = append(contentBlocks, MessageContentBlock{
+								Type: "redacted_thinking",
+								Data: rb.Data,
+							})
+						}
+					}
 				}
-				if message.ReasoningSignature != nil && *message.ReasoningSignature != "" {
-					thinkingBlock.Signature = message.ReasoningSignature
+			} else {
+				// Handle reasoning content (thinking) first if present
+				if message.ReasoningContent != nil && *message.ReasoningContent != "" {
+					thinkingBlock := MessageContentBlock{
+						Type:     "thinking",
+						Thinking: message.ReasoningContent,
+					}
+					if message.ReasoningSignature != nil && *message.ReasoningSignature != "" {
+						thinkingBlock.Signature = message.ReasoningSignature
+					}
+					// No fallback magic string — if signature is absent (non-Anthropic upstream),
+					// Signature remains nil and is omitted via omitempty.
+
+					contentBlocks = append(contentBlocks, thinkingBlock)
 				}
-				// No fallback magic string — if signature is absent (non-Anthropic upstream),
-				// Signature remains nil and is omitted via omitempty.
 
-				contentBlocks = append(contentBlocks, thinkingBlock)
-			}
-
-			// Handle redacted thinking blocks
-			for _, data := range message.RedactedThinkingBlocks {
-				contentBlocks = append(contentBlocks, MessageContentBlock{
-					Type: "redacted_thinking",
-					Data: data,
-				})
+				// Handle redacted thinking blocks
+				for _, data := range message.RedactedThinkingBlocks {
+					contentBlocks = append(contentBlocks, MessageContentBlock{
+						Type: "redacted_thinking",
+						Data: data,
+					})
+				}
 			}
 
 			// Handle regular content
@@ -1012,6 +1060,23 @@ func (i *MessagesInbound) GetInternalResponse(ctx context.Context) (*model.Inter
 						existingChoice.Message.RedactedThinkingBlocks,
 						delta.RedactedThinkingBlocks...,
 					)
+					for _, data := range delta.RedactedThinkingBlocks {
+						existingChoice.Message.AppendReasoningBlock(model.ReasoningBlock{
+							Kind:     model.ReasoningBlockKindRedacted,
+							Index:    -1,
+							Data:     data,
+							Provider: "anthropic",
+						})
+					}
+				}
+
+				// Carry forward full reasoning blocks when the delta already provides them.
+				// Anthropic signature_delta chunks are handled via ReasoningSignature and merged
+				// into the last thinking block after aggregation (see finalize below).
+				if len(delta.ReasoningBlocks) > 0 {
+					for _, rb := range delta.ReasoningBlocks {
+						existingChoice.Message.AppendReasoningBlock(rb)
+					}
 				}
 
 				// Set refusal if present

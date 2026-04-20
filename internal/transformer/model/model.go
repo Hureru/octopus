@@ -510,16 +510,73 @@ type Message struct {
 	Reasoning *string `json:"reasoning,omitempty"`
 
 	// Help field, will not be sent to the llm service, to adapt the anthropic think signature.
+	// Deprecated: prefer ReasoningBlocks for multi-block provenance. Kept as a fallback so that
+	// legacy single-block emitters (OpenRouter, Ollama compat) keep working.
 	ReasoningSignature *string `json:"reasoning_signature,omitempty"`
 
 	// RedactedThinkingBlocks stores opaque redacted_thinking blocks from Anthropic.
-	// Each entry is the raw "data" field value from a redacted_thinking content block.
-	// These must be passed through transparently without modification.
+	// Deprecated: mirrored into ReasoningBlocks with Kind=ReasoningBlockKindRedacted. Kept for
+	// backward compatibility with callers that read this field directly.
 	RedactedThinkingBlocks []string `json:"-"`
+
+	// ReasoningBlocks preserves the full order of thinking / redacted_thinking / signature blocks
+	// from the assistant turn. Each entry carries its provider-specific signature verbatim so that
+	// multi-turn tool-use scenarios (Anthropic extended thinking, Gemini 3 thoughtSignature) can be
+	// replayed to the upstream without signature_mismatch / FAILED_PRECONDITION errors.
+	ReasoningBlocks []ReasoningBlock `json:"-"`
 
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	// This field is not serialized in JSON.
 	CacheControl *CacheControl `json:"-"`
+}
+
+// ReasoningBlockKind enumerates the kinds of reasoning/thinking blocks we preserve.
+type ReasoningBlockKind string
+
+const (
+	// ReasoningBlockKindThinking is a visible thinking block with optional signature (Anthropic)
+	// or thought-signature-carrying Part (Gemini 3).
+	ReasoningBlockKindThinking ReasoningBlockKind = "thinking"
+	// ReasoningBlockKindRedacted is Anthropic's redacted_thinking block (opaque data, no text).
+	ReasoningBlockKindRedacted ReasoningBlockKind = "redacted_thinking"
+	// ReasoningBlockKindSignature is a standalone signature carrier used when the text part has
+	// already been emitted separately (e.g. Gemini fn-call Part-level thoughtSignature).
+	ReasoningBlockKindSignature ReasoningBlockKind = "thought_signature"
+)
+
+// ReasoningBlock preserves one thinking/redacted_thinking/thought_signature block verbatim.
+// All fields are opaque to the aggregator; they are round-tripped to the upstream as-is.
+type ReasoningBlock struct {
+	Kind      ReasoningBlockKind `json:"kind,omitempty"`
+	Index     int                `json:"index,omitempty"`
+	Text      string             `json:"text,omitempty"`
+	Signature string             `json:"signature,omitempty"`
+	Data      string             `json:"data,omitempty"`
+	Provider  string             `json:"provider,omitempty"`
+}
+
+// AppendReasoningBlock appends a reasoning block preserving insertion order.
+// Index is auto-assigned based on the current slice length when the caller passes a negative Index.
+func (m *Message) AppendReasoningBlock(block ReasoningBlock) {
+	if block.Index < 0 {
+		block.Index = len(m.ReasoningBlocks)
+	}
+	m.ReasoningBlocks = append(m.ReasoningBlocks, block)
+}
+
+// ReasoningBlocksByProvider returns the subset of blocks authored by the given provider.
+// Pass an empty string to get the full slice.
+func (m *Message) ReasoningBlocksByProvider(provider string) []ReasoningBlock {
+	if provider == "" {
+		return m.ReasoningBlocks
+	}
+	out := make([]ReasoningBlock, 0, len(m.ReasoningBlocks))
+	for _, b := range m.ReasoningBlocks {
+		if b.Provider == provider {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 func (m *Message) ClearHelpFields() {
@@ -527,6 +584,7 @@ func (m *Message) ClearHelpFields() {
 	m.Reasoning = nil
 	m.ReasoningSignature = nil
 	m.RedactedThinkingBlocks = nil
+	m.ReasoningBlocks = nil
 }
 
 // GetReasoningContent returns the reasoning content from either ReasoningContent or Reasoning field.
@@ -875,11 +933,41 @@ type Tool struct {
 }
 
 // CacheControl represents cache control configuration.
-// This field is used internally for provider-specific cache control
-// and should not be serialized in the standard llm JSON format.
+// Shared by Anthropic prompt caching (`{"type":"ephemeral","ttl":"5m"|"1h"}`) and any future
+// providers that piggyback on the same shape. The struct is serialized so internal logs and
+// tests can snapshot it; outbound transformers decide whether to forward it.
 type CacheControl struct {
-	Type string `json:"-"`
-	TTL  string `json:"-"`
+	Type string `json:"type,omitempty"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+// CacheControlType and CacheControlTTL values currently accepted by Anthropic's Messages API.
+// Keep as typed constants so typos fail at compile time; unknown values should still be
+// rejected at the inbound boundary.
+const (
+	CacheControlTypeEphemeral = "ephemeral"
+	CacheTTL5m                = "5m"
+	CacheTTL1h                = "1h"
+)
+
+// AnthropicMaxCacheBreakpoints is the provider-enforced upper bound on `cache_control` breakpoints
+// per Messages request. Excess breakpoints must be pruned by the outbound layer rather than
+// surfacing an HTTP 400 to the caller.
+const AnthropicMaxCacheBreakpoints = 4
+
+// Validate returns an error if the CacheControl values are not acceptable for Anthropic.
+// Nil receivers are treated as valid (absent).
+func (c *CacheControl) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.Type != "" && c.Type != CacheControlTypeEphemeral {
+		return fmt.Errorf("invalid cache_control.type %q (only %q is supported)", c.Type, CacheControlTypeEphemeral)
+	}
+	if c.TTL != "" && c.TTL != CacheTTL5m && c.TTL != CacheTTL1h {
+		return fmt.Errorf("invalid cache_control.ttl %q (only %q or %q are supported)", c.TTL, CacheTTL5m, CacheTTL1h)
+	}
+	return nil
 }
 
 type toolJSONMarshaller Tool
