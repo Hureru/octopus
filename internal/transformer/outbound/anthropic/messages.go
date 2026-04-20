@@ -1087,25 +1087,20 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 	return result
 }
 
+// convertStopReason parses Anthropic's stop_reason into the canonical
+// FinishReason (model.FinishReasonFromAnthropic) and returns a *string for
+// Choice.FinishReason. Rich reasons such as "pause_turn" / "refusal" are
+// preserved so downstream inbounds can distinguish them from a plain stop.
 func convertStopReason(stopReason *string) *string {
 	if stopReason == nil {
 		return nil
 	}
-
-	switch *stopReason {
-	case "end_turn":
-		return lo.ToPtr("stop")
-	case "max_tokens":
-		return lo.ToPtr("length")
-	case "stop_sequence", "pause_turn":
-		return lo.ToPtr("stop")
-	case "tool_use":
-		return lo.ToPtr("tool_calls")
-	case "refusal":
-		return lo.ToPtr("content_filter")
-	default:
-		return stopReason
+	reason := model.FinishReasonFromAnthropic(*stopReason)
+	if reason.IsZero() {
+		return nil
 	}
+	s := reason.String()
+	return &s
 }
 
 func convertAnthropicUsage(usage *anthropicModel.Usage) *model.Usage {

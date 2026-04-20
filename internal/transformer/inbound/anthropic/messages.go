@@ -489,17 +489,10 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 
 		// Convert finish reason
 		if choice.FinishReason != nil {
-			switch *choice.FinishReason {
-			case "stop":
-				stopReason := "end_turn"
-				resp.StopReason = &stopReason
-			case "length":
-				stopReason := "max_tokens"
-				resp.StopReason = &stopReason
-			case "tool_calls":
-				stopReason := "tool_use"
-				resp.StopReason = &stopReason
-			default:
+			reason := model.ParseFinishReason(*choice.FinishReason)
+			if wire := reason.ToAnthropic(); wire != "" {
+				resp.StopReason = &wire
+			} else {
 				resp.StopReason = choice.FinishReason
 			}
 		}
@@ -885,15 +878,8 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 			events = append(events, formatSSEEvent("content_block_stop", data))
 
 			// Convert finish reason to Anthropic format
-			var stopReason string
-			switch *choice.FinishReason {
-			case "stop":
-				stopReason = "end_turn"
-			case "length":
-				stopReason = "max_tokens"
-			case "tool_calls":
-				stopReason = "tool_use"
-			default:
+			stopReason := model.ParseFinishReason(*choice.FinishReason).ToAnthropic()
+			if stopReason == "" {
 				stopReason = "end_turn"
 			}
 

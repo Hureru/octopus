@@ -653,19 +653,13 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 	return resp
 }
 
+// convertGeminiFinishReason maps a Gemini finishReason to the canonical
+// FinishReason wire string. Unlike the previous hardcoded switch, this
+// preserves provider-specific reasons (BLOCKLIST / PROHIBITED_CONTENT / SPII /
+// MALFORMED_FUNCTION_CALL / IMAGE_SAFETY / LANGUAGE / OTHER) instead of
+// collapsing them to "stop".
 func convertGeminiFinishReason(reason string) string {
-	switch reason {
-	case "STOP":
-		return "stop"
-	case "MAX_TOKENS":
-		return "length"
-	case "SAFETY":
-		return "content_filter"
-	case "RECITATION":
-		return "content_filter"
-	default:
-		return "stop"
-	}
+	return model.FinishReasonFromGemini(reason).String()
 }
 
 func cleanGeminiSchema(schema map[string]any) {
