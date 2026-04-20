@@ -1118,7 +1118,12 @@ func convertAnthropicUsage(usage *anthropicModel.Usage) *model.Usage {
 		CompletionTokens:         usage.OutputTokens,
 		TotalTokens:              usage.InputTokens + usage.OutputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
-		AnthropicUsage:           true,
+		CacheReadInputTokens:     usage.CacheReadInputTokens,
+	}
+
+	if usage.CacheCreation != nil {
+		result.CacheCreation5mInputTokens = usage.CacheCreation.Ephemeral5mInputTokens
+		result.CacheCreation1hInputTokens = usage.CacheCreation.Ephemeral1hInputTokens
 	}
 
 	if usage.CacheReadInputTokens > 0 {

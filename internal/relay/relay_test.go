@@ -174,8 +174,8 @@ func TestRelayMetricsCapturesAnthropicInputBreakdown(t *testing.T) {
 		Usage: &transformerModel.Usage{
 			PromptTokens:             400,
 			CompletionTokens:         180,
-			AnthropicUsage:           true,
 			CacheCreationInputTokens: 250,
+			CacheReadInputTokens:     1200,
 			PromptTokensDetails: &transformerModel.PromptTokensDetails{
 				CachedTokens: 1200,
 			},

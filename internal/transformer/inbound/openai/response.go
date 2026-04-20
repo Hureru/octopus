@@ -1448,14 +1448,28 @@ func convertUsageToResponses(usage *model.Usage) *ResponsesUsage {
 		return nil
 	}
 
+	inputTokens := usage.PromptTokens
+	cachedTokens := int64(0)
+	if usage.PromptTokensDetails != nil {
+		cachedTokens = usage.PromptTokensDetails.CachedTokens
+	}
+	if usage.HasAnthropicCacheSemantic() {
+		// Anthropic stored PromptTokens as non-cached; add cache read/create back so
+		// OpenAI clients see the conventional total input count.
+		inputTokens += usage.CacheReadInputTokens + usage.CacheCreationInputTokens
+		if cachedTokens == 0 && usage.CacheReadInputTokens > 0 {
+			cachedTokens = usage.CacheReadInputTokens
+		}
+	}
+
 	result := &ResponsesUsage{
-		InputTokens:  usage.PromptTokens,
+		InputTokens:  inputTokens,
 		OutputTokens: usage.CompletionTokens,
 		TotalTokens:  usage.TotalTokens,
 	}
 
-	if usage.PromptTokensDetails != nil {
-		result.InputTokenDetails.CachedTokens = usage.PromptTokensDetails.CachedTokens
+	if cachedTokens > 0 {
+		result.InputTokenDetails.CachedTokens = cachedTokens
 	}
 
 	if usage.CompletionTokensDetails != nil {

@@ -822,6 +822,17 @@ type ResponseMeta struct {
 
 // Usage Represents the total token usage per request to OpenAI.
 // For embedding requests, CompletionTokens is always 0.
+//
+// Cache semantics (detection via HasAnthropicCacheSemantic):
+//   - Anthropic path: PromptTokens excludes cached tokens; CacheReadInputTokens /
+//     CacheCreationInputTokens carry the split. PromptTokensDetails.CachedTokens is
+//     mirrored for OpenAI-style downstreams.
+//   - OpenAI / Gemini path: PromptTokens already includes cached reads (OpenAI
+//     convention). CacheReadInputTokens stays zero; PromptTokensDetails.CachedTokens
+//     holds the cached subset.
+//
+// Use the Billable* and EffectiveInputTokens helpers instead of branching on the
+// upstream provider directly.
 type Usage struct {
 	PromptTokens            int64                    `json:"prompt_tokens"`
 	CompletionTokens        int64                    `json:"completion_tokens"`
@@ -833,9 +844,13 @@ type Usage struct {
 	PromptModalityTokenDetails []ModalityTokenCount `json:"-"`
 	// Output only. A detailed breakdown of the token count for each modality in the candidates.
 	CompletionModalityTokenDetails []ModalityTokenCount `json:"-"`
-	// Anthropic specific fields
-	AnthropicUsage           bool  `json:"-"`
-	CacheCreationInputTokens int64 `json:"-"`
+
+	// Anthropic-style cache accounting. Presence of either CacheCreationInputTokens or
+	// CacheReadInputTokens implies PromptTokens excludes cached tokens.
+	CacheCreationInputTokens   int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheCreation5mInputTokens int64 `json:"cache_creation_5m_input_tokens,omitempty"`
+	CacheCreation1hInputTokens int64 `json:"cache_creation_1h_input_tokens,omitempty"`
+	CacheReadInputTokens       int64 `json:"cache_read_input_tokens,omitempty"`
 }
 
 func (u *Usage) GetCompletionTokens() *int64 {
@@ -852,6 +867,74 @@ func (u *Usage) GetPromptTokens() *int64 {
 	}
 
 	return &u.PromptTokens
+}
+
+// HasAnthropicCacheSemantic reports whether PromptTokens excludes cached tokens
+// (the Anthropic Messages convention). When true, total input billing must add
+// cache read/write on top of PromptTokens.
+func (u *Usage) HasAnthropicCacheSemantic() bool {
+	if u == nil {
+		return false
+	}
+	return u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0
+}
+
+// BillableCacheReadInput returns the cache-read token count, preferring the
+// explicit CacheReadInputTokens field and falling back to the OpenAI-style
+// PromptTokensDetails.CachedTokens mirror.
+func (u *Usage) BillableCacheReadInput() int64 {
+	if u == nil {
+		return 0
+	}
+	if u.CacheReadInputTokens > 0 {
+		return u.CacheReadInputTokens
+	}
+	if u.PromptTokensDetails != nil {
+		return u.PromptTokensDetails.CachedTokens
+	}
+	return 0
+}
+
+// BillableCacheWriteInput returns cache creation tokens (only populated on the
+// Anthropic path).
+func (u *Usage) BillableCacheWriteInput() int64 {
+	if u == nil {
+		return 0
+	}
+	return u.CacheCreationInputTokens
+}
+
+// BillableNonCachedInput returns the non-cached portion of the prompt used for
+// standard input pricing. Semantics:
+//   - Anthropic: PromptTokens already excludes cache, return as-is.
+//   - OpenAI / Gemini: subtract cached tokens tracked in PromptTokensDetails.
+func (u *Usage) BillableNonCachedInput() int64 {
+	if u == nil {
+		return 0
+	}
+	if u.HasAnthropicCacheSemantic() {
+		if u.PromptTokens < 0 {
+			return 0
+		}
+		return u.PromptTokens
+	}
+	cached := u.BillableCacheReadInput()
+	n := u.PromptTokens - cached
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// EffectiveInputTokens returns the total input tokens counted against quota
+// across providers: PromptTokens + CacheReadInputTokens + CacheCreationInputTokens.
+// For OpenAI/Gemini (where PromptTokens already includes cached reads),
+// CacheRead/Create stay zero so the result collapses to PromptTokens.
+func (u *Usage) EffectiveInputTokens() int64 {
+	if u == nil {
+		return 0
+	}
+	return u.PromptTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 }
 
 // CompletionTokensDetails Breakdown of tokens used in a completion.

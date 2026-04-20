@@ -3,8 +3,6 @@ package relay
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -93,20 +91,13 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	}
 
 	usage := resp.Usage
-	cachedTokens := int64(0)
-	if usage.PromptTokensDetails != nil {
-		cachedTokens = usage.PromptTokensDetails.CachedTokens
-	}
-	billInputTokens := usage.PromptTokens
-	if !usage.AnthropicUsage {
-		billInputTokens -= cachedTokens
-		if billInputTokens < 0 {
-			billInputTokens = 0
-		}
-	}
-	m.BillInputTokens = intPtr(int(billInputTokens))
-	m.CacheReadTokens = intPtr(int(cachedTokens))
-	m.CacheWriteTokens = intPtr(int(usage.CacheCreationInputTokens))
+	nonCachedInput := usage.BillableNonCachedInput()
+	cacheReadTokens := usage.BillableCacheReadInput()
+	cacheWriteTokens := usage.BillableCacheWriteInput()
+
+	m.BillInputTokens = intPtr(int(nonCachedInput))
+	m.CacheReadTokens = intPtr(int(cacheReadTokens))
+	m.CacheWriteTokens = intPtr(int(cacheWriteTokens))
 	m.Stats.InputToken = usage.PromptTokens
 	m.Stats.OutputToken = usage.CompletionTokens
 
@@ -114,18 +105,9 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	if modelPrice == nil {
 		return
 	}
-	if usage.PromptTokensDetails == nil {
-		usage.PromptTokensDetails = &transformerModel.PromptTokensDetails{
-			CachedTokens: 0,
-		}
-	}
-	if usage.AnthropicUsage {
-		m.Stats.InputCost = (float64(usage.PromptTokensDetails.CachedTokens)*modelPrice.CacheRead +
-			float64(usage.PromptTokens)*modelPrice.Input +
-			float64(usage.CacheCreationInputTokens)*modelPrice.CacheWrite) * 1e-6
-	} else {
-		m.Stats.InputCost = (float64(usage.PromptTokensDetails.CachedTokens)*modelPrice.CacheRead + float64(usage.PromptTokens-usage.PromptTokensDetails.CachedTokens)*modelPrice.Input) * 1e-6
-	}
+	m.Stats.InputCost = (float64(cacheReadTokens)*modelPrice.CacheRead +
+		float64(cacheWriteTokens)*modelPrice.CacheWrite +
+		float64(nonCachedInput)*modelPrice.Input) * 1e-6
 	m.Stats.OutputCost = float64(usage.CompletionTokens) * modelPrice.Output * 1e-6
 }
 
@@ -230,12 +212,6 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 	if m.InternalResponse != nil {
 		respForLog := m.filterResponseForLog(m.InternalResponse)
 		if respJSON, jsonErr := json.Marshal(respForLog); jsonErr == nil {
-			if m.InternalResponse.Usage != nil && m.InternalResponse.Usage.AnthropicUsage {
-				respStr := string(respJSON)
-				old := `"usage":{`
-				insert := fmt.Sprintf(`"usage":{"cache_creation_input_tokens":%d,`, m.InternalResponse.Usage.CacheCreationInputTokens)
-				respJSON = []byte(strings.Replace(respStr, old, insert, 1))
-			}
 			relayLog.ResponseContent = string(respJSON)
 		}
 	}

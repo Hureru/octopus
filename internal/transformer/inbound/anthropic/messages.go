@@ -507,15 +507,7 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 
 	// Convert usage
 	if response.Usage != nil {
-		usage := &Usage{
-			InputTokens:  response.Usage.PromptTokens,
-			OutputTokens: response.Usage.CompletionTokens,
-		}
-		if response.Usage.PromptTokensDetails != nil {
-			usage.CacheReadInputTokens = response.Usage.PromptTokensDetails.CachedTokens
-			usage.InputTokens -= usage.CacheReadInputTokens
-		}
-		resp.Usage = usage
+		resp.Usage = i.convertUsage(response.Usage)
 	}
 
 	return json.Marshal(resp)
@@ -965,9 +957,21 @@ func (i *MessagesInbound) convertUsage(usage *model.Usage) *Usage {
 		InputTokens:  usage.PromptTokens,
 		OutputTokens: usage.CompletionTokens,
 	}
-	if usage.PromptTokensDetails != nil {
+	if usage.HasAnthropicCacheSemantic() {
+		anthropicUsage.CacheCreationInputTokens = usage.CacheCreationInputTokens
+		anthropicUsage.CacheReadInputTokens = usage.CacheReadInputTokens
+		if usage.CacheCreation5mInputTokens > 0 || usage.CacheCreation1hInputTokens > 0 {
+			anthropicUsage.CacheCreation = &CacheCreationUsage{
+				Ephemeral5mInputTokens: usage.CacheCreation5mInputTokens,
+				Ephemeral1hInputTokens: usage.CacheCreation1hInputTokens,
+			}
+		}
+	} else if usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokens > 0 {
 		anthropicUsage.CacheReadInputTokens = usage.PromptTokensDetails.CachedTokens
 		anthropicUsage.InputTokens -= anthropicUsage.CacheReadInputTokens
+		if anthropicUsage.InputTokens < 0 {
+			anthropicUsage.InputTokens = 0
+		}
 	}
 	return anthropicUsage
 }

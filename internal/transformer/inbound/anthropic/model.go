@@ -435,6 +435,16 @@ type Usage struct {
 	// The number of input tokens read from the cache.
 	CacheReadInputTokens int64 `json:"cache_read_input_tokens,omitempty"`
 
+	// Breakdown of cache creation tokens by TTL bucket (extended-cache-ttl beta).
+	CacheCreation *CacheCreationUsage `json:"cache_creation,omitempty"`
+
 	// Available options: standard, priority, batch
 	ServiceTier string `json:"service_tier,omitempty"`
+}
+
+// CacheCreationUsage breaks cache_creation_input_tokens down by TTL bucket when
+// Anthropic's extended cache TTL beta is enabled.
+type CacheCreationUsage struct {
+	Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens,omitempty"`
+	Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens,omitempty"`
 }
