@@ -29,13 +29,27 @@ const continuedPivotText = "(continued)"
 // The rewrite is destructive: the affected parts are replaced in-place so
 // downstream JSON marshalling sees only supported types. Document blocks
 // are collapsed into a text hint containing title/context/body; server
-// tool blocks are dropped silently.
+// tool blocks are dropped silently. Tools with provider-specific types
+// (server_search / code_execution / url_context) are stripped since
+// OpenAI Chat Completions rejects the corresponding payloads.
 func (r *InternalLLMRequest) FlattenUnsupportedBlocks(provider AlternationProvider) {
 	if provider != AlternationProviderOpenAI {
 		return
 	}
 	for i := range r.Messages {
 		r.Messages[i].flattenUnsupportedBlocksForOpenAI()
+	}
+	if len(r.Tools) > 0 {
+		filtered := r.Tools[:0]
+		for _, tool := range r.Tools {
+			switch tool.Type {
+			case "server_search", "code_execution", "url_context":
+				continue
+			default:
+				filtered = append(filtered, tool)
+			}
+		}
+		r.Tools = filtered
 	}
 }
 

@@ -511,33 +511,54 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		}
 	}
 
-	// Convert tools
+	// Convert tools. Gemini's API treats GeminiTool entries as a
+	// discriminated union — functionDeclarations + googleSearch cannot
+	// co-exist per the current API — so we emit server tools as separate
+	// GeminiTool entries and log a warning if the client mixes both.
 	if len(request.Tools) > 0 {
 		functionDeclarations := make([]*model.GeminiFunctionDeclaration, 0, len(request.Tools))
+		serverTools := make([]*model.GeminiTool, 0, len(request.Tools))
 
 		for _, tool := range request.Tools {
-			if tool.Type != "function" {
-				continue
-			}
-
-			var params map[string]any
-			if len(tool.Function.Parameters) > 0 {
-				// Best-effort: if schema can't be parsed, we still send the declaration without parameters.
-				if err := json.Unmarshal(tool.Function.Parameters, &params); err != nil {
-					log.Warnf("gemini: failed to unmarshal tool parameters for %s: %v", tool.Function.Name, err)
+			switch tool.Type {
+			case "function", "":
+				var params map[string]any
+				if len(tool.Function.Parameters) > 0 {
+					// Best-effort: if schema can't be parsed, we still send the declaration without parameters.
+					if err := json.Unmarshal(tool.Function.Parameters, &params); err != nil {
+						log.Warnf("gemini: failed to unmarshal tool parameters for %s: %v", tool.Function.Name, err)
+					}
 				}
-			}
-			cleanGeminiSchema(params)
+				cleanGeminiSchema(params)
 
-			functionDeclarations = append(functionDeclarations, &model.GeminiFunctionDeclaration{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-				Parameters:  params,
-			})
+				functionDeclarations = append(functionDeclarations, &model.GeminiFunctionDeclaration{
+					Name:        tool.Function.Name,
+					Description: tool.Function.Description,
+					Parameters:  params,
+				})
+			case "server_search":
+				serverTools = append(serverTools, &model.GeminiTool{GoogleSearch: &model.GeminiGoogleSearch{}})
+			case "code_execution":
+				serverTools = append(serverTools, &model.GeminiTool{CodeExecution: &model.GeminiCodeExecution{}})
+			case "url_context":
+				serverTools = append(serverTools, &model.GeminiTool{UrlContext: &model.GeminiUrlContext{}})
+			default:
+				log.Warnf("gemini: dropping unsupported tool type %q", tool.Type)
+			}
 		}
 
+		tools := make([]*model.GeminiTool, 0, len(serverTools)+1)
 		if len(functionDeclarations) > 0 {
-			geminiReq.Tools = []*model.GeminiTool{{FunctionDeclarations: functionDeclarations}}
+			tools = append(tools, &model.GeminiTool{FunctionDeclarations: functionDeclarations})
+		}
+		tools = append(tools, serverTools...)
+
+		if len(functionDeclarations) > 0 && len(serverTools) > 0 {
+			log.Warnf("gemini: server tools and functionDeclarations declared together; provider may reject the request")
+		}
+
+		if len(tools) > 0 {
+			geminiReq.Tools = tools
 		}
 	}
 

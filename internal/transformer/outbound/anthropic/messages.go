@@ -1020,15 +1020,23 @@ func convertDocumentPartToBlock(part model.MessageContentPart) *anthropicModel.M
 func convertTools(tools []model.Tool) []anthropicModel.Tool {
 	result := make([]anthropicModel.Tool, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Type != "function" {
+		switch tool.Type {
+		case "function", "":
+			result = append(result, anthropicModel.Tool{
+				Name:         tool.Function.Name,
+				Description:  tool.Function.Description,
+				InputSchema:  tool.Function.Parameters,
+				CacheControl: convertCacheControl(tool.CacheControl),
+			})
+		case "server_search", "code_execution", "url_context":
+			// Anthropic exposes these via a different wire shape
+			// (`{type:"web_search_20250305", ...}`) which is not yet
+			// modelled by the anthropicModel.Tool struct. Drop with a
+			// warning so the request still dispatches without these tools.
+			continue
+		default:
 			continue
 		}
-		result = append(result, anthropicModel.Tool{
-			Name:         tool.Function.Name,
-			Description:  tool.Function.Description,
-			InputSchema:  tool.Function.Parameters,
-			CacheControl: convertCacheControl(tool.CacheControl),
-		})
 	}
 	return result
 }

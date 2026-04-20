@@ -77,11 +77,35 @@ type GeminiFunctionResponse struct {
 	Response map[string]interface{} `json:"response"`
 }
 
-// GeminiTool represents a tool/function definition
+// GeminiTool represents a tool/function definition. Exactly one of the
+// *Tool flavours should be set per entry — Gemini's API treats the fields
+// as a discriminated union, and some combinations (e.g. googleSearch +
+// functionDeclarations) are rejected at request time.
 type GeminiTool struct {
+	// FunctionDeclarations holds client-defined functions the model may
+	// call via functionCall parts.
 	FunctionDeclarations []*GeminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
-	CodeExecution        *GeminiCodeExecution         `json:"codeExecution,omitempty"`
+
+	// CodeExecution enables Gemini's sandboxed code_execution tool.
+	CodeExecution *GeminiCodeExecution `json:"codeExecution,omitempty"`
+
+	// GoogleSearch enables Gemini's web search tool (Gemini 2.5+). The
+	// payload is an empty object per the API; we keep the nil-vs-empty
+	// distinction via pointer.
+	GoogleSearch *GeminiGoogleSearch `json:"googleSearch,omitempty"`
+
+	// UrlContext enables Gemini's URL fetch tool, which lets the model
+	// read public web pages by URL.
+	UrlContext *GeminiUrlContext `json:"urlContext,omitempty"`
 }
+
+// GeminiGoogleSearch toggles Gemini's managed web-search tool. The wire
+// payload is `{}`; the struct is empty on purpose.
+type GeminiGoogleSearch struct{}
+
+// GeminiUrlContext toggles Gemini's URL fetch tool. Empty payload like
+// GoogleSearch.
+type GeminiUrlContext struct{}
 
 // GeminiFunctionDeclaration describes a function that can be called
 type GeminiFunctionDeclaration struct {
