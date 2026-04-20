@@ -21,6 +21,7 @@ type ResponseInbound struct {
 	hasContentPartStarted   bool
 	hasFinished             bool
 	responseCompleted       bool
+	finalFinishReason       string
 
 	// Response metadata
 	responseID string
@@ -175,6 +176,7 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		// Handle finish reason
 		if choice.FinishReason != nil && !i.hasFinished {
 			i.hasFinished = true
+			i.finalFinishReason = *choice.FinishReason
 
 			// Close any open content parts and output items
 			events = append(events, i.closeCurrentContentPart()...)
@@ -187,7 +189,7 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		i.responseCompleted = true
 		i.usage = stream.Usage
 
-		status := "completed"
+		eventType, status := responsesTerminalEvent(i.finalFinishReason)
 		response := &ResponsesResponse{
 			Object:    "response",
 			ID:        i.responseID,
@@ -199,7 +201,7 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		}
 
 		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:     "response.completed",
+			Type:     eventType,
 			Response: response,
 		}))
 	}
@@ -998,13 +1000,17 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 
 	// Convert reasoning
 	if req.Reasoning != nil {
-		if req.Reasoning.Effort != "" {
-			chatReq.ReasoningEffort = req.Reasoning.Effort
+		if effort := validateReasoningEffort(req.Reasoning.Effort); effort != "" {
+			chatReq.ReasoningEffort = effort
 		}
 		if req.Reasoning.MaxTokens != nil {
 			chatReq.ReasoningBudget = req.Reasoning.MaxTokens
 		}
-		chatReq.ReasoningSummary = req.Reasoning.Summary
+		if req.Reasoning.Summary != nil {
+			if summary := validateReasoningSummary(*req.Reasoning.Summary); summary != "" {
+				chatReq.ReasoningSummary = &summary
+			}
+		}
 		chatReq.ReasoningGenerateSummary = req.Reasoning.GenerateSummary
 	}
 
@@ -1417,16 +1423,8 @@ func convertToResponsesAPIResponse(resp *model.InternalLLMResponse) *ResponsesRe
 
 		// Set status based on finish reason
 		if choice.FinishReason != nil {
-			switch *choice.FinishReason {
-			case "stop":
-				result.Status = lo.ToPtr("completed")
-			case "length":
-				result.Status = lo.ToPtr("incomplete")
-			case "tool_calls":
-				result.Status = lo.ToPtr("completed")
-			case "error":
-				result.Status = lo.ToPtr("failed")
-			}
+			_, status := responsesTerminalEvent(*choice.FinishReason)
+			result.Status = lo.ToPtr(status)
 		}
 	}
 
@@ -1492,4 +1490,53 @@ func convertUsageToResponses(usage *model.Usage) *ResponsesUsage {
 
 func generateItemID() string {
 	return fmt.Sprintf("item_%s", lo.RandomString(16, lo.AlphanumericCharset))
+}
+
+// validateReasoningEffort whitelists the values OpenAI's Responses API
+// accepts for `reasoning.effort`. Unknown inputs are dropped (empty
+// return) so the upstream schema validator never sees garbage; callers
+// fall back to the provider default.
+func validateReasoningEffort(effort string) string {
+	switch effort {
+	case "minimal", "low", "medium", "high":
+		return effort
+	case "":
+		return ""
+	default:
+		return ""
+	}
+}
+
+// validateReasoningSummary whitelists the values OpenAI's Responses API
+// accepts for `reasoning.summary`. Unknown inputs are dropped.
+func validateReasoningSummary(summary string) string {
+	switch summary {
+	case "auto", "concise", "detailed":
+		return summary
+	case "":
+		return ""
+	default:
+		return ""
+	}
+}
+
+// responsesTerminalEvent picks the correct terminal stream event + status
+// pair based on the canonical FinishReason (see model/finishreason.go).
+// Length-truncated or paused turns map to response.incomplete; safety /
+// refusal / error-class stops map to response.failed; everything else is
+// the normal response.completed.
+func responsesTerminalEvent(finishReason string) (eventType string, status string) {
+	r := model.ParseFinishReason(finishReason)
+	switch {
+	case r.IsZero():
+		return "response.completed", "completed"
+	case r == model.FinishReasonLength || r == model.FinishReasonPauseTurn:
+		return "response.incomplete", "incomplete"
+	case r == model.FinishReasonError || r == model.FinishReasonMalformedCall:
+		return "response.failed", "failed"
+	case r.IsSafetyBlock():
+		return "response.failed", "failed"
+	default:
+		return "response.completed", "completed"
+	}
 }
