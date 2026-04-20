@@ -1055,9 +1055,18 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 
 	// Convert text format
 	if req.Text != nil && req.Text.Format != nil && req.Text.Format.Type != "" {
-		chatReq.ResponseFormat = &model.ResponseFormat{
+		rf := &model.ResponseFormat{
 			Type: req.Text.Format.Type,
+			Name: req.Text.Format.Name,
 		}
+		if len(req.Text.Format.Schema) > 0 {
+			rf.RawSchema = req.Text.Format.Schema
+			rf.JSONSchema = req.Text.Format.Schema
+			if parsed, err := model.ParseSchema(req.Text.Format.Schema); err == nil {
+				rf.Schema = parsed
+			}
+		}
+		chatReq.ResponseFormat = rf
 	}
 
 	return chatReq, nil
@@ -1072,11 +1081,13 @@ func convertToolChoiceToInternal(src *ResponsesToolChoice) *model.ToolChoice {
 	if src.Mode != nil {
 		result.ToolChoice = src.Mode
 	} else if src.Type != nil && src.Name != nil {
+		name := *src.Name
 		result.NamedToolChoice = &model.NamedToolChoice{
 			Type: *src.Type,
-			Function: model.ToolFunction{
-				Name: *src.Name,
+			Function: &model.ToolFunction{
+				Name: name,
 			},
+			Name: &name,
 		}
 	}
 	return result

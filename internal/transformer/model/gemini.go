@@ -109,13 +109,58 @@ type GeminiGenerationConfig struct {
 	ThinkingConfig *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
-// GeminiSchema for structured output
+// GeminiSchema for structured output. Mirrors the OpenAPI 3.0 / JSON Schema
+// Draft-07 subset that Gemini's responseSchema and function-calling
+// parameters accept. Fields not explicitly listed here (e.g. $ref,
+// additionalProperties, if/then/else) are rejected by the API.
 type GeminiSchema struct {
-	Type       string                   `json:"type"`
+	// Type is the primitive JSON Schema type: "string", "number", "integer",
+	// "boolean", "array", "object". Gemini rejects missing or unknown types.
+	Type string `json:"type"`
+
+	// Description is the free-form natural-language hint shown to the model.
+	Description string `json:"description,omitempty"`
+
+	// Format narrows the Type — e.g. "int32"/"int64" for integer,
+	// "float"/"double" for number, "date-time"/"enum" for string.
+	Format string `json:"format,omitempty"`
+
+	// Nullable flags the value as legally null. Gemini's wire form is a
+	// boolean (not the JSON Schema {"type":["string","null"]} sugar).
+	Nullable bool `json:"nullable,omitempty"`
+
+	// Enum holds the allowed string values when Type=="string". For enum
+	// fields Format is typically "enum" on Gemini.
+	Enum []string `json:"enum,omitempty"`
+
+	// Required is the list of property names that must appear for
+	// Type=="object". Gemini enforces required even when property schemas
+	// are otherwise permissive.
+	Required []string `json:"required,omitempty"`
+
+	// PropertyOrdering dictates the emission order of object properties.
+	// Gemini honours this at generation time to stabilise output shape.
+	PropertyOrdering []string `json:"propertyOrdering,omitempty"`
+
+	// Properties maps field name to sub-schema for Type=="object".
 	Properties map[string]*GeminiSchema `json:"properties,omitempty"`
-	Items      *GeminiSchema            `json:"items,omitempty"`
-	Required   []string                 `json:"required,omitempty"`
-	Enum       []string                 `json:"enum,omitempty"`
+
+	// Items is the element schema for Type=="array".
+	Items *GeminiSchema `json:"items,omitempty"`
+
+	// MinItems / MaxItems constrain array cardinality.
+	MinItems *int64 `json:"minItems,omitempty"`
+	MaxItems *int64 `json:"maxItems,omitempty"`
+
+	// Minimum / Maximum constrain numeric range. Pointers so zero is
+	// distinguishable from absent.
+	Minimum *float64 `json:"minimum,omitempty"`
+	Maximum *float64 `json:"maximum,omitempty"`
+
+	// AnyOf expresses a union of allowed schemas. Gemini supports anyOf but
+	// not oneOf / allOf — callers converting from Draft-07 should prefer
+	// anyOf or fall back to ErrSchemaLossy.
+	AnyOf []*GeminiSchema `json:"anyOf,omitempty"`
 }
 
 // GeminiThinkingConfig is the thinking features configuration

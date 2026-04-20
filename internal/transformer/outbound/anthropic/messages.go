@@ -398,12 +398,70 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 		}
 	}
 
+	// Convert tool choice
+	if tc := convertToolChoice(req.ToolChoice); tc != nil {
+		result.ToolChoice = tc
+	}
+
 	// Cap cache_control breakpoints to Anthropic's per-request ceiling. Excess markers are
 	// silently dropped rather than surfacing a 400 — the request still succeeds, just without
 	// caching on the trimmed blocks.
 	pruneCacheBreakpoints(result)
 
 	return result
+}
+
+// convertToolChoice maps the internal ToolChoice into the Anthropic wire
+// shape: {type, name?, disable_parallel_tool_use?}. The string form
+// ("auto"/"none"/"required"/"any") is normalised into the Anthropic enum,
+// and OpenAI-style {type:"function", function:{name}} is re-expressed as
+// {type:"tool", name}. Anthropic's schema rejects unknown types, so we drop
+// anything we can't translate rather than passing it through.
+func convertToolChoice(tc *model.ToolChoice) *anthropicModel.ToolChoice {
+	if tc == nil {
+		return nil
+	}
+	if tc.ToolChoice != nil {
+		switch strings.ToLower(*tc.ToolChoice) {
+		case "auto":
+			return &anthropicModel.ToolChoice{Type: "auto"}
+		case "none":
+			return &anthropicModel.ToolChoice{Type: "none"}
+		case "required", "any":
+			return &anthropicModel.ToolChoice{Type: "any"}
+		default:
+			return nil
+		}
+	}
+	named := tc.NamedToolChoice
+	if named == nil {
+		return nil
+	}
+	out := &anthropicModel.ToolChoice{
+		DisableParallelToolUse: named.DisableParallelToolUse,
+	}
+	switch strings.ToLower(named.Type) {
+	case "auto":
+		out.Type = "auto"
+	case "any", "required":
+		out.Type = "any"
+	case "none":
+		out.Type = "none"
+	case "tool", "function":
+		out.Type = "tool"
+		if name := named.ResolvedFunctionName(); name != "" {
+			n := name
+			out.Name = &n
+		} else {
+			// tool type requires a name on Anthropic; without one the
+			// request would 400. Fall back to auto so the request stays
+			// valid.
+			out.Type = "auto"
+		}
+	default:
+		return nil
+	}
+	return out
 }
 
 func resolveMaxTokens(req *model.InternalLLMRequest) int64 {

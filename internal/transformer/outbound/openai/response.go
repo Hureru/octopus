@@ -504,11 +504,25 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 
 	// Convert text options
 	if req.ResponseFormat != nil {
-		result.Text = &ResponsesTextOptions{
-			Format: &ResponsesTextFormat{
-				Type: req.ResponseFormat.Type,
-			},
+		format := &ResponsesTextFormat{
+			Type: req.ResponseFormat.Type,
+			Name: req.ResponseFormat.Name,
 		}
+		// Prefer the parsed Schema so nested fields survive round-trips;
+		// fall back to RawSchema (passthrough) then the legacy JSONSchema
+		// blob for callers that never populated the new fields.
+		if req.ResponseFormat.Schema != nil {
+			if b, err := req.ResponseFormat.Schema.ToOpenAIResponseFormat(); err == nil {
+				format.Schema = b
+			}
+		}
+		if len(format.Schema) == 0 && len(req.ResponseFormat.RawSchema) > 0 {
+			format.Schema = req.ResponseFormat.RawSchema
+		}
+		if len(format.Schema) == 0 && len(req.ResponseFormat.JSONSchema) > 0 {
+			format.Schema = req.ResponseFormat.JSONSchema
+		}
+		result.Text = &ResponsesTextOptions{Format: format}
 	}
 
 	// Convert reasoning
@@ -790,7 +804,10 @@ func convertToolChoiceToResponses(tc *model.ToolChoice) *ResponsesToolChoice {
 		result.Mode = tc.ToolChoice
 	} else if tc.NamedToolChoice != nil {
 		result.Type = &tc.NamedToolChoice.Type
-		result.Name = &tc.NamedToolChoice.Function.Name
+		if name := tc.NamedToolChoice.ResolvedFunctionName(); name != "" {
+			n := name
+			result.Name = &n
+		}
 	}
 	return result
 }

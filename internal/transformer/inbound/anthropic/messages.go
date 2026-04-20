@@ -298,6 +298,11 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 		chatReq.Tools = tools
 	}
 
+	// Convert tool_choice
+	if anthropicReq.ToolChoice != nil {
+		chatReq.ToolChoice = convertToolChoiceFromAnthropic(anthropicReq.ToolChoice)
+	}
+
 	// Convert stop sequences
 	if len(anthropicReq.StopSequences) > 0 {
 		if len(anthropicReq.StopSequences) == 1 {
@@ -338,6 +343,44 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 		}
 	}
 	return chatReq, nil
+}
+
+// convertToolChoiceFromAnthropic converts the wire-level Anthropic
+// ToolChoice into the provider-agnostic internal representation. The string
+// form is used for {auto,none,any} which are the simple modes; the named
+// form preserves `tool + name` (Anthropic) and `disable_parallel_tool_use`
+// so outbound emitters can reproduce them verbatim when the upstream is
+// also Anthropic.
+func convertToolChoiceFromAnthropic(src *ToolChoice) *model.ToolChoice {
+	if src == nil {
+		return nil
+	}
+	switch src.Type {
+	case "auto", "none", "any":
+		if src.DisableParallelToolUse == nil {
+			mode := src.Type
+			return &model.ToolChoice{ToolChoice: &mode}
+		}
+		return &model.ToolChoice{
+			NamedToolChoice: &model.NamedToolChoice{
+				Type:                   src.Type,
+				DisableParallelToolUse: src.DisableParallelToolUse,
+			},
+		}
+	case "tool":
+		named := &model.NamedToolChoice{
+			Type:                   "tool",
+			DisableParallelToolUse: src.DisableParallelToolUse,
+		}
+		if src.Name != nil {
+			name := *src.Name
+			named.Name = &name
+			named.Function = &model.ToolFunction{Name: name}
+		}
+		return &model.ToolChoice{NamedToolChoice: named}
+	default:
+		return nil
+	}
 }
 
 func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model.InternalLLMResponse) ([]byte, error) {

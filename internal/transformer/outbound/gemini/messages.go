@@ -122,6 +122,23 @@ func reasoningToThinkingBudget(effort string) int32 {
 	}
 }
 
+// canonicalGeminiModality normalises a client-supplied modality keyword into
+// the Gemini wire shape. Gemini accepts TEXT / IMAGE / AUDIO (upper case);
+// unknown values return the empty string so the caller drops them rather
+// than letting a 400 surface at request time.
+func canonicalGeminiModality(m string) string {
+	switch strings.ToLower(strings.TrimSpace(m)) {
+	case "text":
+		return "TEXT"
+	case "image":
+		return "IMAGE"
+	case "audio":
+		return "AUDIO"
+	default:
+		return ""
+	}
+}
+
 func audioTypeToMimeType(format string) string {
 	switch format {
 	case "wav":
@@ -332,14 +349,21 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		hasConfig = true
 	}
 
-	if request.ReasoningEffort != "" {
-		budget := reasoningToThinkingBudget(request.ReasoningEffort)
-
-		config.ThinkingConfig = &model.GeminiThinkingConfig{
-			ThinkingBudget:  &budget,
-			IncludeThoughts: true,
+	if request.ReasoningEffort != "" || request.ReasoningBudget != nil || request.AdaptiveThinking {
+		decision := resolveThinkingConfig(request.Model, request.ReasoningBudget, request.ReasoningEffort, request.AdaptiveThinking)
+		if decision.Supported {
+			thinkingConfig := &model.GeminiThinkingConfig{
+				IncludeThoughts: decision.IncludeThoughts,
+			}
+			if decision.UseLevel {
+				thinkingConfig.ThinkingLevel = decision.Level
+			} else {
+				b := decision.Budget
+				thinkingConfig.ThinkingBudget = &b
+			}
+			config.ThinkingConfig = thinkingConfig
+			hasConfig = true
 		}
-		hasConfig = true
 	}
 
 	// Convert ResponseFormat to ResponseMimeType and ResponseSchema
@@ -350,7 +374,29 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			hasConfig = true
 		case "json_schema":
 			config.ResponseMimeType = "application/json"
-			// TODO: Convert JSON schema to Gemini schema format if schema is provided
+			if request.ResponseFormat.Schema != nil {
+				geminiSchema, err := request.ResponseFormat.Schema.ToGemini()
+				if err != nil {
+					// Lossy: Gemini cannot express every Draft-07 keyword.
+					// Log-and-continue rather than fail the whole request —
+					// the schema was advisory anyway and JSON mode still
+					// constrains output shape.
+					log.Warnf("gemini: response schema lossy conversion: %v", err)
+				}
+				if geminiSchema != nil {
+					config.ResponseSchema = geminiSchema
+				}
+			} else if len(request.ResponseFormat.RawSchema) > 0 {
+				// Passthrough path: decode the raw bytes into GeminiSchema
+				// shape best-effort. If decoding fails we still set the
+				// MIME type so the model returns JSON.
+				var fallback model.GeminiSchema
+				if err := json.Unmarshal(request.ResponseFormat.RawSchema, &fallback); err == nil {
+					config.ResponseSchema = &fallback
+				} else {
+					log.Warnf("gemini: response raw schema passthrough failed: %v", err)
+				}
+			}
 			hasConfig = true
 		case "text":
 			config.ResponseMimeType = "text/plain"
@@ -358,18 +404,21 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		}
 	}
 
-	// Convert Modalities to ResponseModalities
-	// Gemini requires capitalized modalities: "Text", "Image" instead of "text", "image"
+	// Convert Modalities to ResponseModalities.
+	// Gemini requires upper-case modality tokens (TEXT / IMAGE / AUDIO).
+	// The previous `strings.ToUpper(m[:1]) + strings.ToLower(m[1:])` produced
+	// "Text"/"Image" which Gemini 2.5+ rejects with a 400.
 	if len(request.Modalities) > 0 {
-		convertedModalities := make([]string, len(request.Modalities))
-		for i, m := range request.Modalities {
-			// Capitalize first letter: "text" -> "Text", "image" -> "Image"
-			if len(m) > 0 {
-				convertedModalities[i] = strings.ToUpper(m[:1]) + strings.ToLower(m[1:])
+		convertedModalities := make([]string, 0, len(request.Modalities))
+		for _, m := range request.Modalities {
+			if wire := canonicalGeminiModality(m); wire != "" {
+				convertedModalities = append(convertedModalities, wire)
 			}
 		}
-		config.ResponseModalities = convertedModalities
-		hasConfig = true
+		if len(convertedModalities) > 0 {
+			config.ResponseModalities = convertedModalities
+			hasConfig = true
+		}
 	}
 
 	if hasConfig {
@@ -414,7 +463,11 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		}
 	}
 
-	// Convert tool choice to Gemini toolConfig.functionCallingConfig
+	// Convert tool choice to Gemini toolConfig.functionCallingConfig.
+	// Gemini only exposes mode = AUTO/ANY/NONE + allowedFunctionNames, so the
+	// rich OpenAI / Anthropic variants collapse into one of three modes.
+	// Anthropic's disable_parallel_tool_use has no Gemini equivalent and is
+	// dropped (Gemini always emits at most one functionCall per Part anyway).
 	if request.ToolChoice != nil {
 		mode := "AUTO"
 		var allowed []string
@@ -423,15 +476,24 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			switch strings.ToLower(*request.ToolChoice.ToolChoice) {
 			case "auto":
 				mode = "AUTO"
-			case "required":
+			case "required", "any":
 				mode = "ANY"
 			case "none":
 				mode = "NONE"
 			}
-		} else if request.ToolChoice.NamedToolChoice != nil && request.ToolChoice.NamedToolChoice.Type == "function" {
-			mode = "ANY"
-			if request.ToolChoice.NamedToolChoice.Function.Name != "" {
-				allowed = []string{request.ToolChoice.NamedToolChoice.Function.Name}
+		} else if named := request.ToolChoice.NamedToolChoice; named != nil {
+			switch strings.ToLower(named.Type) {
+			case "auto":
+				mode = "AUTO"
+			case "any", "required":
+				mode = "ANY"
+			case "none":
+				mode = "NONE"
+			case "function", "tool":
+				mode = "ANY"
+				if name := named.ResolvedFunctionName(); name != "" {
+					allowed = []string{name}
+				}
 			}
 		}
 
