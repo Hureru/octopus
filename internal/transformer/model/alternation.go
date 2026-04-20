@@ -19,6 +19,87 @@ const (
 // doesn't have one at the expected position.
 const continuedPivotText = "(continued)"
 
+// FlattenUnsupportedBlocks rewrites MessageContentPart entries whose Type
+// is not natively supported by the target provider into text hints or
+// drops them outright. Intended for outbound paths whose upstream rejects
+// unknown block types (OpenAI chat completions rejects anything other than
+// text / image_url / input_audio / file today). Anthropic and Gemini
+// outbound paths build their own wire shapes and do not need this.
+//
+// The rewrite is destructive: the affected parts are replaced in-place so
+// downstream JSON marshalling sees only supported types. Document blocks
+// are collapsed into a text hint containing title/context/body; server
+// tool blocks are dropped silently.
+func (r *InternalLLMRequest) FlattenUnsupportedBlocks(provider AlternationProvider) {
+	if provider != AlternationProviderOpenAI {
+		return
+	}
+	for i := range r.Messages {
+		r.Messages[i].flattenUnsupportedBlocksForOpenAI()
+	}
+}
+
+// flattenUnsupportedBlocksForOpenAI is the per-message worker for
+// FlattenUnsupportedBlocks. It compacts MultipleContent in place: document
+// blocks become text parts, server_tool_use / server_tool_result blocks
+// are dropped (they carry no value for OpenAI-shaped clients).
+func (m *Message) flattenUnsupportedBlocksForOpenAI() {
+	if len(m.Content.MultipleContent) == 0 {
+		return
+	}
+	filtered := m.Content.MultipleContent[:0]
+	for _, part := range m.Content.MultipleContent {
+		switch part.Type {
+		case "document":
+			if hint := documentTextHint(part.Document); hint != "" {
+				text := hint
+				filtered = append(filtered, MessageContentPart{
+					Type: "text",
+					Text: &text,
+				})
+			}
+		case "server_tool_use", "server_tool_result":
+			// OpenAI has no direct equivalent; drop.
+		default:
+			filtered = append(filtered, part)
+		}
+	}
+	m.Content.MultipleContent = filtered
+}
+
+// documentTextHint produces a best-effort plain-text representation of a
+// document block so providers without native document support still see
+// the metadata and body text.
+func documentTextHint(doc *DocumentSource) string {
+	if doc == nil {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if doc.Title != "" {
+		parts = append(parts, "Title: "+doc.Title)
+	}
+	if doc.Context != "" {
+		parts = append(parts, "Context: "+doc.Context)
+	}
+	switch doc.Type {
+	case "url":
+		if doc.URL != "" {
+			parts = append(parts, "Document URL: "+doc.URL)
+		}
+	case "text":
+		if doc.Text != "" {
+			parts = append(parts, doc.Text)
+		} else if doc.Data != "" {
+			parts = append(parts, doc.Data)
+		}
+	case "base64":
+		if doc.MediaType != "" {
+			parts = append(parts, "Attached document ("+doc.MediaType+")")
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 // EnforceAlternation returns a copy of msgs with consecutive same-role
 // turns merged so Anthropic's and Gemini's strict user/assistant
 // alternation holds. System and developer messages are preserved verbatim

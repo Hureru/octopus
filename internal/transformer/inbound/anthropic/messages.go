@@ -229,6 +229,43 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 						CacheControl: convertToLLMCacheControl(block.CacheControl),
 					})
 					hasContent = true
+				case "document":
+					part := convertDocumentBlockToLLM(block)
+					if part != nil {
+						contentParts = append(contentParts, *part)
+						hasContent = true
+					}
+				case "server_tool_use":
+					contentParts = append(contentParts, model.MessageContentPart{
+						Type: "server_tool_use",
+						ServerToolUse: &model.ServerToolUseBlock{
+							ID:    block.ID,
+							Name:  lo.FromPtr(block.Name),
+							Input: block.Input,
+						},
+						CacheControl: convertToLLMCacheControl(block.CacheControl),
+					})
+					hasContent = true
+				case "web_search_tool_result", "code_execution_tool_result":
+					result := &model.ServerToolResultBlock{
+						ToolUseID: lo.FromPtr(block.ToolUseID),
+						IsError:   block.IsError,
+					}
+					if block.Content != nil {
+						if block.Content.Content != nil {
+							b, _ := json.Marshal(*block.Content.Content)
+							result.Content = b
+						} else if len(block.Content.MultipleContent) > 0 {
+							b, _ := json.Marshal(block.Content.MultipleContent)
+							result.Content = b
+						}
+					}
+					contentParts = append(contentParts, model.MessageContentPart{
+						Type:             "server_tool_result",
+						ServerToolResult: result,
+						CacheControl:     convertToLLMCacheControl(block.CacheControl),
+					})
+					hasContent = true
 				}
 			}
 
@@ -380,6 +417,40 @@ func convertToolChoiceFromAnthropic(src *ToolChoice) *model.ToolChoice {
 		return &model.ToolChoice{NamedToolChoice: named}
 	default:
 		return nil
+	}
+}
+
+// convertDocumentBlockToLLM maps an Anthropic document content block into
+// an internal MessageContentPart of type "document". The wire `source`
+// carries either a base64/url/text payload or a pre-chunked content array;
+// Title / Context / Citations metadata is preserved verbatim.
+func convertDocumentBlockToLLM(block MessageContentBlock) *model.MessageContentPart {
+	if block.Source == nil {
+		return nil
+	}
+	doc := &model.DocumentSource{
+		Type:      block.Source.Type,
+		MediaType: block.Source.MediaType,
+		Data:      block.Source.Data,
+		URL:       block.Source.URL,
+		Content:   block.Source.Content,
+		Title:     block.Title,
+		Context:   block.Context,
+	}
+	// The wire shape carries text in source.data when type == "text"; split
+	// it out into the dedicated Text field so converters can distinguish
+	// raw text from a base64 blob.
+	if doc.Type == "text" {
+		doc.Text = doc.Data
+		doc.Data = ""
+	}
+	if block.Citations != nil {
+		doc.Citations = &model.DocumentCitations{Enabled: block.Citations.Enabled}
+	}
+	return &model.MessageContentPart{
+		Type:         "document",
+		Document:     doc,
+		CacheControl: convertToLLMCacheControl(block.CacheControl),
 	}
 }
 

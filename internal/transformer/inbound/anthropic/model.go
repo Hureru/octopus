@@ -277,7 +277,9 @@ func (c *MessageContent) UnmarshalJSON(data []byte) error {
 
 // MessageContentBlock represents different types of content blocks.
 type MessageContentBlock struct {
-	// Any of "text", "image", "thinking", "redacted_thinking", "tool_use", "server_tool_use", "tool_result".
+	// Any of "text", "image", "document", "thinking", "redacted_thinking",
+	// "tool_use", "server_tool_use", "tool_result", "web_search_tool_result",
+	// "code_execution_tool_result".
 	Type string `json:"type"`
 
 	// Text will be present if type is "text".
@@ -295,8 +297,13 @@ type MessageContentBlock struct {
 	// Data will be present if type is "redacted_thinking".
 	Data string `json:"data,omitempty"`
 
-	// Image will be present if type is "image".
+	// Image / Document source
 	Source *ImageSource `json:"source,omitempty"`
+
+	// Document-block metadata (Type == "document").
+	Title     string                    `json:"title,omitempty"`
+	Context   string                    `json:"context,omitempty"`
+	Citations *DocumentCitationsControl `json:"citations,omitempty"`
 
 	// Tool use request
 	// tool_use or server_tool_use
@@ -313,22 +320,36 @@ type MessageContentBlock struct {
 	IsError *bool           `json:"is_error,omitempty"`
 }
 
-// ImageSource represents image source for Anthropic.
+// DocumentCitationsControl mirrors document.citations on Anthropic document
+// blocks. A single `enabled` flag today; we preserve the struct shape for
+// forward-compatibility as Anthropic extends citation metadata.
+type DocumentCitationsControl struct {
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+// ImageSource represents the `source` sub-object of an Anthropic content
+// block. It serves image / document / url_pdf blocks; Type selects the
+// carrier. Fields Data/URL/Text/Content are populated depending on Type.
 type ImageSource struct {
-	// Type is the type of image source.
-	// Available values: base64, url
+	// Type is the source envelope.
+	// For image blocks: "base64" | "url"
+	// For document blocks: "base64" | "url" | "text" | "content"
 	Type string `json:"type"`
-	// MediaType is the media type of image.
-	// Available values: image/png, image/jpeg, image/gif, image/webp
-	MediaType string `json:"media_type"`
+	// MediaType is the media type of the payload.
+	// Image values: image/png, image/jpeg, image/gif, image/webp
+	// Document values: application/pdf, text/plain
+	MediaType string `json:"media_type,omitempty"`
 
-	// Data is the image data.
-	// If Type is base64, Data is the base64-encoded image data.
-	Data string `json:"data"`
+	// Data is the base64 payload (Type=="base64") or raw text
+	// (Type=="text" for document blocks).
+	Data string `json:"data,omitempty"`
 
-	// URL is the URL of the image.
-	// It will be present if Type is url.
+	// URL is the payload URL (Type=="url").
 	URL string `json:"url,omitempty"`
+
+	// Content holds Anthropic's pre-chunked document content blocks when
+	// Type=="content". Preserved as raw JSON for passthrough.
+	Content json.RawMessage `json:"content,omitempty"`
 }
 
 // StreamEvent represents events in Anthropic streaming response.

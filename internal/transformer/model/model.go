@@ -740,7 +740,8 @@ func (c *MessageContent) UnmarshalJSON(data []byte) error {
 // MessageContentPart represents different types of content (text, image, etc.)
 type MessageContentPart struct {
 	// Type is the type of the content part.
-	// e.g. "text", "image_url"
+	// e.g. "text", "image_url", "input_audio", "file", "document",
+	// "server_tool_use", "server_tool_result".
 	Type string `json:"type"`
 	// Text is the text content, required when type is "text"
 	Text *string `json:"text,omitempty"`
@@ -754,9 +755,96 @@ type MessageContentPart struct {
 	// File is the file content, required when type is "file"
 	File *File `json:"file,omitempty"`
 
+	// Document is the document content, required when type is "document".
+	// Mirrors Anthropic's document block — carries a PDF/text source plus
+	// optional title/context metadata and citation hints. The json:"-" tag
+	// keeps the block from leaking to OpenAI chat completions (which would
+	// reject the field); provider-specific outbound paths read the Go
+	// field directly.
+	Document *DocumentSource `json:"-"`
+
+	// ServerToolUse captures an Anthropic server_tool_use block (e.g.
+	// web_search_20250305, code_execution_20250522) so it can be preserved
+	// across retries and re-emitted verbatim. Non-Anthropic providers drop
+	// the block and surface a warning. json:"-" for the same reason as
+	// Document.
+	ServerToolUse *ServerToolUseBlock `json:"-"`
+
+	// ServerToolResult captures the result payload returned by Anthropic
+	// after a server-side tool invocation (web_search_tool_result,
+	// code_execution_tool_result). Shape mirrors tool_result but uses the
+	// dedicated server_* name so routing logic can distinguish them.
+	// json:"-" for the same reason as Document.
+	ServerToolResult *ServerToolResultBlock `json:"-"`
+
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	// This field is not serialized in JSON.
 	CacheControl *CacheControl `json:"-"`
+}
+
+// DocumentSource mirrors the Anthropic document content block. A document
+// carries a source (base64 / url / text / content array) plus optional
+// title / context / citation metadata. Other providers that don't support
+// native documents fall back to emitting either an inline PDF blob (Gemini
+// inline_data application/pdf) or a text hint in the user turn.
+type DocumentSource struct {
+	// Type identifies the envelope: "base64", "url", "text", or "content".
+	// "content" carries an array of sub-blocks (not yet fully supported —
+	// passthrough only).
+	Type string `json:"type"`
+
+	// MediaType is the MIME type of the document payload.
+	// Examples: "application/pdf", "text/plain".
+	MediaType string `json:"media_type,omitempty"`
+
+	// Data is the base64-encoded document (when Type=="base64").
+	Data string `json:"data,omitempty"`
+
+	// URL is the document URL (when Type=="url").
+	URL string `json:"url,omitempty"`
+
+	// Text is the raw text content (when Type=="text"). Providers that
+	// cannot embed documents natively use this as the fallback payload.
+	Text string `json:"text,omitempty"`
+
+	// Content holds pre-chunked sub-blocks (when Type=="content"). This is
+	// an opaque JSON payload — we preserve it for Anthropic passthrough but
+	// do not interpret it.
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Title / Context are optional metadata hints Anthropic surfaces in
+	// citation responses. Both are passed through unchanged.
+	Title   string `json:"title,omitempty"`
+	Context string `json:"context,omitempty"`
+
+	// Citations configures Anthropic's citation generation. When Enabled
+	// is true the model may emit citation references to this document.
+	Citations *DocumentCitations `json:"citations,omitempty"`
+}
+
+// DocumentCitations matches Anthropic's document.citations sub-object.
+type DocumentCitations struct {
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+// ServerToolUseBlock captures Anthropic's server_tool_use content block.
+// Unlike a regular tool_use, the tool is invoked by Anthropic's backend
+// (web search, code execution, etc.) and the invocation is already
+// complete by the time the block reaches the client.
+type ServerToolUseBlock struct {
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+// ServerToolResultBlock captures the result of a server-side tool
+// invocation (web_search_tool_result, code_execution_tool_result). The
+// content field mirrors tool_result.content — Anthropic returns either a
+// text string or an array of sub-blocks.
+type ServerToolResultBlock struct {
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	IsError   *bool           `json:"is_error,omitempty"`
 }
 
 // ImageURL represents an image URL with optional detail level.

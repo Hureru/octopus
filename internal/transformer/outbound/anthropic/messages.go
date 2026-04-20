@@ -879,6 +879,56 @@ func convertMultiplePartContent(msg model.Message) anthropicModel.MessageContent
 					blocks = append(blocks, *block)
 				}
 			}
+		case "document":
+			if block := convertDocumentPartToBlock(part); block != nil {
+				blocks = append(blocks, *block)
+			}
+		case "server_tool_use":
+			if part.ServerToolUse == nil {
+				continue
+			}
+			name := part.ServerToolUse.Name
+			blocks = append(blocks, anthropicModel.MessageContentBlock{
+				Type:         "server_tool_use",
+				ID:           part.ServerToolUse.ID,
+				Name:         &name,
+				Input:        part.ServerToolUse.Input,
+				CacheControl: convertCacheControl(part.CacheControl),
+			})
+		case "server_tool_result":
+			if part.ServerToolResult == nil {
+				continue
+			}
+			// Server tool result blocks carry a `content` field which may be
+			// a raw text string or an array of sub-blocks; passthrough the
+			// bytes so Anthropic receives the same shape the upstream
+			// model produced.
+			toolUseID := part.ServerToolResult.ToolUseID
+			wireType := "web_search_tool_result"
+			if part.ServerToolUse != nil && part.ServerToolUse.Name == "code_execution_20250522" {
+				wireType = "code_execution_tool_result"
+			}
+			var contentWrap *anthropicModel.MessageContent
+			if len(part.ServerToolResult.Content) > 0 {
+				c := anthropicModel.MessageContent{}
+				if err := json.Unmarshal(part.ServerToolResult.Content, &c); err == nil {
+					contentWrap = &c
+				} else {
+					// Fall back to a text string when the payload is a
+					// raw string rather than the structured form.
+					var raw string
+					if err := json.Unmarshal(part.ServerToolResult.Content, &raw); err == nil {
+						contentWrap = &anthropicModel.MessageContent{Content: &raw}
+					}
+				}
+			}
+			blocks = append(blocks, anthropicModel.MessageContentBlock{
+				Type:         wireType,
+				ToolUseID:    &toolUseID,
+				Content:      contentWrap,
+				IsError:      part.ServerToolResult.IsError,
+				CacheControl: convertCacheControl(part.CacheControl),
+			})
 		}
 	}
 
@@ -932,6 +982,39 @@ func convertImageURLToBlock(part model.MessageContentPart) *anthropicModel.Messa
 		},
 		CacheControl: convertCacheControl(part.CacheControl),
 	}
+}
+
+// convertDocumentPartToBlock maps an internal MessageContentPart of type
+// "document" into an Anthropic document content block. Anthropic accepts
+// four source envelopes (base64 / url / text / content); we honour whatever
+// the internal payload carries. Title / Context / Citations metadata is
+// preserved, so citation-aware downstream callers keep working.
+func convertDocumentPartToBlock(part model.MessageContentPart) *anthropicModel.MessageContentBlock {
+	doc := part.Document
+	if doc == nil {
+		return nil
+	}
+	source := &anthropicModel.ImageSource{
+		Type:      doc.Type,
+		MediaType: doc.MediaType,
+		Data:      doc.Data,
+		URL:       doc.URL,
+		Content:   doc.Content,
+	}
+	if doc.Type == "text" && doc.Data == "" && doc.Text != "" {
+		source.Data = doc.Text
+	}
+	block := &anthropicModel.MessageContentBlock{
+		Type:         "document",
+		Source:       source,
+		Title:        doc.Title,
+		Context:      doc.Context,
+		CacheControl: convertCacheControl(part.CacheControl),
+	}
+	if doc.Citations != nil {
+		block.Citations = &anthropicModel.DocumentCitationsControl{Enabled: doc.Citations.Enabled}
+	}
+	return block
 }
 
 func convertTools(tools []model.Tool) []anthropicModel.Tool {
@@ -1116,6 +1199,33 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 					Provider: "anthropic",
 				})
 			}
+		case "server_tool_use":
+			content.MultipleContent = append(content.MultipleContent, model.MessageContentPart{
+				Type: "server_tool_use",
+				ServerToolUse: &model.ServerToolUseBlock{
+					ID:    block.ID,
+					Name:  lo.FromPtr(block.Name),
+					Input: block.Input,
+				},
+			})
+		case "web_search_tool_result", "code_execution_tool_result":
+			result := &model.ServerToolResultBlock{
+				ToolUseID: lo.FromPtr(block.ToolUseID),
+				IsError:   block.IsError,
+			}
+			if block.Content != nil {
+				if block.Content.Content != nil {
+					b, _ := json.Marshal(*block.Content.Content)
+					result.Content = b
+				} else if len(block.Content.MultipleContent) > 0 {
+					b, _ := json.Marshal(block.Content.MultipleContent)
+					result.Content = b
+				}
+			}
+			content.MultipleContent = append(content.MultipleContent, model.MessageContentPart{
+				Type:             "server_tool_result",
+				ServerToolResult: result,
+			})
 		}
 	}
 

@@ -146,6 +146,67 @@ func canonicalGeminiModality(m string) string {
 	}
 }
 
+// convertDocumentToGeminiPart maps an Anthropic-style document block onto a
+// GeminiPart. PDF / image payloads become inline_data; text documents fall
+// back to a Text part prefixed with the title/context so the model still
+// has the metadata. URL-sourced documents degrade to a text hint since
+// Gemini does not fetch URLs inline.
+func convertDocumentToGeminiPart(doc *model.DocumentSource) *model.GeminiPart {
+	if doc == nil {
+		return nil
+	}
+	switch doc.Type {
+	case "base64":
+		if doc.Data == "" {
+			return nil
+		}
+		mime := doc.MediaType
+		if mime == "" {
+			mime = "application/pdf"
+		}
+		return &model.GeminiPart{
+			InlineData: &model.GeminiBlob{MimeType: mime, Data: doc.Data},
+		}
+	case "url":
+		if doc.URL == "" {
+			return nil
+		}
+		// Gemini FileData supports Google-Cloud-Storage / gs:// URIs, not
+		// arbitrary HTTPS; fall back to a text hint so the user sees the
+		// reference instead of having the block silently dropped.
+		hint := buildDocumentTextHint(doc, "document at "+doc.URL)
+		return &model.GeminiPart{Text: hint}
+	case "text":
+		text := doc.Text
+		if text == "" {
+			text = doc.Data
+		}
+		if text == "" {
+			return nil
+		}
+		return &model.GeminiPart{Text: buildDocumentTextHint(doc, text)}
+	default:
+		return nil
+	}
+}
+
+// buildDocumentTextHint joins title / context / body into a single
+// whitespace-separated block. Used as a fallback when Gemini (or any other
+// non-Anthropic provider) cannot embed a native document.
+func buildDocumentTextHint(doc *model.DocumentSource, body string) string {
+	parts := make([]string, 0, 3)
+	if doc.Title != "" {
+		parts = append(parts, "Title: "+doc.Title)
+	}
+	if doc.Context != "" {
+		parts = append(parts, "Context: "+doc.Context)
+	}
+	if body != "" {
+		parts = append(parts, body)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 func audioTypeToMimeType(format string) string {
 	switch format {
 	case "wav":
@@ -268,6 +329,16 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 								})
 							}
 						}
+					case "document":
+						if p := convertDocumentToGeminiPart(part.Document); p != nil {
+							content.Parts = append(content.Parts, p)
+						}
+					case "server_tool_use", "server_tool_result":
+						// Gemini has no native server-tool equivalent. Drop
+						// with a warning so the request still dispatches;
+						// the relay layer may surface an X-Octopus-Warning
+						// header.
+						log.Warnf("gemini: dropping unsupported %q block", part.Type)
 					}
 				}
 			}
