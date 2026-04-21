@@ -356,9 +356,28 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 		if streamEvent.Usage != nil {
 			usage := convertAnthropicUsage(streamEvent.Usage)
 			if o.streamUsage != nil {
+				// message_delta.usage normally carries only the final output_tokens.
+				// Carry forward cache metadata captured at message_start so the
+				// aggregate reflects all four buckets (input / output / cache_read /
+				// cache_write) rather than collapsing to input+output.
 				usage.PromptTokens = o.streamUsage.PromptTokens
-				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+				if usage.CacheCreationInputTokens == 0 {
+					usage.CacheCreationInputTokens = o.streamUsage.CacheCreationInputTokens
+				}
+				if usage.CacheReadInputTokens == 0 {
+					usage.CacheReadInputTokens = o.streamUsage.CacheReadInputTokens
+				}
+				if usage.CacheCreation5mInputTokens == 0 {
+					usage.CacheCreation5mInputTokens = o.streamUsage.CacheCreation5mInputTokens
+				}
+				if usage.CacheCreation1hInputTokens == 0 {
+					usage.CacheCreation1hInputTokens = o.streamUsage.CacheCreation1hInputTokens
+				}
+				if usage.PromptTokensDetails == nil {
+					usage.PromptTokensDetails = o.streamUsage.PromptTokensDetails
+				}
 			}
+			usage.TotalTokens = usage.EffectiveInputTokens() + usage.CompletionTokens
 			o.streamUsage = usage
 		}
 
@@ -368,6 +387,7 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 				{
 					Index:        0,
 					FinishReason: finishReason,
+					StopSequence: streamEvent.Delta.StopSequence,
 				},
 			}
 		}
@@ -1463,6 +1483,7 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 		Index:        0,
 		Message:      message,
 		FinishReason: convertStopReason(resp.StopReason),
+		StopSequence: resp.StopSequence,
 	}
 
 	result.Choices = []model.Choice{choice}

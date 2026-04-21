@@ -25,6 +25,7 @@ type MessagesInbound struct {
 	modelName                 string
 	contentIndex              int64
 	stopReason                *string
+	stopSequence              *string
 	toolCallIndices           map[int]bool // Track which tool call indices we've seen
 	inputToken                int64
 
@@ -630,6 +631,10 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 				resp.StopReason = choice.FinishReason
 			}
 		}
+
+		if choice.StopSequence != nil {
+			resp.StopSequence = choice.StopSequence
+		}
 	}
 
 	// Convert usage
@@ -1056,6 +1061,9 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 			// Store the stop reason, but don't generate message_delta yet
 			// We'll wait for the usage chunk to combine them
 			i.stopReason = &stopReason
+			if choice.StopSequence != nil {
+				i.stopSequence = choice.StopSequence
+			}
 		}
 	}
 
@@ -1096,7 +1104,8 @@ func (i *MessagesInbound) finalizeStreamMessage(usage *model.Usage) ([][]byte, e
 
 	if i.stopReason != nil {
 		msgDeltaEvent.Delta = &StreamDelta{
-			StopReason: i.stopReason,
+			StopReason:   i.stopReason,
+			StopSequence: i.stopSequence,
 		}
 	}
 

@@ -1172,6 +1172,11 @@ type Choice struct {
 	// e.g. "stop", "length", "content_filter", "function_call", "tool_calls"
 	FinishReason *string `json:"finish_reason,omitempty"`
 
+	// StopSequence is the matched custom stop string reported by Anthropic when
+	// FinishReason is "stop_sequence". Carried through so the originating
+	// inbound can round-trip the value.
+	StopSequence *string `json:"stop_sequence,omitempty"`
+
 	Logprobs *LogprobsContent `json:"logprobs,omitempty"`
 }
 
