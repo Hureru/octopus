@@ -284,16 +284,9 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 			} else if rawOutput, ok := o.marshalTrackedOutputItems(); ok {
 				resp.RawResponsesOutputItems = rawOutput
 			}
-			var finishReason *string
-			if streamEvent.Response.Status != nil {
-				switch *streamEvent.Response.Status {
-				case "completed":
-					finishReason = lo.ToPtr("stop")
-				case "incomplete":
-					finishReason = lo.ToPtr("length")
-				case "failed":
-					finishReason = lo.ToPtr("error")
-				}
+			finishReason, respErr := normalizeResponsesFinishReason(streamEvent.Response.Status, streamEvent.Response.Error)
+			if respErr != nil {
+				resp.Error = respErr
 			}
 			resp.Choices = []model.Choice{
 				{
@@ -307,10 +300,41 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 		}
 
 	case "response.failed", "response.incomplete", "error":
+		// Synthesize a terminal chunk with a legal finish_reason. Previously
+		// we emitted FinishReason="error" which is not in the OpenAI Chat
+		// Completions enum (stop | length | tool_calls | content_filter |
+		// function_call); strict downstream SDKs (Pydantic AI, OpenAI Python)
+		// reject the entire response. Pick a legal value and surface the
+		// original cause via ResponseError so the inbound layer can forward
+		// it to the client.
+		var reason *string
+		var respErr *model.ResponseError
+		switch streamEvent.Type {
+		case "response.incomplete":
+			reason = lo.ToPtr("length")
+		default:
+			reason = lo.ToPtr("stop")
+		}
+		if streamEvent.Response != nil && streamEvent.Response.Error != nil {
+			respErr = &model.ResponseError{
+				Detail: model.ErrorDetail{
+					Code:    fmt.Sprintf("%d", streamEvent.Response.Error.Code),
+					Message: streamEvent.Response.Error.Message,
+				},
+			}
+		} else if streamEvent.Code != "" || streamEvent.Message != "" {
+			respErr = &model.ResponseError{
+				Detail: model.ErrorDetail{
+					Code:    streamEvent.Code,
+					Message: streamEvent.Message,
+				},
+			}
+		}
+		resp.Error = respErr
 		resp.Choices = []model.Choice{
 			{
 				Index:        0,
-				FinishReason: lo.ToPtr("error"),
+				FinishReason: reason,
 			},
 		}
 
@@ -979,14 +1003,11 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 	// Set finish reason based on status
 	if len(toolCalls) > 0 {
 		choice.FinishReason = lo.ToPtr("tool_calls")
-	} else if resp.Status != nil {
-		switch *resp.Status {
-		case "completed":
-			choice.FinishReason = lo.ToPtr("stop")
-		case "failed":
-			choice.FinishReason = lo.ToPtr("error")
-		case "incomplete":
-			choice.FinishReason = lo.ToPtr("length")
+	} else {
+		finishReason, respErr := normalizeResponsesFinishReason(resp.Status, resp.Error)
+		choice.FinishReason = finishReason
+		if respErr != nil {
+			result.Error = respErr
 		}
 	}
 
@@ -1240,6 +1261,44 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// normalizeResponsesFinishReason maps an OpenAI Responses API `status` value
+// to a legal OpenAI Chat Completions finish_reason. The Chat schema enum is
+// stop | length | tool_calls | content_filter | function_call; emitting
+// anything else (the historical "error" value we used) is rejected outright
+// by strict downstream SDKs such as OpenAI Python / Pydantic AI.
+//
+// When the upstream carries a ResponsesError on failure / incomplete turns
+// we synthesise a ResponseError so the inbound layer can surface the
+// original cause to the client via the final chunk payload. Tool-call
+// driven completions are handled by the caller before this helper runs;
+// content_filter / nuanced mappings (incomplete_details.reason) will land
+// with O-M1.
+func normalizeResponsesFinishReason(status *string, errDetail *ResponsesError) (*string, *model.ResponseError) {
+	var respErr *model.ResponseError
+	if errDetail != nil && (errDetail.Message != "" || errDetail.Code != 0) {
+		respErr = &model.ResponseError{
+			Detail: model.ErrorDetail{
+				Code:    fmt.Sprintf("%d", errDetail.Code),
+				Message: errDetail.Message,
+			},
+		}
+	}
+
+	if status == nil {
+		return nil, respErr
+	}
+	switch *status {
+	case "completed":
+		return lo.ToPtr("stop"), nil
+	case "incomplete":
+		return lo.ToPtr("length"), respErr
+	case "failed":
+		return lo.ToPtr("stop"), respErr
+	default:
+		return nil, respErr
+	}
 }
 
 func convertResponsesUsage(usage *ResponsesUsage) *model.Usage {

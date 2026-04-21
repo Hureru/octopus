@@ -252,3 +252,81 @@ func TestTransformRequestRawRewritesModel(t *testing.T) {
 func stringPtr(value string) *string {
 	return &value
 }
+
+// TestNormalizeResponsesFinishReason verifies that Responses API status
+// values are mapped to the OpenAI Chat Completions finish_reason enum
+// (stop | length | tool_calls | content_filter | function_call). Historic
+// behaviour emitted "error" which strict SDKs such as OpenAI Python reject
+// with a Literal validation error. (O-C1)
+func TestNormalizeResponsesFinishReason(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     string
+		err        *ResponsesError
+		wantReason string
+		wantErrMsg string
+	}{
+		{name: "completed", status: "completed", wantReason: "stop"},
+		{name: "incomplete", status: "incomplete", wantReason: "length"},
+		{name: "failed carries error cause", status: "failed", err: &ResponsesError{Code: 400, Message: "boom"}, wantReason: "stop", wantErrMsg: "boom"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := tc.status
+			reason, respErr := normalizeResponsesFinishReason(&status, tc.err)
+			if reason == nil || *reason != tc.wantReason {
+				t.Fatalf("want reason=%q, got %v", tc.wantReason, reason)
+			}
+			if tc.wantErrMsg != "" {
+				if respErr == nil || respErr.Detail.Message != tc.wantErrMsg {
+					t.Fatalf("want error %q, got %+v", tc.wantErrMsg, respErr)
+				}
+			}
+			// Must never produce the legacy illegal "error" value.
+			if reason != nil && *reason == "error" {
+				t.Fatalf("illegal finish_reason=error leaked, status=%s", tc.status)
+			}
+		})
+	}
+}
+
+// TestTransformStreamFailedEventPreservesLegalFinishReason covers the full
+// stream path for a `response.failed` event carrying an embedded error
+// payload. The event must translate to finish_reason=stop and an attached
+// ResponseError so the inbound layer can forward the original cause. Any
+// leak of finish_reason=error means a downstream client will throw out the
+// whole turn.
+func TestTransformStreamFailedEventPreservesLegalFinishReason(t *testing.T) {
+	o := &ResponseOutbound{}
+	event := `{"type":"response.failed","response":{"status":"failed","error":{"code":500,"message":"upstream oops"}}}`
+	resp, err := o.TransformStream(context.Background(), []byte(event))
+	if err != nil {
+		t.Fatalf("TransformStream: %v", err)
+	}
+	if resp == nil || len(resp.Choices) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.Choices[0].FinishReason == nil || *resp.Choices[0].FinishReason != "stop" {
+		t.Fatalf("want finish_reason=stop, got %+v", resp.Choices[0].FinishReason)
+	}
+	if resp.Error == nil || resp.Error.Detail.Message != "upstream oops" {
+		t.Fatalf("expected ResponseError attached, got %+v", resp.Error)
+	}
+}
+
+// TestTransformStreamIncompleteEventMapsToLength guards the incomplete
+// status mapping specifically — under the bug this also became "error".
+func TestTransformStreamIncompleteEventMapsToLength(t *testing.T) {
+	o := &ResponseOutbound{}
+	event := `{"type":"response.incomplete"}`
+	resp, err := o.TransformStream(context.Background(), []byte(event))
+	if err != nil {
+		t.Fatalf("TransformStream: %v", err)
+	}
+	if resp == nil || len(resp.Choices) != 1 || resp.Choices[0].FinishReason == nil {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if *resp.Choices[0].FinishReason != "length" {
+		t.Fatalf("want length, got %q", *resp.Choices[0].FinishReason)
+	}
+}
