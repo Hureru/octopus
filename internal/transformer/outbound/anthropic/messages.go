@@ -1147,14 +1147,26 @@ func convertTools(tools []model.Tool) []anthropicModel.Tool {
 				InputSchema:  tool.Function.Parameters,
 				CacheControl: convertCacheControl(tool.CacheControl),
 			})
-		case "server_search", "code_execution", "url_context":
-			// Anthropic exposes these via a different wire shape
-			// (`{type:"web_search_20250305", ...}`) which is not yet
-			// modelled by the anthropicModel.Tool struct. Drop with a
-			// warning so the request still dispatches without these tools.
-			continue
 		default:
-			continue
+			// Anthropic server tools (web_search_*, code_execution_*,
+			// computer_*): replay the raw spec captured at inbound time so
+			// provider-specific fields (max_uses, allowed_domains,
+			// display_width_px, ...) survive without enumerating every
+			// variant here. The MarshalJSON on anthropicModel.Tool handles
+			// the raw-body passthrough.
+			if len(tool.AnthropicServerSpec) == 0 {
+				log.Warnw("transformer.anthropic.server_tool.missing_spec",
+					"tool_type", tool.Type,
+					"tool_name", tool.Function.Name,
+				)
+				continue
+			}
+			result = append(result, anthropicModel.Tool{
+				Type:         tool.Type,
+				Name:         tool.Function.Name,
+				RawBody:      tool.AnthropicServerSpec,
+				CacheControl: convertCacheControl(tool.CacheControl),
+			})
 		}
 	}
 	return result
@@ -1194,9 +1206,10 @@ func convertCacheControl(cc *model.CacheControl) *anthropicModel.CacheControl {
 
 // collectAnthropicBetaHeaders scans the outbound MessageRequest for features
 // that require an `anthropic-beta` header and returns the gated values.
-// Today we only detect cache_control.ttl == "1h" (extended-cache-ttl-2025-04-11);
-// other server-tool betas (web-search-2025-03-05, code-execution-2025-05-22,
-// computer-use-2025-01-24) will slot in here once A-H5 lands.
+// Covers:
+//   - cache_control.ttl == "1h" → extended-cache-ttl-2025-04-11 (A-C3)
+//   - server tools (web_search_*, code_execution_*, computer_*) → the matching
+//     beta required for the respective server tool (A-H5)
 //
 // Returning a slice (de-duplicated, order-preserving) lets callers join with
 // a comma; multiple beta tags are valid in a single header per the Anthropic
@@ -1236,6 +1249,7 @@ func collectAnthropicBetaHeaders(req *anthropicModel.MessageRequest) []string {
 	}
 	for i := range req.Tools {
 		inspect(req.Tools[i].CacheControl)
+		add(anthropicServerToolBeta(req.Tools[i].Type))
 	}
 	for i := range req.Messages {
 		msg := &req.Messages[i]
@@ -1244,6 +1258,24 @@ func collectAnthropicBetaHeaders(req *anthropicModel.MessageRequest) []string {
 		}
 	}
 	return out
+}
+
+// anthropicServerToolBeta maps an Anthropic server-tool `type` (e.g.
+// "web_search_20250305") to its required anthropic-beta value. Returns an
+// empty string for function/custom tools that need no beta.
+func anthropicServerToolBeta(toolType string) string {
+	switch {
+	case toolType == "" || toolType == "function" || toolType == "custom":
+		return ""
+	case strings.HasPrefix(toolType, "web_search_"):
+		return "web-search-2025-03-05"
+	case strings.HasPrefix(toolType, "code_execution_"):
+		return "code-execution-2025-05-22"
+	case strings.HasPrefix(toolType, "computer_"):
+		return "computer-use-2025-01-24"
+	default:
+		return ""
+	}
 }
 
 // pruneCacheBreakpoints walks the Anthropic request after conversion and drops cache_control

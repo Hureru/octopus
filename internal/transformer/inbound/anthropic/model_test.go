@@ -2,6 +2,8 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +62,62 @@ func TestTransformRequestAcceptsToolResultContentAsSingleBlockObject(t *testing.
 	part := msg.Content.MultipleContent[0]
 	if part.Type != "text" || part.Text == nil || *part.Text != "tool ok" {
 		t.Fatalf("expected tool result text part to be preserved, got %#v", part)
+	}
+}
+
+// A-H5: Server tools like `web_search_20250305` must preserve their raw body
+// so outbound can replay spec-specific fields. Function tools keep working
+// unchanged.
+func TestToolUnmarshalPreservesServerToolRawBody(t *testing.T) {
+	raw := `{"type":"web_search_20250305","name":"web_search","max_uses":3,"allowed_domains":["a.com"]}`
+	var tool Tool
+	if err := json.Unmarshal([]byte(raw), &tool); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if tool.Type != "web_search_20250305" {
+		t.Fatalf("expected type preserved, got %q", tool.Type)
+	}
+	if !tool.IsServerTool() {
+		t.Fatalf("expected IsServerTool=true")
+	}
+	if len(tool.RawBody) == 0 {
+		t.Fatalf("expected raw body preserved")
+	}
+	out, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(out), "max_uses") {
+		t.Fatalf("expected spec-specific fields in marshaled wire body, got %s", string(out))
+	}
+	if !strings.Contains(string(out), "allowed_domains") {
+		t.Fatalf("expected allowed_domains to survive, got %s", string(out))
+	}
+}
+
+// A-H5 (negative): function tools still use the default marshal path and
+// do not grow new fields (type, name, description, input_schema).
+func TestToolUnmarshalFunctionToolUnchanged(t *testing.T) {
+	raw := `{"name":"lookup","description":"look it up","input_schema":{"type":"object"}}`
+	var tool Tool
+	if err := json.Unmarshal([]byte(raw), &tool); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if tool.IsServerTool() {
+		t.Fatalf("function tool misclassified as server tool")
+	}
+	out, err := json.Marshal(tool)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var generic map[string]json.RawMessage
+	if err := json.Unmarshal(out, &generic); err != nil {
+		t.Fatalf("unmarshal back: %v", err)
+	}
+	if _, ok := generic["type"]; ok {
+		t.Fatalf("function tool should omit top-level type when unset, got %s", string(out))
+	}
+	if _, ok := generic["input_schema"]; !ok {
+		t.Fatalf("expected input_schema to be preserved, got %s", string(out))
 	}
 }

@@ -320,6 +320,22 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 	if len(anthropicReq.Tools) > 0 {
 		tools := make([]model.Tool, 0, len(anthropicReq.Tools))
 		for _, tool := range anthropicReq.Tools {
+			if tool.IsServerTool() {
+				// Server-side tool (web_search_*, code_execution_*, computer_*).
+				// Preserve the raw spec body so the outbound path can replay
+				// the wire payload verbatim; Type drives beta header selection.
+				llmTool := model.Tool{
+					Type: tool.Type,
+					Function: model.Function{
+						Name: tool.Name,
+					},
+					CacheControl:        convertToLLMCacheControl(tool.CacheControl),
+					AnthropicServerSpec: tool.RawBody,
+				}
+				tools = append(tools, llmTool)
+				i.inputToken += int64(tokenizer.CountTokens(tool.Name, chatReq.Model))
+				continue
+			}
 			llmTool := model.Tool{
 				Type: "function",
 				Function: model.Function{

@@ -246,3 +246,114 @@ func TestTransformStreamErrorEventSurfacesResponseError(t *testing.T) {
 		})
 	}
 }
+
+// A-H5: Anthropic server tools (web_search_*, code_execution_*, computer_*)
+// must round-trip through inbound → internal → outbound without dropping the
+// spec-specific fields, and the matching `anthropic-beta` header must be
+// attached. Previously convertTools explicitly skipped server tools, so
+// clients lost access to web search / code execution when routing through us.
+func TestTransformRequestPreservesServerToolSpecAndBeta(t *testing.T) {
+	cases := []struct {
+		name     string
+		toolType string
+		wantBeta string
+		rawSpec  string
+	}{
+		{
+			name:     "web_search",
+			toolType: "web_search_20250305",
+			wantBeta: "web-search-2025-03-05",
+			rawSpec:  `{"type":"web_search_20250305","name":"web_search","max_uses":5,"allowed_domains":["wikipedia.org"]}`,
+		},
+		{
+			name:     "code_execution",
+			toolType: "code_execution_20250522",
+			wantBeta: "code-execution-2025-05-22",
+			rawSpec:  `{"type":"code_execution_20250522","name":"code_execution"}`,
+		},
+		{
+			name:     "computer_use",
+			toolType: "computer_20250124",
+			wantBeta: "computer-use-2025-01-24",
+			rawSpec:  `{"type":"computer_20250124","name":"computer","display_width_px":1024,"display_height_px":768,"display_number":1}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outbound := &MessageOutbound{}
+			req := &model.InternalLLMRequest{
+				Model: "claude-3-5-sonnet",
+				Messages: []model.Message{
+					{
+						Role:    "user",
+						Content: model.MessageContent{Content: stringPtr("hi")},
+					},
+				},
+				Tools: []model.Tool{
+					{
+						Type: tc.toolType,
+						Function: model.Function{Name: strings.Split(tc.toolType, "_")[0]},
+						AnthropicServerSpec: json.RawMessage(tc.rawSpec),
+					},
+				},
+			}
+			httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.anthropic.com", "sk-test")
+			if err != nil {
+				t.Fatalf("TransformRequest: %v", err)
+			}
+			if got := httpReq.Header.Get("anthropic-beta"); !strings.Contains(got, tc.wantBeta) {
+				t.Fatalf("expected %q in anthropic-beta header, got %q", tc.wantBeta, got)
+			}
+
+			body, err := io.ReadAll(httpReq.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			if !strings.Contains(string(body), tc.toolType) {
+				t.Fatalf("expected serialized request to contain %q, got %s", tc.toolType, string(body))
+			}
+			// Spot-check a spec-specific field survives.
+			if tc.name == "web_search" && !strings.Contains(string(body), "allowed_domains") {
+				t.Fatalf("expected allowed_domains to be preserved, got %s", string(body))
+			}
+			if tc.name == "computer_use" && !strings.Contains(string(body), "display_width_px") {
+				t.Fatalf("expected display_width_px to be preserved, got %s", string(body))
+			}
+		})
+	}
+}
+
+// A-H5: convertTools drops server tools that lack a raw spec payload instead
+// of emitting a malformed wire object.
+func TestConvertToolsDropsServerToolWithoutSpec(t *testing.T) {
+	tools := []model.Tool{
+		{
+			Type:     "web_search_20250305",
+			Function: model.Function{Name: "web_search"},
+		},
+	}
+	got := convertTools(tools)
+	if len(got) != 0 {
+		t.Fatalf("expected empty result for spec-less server tool, got %+v", got)
+	}
+}
+
+// A-H5: anthropicServerToolBeta recognises each supported family prefix.
+func TestAnthropicServerToolBeta(t *testing.T) {
+	cases := map[string]string{
+		"":                          "",
+		"function":                  "",
+		"custom":                    "",
+		"web_search_20250305":       "web-search-2025-03-05",
+		"web_search_20260101":       "web-search-2025-03-05",
+		"code_execution_20250522":   "code-execution-2025-05-22",
+		"computer_20250124":         "computer-use-2025-01-24",
+		"something_unknown":         "",
+	}
+	for in, want := range cases {
+		if got := anthropicServerToolBeta(in); got != want {
+			t.Fatalf("anthropicServerToolBeta(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

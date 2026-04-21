@@ -179,14 +179,72 @@ type ToolChoice struct {
 }
 
 // Tool represents a tool definition for Anthropic API.
+//
+// Anthropic distinguishes between custom (function) tools and server-side tools
+// (web_search_*, code_execution_*, computer_*). Server tools carry a distinct
+// wire shape with per-type parameters (max_uses, allowed_domains, display_*).
+// Instead of enumerating every spec variant, the struct preserves the full raw
+// JSON in RawBody so inbound → outbound round-trips stay lossless via custom
+// Marshal/Unmarshal.
 type Tool struct {
-	// Ensure the omitempty, otherwise it will be sent empty string to the API, will cause some providers ignore the tool.
-	// For now, we only support function (client tool or custom tool in anthropic) tool, so we can just omit the type.
-	// Type         string          `json:"type,omitempty"`
+	// Type carries the tool type string. Empty / "function" / "custom" are
+	// function-style tools; anything else is a server tool whose wire body we
+	// preserve in RawBody.
+	Type         string          `json:"type,omitempty"`
 	Name         string          `json:"name"`
 	Description  string          `json:"description"`
 	InputSchema  json.RawMessage `json:"input_schema"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+
+	// RawBody preserves the full incoming JSON for server tools so outbound
+	// can passthrough spec-specific fields without per-variant modelling.
+	// Populated by UnmarshalJSON; consumed by MarshalJSON.
+	RawBody json.RawMessage `json:"-"`
+}
+
+// IsServerTool reports whether the Type marks this as a Anthropic server-side
+// tool (web_search_*, code_execution_*, computer_*, ...).
+func (t Tool) IsServerTool() bool {
+	return t.Type != "" && t.Type != "function" && t.Type != "custom"
+}
+
+// MarshalJSON renders server tools directly from their raw body (optionally
+// re-injecting cache_control) so spec-specific fields survive. Function-style
+// tools use the default struct marshaling.
+func (t Tool) MarshalJSON() ([]byte, error) {
+	if t.IsServerTool() && len(t.RawBody) > 0 {
+		if t.CacheControl == nil {
+			return t.RawBody, nil
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(t.RawBody, &m); err != nil {
+			return t.RawBody, nil
+		}
+		ccBytes, err := json.Marshal(t.CacheControl)
+		if err == nil {
+			m["cache_control"] = ccBytes
+		}
+		return json.Marshal(m)
+	}
+	type alias Tool
+	return json.Marshal(alias(t))
+}
+
+// UnmarshalJSON populates the struct from either shape and — for server
+// tools — retains the full raw body so it can be replayed verbatim later.
+func (t *Tool) UnmarshalJSON(data []byte) error {
+	type alias Tool
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*t = Tool(a)
+	if t.IsServerTool() {
+		buf := make([]byte, len(data))
+		copy(buf, data)
+		t.RawBody = buf
+	}
+	return nil
 }
 
 type CacheControl struct {

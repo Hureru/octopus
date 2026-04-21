@@ -117,3 +117,43 @@ func TestTransformStreamErrorDefaultsTypeWhenEmpty(t *testing.T) {
 		t.Fatalf("expected fallback type=api_error, got %q", string(out))
 	}
 }
+
+// A-H5: TransformRequest must preserve the server-tool Type and raw spec
+// payload on the InternalLLMRequest so the outbound anthropic transformer can
+// rehydrate the wire object and attach the matching beta header.
+func TestTransformRequestPreservesServerToolOnInternalRequest(t *testing.T) {
+	inbound := &MessagesInbound{}
+	body := []byte(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":"hello"}],
+		"tools":[
+			{"type":"web_search_20250305","name":"web_search","max_uses":3,"allowed_domains":["a.com"]},
+			{"name":"lookup","description":"look","input_schema":{"type":"object"}}
+		]
+	}`)
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	if len(req.Tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(req.Tools))
+	}
+	srv := req.Tools[0]
+	if srv.Type != "web_search_20250305" {
+		t.Fatalf("server tool Type lost, got %q", srv.Type)
+	}
+	if len(srv.AnthropicServerSpec) == 0 {
+		t.Fatalf("server tool raw spec lost")
+	}
+	if !strings.Contains(string(srv.AnthropicServerSpec), "allowed_domains") {
+		t.Fatalf("spec-specific fields missing, got %s", string(srv.AnthropicServerSpec))
+	}
+	fn := req.Tools[1]
+	if fn.Type != "function" {
+		t.Fatalf("function tool Type = %q, want function", fn.Type)
+	}
+	if fn.Function.Name != "lookup" {
+		t.Fatalf("function tool name mismatch, got %q", fn.Function.Name)
+	}
+}

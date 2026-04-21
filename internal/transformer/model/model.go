@@ -1384,6 +1384,14 @@ type Tool struct {
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	// This field is not serialized in JSON.
 	CacheControl *CacheControl `json:"-"`
+
+	// AnthropicServerSpec preserves the raw JSON for Anthropic server-side
+	// tools (web_search_*, code_execution_*, computer_*). The outbound
+	// Anthropic transformer reconstructs the wire payload from this raw body
+	// so upstream-specific fields (max_uses, allowed_domains, display_*,
+	// etc.) survive cross-tranformer round-trips without enumerating every
+	// spec variant. Not serialized on the internal request.
+	AnthropicServerSpec json.RawMessage `json:"-"`
 }
 
 // CacheControl represents cache control configuration.
