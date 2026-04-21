@@ -45,6 +45,49 @@ func TestConvertToResponsesRequestPreservesRawInputItems(t *testing.T) {
 	}
 }
 
+func TestConvertToResponsesRequestSanitizesRawReasoningInputSummary(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gpt-4o",
+		RawInputItems: json.RawMessage(`[
+			{"type":"input_text","text":"hello"},
+			{"type":"reasoning","encrypted_content":"enc","native_meta":{"keep":true}}
+		]`),
+	}
+
+	responsesReq := ConvertToResponsesRequest(req)
+	body, err := json.Marshal(responsesReq)
+	if err != nil {
+		t.Fatalf("marshal responses request failed: %v", err)
+	}
+
+	var payload struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal responses request failed: %v", err)
+	}
+
+	if len(payload.Input) != 2 {
+		t.Fatalf("expected two raw input items, got %#v", payload.Input)
+	}
+
+	reasoning := payload.Input[1]
+	summary, ok := reasoning["summary"].([]any)
+	if !ok || len(summary) != 1 {
+		t.Fatalf("expected reasoning summary to be added, got %#v", reasoning["summary"])
+	}
+	part, ok := summary[0].(map[string]any)
+	if !ok || part["type"] != "summary_text" || part["text"] != "" {
+		t.Fatalf("expected default summary_text part, got %#v", summary[0])
+	}
+	if _, ok := reasoning["native_meta"]; !ok {
+		t.Fatalf("expected native fields to be preserved, got %#v", reasoning)
+	}
+	if reasoning["encrypted_content"] != "enc" {
+		t.Fatalf("expected encrypted_content to be preserved, got %#v", reasoning["encrypted_content"])
+	}
+}
+
 func TestMarshalResponsesInputItemsBuildsArrayInput(t *testing.T) {
 	data, err := MarshalResponsesInputItems([]model.Message{{
 		Role: "assistant",

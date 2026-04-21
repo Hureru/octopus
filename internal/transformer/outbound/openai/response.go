@@ -222,7 +222,7 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 	case "response.completed":
 		if streamEvent.Response != nil {
 			if len(streamEvent.Response.Output) > 0 {
-				if rawOutput, marshalErr := json.Marshal(streamEvent.Response.Output); marshalErr == nil {
+				if rawOutput, marshalErr := json.Marshal(sanitizeResponsesItems(streamEvent.Response.Output)); marshalErr == nil {
 					resp.RawResponsesOutputItems = rawOutput
 				}
 			} else if rawOutput, ok := o.marshalTrackedOutputItems(); ok {
@@ -558,12 +558,12 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 
 func buildResponsesInput(req *model.InternalLLMRequest) ResponsesInput {
 	if req != nil && len(req.RawInputItems) > 0 {
-		return ResponsesInput{Raw: append(json.RawMessage(nil), req.RawInputItems...)}
+		return ResponsesInput{Raw: sanitizeResponsesRawItems(append(json.RawMessage(nil), req.RawInputItems...))}
 	}
 	if req == nil {
 		return ResponsesInput{}
 	}
-	return convertInputFromMessages(req.Messages, req.TransformOptions)
+	return sanitizeResponsesInput(convertInputFromMessages(req.Messages, req.TransformOptions))
 }
 
 func MarshalResponsesInputItems(msgs []model.Message) (json.RawMessage, error) {
@@ -639,7 +639,7 @@ func convertInputFromMessages(msgs []model.Message, transformOptions model.Trans
 		}
 	}
 
-	return ResponsesInput{Items: items}
+	return ResponsesInput{Items: sanitizeResponsesItems(items)}
 }
 
 func convertUserMessageToResponses(msg model.Message) ResponsesItem {
@@ -733,7 +733,7 @@ func convertAssistantMessageToResponses(msg model.Message) []ResponsesItem {
 		})
 	}
 
-	return items
+	return sanitizeResponsesItems(items)
 }
 
 func convertToolMessageToResponses(msg model.Message) ResponsesItem {
@@ -830,7 +830,7 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 		Created: resp.CreatedAt,
 	}
 	if len(resp.Output) > 0 {
-		if rawOutput, err := json.Marshal(resp.Output); err == nil {
+		if rawOutput, err := json.Marshal(sanitizeResponsesItems(resp.Output)); err == nil {
 			result.RawResponsesOutputItems = rawOutput
 		}
 	}
@@ -1041,11 +1041,140 @@ func (o *ResponseOutbound) marshalTrackedOutputItems() (json.RawMessage, bool) {
 	if len(items) == 0 {
 		return nil, false
 	}
-	data, err := json.Marshal(items)
+	data, err := json.Marshal(sanitizeResponsesItems(items))
 	if err != nil {
 		return nil, false
 	}
 	return data, true
+}
+
+func sanitizeResponsesInput(input ResponsesInput) ResponsesInput {
+	if len(input.Raw) > 0 {
+		input.Raw = sanitizeResponsesRawItems(input.Raw)
+	}
+	if len(input.Items) > 0 {
+		input.Items = sanitizeResponsesItems(input.Items)
+	}
+	return input
+}
+
+func sanitizeResponsesItems(items []ResponsesItem) []ResponsesItem {
+	if len(items) == 0 {
+		return items
+	}
+
+	sanitized := make([]ResponsesItem, len(items))
+	for i, item := range items {
+		sanitized[i] = item
+		ensureResponsesReasoningSummary(&sanitized[i])
+	}
+	return sanitized
+}
+
+func ensureResponsesReasoningSummary(item *ResponsesItem) {
+	if item == nil || item.Type != "reasoning" {
+		return
+	}
+	if len(item.Summary) == 0 {
+		item.Summary = []ResponsesReasoningSummary{{
+			Type: "summary_text",
+			Text: "",
+		}}
+		return
+	}
+	for i := range item.Summary {
+		if item.Summary[i].Type == "" {
+			item.Summary[i].Type = "summary_text"
+		}
+	}
+}
+
+func sanitizeResponsesRawItems(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return raw
+	}
+
+	changed := false
+	for _, item := range items {
+		if decodeRawString(item["type"]) != "reasoning" {
+			continue
+		}
+
+		summaryRaw, ok := item["summary"]
+		if !ok || len(bytes.TrimSpace(summaryRaw)) == 0 || bytes.Equal(bytes.TrimSpace(summaryRaw), []byte("null")) {
+			item["summary"] = defaultRawResponsesReasoningSummary()
+			changed = true
+			continue
+		}
+
+		sanitizedSummary, summaryChanged, ok := sanitizeResponsesRawSummary(summaryRaw)
+		if ok && summaryChanged {
+			item["summary"] = sanitizedSummary
+			changed = true
+		}
+	}
+
+	if !changed {
+		return raw
+	}
+
+	data, err := json.Marshal(items)
+	if err != nil {
+		return raw
+	}
+	return data
+}
+
+func sanitizeResponsesRawSummary(raw json.RawMessage) (json.RawMessage, bool, bool) {
+	var summaryItems []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &summaryItems); err != nil {
+		return nil, false, false
+	}
+	if len(summaryItems) == 0 {
+		return defaultRawResponsesReasoningSummary(), true, true
+	}
+
+	changed := false
+	for _, summary := range summaryItems {
+		if _, ok := summary["type"]; !ok {
+			summary["type"] = []byte(`"summary_text"`)
+			changed = true
+		}
+		if _, ok := summary["text"]; !ok {
+			summary["text"] = []byte(`""`)
+			changed = true
+		}
+	}
+
+	if !changed {
+		return raw, false, true
+	}
+
+	data, err := json.Marshal(summaryItems)
+	if err != nil {
+		return nil, false, false
+	}
+	return data, true, true
+}
+
+func defaultRawResponsesReasoningSummary() json.RawMessage {
+	return json.RawMessage(`[{"type":"summary_text","text":""}]`)
+}
+
+func decodeRawString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return value
 }
 
 func firstNonEmpty(values ...string) string {
