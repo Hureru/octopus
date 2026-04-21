@@ -38,6 +38,69 @@ func TestChatInboundParses2025Fields(t *testing.T) {
 	}
 }
 
+// O-H7: streaming aggregator must merge Chat delta.Audio across chunks
+// (gpt-5-audio and other audio-capable models stream incremental
+// data/transcript while id stays stable). Previously the field was
+// ignored during aggregation and the resulting message carried no
+// Audio payload.
+func TestChatInboundAggregatesAudioDelta(t *testing.T) {
+	inbound := &ChatInbound{}
+	ctx := context.Background()
+
+	chunk := func(id string, data, transcript string, exp int64) *model.InternalLLMResponse {
+		return &model.InternalLLMResponse{
+			ID: "resp-1",
+			Choices: []model.Choice{{
+				Index: 0,
+				Delta: &model.Message{
+					Audio: &struct {
+						Data       string `json:"data,omitempty"`
+						ExpiresAt  int64  `json:"expires_at,omitempty"`
+						ID         string `json:"id,omitempty"`
+						Transcript string `json:"transcript,omitempty"`
+					}{
+						ID:         id,
+						Data:       data,
+						Transcript: transcript,
+						ExpiresAt:  exp,
+					},
+				},
+			}},
+		}
+	}
+
+	if _, err := inbound.TransformStream(ctx, chunk("aud-1", "AAA", "Hello", 1700000000)); err != nil {
+		t.Fatalf("TransformStream 1: %v", err)
+	}
+	if _, err := inbound.TransformStream(ctx, chunk("", "BBB", " world", 0)); err != nil {
+		t.Fatalf("TransformStream 2: %v", err)
+	}
+
+	result, err := inbound.GetInternalResponse(ctx)
+	if err != nil {
+		t.Fatalf("GetInternalResponse: %v", err)
+	}
+	if result == nil || len(result.Choices) != 1 {
+		t.Fatalf("expected 1 choice, got %+v", result)
+	}
+	msg := result.Choices[0].Message
+	if msg == nil || msg.Audio == nil {
+		t.Fatalf("expected aggregated audio, got %+v", msg)
+	}
+	if msg.Audio.ID != "aud-1" {
+		t.Errorf("expected ID carried from first chunk, got %q", msg.Audio.ID)
+	}
+	if msg.Audio.Data != "AAABBB" {
+		t.Errorf("expected data concatenated, got %q", msg.Audio.Data)
+	}
+	if msg.Audio.Transcript != "Hello world" {
+		t.Errorf("expected transcript concatenated, got %q", msg.Audio.Transcript)
+	}
+	if msg.Audio.ExpiresAt != 1700000000 {
+		t.Errorf("expected expires_at preserved, got %d", msg.Audio.ExpiresAt)
+	}
+}
+
 // O-H2: Chat inbound must tag the internal request with
 // APIFormatOpenAIChatCompletion so downstream transformers can tell Chat
 // requests apart from Responses requests.

@@ -155,6 +155,29 @@ func (i *ChatInbound) GetInternalResponse(ctx context.Context) (*model.InternalL
 					)
 				}
 
+				// Aggregate audio output chunks (O-H7). gpt-5-audio and other
+				// audio-capable models stream Delta.Audio with a stable id plus
+				// incremental data / transcript; id and expires_at replace,
+				// data and transcript concatenate.
+				if delta.Audio != nil {
+					if existingChoice.Message.Audio == nil {
+						existingChoice.Message.Audio = &struct {
+							Data       string `json:"data,omitempty"`
+							ExpiresAt  int64  `json:"expires_at,omitempty"`
+							ID         string `json:"id,omitempty"`
+							Transcript string `json:"transcript,omitempty"`
+						}{}
+					}
+					if delta.Audio.ID != "" {
+						existingChoice.Message.Audio.ID = delta.Audio.ID
+					}
+					if delta.Audio.ExpiresAt > 0 {
+						existingChoice.Message.Audio.ExpiresAt = delta.Audio.ExpiresAt
+					}
+					existingChoice.Message.Audio.Data += delta.Audio.Data
+					existingChoice.Message.Audio.Transcript += delta.Audio.Transcript
+				}
+
 				// Append reasoning content (supports both reasoning_content and reasoning fields)
 				if delta.GetReasoningContent() != "" {
 					if existingChoice.Message.ReasoningContent == nil {
