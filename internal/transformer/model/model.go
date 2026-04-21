@@ -624,6 +624,15 @@ type ReasoningBlock struct {
 	Signature string             `json:"signature,omitempty"`
 	Data      string             `json:"data,omitempty"`
 	Provider  string             `json:"provider,omitempty"`
+
+	// ToolCallID / ToolCallName anchor a Signature-kind block to the
+	// specific function call it belongs to. Gemini 3 returns one
+	// thoughtSignature per functionCall, and the outbound layer must replay
+	// the signature on the matching functionCall part by name (not by
+	// ordinal position) — otherwise multi-tool turns get their signatures
+	// swapped and Gemini rejects the replay with 400. See G-H7.
+	ToolCallID   string `json:"tool_call_id,omitempty"`
+	ToolCallName string `json:"tool_call_name,omitempty"`
 }
 
 // AppendReasoningBlock appends a reasoning block preserving insertion order.

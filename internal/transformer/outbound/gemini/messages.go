@@ -17,7 +17,23 @@ import (
 	"github.com/samber/lo"
 )
 
-type MessagesOutbound struct{}
+type MessagesOutbound struct {
+	// streamReasoningIndex tracks the global (cross-chunk) emission order of
+	// reasoning blocks per candidate. Gemini 3 interleaves thought /
+	// signature parts across many SSE chunks; the inbound aggregator needs a
+	// monotonically-increasing Index to bind signatures to the correct
+	// thinking block. See G-C4.
+	streamReasoningIndex map[int]int
+}
+
+func (o *MessagesOutbound) nextReasoningIndex(candidateIndex int) int {
+	if o.streamReasoningIndex == nil {
+		o.streamReasoningIndex = make(map[int]int)
+	}
+	idx := o.streamReasoningIndex[candidateIndex]
+	o.streamReasoningIndex[candidateIndex] = idx + 1
+	return idx
+}
 
 func (o *MessagesOutbound) TransformRequest(ctx context.Context, request *model.InternalLLMRequest, baseUrl, key string) (*http.Request, error) {
 	if request == nil {
@@ -90,7 +106,7 @@ func (o *MessagesOutbound) TransformResponse(ctx context.Context, response *http
 	}
 
 	// Convert Gemini response to internal format
-	return convertGeminiToLLMResponse(&geminiResp, false), nil
+	return convertGeminiToLLMResponse(&geminiResp, false, nil), nil
 }
 
 func (o *MessagesOutbound) TransformStream(ctx context.Context, eventData []byte) (*model.InternalLLMResponse, error) {
@@ -107,8 +123,10 @@ func (o *MessagesOutbound) TransformStream(ctx context.Context, eventData []byte
 		return nil, fmt.Errorf("failed to unmarshal gemini stream chunk: %w", err)
 	}
 
-	// Convert to internal format
-	return convertGeminiToLLMResponse(&geminiResp, true), nil
+	// Convert to internal format, handing in a per-candidate global index
+	// counter so ReasoningBlock.Index stays monotonically increasing across
+	// stream chunks (G-C4).
+	return convertGeminiToLLMResponse(&geminiResp, true, o.nextReasoningIndex), nil
 }
 
 // Helper functions
@@ -239,6 +257,32 @@ func collectGeminiSignatures(blocks []model.ReasoningBlock) []string {
 		case model.ReasoningBlockKindSignature:
 			out = append(out, b.Signature)
 		}
+	}
+	return out
+}
+
+// collectGeminiSignaturesByName indexes Signature-kind blocks by the tool
+// call they originated from (ToolCallName). This lets the outbound replay
+// attach each signature to its matching functionCall, which is required for
+// multi-tool turns — Gemini 3 rejects the request if a signature is bound
+// to the wrong functionCall. See G-H7.
+//
+// Blocks without a ToolCallName are ignored; the caller falls back to the
+// ordinal list returned by collectGeminiSignatures for them.
+func collectGeminiSignaturesByName(blocks []model.ReasoningBlock) map[string]string {
+	out := make(map[string]string, len(blocks))
+	for _, b := range blocks {
+		if b.Kind != model.ReasoningBlockKindSignature || b.Signature == "" {
+			continue
+		}
+		name := strings.TrimSpace(b.ToolCallName)
+		if name == "" {
+			continue
+		}
+		if _, exists := out[name]; exists {
+			continue
+		}
+		out[name] = b.Signature
 	}
 	return out
 }
@@ -414,6 +458,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			geminiBlocks := msg.ReasoningBlocksByProvider("gemini")
 			content.Parts = append(content.Parts, buildGeminiThoughtParts(geminiBlocks)...)
 			geminiSigs := collectGeminiSignatures(geminiBlocks)
+			geminiSigByName := collectGeminiSignaturesByName(geminiBlocks)
 			sigIdx := 0
 			// Handle text content
 			if msg.Content.Content != nil && *msg.Content.Content != "" {
@@ -438,7 +483,14 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 
 					sig := strings.TrimSpace(toolCall.ThoughtSignature)
 					if sig == "" {
-						if fallbackSig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
+						// Prefer a name-indexed lookup so multi-tool turns bind
+						// the correct signature to each functionCall; fall back
+						// to the ordinal cursor only if no name-match exists
+						// (mostly legacy or single-tool traces). See G-H7.
+						if named, ok := geminiSigByName[toolCall.Function.Name]; ok && named != "" {
+							sig = named
+							delete(geminiSigByName, toolCall.Function.Name)
+						} else if fallbackSig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
 							sig = fallbackSig
 						}
 					}
@@ -845,7 +897,7 @@ func flattenGeminiToolResultContent(msg *model.Message) string {
 	return ""
 }
 
-func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse, isStream bool) *model.InternalLLMResponse {
+func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse, isStream bool, streamIndexer func(candidateIndex int) int) *model.InternalLLMResponse {
 	resp := &model.InternalLLMResponse{
 		Choices: []model.Choice{},
 	}
@@ -860,6 +912,20 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 	for _, candidate := range geminiResp.Candidates {
 		choice := model.Choice{
 			Index: candidate.Index,
+		}
+
+		// nextReasoningIndex returns the Index to stamp on the next
+		// ReasoningBlock for this candidate. For streaming, it draws from the
+		// outbound's per-candidate counter so signatures bind to the right
+		// thinking block across chunks (G-C4). For non-streaming, it falls
+		// back to the local slice length as before.
+		nextReasoningIndex := func() int {
+			if streamIndexer != nil {
+				return streamIndexer(candidate.Index)
+			}
+			// local fallback — len of whatever we've appended so far
+			// (captured via closure below).
+			return -1
 		}
 
 		// Convert finish reason
@@ -881,6 +947,12 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			var reasoningContent *string
 			var hasInlineData bool
 			var reasoningBlocks []model.ReasoningBlock
+			assignIndex := func() int {
+				if idx := nextReasoningIndex(); idx >= 0 {
+					return idx
+				}
+				return len(reasoningBlocks)
+			}
 
 			for idx, part := range candidate.Content.Parts {
 				if part.Thought {
@@ -893,7 +965,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 					if part.Text != "" || part.ThoughtSignature != "" {
 						reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
 							Kind:      model.ReasoningBlockKindThinking,
-							Index:     len(reasoningBlocks),
+							Index:     assignIndex(),
 							Text:      part.Text,
 							Signature: part.ThoughtSignature,
 							Provider:  "gemini",
@@ -910,7 +982,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 					if part.ThoughtSignature != "" {
 						reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
 							Kind:      model.ReasoningBlockKindSignature,
-							Index:     len(reasoningBlocks),
+							Index:     assignIndex(),
 							Signature: part.ThoughtSignature,
 							Provider:  "gemini",
 						})
@@ -930,9 +1002,10 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 				}
 				if part.FunctionCall != nil {
 					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+					toolCallID := fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, idx)
 					toolCall := model.ToolCall{
 						Index: idx,
-						ID:    fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, idx),
+						ID:    toolCallID,
 						Type:  "function",
 						Function: model.FunctionCall{
 							Name:      part.FunctionCall.Name,
@@ -942,11 +1015,18 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 					}
 					toolCalls = append(toolCalls, toolCall)
 					if part.ThoughtSignature != "" {
+						// Anchor signatures to their originating functionCall so
+						// the outbound replay can reconstruct the mapping by
+						// name (G-H7) instead of relying on ordinal position —
+						// multi-tool turns otherwise swap signatures and Gemini
+						// rejects the request with 400.
 						reasoningBlocks = append(reasoningBlocks, model.ReasoningBlock{
-							Kind:      model.ReasoningBlockKindSignature,
-							Index:     len(reasoningBlocks),
-							Signature: part.ThoughtSignature,
-							Provider:  "gemini",
+							Kind:         model.ReasoningBlockKindSignature,
+							Index:        assignIndex(),
+							Signature:    part.ThoughtSignature,
+							Provider:     "gemini",
+							ToolCallID:   toolCallID,
+							ToolCallName: part.FunctionCall.Name,
 						})
 					}
 				}
