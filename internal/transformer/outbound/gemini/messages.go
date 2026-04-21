@@ -236,11 +236,29 @@ func collectGeminiSignatures(blocks []model.ReasoningBlock) []string {
 			continue
 		}
 		switch b.Kind {
-		case model.ReasoningBlockKindSignature, model.ReasoningBlockKindThinking:
+		case model.ReasoningBlockKindSignature:
 			out = append(out, b.Signature)
 		}
 	}
 	return out
+}
+
+func buildGeminiThoughtParts(blocks []model.ReasoningBlock) []*model.GeminiPart {
+	parts := make([]*model.GeminiPart, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Kind != model.ReasoningBlockKindThinking {
+			continue
+		}
+		part := &model.GeminiPart{Thought: true}
+		if b.Text != "" {
+			part.Text = b.Text
+		}
+		if b.Signature != "" {
+			part.ThoughtSignature = b.Signature
+		}
+		parts = append(parts, part)
+	}
+	return parts
 }
 
 // nextGeminiSignature pops the next signature string, advancing the caller-managed cursor.
@@ -293,6 +311,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 
 	// Convert messages
 	var systemInstruction *model.GeminiContent
+	degradedToolCalls := map[string]string{}
 
 	for _, msg := range request.Messages {
 		switch msg.Role {
@@ -383,20 +402,15 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 				Parts: []*model.GeminiPart{},
 			}
 			// Gemini 3 requires Part-level thoughtSignature verbatim on multi-turn function
-			// calling. Pull the signatures captured from the upstream response; anything not
-			// tagged Provider="gemini" (e.g. Anthropic signatures) would be rejected and is
-			// therefore dropped.
-			geminiSigs := collectGeminiSignatures(msg.ReasoningBlocksByProvider("gemini"))
+			// calling. Replay Gemini-authored thinking parts as thoughts, and keep standalone
+			// signature blocks for matching functionCall parts only.
+			geminiBlocks := msg.ReasoningBlocksByProvider("gemini")
+			content.Parts = append(content.Parts, buildGeminiThoughtParts(geminiBlocks)...)
+			geminiSigs := collectGeminiSignatures(geminiBlocks)
 			sigIdx := 0
 			// Handle text content
 			if msg.Content.Content != nil && *msg.Content.Content != "" {
-				part := &model.GeminiPart{
-					Text: *msg.Content.Content,
-				}
-				if sig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
-					part.ThoughtSignature = sig
-				}
-				content.Parts = append(content.Parts, part)
+				content.Parts = append(content.Parts, &model.GeminiPart{Text: *msg.Content.Content})
 			}
 			// Handle tool calls
 			if len(msg.ToolCalls) > 0 {
@@ -411,15 +425,35 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 							Args: args,
 						},
 					}
-					if sig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
-						part.ThoughtSignature = sig
+
+					sig := strings.TrimSpace(toolCall.ThoughtSignature)
+					if sig == "" {
+						if fallbackSig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {
+							sig = fallbackSig
+						}
 					}
-					content.Parts = append(content.Parts, part)
+
+					if sig != "" {
+						part.ThoughtSignature = sig
+						content.Parts = append(content.Parts, part)
+						continue
+					}
+
+					// Cross-provider tool histories (for example Anthropic inbound ->
+					// Gemini outbound) don't carry Gemini thoughtSignatures. Degrade the
+					// historical function call into plain text context instead of sending
+					// an invalid functionCall part that Gemini rejects with 400.
+					if fallback := formatGeminiToolCallFallback(toolCall); fallback != "" {
+						content.Parts = append(content.Parts, &model.GeminiPart{Text: fallback})
+					}
+					if toolCall.ID != "" {
+						degradedToolCalls[toolCall.ID] = toolCall.Function.Name
+					}
 				}
 			}
 			geminiReq.Contents = append(geminiReq.Contents, content)
 
-			if sigIdx > 0 {
+			if len(geminiBlocks) > 0 || sigIdx > 0 {
 				log.Debugw("transformer.reasoning.signature.passthrough",
 					"provider", "gemini",
 					"direction", "inject",
@@ -429,8 +463,15 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			}
 
 		case "tool":
-			// Tool result
+			// Tool result. If the corresponding assistant functionCall had to be
+			// downgraded to plain text because no Gemini thoughtSignature was
+			// available, degrade the tool result too so the request stays valid.
 			content := convertLLMToolResultToGeminiContent(&msg)
+			if msg.ToolCallID != nil {
+				if toolName, ok := degradedToolCalls[*msg.ToolCallID]; ok {
+					content = convertLLMToolResultToGeminiTextContent(&msg, toolName)
+				}
+			}
 			geminiReq.Contents = append(geminiReq.Contents, content)
 		}
 	}
@@ -656,8 +697,8 @@ func convertLLMToolResultToGeminiContent(msg *model.Message) *model.GeminiConten
 
 	var responseData map[string]any
 	if msg.Content.Content != nil {
-		if err := json.Unmarshal([]byte(*msg.Content.Content), &responseData); err != nil {
-			log.Warnf("gemini: failed to unmarshal tool response content: %v", err)
+		if parsed, ok := decodeGeminiToolResponse(*msg.Content.Content); ok {
+			responseData = parsed
 		}
 	}
 
@@ -675,6 +716,92 @@ func convertLLMToolResultToGeminiContent(msg *model.Message) *model.GeminiConten
 	}
 
 	return content
+}
+
+func decodeGeminiToolResponse(raw string) (map[string]any, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || !json.Valid([]byte(trimmed)) {
+		return nil, false
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return nil, false
+	}
+	switch value := decoded.(type) {
+	case map[string]any:
+		return value, true
+	default:
+		return map[string]any{"result": value}, true
+	}
+}
+
+func formatGeminiToolCallFallback(toolCall model.ToolCall) string {
+	name := strings.TrimSpace(toolCall.Function.Name)
+	args := strings.TrimSpace(toolCall.Function.Arguments)
+	switch {
+	case name == "" && args == "":
+		return ""
+	case args == "":
+		return fmt.Sprintf("Tool call: %s", name)
+	case name == "":
+		return fmt.Sprintf("Tool call arguments: %s", args)
+	default:
+		return fmt.Sprintf("Tool call %s arguments: %s", name, args)
+	}
+}
+
+func convertLLMToolResultToGeminiTextContent(msg *model.Message, toolName string) *model.GeminiContent {
+	text := formatGeminiToolResultFallback(msg, toolName)
+	if text == "" {
+		text = "Tool result received."
+	}
+	return &model.GeminiContent{
+		Role:  "user",
+		Parts: []*model.GeminiPart{{Text: text}},
+	}
+}
+
+func formatGeminiToolResultFallback(msg *model.Message, toolName string) string {
+	label := strings.TrimSpace(toolName)
+	if label == "" {
+		if msg.ToolCallName != nil {
+			label = strings.TrimSpace(*msg.ToolCallName)
+		}
+	}
+	body := strings.TrimSpace(flattenGeminiToolResultContent(msg))
+	switch {
+	case label != "" && body != "":
+		return fmt.Sprintf("Tool result %s: %s", label, body)
+	case label != "":
+		return fmt.Sprintf("Tool result %s received.", label)
+	default:
+		return body
+	}
+}
+
+func flattenGeminiToolResultContent(msg *model.Message) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Content.Content != nil {
+		return *msg.Content.Content
+	}
+	if len(msg.Content.MultipleContent) == 0 {
+		return ""
+	}
+	texts := make([]string, 0, len(msg.Content.MultipleContent))
+	for _, part := range msg.Content.MultipleContent {
+		if part.Text != nil && *part.Text != "" {
+			texts = append(texts, *part.Text)
+		}
+	}
+	if len(texts) > 0 {
+		return strings.Join(texts, "\n")
+	}
+	if body, err := json.Marshal(msg.Content.MultipleContent); err == nil {
+		return string(body)
+	}
+	return ""
 }
 
 func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse, isStream bool) *model.InternalLLMResponse {
@@ -770,6 +897,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 							Name:      part.FunctionCall.Name,
 							Arguments: string(argsJSON),
 						},
+						ThoughtSignature: part.ThoughtSignature,
 					}
 					toolCalls = append(toolCalls, toolCall)
 					if part.ThoughtSignature != "" {

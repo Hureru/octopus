@@ -1408,6 +1408,11 @@ type ToolCall struct {
 	// Cannot use omitempty, as an index of 0 would be omitted, which can break consumers.
 	Index int `json:"index"`
 
+	// ThoughtSignature preserves Gemini's per-functionCall thoughtSignature so
+	// multi-turn tool use can be replayed without losing the provider-required
+	// signature binding. Help field only; never serialized to client JSON.
+	ThoughtSignature string `json:"-"`
+
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	CacheControl *CacheControl `json:"-"`
 }
