@@ -389,3 +389,38 @@ func TestTransformStreamCompletedFallsBackToTrackedFunctionCall(t *testing.T) {
 		t.Fatalf("want tool_calls from tracked items, got %q", *resp.Choices[0].FinishReason)
 	}
 }
+
+// O-H4: Responses streaming "response.refusal.delta" must be forwarded as
+// Choice.Delta.Refusal so downstream inbounds can surface the safety refusal
+// as a distinct content part. Before this fix the outbound switch hit its
+// default branch and dropped the entire refusal payload, so clients saw a
+// truncated assistant message without a reason.
+func TestTransformStreamRefusalDeltaIsForwarded(t *testing.T) {
+	o := &ResponseOutbound{}
+	event := `{"type":"response.refusal.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"I cannot help with that."}`
+	resp, err := o.TransformStream(context.Background(), []byte(event))
+	if err != nil {
+		t.Fatalf("TransformStream refusal.delta: %v", err)
+	}
+	if resp == nil || len(resp.Choices) != 1 || resp.Choices[0].Delta == nil {
+		t.Fatalf("expected 1 choice with delta, got %+v", resp)
+	}
+	if got := resp.Choices[0].Delta.Refusal; got != "I cannot help with that." {
+		t.Fatalf("expected refusal to be forwarded, got %q", got)
+	}
+}
+
+// O-H4: `response.refusal.done` carries the full refusal text which was
+// already streamed via delta events. Re-emitting it would double-count on the
+// inbound accumulator, so the outbound must drop the event.
+func TestTransformStreamRefusalDoneIsDropped(t *testing.T) {
+	o := &ResponseOutbound{}
+	event := `{"type":"response.refusal.done","item_id":"msg_1","output_index":0,"content_index":0,"text":"I cannot help with that."}`
+	resp, err := o.TransformStream(context.Background(), []byte(event))
+	if err != nil {
+		t.Fatalf("TransformStream refusal.done: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected done event to be dropped, got %+v", resp)
+	}
+}

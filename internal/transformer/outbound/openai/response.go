@@ -275,6 +275,30 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 			},
 		}
 
+	case "response.refusal.delta":
+		// Responses surfaces safety refusals as a distinct content-part stream
+		// (response.refusal.delta / response.refusal.done). Forward the delta
+		// on Choice.Delta.Refusal so downstream Chat Completions / Responses
+		// inbounds can emit the matching refusal events — the inbound already
+		// knows how to open a refusal content part when it sees this field.
+		resp.Choices = []model.Choice{
+			{
+				Index: 0,
+				Delta: &model.Message{
+					Role:    "assistant",
+					Refusal: streamEvent.Delta,
+				},
+			},
+		}
+
+	case "response.refusal.done":
+		// `done` carries the full refusal text which has already been streamed
+		// through `delta` events. Re-emitting it would double-count on the
+		// inbound accumulator, so drop it here — the inbound closes the
+		// refusal content part via its own terminal flow (closeMessageItem /
+		// finish_reason).
+		return nil, nil
+
 	case "response.completed":
 		if streamEvent.Response != nil {
 			if len(streamEvent.Response.Output) > 0 {
