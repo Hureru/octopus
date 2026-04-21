@@ -101,6 +101,48 @@
 
 ---
 
+## Round 2（2026-04-21 二次审查衍生批次）
+
+> 配套审查报告：`grok-grok-4-20-expert-api-ancient-eclipse*.md`  
+> 目标：对照三家 2026 最新 API 规范 + Web 交叉核查，处理第一轮 P1–P4 之外剩余的 15 项问题。
+
+### R1 · Critical Hotfix
+
+| 编号 | 标题 | 状态 | 完成时间 | Commit | 备注 |
+|------|------|------|----------|--------|------|
+| G-C6+C7 | Gemini 3 `thinkingLevel` 合法化 + 子家族差异（3 Flash / 3 Pro / 3.1 Pro） | ✅ | 2026-04-21 | 844056a | 清除非法 `"none"` / `"dynamic"` 枚举值；按子家族 clamp；3.1 Pro 不允许禁用 thinking；dynamic 在 Gemini 3 路径改为留空 Level |
+
+### R2 · High（丢字段）
+
+| 编号 | 标题 | 状态 | 完成时间 | Commit | 备注 |
+|------|------|------|----------|--------|------|
+| G-H8 | Gemini `cachedContent` + `labels` 请求字段 | ✅ | 2026-04-21 | 2531b9a | InternalLLMRequest 新增 GeminiCachedContentRef；Labels 复用 Metadata 通道 |
+| G-H9 | `GeminiPart.ExecutableCode` / `CodeExecutionResult` part | ✅ | 2026-04-21 | 825e4cc + 18a6fe4(fixup) | 映射到跨家 ServerToolUse/ServerToolResult（BlockType="code_execution_tool_result"），hasStructuredPart 防止丢失 |
+| G-H10+M9 | Gemini 响应 grounding/citation/urlContext/safetyRatings 回写 | ✅ | 2026-04-21 | 4d62bc8 | Choice 新增结构化字段 Grounding/Citations/URLContext/SafetyRatings；促进跨家对齐；同时合并完成 G-M9（任务 #12） |
+| G-H11 | Gemini `speechConfig` + `audioTimestamp` 请求字段 | ✅ | 2026-04-21 | 3994af2 | raw passthrough + 从 request.Audio.Voice 合成 prebuiltVoiceConfig |
+| A-H6 | Anthropic `mcp_servers` + `container` 双向透传 | ✅ | 2026-04-21 | 621212a | inbound 新字段 + 内部 raw 通道 + outbound 回写；defensive copy 避免 alias |
+| A-H7 | `collectAnthropicBetaHeaders` 扩 7 个 beta 自动化 | ✅ | 2026-04-21 | 24b830a | 新增 mcp-client / structured-outputs / interleaved-thinking / context-1m（Sonnet 4 族 + 显式 flag）/ files-api / fine-grained-tool-streaming / tool-search-tool；Tool 结构体加 DeferLoading |
+| O-H7 | Chat 流式 `delta.Audio` 聚合 | ✅ | 2026-04-21 | f8ed5f5 | id / expires_at 覆盖，data / transcript 拼接 |
+
+### R3 · Medium
+
+| 编号 | 状态 | Commit | 备注 |
+|------|------|--------|------|
+| G-M8 | ✅ | 929c1cc | TransformerMetadata["gemini_candidate_count"] 入口，避免破坏 project-wide N=1 不变式 |
+| G-M9 | ✅ | 4d62bc8 | 随 G-H10 一并实现 |
+| G-M10 | ✅ | 2079694 | >20MB base64 → TransformerMetadata 指定 file_uri 回退 FileData，否则 drop + warn |
+| O-M7 | ✅ | 20f0dfc | applyOpenAIOrgProjectHeaders 在 Chat / Responses / Embedding 三处；raw passthrough 由 copyHeaders 处理 |
+| O-M8 | ✅ | 92358b2 | Responses text.verbosity 现从 InternalLLMRequest.Verbosity 映射，独立于 ResponseFormat |
+
+### R4 · Low
+
+| 编号 | 状态 | Commit | 备注 |
+|------|------|--------|------|
+| A-L5 | ✅ | 9f9bc7a | convertStopSequences 超过 4 项截断 + warn；经验上限（docs 未写死但超限 400） |
+| O-L5 | ✅ | f8981e8 | 移除 Chat outbound 的 developer → system 强制降级，保留语义 |
+
+---
+
 ## 变更日志
 
 | 日期 | 变更 | 作者 |
@@ -111,6 +153,11 @@
 | 2026-04-21 | P2 批次全部完成（A-C2 801d892 / O-H1 2d2b2e6 / O-H4 832b6c0 / A-H5 e92c993 / G-C4+G-H7 fe6ae8a） | Claude Code |
 | 2026-04-21 | P3 批次全部完成（A-H1+A-H2 c5a068e / G-H2+G-H3 72c2a66 / O-H3+O-H5 400bbf2） | Claude Code |
 | 2026-04-21 | P4 批次全部完成（A-H3+A-H4 e3e5569 / G-H1 4985b11 / G-H5+G-H6 38588b7 / O-H2 8fb3a03 / O-H6 d0309a9） | Claude Code |
+| 2026-04-21 | Round 2 启动：对照 2026 API 规范 + Web 核查发现 15 项新问题，按 R1/R2/R3/R4 四批次修复 | Claude Code |
+| 2026-04-21 | R1 完成（G-C6+C7 844056a — Gemini thinkingLevel 非法值 + 子家族 hotfix） | Claude Code |
+| 2026-04-21 | R2 完成（G-H8 2531b9a / G-H9 825e4cc+18a6fe4 / G-H10+M9 4d62bc8 / G-H11 3994af2 / A-H6 621212a / A-H7 24b830a / O-H7 f8ed5f5） | Claude Code |
+| 2026-04-21 | R3 完成（G-M8 929c1cc / G-M10 2079694 / O-M7 20f0dfc / O-M8 92358b2） | Claude Code |
+| 2026-04-21 | R4 完成（A-L5 9f9bc7a / O-L5 f8981e8） | Claude Code |
 
 ---
 
