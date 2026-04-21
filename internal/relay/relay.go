@@ -1030,24 +1030,27 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 	writer.Header().Set("X-Accel-Buffering", "no")
 
 	firstToken := true
-
-	type sseReadResult struct {
-		eventType string
-		data      string
-		err       error
+	type rawReadResult struct {
+		chunk []byte
+		err   error
 	}
-	results := make(chan sseReadResult, 1)
+	results := make(chan rawReadResult, 1)
 	safe.Go("relay-stream-read", func() {
 		defer close(results)
-		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
-		for ev, err := range sse.Read(response.Body, readCfg) {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := response.Body.Read(buf)
+			if n > 0 {
+				chunk := append([]byte(nil), buf[:n]...)
+				results <- rawReadResult{chunk: chunk}
+			}
 			if err != nil {
-				results <- sseReadResult{err: err}
+				results <- rawReadResult{err: err}
 				return
 			}
-			results <- sseReadResult{eventType: ev.Type, data: ev.Data}
 		}
 	})
+	var rawStream bytes.Buffer
 
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time
@@ -1075,28 +1078,28 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
 		case r, ok := <-results:
 			if !ok {
+				ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
 				log.Infof("stream end")
 				return nil
 			}
 			if r.err != nil {
+				if r.err == io.EOF {
+					ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
+					log.Infof("stream end")
+					return nil
+				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
 			}
 
-			// 1) 原样写回客户端（兼容不带 space 的格式，与其余代码风格一致）
-			raw := fmt.Sprintf("event:%s\ndata:%s\n\n", r.eventType, r.data)
-			if _, werr := writer.Write([]byte(raw)); werr != nil {
+			if len(r.chunk) == 0 {
+				continue
+			}
+			if _, werr := writer.Write(r.chunk); werr != nil {
 				return werr
 			}
+			_, _ = rawStream.Write(r.chunk)
 			writer.Flush()
-
-			// 2) 旁路解析供 metrics 聚合：复用 outbound + inbound 的 TransformStream
-			//    inbound.TransformStream 会把 internalStream 追加进 streamChunks，
-			//    collectResponse() 在成功收尾时通过 GetInternalResponse 聚合得到最终 usage。
-			//    忽略 inbound 生成的字节，防止重复写回客户端。
-			if internalStream, terr := ra.outAdapter.TransformStream(ctx, []byte(r.data)); terr == nil && internalStream != nil {
-				_, _ = ra.inAdapter.TransformStream(ctx, internalStream)
-			}
 
 			if firstToken {
 				ra.metrics.SetFirstTokenTime(time.Now())
@@ -1112,6 +1115,22 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 					firstTokenC = nil
 				}
 			}
+		}
+	}
+}
+
+func (ra *relayAttempt) collectAnthropicPassthroughMetrics(ctx context.Context, rawStream []byte) {
+	if len(rawStream) == 0 {
+		return
+	}
+	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+		if err != nil {
+			log.Debugf("anthropic passthrough metrics parse skipped: %v", err)
+			return
+		}
+		if internalStream, terr := ra.outAdapter.TransformStream(ctx, []byte(ev.Data)); terr == nil && internalStream != nil {
+			_, _ = ra.inAdapter.TransformStream(ctx, internalStream)
 		}
 	}
 }
