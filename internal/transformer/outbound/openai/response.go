@@ -662,6 +662,16 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 		result.Text = &ResponsesTextOptions{Format: format}
 	}
 
+	// Verbosity (O-M8) is a sibling of format on Responses text. Attach it
+	// even when ResponseFormat is nil — the gpt-5 verbosity knob can be
+	// used with plain-text output too.
+	if req.Verbosity != nil && strings.TrimSpace(*req.Verbosity) != "" {
+		if result.Text == nil {
+			result.Text = &ResponsesTextOptions{}
+		}
+		result.Text.Verbosity = req.Verbosity
+	}
+
 	// Convert reasoning
 	if req.ReasoningEffort != "" || req.ReasoningBudget != nil || req.ReasoningSummary != nil || req.ReasoningGenerateSummary != nil {
 		result.Reasoning = &ResponsesReasoning{

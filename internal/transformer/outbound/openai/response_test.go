@@ -9,6 +9,42 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/model"
 )
 
+// TestConvertToResponsesRequestForwardsVerbosity verifies O-M8: the gpt-5
+// verbosity knob on the internal request lands on
+// ResponsesRequest.Text.Verbosity regardless of whether ResponseFormat is
+// set, and is omitted when the caller leaves it unset or blank.
+func TestConvertToResponsesRequestForwardsVerbosity(t *testing.T) {
+	v := "high"
+	req := &model.InternalLLMRequest{
+		Model:     "gpt-5",
+		Verbosity: &v,
+	}
+	out := ConvertToResponsesRequest(req)
+	if out.Text == nil || out.Text.Verbosity == nil || *out.Text.Verbosity != "high" {
+		t.Fatalf("expected text.verbosity=high, got %+v", out.Text)
+	}
+
+	// Verbosity coexists with response_format (schema + verbosity are
+	// independent siblings on Responses text options).
+	req.ResponseFormat = &model.ResponseFormat{Type: "text"}
+	out = ConvertToResponsesRequest(req)
+	if out.Text == nil || out.Text.Format == nil || out.Text.Format.Type != "text" {
+		t.Errorf("expected format preserved alongside verbosity, got %+v", out.Text)
+	}
+	if out.Text.Verbosity == nil || *out.Text.Verbosity != "high" {
+		t.Errorf("expected verbosity preserved alongside format, got %+v", out.Text)
+	}
+
+	// Blank / nil verbosity omits the field.
+	blank := "   "
+	req.Verbosity = &blank
+	req.ResponseFormat = nil
+	out = ConvertToResponsesRequest(req)
+	if out.Text != nil && out.Text.Verbosity != nil {
+		t.Errorf("expected verbosity dropped for blank value, got %+v", out.Text)
+	}
+}
+
 func TestConvertToResponsesRequestPreservesRawInputItems(t *testing.T) {
 	req := &model.InternalLLMRequest{
 		Model:         "gpt-4o",
