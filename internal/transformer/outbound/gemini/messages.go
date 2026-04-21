@@ -201,12 +201,33 @@ func canonicalGeminiModality(m string) string {
 	}
 }
 
+// geminiInlineDataMaxBytes is the decoded-size ceiling Gemini enforces
+// on inline_data payloads. Gemini documents the limit as ~20 MB per the
+// File API guidance; exceeding it returns 400 "request payload size
+// exceeds the limit". Callers that need larger payloads must upload via
+// the Files API and send a FileData reference instead.
+// Ref: https://ai.google.dev/gemini-api/docs/document-processing
+//
+// Declared as a var (not const) so tests can shrink the threshold
+// without allocating tens of megabytes of base64 fixture data.
+var geminiInlineDataMaxBytes = 20 * 1024 * 1024
+
 // convertDocumentToGeminiPart maps an Anthropic-style document block onto a
 // GeminiPart. PDF / image payloads become inline_data; text documents fall
 // back to a Text part prefixed with the title/context so the model still
 // has the metadata. URL-sourced documents degrade to a text hint since
 // Gemini does not fetch URLs inline.
-func convertDocumentToGeminiPart(doc *model.DocumentSource) *model.GeminiPart {
+//
+// Base64 payloads larger than ~20MB are rejected upstream; G-M10 widens
+// this path to:
+//  1. TransformerMetadata["gemini_files_api_uri"] (per-request override) —
+//     emit a FileData reference instead of inline_data;
+//  2. a generic mediaType-keyed override
+//     TransformerMetadata["gemini_files_api_uri:<media_type>"] for callers
+//     that pre-uploaded a specific asset;
+//  3. otherwise drop the block with a warning so operators can see the
+//     payload is too big for inline transport.
+func convertDocumentToGeminiPart(doc *model.DocumentSource, req *model.InternalLLMRequest) *model.GeminiPart {
 	if doc == nil {
 		return nil
 	}
@@ -218,6 +239,20 @@ func convertDocumentToGeminiPart(doc *model.DocumentSource) *model.GeminiPart {
 		mime := doc.MediaType
 		if mime == "" {
 			mime = "application/pdf"
+		}
+		// Estimate the decoded payload size from the base64 string length.
+		// We avoid actually decoding (no benefit over the cheap arithmetic
+		// estimate and decoding allocates).
+		decoded := (len(doc.Data) * 3) / 4
+		if decoded > geminiInlineDataMaxBytes {
+			// Prefer an explicit File API pointer if the caller provided
+			// one, otherwise drop with a warning. G-M10.
+			if uri := lookupGeminiFilesAPIURI(req, mime); uri != "" {
+				log.Warnf("gemini: inline document ~%d bytes exceeds %d; forwarding via fileData(%q)", decoded, geminiInlineDataMaxBytes, uri)
+				return &model.GeminiPart{FileData: &model.GeminiFileData{MimeType: mime, FileURI: uri}}
+			}
+			log.Warnf("gemini: dropping inline document (~%d bytes, mime=%q) — exceeds %d-byte inline limit and no gemini_files_api_uri provided", decoded, mime, geminiInlineDataMaxBytes)
+			return nil
 		}
 		return &model.GeminiPart{
 			InlineData: &model.GeminiBlob{MimeType: mime, Data: doc.Data},
@@ -243,6 +278,25 @@ func convertDocumentToGeminiPart(doc *model.DocumentSource) *model.GeminiPart {
 	default:
 		return nil
 	}
+}
+
+// lookupGeminiFilesAPIURI looks up a pre-uploaded Files API URI that should
+// substitute for an oversized inline document. Priority:
+//
+//  1. TransformerMetadata["gemini_files_api_uri:<media_type>"] — per-mime
+//     override for callers that pre-uploaded a specific asset.
+//  2. TransformerMetadata["gemini_files_api_uri"] — generic fallback for
+//     the common single-document case.
+func lookupGeminiFilesAPIURI(req *model.InternalLLMRequest, mediaType string) string {
+	if req == nil || req.TransformerMetadata == nil {
+		return ""
+	}
+	if mediaType != "" {
+		if uri := strings.TrimSpace(req.TransformerMetadata["gemini_files_api_uri:"+mediaType]); uri != "" {
+			return uri
+		}
+	}
+	return strings.TrimSpace(req.TransformerMetadata["gemini_files_api_uri"])
 }
 
 // buildDocumentTextHint joins title / context / body into a single
@@ -469,7 +523,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 							}
 						}
 					case "document":
-						if p := convertDocumentToGeminiPart(part.Document); p != nil {
+						if p := convertDocumentToGeminiPart(part.Document, request); p != nil {
 							content.Parts = append(content.Parts, p)
 						}
 					case "server_tool_use", "server_tool_result":

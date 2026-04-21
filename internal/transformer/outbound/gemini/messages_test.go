@@ -486,6 +486,61 @@ func TestConvertGeminiResponseSafetyRatings(t *testing.T) {
 	}
 }
 
+// TestConvertDocumentToGeminiPartInlineLimitFallback verifies G-M10:
+// base64 documents estimated to exceed the inline-data ceiling either
+// (a) route to a pre-uploaded Files API URI when TransformerMetadata
+// carries one, or (b) are dropped with a warning when no URI is
+// provided. Small documents still go through as inline_data.
+//
+// The ceiling var is shrunk during the test so we don't need a 27 MB
+// base64 fixture.
+func TestConvertDocumentToGeminiPartInlineLimitFallback(t *testing.T) {
+	orig := geminiInlineDataMaxBytes
+	geminiInlineDataMaxBytes = 100 // decoded bytes
+	defer func() { geminiInlineDataMaxBytes = orig }()
+
+	bigPayload := strings.Repeat("A", 500) // ~375 decoded bytes > 100 limit
+	doc := &model.DocumentSource{Type: "base64", MediaType: "application/pdf", Data: bigPayload}
+
+	// No file URI → drop.
+	if p := convertDocumentToGeminiPart(doc, &model.InternalLLMRequest{}); p != nil {
+		t.Errorf("expected oversized doc to be dropped, got %+v", p)
+	}
+
+	// With generic URI → FileData reference.
+	req := &model.InternalLLMRequest{
+		TransformerMetadata: map[string]string{
+			"gemini_files_api_uri": "https://generativelanguage.googleapis.com/v1beta/files/abc",
+		},
+	}
+	p := convertDocumentToGeminiPart(doc, req)
+	if p == nil || p.FileData == nil {
+		t.Fatalf("expected FileData fallback, got %+v", p)
+	}
+	if p.FileData.FileURI != "https://generativelanguage.googleapis.com/v1beta/files/abc" {
+		t.Errorf("expected generic URI, got %q", p.FileData.FileURI)
+	}
+	if p.InlineData != nil {
+		t.Errorf("expected inline_data stripped on fallback, got %+v", p.InlineData)
+	}
+
+	// Per-media-type URI takes precedence over the generic one.
+	req.TransformerMetadata["gemini_files_api_uri:application/pdf"] =
+		"https://generativelanguage.googleapis.com/v1beta/files/pdf-specific"
+	p = convertDocumentToGeminiPart(doc, req)
+	if p == nil || p.FileData == nil ||
+		p.FileData.FileURI != "https://generativelanguage.googleapis.com/v1beta/files/pdf-specific" {
+		t.Errorf("expected per-mime URI precedence, got %+v", p)
+	}
+
+	// Small payloads still go through as inline_data unchanged.
+	small := &model.DocumentSource{Type: "base64", MediaType: "application/pdf", Data: "AAAA"}
+	p = convertDocumentToGeminiPart(small, &model.InternalLLMRequest{})
+	if p == nil || p.InlineData == nil || p.InlineData.Data != "AAAA" {
+		t.Errorf("expected small doc to keep inline_data, got %+v", p)
+	}
+}
+
 // TestConvertGeminiRequestCandidateCount verifies G-M8: a numeric value
 // in TransformerMetadata["gemini_candidate_count"] populates
 // generationConfig.candidateCount. Non-positive / invalid values leave
