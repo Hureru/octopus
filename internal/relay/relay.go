@@ -63,6 +63,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 	// 初始化 Metrics
 	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, internalRequest)
+	responsesPassthroughRequired := internalRequest.RequiresOpenAIResponsesPassthrough()
+	responsesPassthroughCapableFound := false
 
 	// 请求级上下文
 	req := &relayRequest{
@@ -110,6 +112,14 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		if !channel.Enabled {
 			iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
 			continue
+		}
+		if responsesPassthroughRequired {
+			if channel.Type == outbound.OutboundTypeOpenAIResponse {
+				responsesPassthroughCapableFound = true
+			} else {
+				iter.Skip(channel.ID, 0, channel.Name, "openai responses passthrough required")
+				continue
+			}
 		}
 
 		// 出站适配器
@@ -230,6 +240,12 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	}
 
 	// 所有候选通道均失败
+	if responsesPassthroughRequired && !responsesPassthroughCapableFound {
+		err := fmt.Errorf("openai responses native tools require an openai responses channel")
+		metrics.Save(c.Request.Context(), false, err, iter.Attempts())
+		resp.Error(c, http.StatusBadRequest, "当前请求包含 OpenAI Responses 原生工具，仅支持 OpenAI Responses 通道直通")
+		return
+	}
 	metrics.Save(c.Request.Context(), false, lastErr, iter.Attempts())
 
 	// 透传 429/503 状态码和 Retry-After 头，让客户端 SDK 的重试机制接管
@@ -359,7 +375,9 @@ func (ra *relayAttempt) forward() (int, error) {
 		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 
 		shouldTryWS := false
-		if ra.internalRequest.TransformerMetadata != nil && strings.TrimSpace(ra.internalRequest.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact" {
+		if ra.shouldPassthroughOpenAIResponses() {
+			shouldTryWS = false
+		} else if ra.internalRequest.TransformerMetadata != nil && strings.TrimSpace(ra.internalRequest.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact" {
 			shouldTryWS = false
 		} else {
 			wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
@@ -615,6 +633,9 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 	// 内容块重排、thinking 签名错位等在长上下文下触发上游 520 的问题。
 	if ra.shouldPassthroughAnthropic() {
 		return ra.forwardViaHTTPPassthroughAnthropic(ctx)
+	}
+	if ra.shouldPassthroughOpenAIResponses() {
+		return ra.forwardViaHTTPPassthroughOpenAIResponses(ctx)
 	}
 
 	// 构建出站请求
@@ -902,6 +923,224 @@ func (ra *relayAttempt) shouldPassthroughAnthropic() bool {
 		return false
 	}
 	return ra.channel.Type == outbound.OutboundTypeAnthropic
+}
+
+// shouldPassthroughOpenAIResponses 判定是否走 OpenAI Responses 原生直通路径。
+// 当前仅在检测到原生高级工具时对 HTTP/SSE 客户端启用，避免 apply_patch / shell /
+// MCP approval 等请求在内部统一模型往返时被裁剪，同时尽量减少对既有 continuation
+// 路径的影响。
+func (ra *relayAttempt) shouldPassthroughOpenAIResponses() bool {
+	if ra == nil || ra.internalRequest == nil || ra.channel == nil {
+		return false
+	}
+	if ra.c == nil {
+		return false
+	}
+	if len(ra.rawBody) == 0 {
+		return false
+	}
+	if ra.internalRequest.RawAPIFormat != model.APIFormatOpenAIResponse {
+		return false
+	}
+	if !ra.internalRequest.RequiresOpenAIResponsesPassthrough() {
+		return false
+	}
+	return ra.channel.Type == outbound.OutboundTypeOpenAIResponse
+}
+
+// forwardViaHTTPPassthroughOpenAIResponses 直通 OpenAI Responses 原始 JSON/SSE。
+// 客户端原始 body 只改顶层 model 后发上游，响应原样写回客户端；旁路解析仅用于 metrics。
+func (ra *relayAttempt) forwardViaHTTPPassthroughOpenAIResponses(ctx context.Context) (int, error) {
+	openaiOut, ok := ra.outAdapter.(*openaiOutbound.ResponseOutbound)
+	if !ok {
+		return ra.forwardViaHTTPStandard(ctx)
+	}
+
+	outboundRequest, err := openaiOut.TransformRequestRaw(
+		ctx,
+		ra.rawBody,
+		ra.internalRequest.Model,
+		ra.channel.GetBaseUrl(),
+		ra.usedKey.ChannelKey,
+		ra.internalRequest.Query,
+	)
+	if err != nil {
+		log.Warnf("failed to create passthrough request: %v", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
+		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	}
+	ra.copyHeaders(outboundRequest)
+
+	response, err := ra.sendRequest(outboundRequest)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
+		body, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
+		}
+		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
+		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+	}
+
+	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
+		if err := ra.handleStreamResponsePassthroughOpenAIResponses(ctx, response); err != nil {
+			return 0, err
+		}
+		return response.StatusCode, nil
+	}
+	if err := ra.handleResponsePassthroughOpenAIResponses(ctx, response); err != nil {
+		return 0, err
+	}
+	return response.StatusCode, nil
+}
+
+func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
+	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
+		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
+	}
+
+	writer := ra.getStreamWriter()
+	writer.Header().Set("Content-Type", "text/event-stream")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.Header().Set("Connection", "keep-alive")
+	writer.Header().Set("X-Accel-Buffering", "no")
+
+	firstToken := true
+	type rawReadResult struct {
+		chunk []byte
+		err   error
+	}
+	results := make(chan rawReadResult, 1)
+	safe.Go("relay-stream-read", func() {
+		defer close(results)
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := response.Body.Read(buf)
+			if n > 0 {
+				chunk := append([]byte(nil), buf[:n]...)
+				results <- rawReadResult{chunk: chunk}
+			}
+			if err != nil {
+				results <- rawReadResult{err: err}
+				return
+			}
+		}
+	})
+	var rawStream bytes.Buffer
+
+	var firstTokenTimer *time.Timer
+	var firstTokenC <-chan time.Time
+	if firstToken && ra.firstTokenTimeOutSec > 0 {
+		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
+		firstTokenC = firstTokenTimer.C
+		defer func() {
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
+		}()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			if isLocalRelayBudgetExceeded(ctx, contextError(ctx)) {
+				return contextError(ctx)
+			}
+			log.Infof("client disconnected, stopping stream")
+			return nil
+		case <-firstTokenC:
+			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
+			_ = response.Body.Close()
+			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+		case r, ok := <-results:
+			if !ok {
+				ra.collectOpenAIResponsesPassthroughMetrics(ctx, rawStream.Bytes())
+				log.Infof("stream end")
+				return nil
+			}
+			if r.err != nil {
+				if r.err == io.EOF {
+					ra.collectOpenAIResponsesPassthroughMetrics(ctx, rawStream.Bytes())
+					log.Infof("stream end")
+					return nil
+				}
+				log.Warnf("failed to read event: %v", r.err)
+				return fmt.Errorf("failed to read stream event: %w", r.err)
+			}
+			if len(r.chunk) == 0 {
+				continue
+			}
+			if _, werr := writer.Write(r.chunk); werr != nil {
+				return werr
+			}
+			_, _ = rawStream.Write(r.chunk)
+			writer.Flush()
+
+			if firstToken {
+				ra.metrics.SetFirstTokenTime(time.Now())
+				firstToken = false
+				if firstTokenTimer != nil {
+					if !firstTokenTimer.Stop() {
+						select {
+						case <-firstTokenTimer.C:
+						default:
+						}
+					}
+					firstTokenTimer = nil
+					firstTokenC = nil
+				}
+			}
+		}
+	}
+}
+
+func (ra *relayAttempt) collectOpenAIResponsesPassthroughMetrics(ctx context.Context, rawStream []byte) {
+	if len(rawStream) == 0 {
+		return
+	}
+	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+		if err != nil {
+			log.Debugf("openai responses passthrough metrics parse skipped: %v", err)
+			return
+		}
+		if internalStream, terr := ra.outAdapter.TransformStream(ctx, []byte(ev.Data)); terr == nil && internalStream != nil {
+			_, _ = ra.inAdapter.TransformStream(ctx, internalStream)
+		}
+	}
+}
+
+func (ra *relayAttempt) handleResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	contentType := response.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	ra.c.Data(response.StatusCode, contentType, body)
+
+	sidecarResp := &http.Response{
+		StatusCode: response.StatusCode,
+		Header:     response.Header.Clone(),
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}
+	if internalResponse, terr := ra.outAdapter.TransformResponse(ctx, sidecarResp); terr == nil && internalResponse != nil {
+		_, _ = ra.inAdapter.TransformResponse(ctx, internalResponse)
+	}
+	return nil
 }
 
 // forwardViaHTTPPassthroughAnthropic 直通路径：客户端原始 body 原样转发；上游响应原样写回客户端；

@@ -61,6 +61,62 @@ func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.
 	return req, nil
 }
 
+// TransformRequestRaw keeps the original OpenAI Responses payload intact and only rewrites
+// the top-level model to the selected upstream model.
+func (o *ResponseOutbound) TransformRequestRaw(ctx context.Context, rawBody []byte, modelName, baseUrl, key string, query url.Values) (*http.Request, error) {
+	if len(rawBody) == 0 {
+		return nil, fmt.Errorf("raw body is empty")
+	}
+	if strings.TrimSpace(modelName) != "" {
+		rewrittenBody, err := rewriteRawResponsesRequestModel(rawBody, modelName)
+		if err != nil {
+			return nil, err
+		}
+		rawBody = rewrittenBody
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(rawBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.ContentLength = int64(len(rawBody))
+	bodyBytes := rawBody
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	parsedURL, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base url: %w", err)
+	}
+	parsedURL.Path = parsedURL.Path + "/responses"
+	if query != nil {
+		parsedURL.RawQuery = query.Encode()
+	}
+	req.URL = parsedURL
+	req.Method = http.MethodPost
+
+	return req, nil
+}
+
+func rewriteRawResponsesRequestModel(rawBody []byte, modelName string) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to decode raw responses request: %w", err)
+	}
+	payload["model"] = strings.TrimSpace(modelName)
+	rewrittenBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode raw responses request: %w", err)
+	}
+	return rewrittenBody, nil
+}
+
 func (o *ResponseOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {
 	if response == nil {
 		return nil, fmt.Errorf("response is nil")

@@ -23,6 +23,11 @@ const (
 	APIFormatAiSDKDataStream       APIFormat = "aisdk/datastream"
 )
 
+const (
+	TransformerMetadataOpenAIResponsesPassthroughRequired = "octopus_openai_responses_passthrough_required"
+	TransformerMetadataOpenAIResponsesPassthroughReason   = "octopus_openai_responses_passthrough_reason"
+)
+
 // Request is the unified llm request model for AxonHub, to keep compatibility with major app and framework.
 // It choose to base on the OpenAI chat completion request, but add some extra fields to support more features.
 type InternalLLMRequest struct {
@@ -398,6 +403,31 @@ func (r *InternalLLMRequest) IsEmbeddingRequest() bool {
 // IsChatRequest returns true if this is a chat completion request.
 func (r *InternalLLMRequest) IsChatRequest() bool {
 	return len(r.Messages) > 0 || (r.RawAPIFormat == APIFormatOpenAIResponse && len(r.RawInputItems) > 0)
+}
+
+func (r *InternalLLMRequest) RequiresOpenAIResponsesPassthrough() bool {
+	if r == nil || r.TransformerMetadata == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired]), "true")
+}
+
+func (r *InternalLLMRequest) MarkOpenAIResponsesPassthroughRequired(reason string) {
+	if r == nil {
+		return
+	}
+	if r.TransformerMetadata == nil {
+		r.TransformerMetadata = map[string]string{}
+	}
+	r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired] = "true"
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	if existing := strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason]); existing != "" {
+		reason = existing + "," + reason
+	}
+	r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason] = reason
 }
 
 func (r *InternalLLMRequest) ClearHelpFields() {

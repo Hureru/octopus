@@ -1,7 +1,9 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
@@ -208,6 +210,42 @@ func TestConvertToLLMResponseFromResponsesPreservesRawOutputItems(t *testing.T) 
 	}
 	if len(items) != 1 || items[0]["type"] != "function_call" {
 		t.Fatalf("expected original output items to be kept, got %#v", items)
+	}
+}
+
+func TestTransformRequestRawRewritesModel(t *testing.T) {
+	outbound := &ResponseOutbound{}
+	req, err := outbound.TransformRequestRaw(
+		context.Background(),
+		[]byte(`{"model":"old-model","tools":[{"type":"apply_patch"}],"input":"hello"}`),
+		"new-model",
+		"https://example.com/v1",
+		"test-key",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("TransformRequestRaw() error = %v", err)
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read request body failed: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal request body failed: %v", err)
+	}
+	if payload["model"] != "new-model" {
+		t.Fatalf("expected model to be rewritten, got %#v", payload["model"])
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected raw tools to stay intact, got %#v", payload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok || tool["type"] != "apply_patch" {
+		t.Fatalf("expected raw apply_patch tool to be preserved, got %#v", tools[0])
 	}
 }
 

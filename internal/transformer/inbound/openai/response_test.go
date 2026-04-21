@@ -33,6 +33,42 @@ func TestConvertToInternalRequestPreservesRawInputItems(t *testing.T) {
 	}
 }
 
+func TestConvertToInternalRequestMarksPassthroughForUnsupportedToolType(t *testing.T) {
+	req := &ResponsesRequest{
+		Model: "gpt-4o",
+		Input: ResponsesInput{Text: stringPtr("hello")},
+		Tools: []ResponsesTool{{
+			Type: "apply_patch",
+		}},
+	}
+
+	internalReq, err := convertToInternalRequest(req)
+	if err != nil {
+		t.Fatalf("convertToInternalRequest failed: %v", err)
+	}
+	if !internalReq.RequiresOpenAIResponsesPassthrough() {
+		t.Fatalf("expected unsupported responses tool to require passthrough")
+	}
+}
+
+func TestConvertToInternalRequestMarksPassthroughForUnsupportedInputItem(t *testing.T) {
+	req := &ResponsesRequest{
+		Model: "gpt-4o",
+		Input: ResponsesInput{Items: []ResponsesItem{{
+			Type:   "apply_patch_call_output",
+			CallID: "apc_123",
+		}}},
+	}
+
+	internalReq, err := convertToInternalRequest(req)
+	if err != nil {
+		t.Fatalf("convertToInternalRequest failed: %v", err)
+	}
+	if !internalReq.RequiresOpenAIResponsesPassthrough() {
+		t.Fatalf("expected unsupported responses input item to require passthrough")
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }

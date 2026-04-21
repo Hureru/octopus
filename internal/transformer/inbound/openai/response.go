@@ -1181,6 +1181,7 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 			chatReq.RawInputItems = rawItems
 		}
 	}
+	markOpenAIResponsesPassthroughIfNeeded(req, chatReq)
 
 	// Convert reasoning
 	if req.Reasoning != nil {
@@ -1260,6 +1261,79 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 	}
 
 	return chatReq, nil
+}
+
+func markOpenAIResponsesPassthroughIfNeeded(req *ResponsesRequest, chatReq *model.InternalLLMRequest) {
+	if req == nil || chatReq == nil {
+		return
+	}
+	if unsupportedToolType := firstUnsupportedResponsesToolType(req.Tools); unsupportedToolType != "" {
+		chatReq.MarkOpenAIResponsesPassthroughRequired("tool:" + unsupportedToolType)
+	}
+	if unsupportedItemType := firstUnsupportedResponsesInputType(&req.Input); unsupportedItemType != "" {
+		chatReq.MarkOpenAIResponsesPassthroughRequired("input:" + unsupportedItemType)
+	}
+}
+
+func firstUnsupportedResponsesToolType(tools []ResponsesTool) string {
+	for _, tool := range tools {
+		switch tool.Type {
+		case "function", "image_generation":
+			continue
+		case "":
+			return "<empty>"
+		default:
+			return tool.Type
+		}
+	}
+	return ""
+}
+
+func firstUnsupportedResponsesInputType(input *ResponsesInput) string {
+	if input == nil || len(input.Items) == 0 {
+		return ""
+	}
+	for _, item := range input.Items {
+		if unsupported := firstUnsupportedResponsesTopLevelItemType(&item); unsupported != "" {
+			return unsupported
+		}
+	}
+	return ""
+}
+
+func firstUnsupportedResponsesTopLevelItemType(item *ResponsesItem) string {
+	if item == nil {
+		return ""
+	}
+	switch item.Type {
+	case "", "message", "input_text", "input_image", "function_call", "function_call_output", "reasoning":
+	default:
+		return item.Type
+	}
+	if unsupported := firstUnsupportedResponsesContentItemType(item.Content); unsupported != "" {
+		return unsupported
+	}
+	if unsupported := firstUnsupportedResponsesContentItemType(item.Output); unsupported != "" {
+		return unsupported
+	}
+	return ""
+}
+
+func firstUnsupportedResponsesContentItemType(input *ResponsesInput) string {
+	if input == nil || input.Text != nil || len(input.Items) == 0 {
+		return ""
+	}
+	for _, item := range input.Items {
+		switch item.Type {
+		case "input_text", "text", "output_text", "input_image":
+			continue
+		case "":
+			return "<empty>"
+		default:
+			return item.Type
+		}
+	}
+	return ""
 }
 
 func convertToolChoiceToInternal(src *ResponsesToolChoice) *model.ToolChoice {
