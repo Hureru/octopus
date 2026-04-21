@@ -1,6 +1,10 @@
 package gemini
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/bestruirui/octopus/internal/utils/log"
+)
 
 // Gemini thinking configuration reference:
 //   https://ai.google.dev/gemini-api/docs/thinking
@@ -10,6 +14,14 @@ import "strings"
 //     decide dynamically, any positive value is a hard cap).
 //   - thinkingLevel: a string on Gemini 3.x that selects the reasoning tier
 //     (low / medium / high) without pinning a token budget.
+//
+// Family-specific budget ranges (as of 2026-04):
+//   - Gemini 2.5 Flash:      0      .. 24576
+//   - Gemini 2.5 Flash-Lite: 512    .. 24576  (currently classified as
+//     NoThinking in this project — see classifyGeminiFamily — so these
+//     bounds are never consulted; kept here for documentation.)
+//   - Gemini 2.5 Pro:        128    .. 32768  (0 is rejected by the API)
+//   - Gemini 3 Pro:          thinkingLevel only; thinkingBudget is rejected.
 //
 // resolveThinkingConfig picks the right lever for a given model family and
 // falls back through three priority tiers:
@@ -76,26 +88,30 @@ type geminiFamily int
 
 const (
 	geminiFamilyNoThinking geminiFamily = iota // flash-lite or other non-thinking models
-	geminiFamily25                             // 2.5 family: budget-based thinking
+	geminiFamily25Flash                        // 2.5 flash (budget 0..24576)
+	geminiFamily25Pro                          // 2.5 pro (budget 128..32768, 0 rejected)
 	geminiFamily3                              // 3.x family: level-based thinking
 )
 
 // classifyGeminiFamily inspects the model ID to decide which thinking scheme
-// applies. Matching is conservative: unknown models default to the 2.5
-// budget-based scheme because it is the safest superset (both 2.5 and 3.x
-// accept an integer budget, but only 3.x accepts thinkingLevel).
+// applies. Matching is conservative: unknown models default to the 2.5 Flash
+// tier because its [0, 24576] range is the safest superset for the integer
+// budget lever.
 func classifyGeminiFamily(modelID string) geminiFamily {
 	id := strings.ToLower(modelID)
 	if id == "" {
-		return geminiFamily25
+		return geminiFamily25Flash
 	}
 	if strings.Contains(id, "flash-lite") {
 		return geminiFamilyNoThinking
 	}
-	if strings.Contains(id, "gemini-3") || strings.Contains(id, "gemini-3.") {
+	if strings.Contains(id, "gemini-3") {
 		return geminiFamily3
 	}
-	return geminiFamily25
+	if strings.Contains(id, "pro") {
+		return geminiFamily25Pro
+	}
+	return geminiFamily25Flash
 }
 
 func dynamicDecision(fam geminiFamily) thinkingDecision {
@@ -110,15 +126,38 @@ func defaultFamilyDecision(fam geminiFamily) thinkingDecision {
 }
 
 // decisionFromBudget honours caller-supplied budget values. 0 disables
-// thinking; -1 means dynamic; positive values pin a hard cap.
+// thinking on families that accept it; 2.5 Pro rejects 0 so we clamp it up
+// to the family minimum rather than emit a request the API would 400. -1
+// means dynamic; positive values are clamped to family-specific ranges.
+//
+// For Gemini 3.x the integer budget lever is not accepted by the API; we
+// translate a positive budget into the closest thinkingLevel tier and keep
+// the dynamic sentinel (-1) unchanged.
 func decisionFromBudget(fam geminiFamily, budget int64) thinkingDecision {
 	switch {
-	case budget == 0:
-		// Explicit disable. Level-based models accept thinkingBudget=0 too.
-		return thinkingDecision{Supported: true, Budget: 0, IncludeThoughts: false}
 	case budget < 0:
 		return dynamicDecision(fam)
+	case budget == 0:
+		switch fam {
+		case geminiFamily25Pro:
+			// Pro rejects thinkingBudget=0; pin to family minimum and
+			// surface the override so operators can spot the silent bump.
+			min := geminiBudgetBounds(fam).min
+			log.Warnf("gemini: thinkingBudget=0 is not accepted by %s; clamping up to family minimum %d", familyDisplayName(fam), min)
+			return thinkingDecision{Supported: true, Budget: min, IncludeThoughts: true}
+		case geminiFamily3:
+			// "disable thinking" on Gemini 3 is expressed via thinkingLevel
+			// rather than a zero budget.
+			return thinkingDecision{Supported: true, UseLevel: true, Level: "none", IncludeThoughts: false}
+		default:
+			return thinkingDecision{Supported: true, Budget: 0, IncludeThoughts: false}
+		}
 	default:
+		if fam == geminiFamily3 {
+			// Gemini 3 rejects thinkingBudget; approximate the caller's
+			// intent with a thinkingLevel tier.
+			return thinkingDecision{Supported: true, UseLevel: true, Level: budgetToLevel(int32(budget)), IncludeThoughts: true}
+		}
 		b := clampGeminiBudget(fam, int32(budget))
 		return thinkingDecision{Supported: true, Budget: b, IncludeThoughts: true}
 	}
@@ -129,7 +168,7 @@ func decisionFromEffort(fam geminiFamily, effort string) thinkingDecision {
 		level := map3EffortToLevel(effort)
 		switch level {
 		case "none":
-			return thinkingDecision{Supported: true, Budget: 0, IncludeThoughts: false}
+			return thinkingDecision{Supported: true, UseLevel: true, Level: "none", IncludeThoughts: false}
 		case "dynamic":
 			return dynamicDecision(fam)
 		default:
@@ -138,9 +177,17 @@ func decisionFromEffort(fam geminiFamily, effort string) thinkingDecision {
 	}
 	b := map25EffortToBudget(effort)
 	if b == 0 {
+		if fam == geminiFamily25Pro {
+			// Pro rejects 0; promote to family minimum.
+			min := geminiBudgetBounds(fam).min
+			return thinkingDecision{Supported: true, Budget: min, IncludeThoughts: true}
+		}
 		return thinkingDecision{Supported: true, Budget: 0, IncludeThoughts: false}
 	}
-	return thinkingDecision{Supported: true, Budget: b, IncludeThoughts: true}
+	if b < 0 {
+		return dynamicDecision(fam)
+	}
+	return thinkingDecision{Supported: true, Budget: clampGeminiBudget(fam, b), IncludeThoughts: true}
 }
 
 // map25EffortToBudget keeps the historical effort-to-budget table used by
@@ -182,14 +229,68 @@ func map3EffortToLevel(effort string) string {
 	}
 }
 
-// clampGeminiBudget caps positive budgets to values the API accepts. 2.5 Pro
-// goes up to 32768; 2.5 Flash is capped at 24576. We conservatively clamp at
-// 32768 across the board because the API returns 400 if the value exceeds
-// the model's cap.
-func clampGeminiBudget(_ geminiFamily, b int32) int32 {
-	const maxBudget int32 = 32768
-	if b > maxBudget {
-		return maxBudget
+// geminiBudgetRange captures the min/max thinkingBudget values a given
+// family accepts. Values outside the range cause Gemini to return 400.
+type geminiBudgetRange struct {
+	min int32
+	max int32
+}
+
+// geminiBudgetBounds reports the valid [min, max] for a budget-driven
+// family. Called from clampGeminiBudget and the zero-budget special case
+// in decisionFromBudget.
+func geminiBudgetBounds(fam geminiFamily) geminiBudgetRange {
+	switch fam {
+	case geminiFamily25Pro:
+		return geminiBudgetRange{min: 128, max: 32768}
+	case geminiFamily25Flash:
+		return geminiBudgetRange{min: 0, max: 24576}
+	default:
+		// NoThinking and Gemini 3 never reach here; guard conservatively.
+		return geminiBudgetRange{min: 0, max: 32768}
+	}
+}
+
+// familyDisplayName is only used for diagnostic logging.
+func familyDisplayName(fam geminiFamily) string {
+	switch fam {
+	case geminiFamily25Flash:
+		return "gemini-2.5-flash"
+	case geminiFamily25Pro:
+		return "gemini-2.5-pro"
+	case geminiFamily3:
+		return "gemini-3"
+	default:
+		return "gemini-unknown"
+	}
+}
+
+// budgetToLevel approximates an integer thinkingBudget as a Gemini 3
+// thinkingLevel tier. Used when a client carries a budget across the
+// 2.5 → 3 boundary.
+func budgetToLevel(b int32) string {
+	switch {
+	case b <= 0:
+		return "none"
+	case b <= 2048:
+		return "low"
+	case b <= 8192:
+		return "medium"
+	default:
+		return "high"
+	}
+}
+
+// clampGeminiBudget caps positive budgets to the family's accepted range.
+// Gemini responds with HTTP 400 when the value is outside [min, max], so
+// honouring the bounds here is what keeps the upstream call alive.
+func clampGeminiBudget(fam geminiFamily, b int32) int32 {
+	r := geminiBudgetBounds(fam)
+	if b > r.max {
+		return r.max
+	}
+	if b < r.min {
+		return r.min
 	}
 	return b
 }

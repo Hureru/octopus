@@ -63,6 +63,82 @@ func TestResolveThinkingConfigFlashLiteDisabled(t *testing.T) {
 	}
 }
 
+// TestResolveThinkingConfigBudgetFamilyClamp verifies family-specific bounds:
+// - Pro 2.5 rejects budget=0 (promoted to 128) and caps at 32768.
+// - Flash 2.5 accepts 0 (disabled) and caps at 24576.
+// Regression guard for G-C5. Ref: https://ai.google.dev/gemini-api/docs/thinking
+func TestResolveThinkingConfigBudgetFamilyClamp(t *testing.T) {
+	zero := int64(0)
+	d := resolveThinkingConfig("gemini-2.5-pro", &zero, "", false)
+	if !d.Supported || d.UseLevel || d.Budget != 128 || !d.IncludeThoughts {
+		t.Fatalf("pro budget=0 should clamp to min=128: %+v", d)
+	}
+
+	tooBig := int64(50000)
+	d = resolveThinkingConfig("gemini-2.5-pro", &tooBig, "", false)
+	if d.Budget != 32768 {
+		t.Fatalf("pro clamp max=32768, got %+v", d)
+	}
+
+	overFlash := int64(30000)
+	d = resolveThinkingConfig("gemini-2.5-flash", &overFlash, "", false)
+	if d.Budget != 24576 {
+		t.Fatalf("flash clamp max=24576, got %+v", d)
+	}
+
+	flashZero := int64(0)
+	d = resolveThinkingConfig("gemini-2.5-flash", &flashZero, "", false)
+	if d.Budget != 0 || d.IncludeThoughts {
+		t.Fatalf("flash budget=0 preserved: %+v", d)
+	}
+}
+
+// TestResolveThinkingConfigGemini3TranslatesBudgetToLevel covers the
+// level-only constraint: Gemini 3 rejects thinkingBudget entirely, so a
+// client-supplied integer budget is mapped to the closest thinkingLevel
+// tier and adaptive (-1) / explicit zero are preserved as dynamic / none.
+func TestResolveThinkingConfigGemini3TranslatesBudgetToLevel(t *testing.T) {
+	small := int64(1000)
+	d := resolveThinkingConfig("gemini-3.0-pro", &small, "", false)
+	if !d.UseLevel || d.Level != "low" {
+		t.Fatalf("gemini-3 small budget -> level=low, got %+v", d)
+	}
+
+	medium := int64(4096)
+	d = resolveThinkingConfig("gemini-3.0-pro", &medium, "", false)
+	if !d.UseLevel || d.Level != "medium" {
+		t.Fatalf("gemini-3 medium budget -> level=medium, got %+v", d)
+	}
+
+	large := int64(20000)
+	d = resolveThinkingConfig("gemini-3.0-pro", &large, "", false)
+	if !d.UseLevel || d.Level != "high" {
+		t.Fatalf("gemini-3 large budget -> level=high, got %+v", d)
+	}
+
+	zero := int64(0)
+	d = resolveThinkingConfig("gemini-3.0-pro", &zero, "", false)
+	if !d.UseLevel || d.Level != "none" || d.IncludeThoughts {
+		t.Fatalf("gemini-3 budget=0 -> level=none, got %+v", d)
+	}
+
+	dynamic := int64(-1)
+	d = resolveThinkingConfig("gemini-3.0-pro", &dynamic, "", false)
+	if d.UseLevel || d.Budget != -1 {
+		t.Fatalf("gemini-3 budget=-1 -> dynamic, got %+v", d)
+	}
+}
+
+// TestResolveThinkingConfigProEffortMinimal guards a regression where
+// effort="minimal" returned budget=0 on pro, which pro rejects. It should
+// promote to the family minimum instead.
+func TestResolveThinkingConfigProEffortMinimal(t *testing.T) {
+	d := resolveThinkingConfig("gemini-2.5-pro", nil, "minimal", false)
+	if !d.Supported || d.UseLevel || d.Budget != 128 || !d.IncludeThoughts {
+		t.Fatalf("pro effort=minimal should land at budget=128: %+v", d)
+	}
+}
+
 func TestCanonicalGeminiModality(t *testing.T) {
 	cases := map[string]string{
 		"text":    "TEXT",
