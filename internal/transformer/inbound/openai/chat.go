@@ -19,6 +19,10 @@ func (i *ChatInbound) TransformRequest(ctx context.Context, body []byte) (*model
 	if err := json.Unmarshal(body, &request); err != nil {
 		return nil, err
 	}
+	// O-H2: tag the origin so outbound transformers (raw passthrough,
+	// alternation enforcement, schema conversion) can tell a Chat request
+	// apart from a Responses request.
+	request.RawAPIFormat = model.APIFormatOpenAIChatCompletion
 	return &request, nil
 }
 
