@@ -391,6 +391,7 @@ type ResponsesRequest struct {
 	Text              *ResponsesTextOptions `json:"text,omitempty"`
 	Store             *bool                 `json:"store,omitempty"`
 	ServiceTier       *string               `json:"service_tier,omitempty"`
+	Truncation        *string               `json:"truncation,omitempty"`
 	User              *string               `json:"user,omitempty"`
 	Metadata          map[string]string     `json:"metadata,omitempty"`
 	MaxOutputTokens   *int64                `json:"max_output_tokens,omitempty"`
@@ -598,6 +599,7 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 		Stream:            req.Stream,
 		Store:             req.Store,
 		ServiceTier:       req.ServiceTier,
+		Truncation:        req.Truncation,
 		Metadata:          req.Metadata,
 		MaxOutputTokens:   req.MaxCompletionTokens,
 		ParallelToolCalls: req.ParallelToolCalls,

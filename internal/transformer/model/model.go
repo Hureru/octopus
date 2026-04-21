@@ -225,6 +225,11 @@ type InternalLLMRequest struct {
 	// Specifies the processing type used for serving the request.
 	ServiceTier *string `json:"service_tier,omitempty"`
 
+	// Truncation is the OpenAI Responses API truncation strategy. Valid values
+	// are "auto" and "disabled". Carried through so it can be echoed back in
+	// response.completed (O-H5).
+	Truncation *string `json:"truncation,omitempty"`
+
 	// Not supported with latest reasoning models `o3` and `o4-mini`.
 	//
 	// Up to 4 sequences where the API will stop generating further tokens. The

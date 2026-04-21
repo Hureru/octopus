@@ -28,6 +28,7 @@ type ResponseInbound struct {
 	responseID string
 	model      string
 	createdAt  int64
+	truncation *string
 
 	// Content tracking
 	outputIndex    int
@@ -58,6 +59,12 @@ type ResponseInbound struct {
 	// Usage tracking
 	usage *model.Usage
 
+	// completedOutputItems buffers every ResponsesItem emitted during streaming
+	// (message / reasoning / function_call) so the terminal response.completed
+	// event can echo the full output array. Upstream Responses clients treat
+	// an empty output on response.completed as an error (O-H3).
+	completedOutputItems []ResponsesItem
+
 	// Stream chunks storage for aggregation
 	streamChunks []*model.InternalLLMResponse
 	// storedResponse stores the non-stream response
@@ -74,6 +81,8 @@ func (i *ResponseInbound) TransformRequest(ctx context.Context, body []byte) (*m
 		return nil, fmt.Errorf("model is required")
 	}
 
+	i.truncation = req.Truncation
+
 	return convertToInternalRequest(&req)
 }
 
@@ -87,6 +96,9 @@ func (i *ResponseInbound) TransformResponse(ctx context.Context, response *model
 
 	// Convert to Responses API format
 	resp := convertToResponsesAPIResponse(response)
+	if i.truncation != nil {
+		resp.Truncation = i.truncation
+	}
 
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -133,12 +145,13 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		i.hasResponseCreated = true
 
 		response := &ResponsesResponse{
-			Object:    "response",
-			ID:        i.responseID,
-			Model:     i.model,
-			CreatedAt: i.createdAt,
-			Status:    lo.ToPtr("in_progress"),
-			Output:    []ResponsesItem{},
+			Object:     "response",
+			ID:         i.responseID,
+			Model:      i.model,
+			CreatedAt:  i.createdAt,
+			Status:     lo.ToPtr("in_progress"),
+			Truncation: i.truncation,
+			Output:     []ResponsesItem{},
 		}
 
 		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
@@ -229,14 +242,16 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		i.usage = stream.Usage
 
 		eventType, status := responsesTerminalEvent(i.finalFinishReason)
+		output := i.finalOutputItems()
 		response := &ResponsesResponse{
-			Object:    "response",
-			ID:        i.responseID,
-			Model:     i.model,
-			CreatedAt: i.createdAt,
-			Status:    &status,
-			Output:    []ResponsesItem{},
-			Usage:     convertUsageToResponses(i.usage),
+			Object:     "response",
+			ID:         i.responseID,
+			Model:      i.model,
+			CreatedAt:  i.createdAt,
+			Status:     &status,
+			Truncation: i.truncation,
+			Output:     output,
+			Usage:      convertUsageToResponses(i.usage),
 		}
 
 		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
@@ -591,6 +606,7 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 		Item:        &item,
 	}))
 
+	i.completedOutputItems = append(i.completedOutputItems, item)
 	i.outputIndex++
 	i.accumulatedReasoning.Reset()
 	i.reasoningBlockSignatures = nil
@@ -658,6 +674,7 @@ func (i *ResponseInbound) closeMessageItem() [][]byte {
 		Item:        &item,
 	}))
 
+	i.completedOutputItems = append(i.completedOutputItems, item)
 	i.outputIndex++
 	i.contentIndex = 0
 	i.accumulatedText.Reset()
@@ -775,11 +792,37 @@ func (i *ResponseInbound) closeCurrentOutputItem() [][]byte {
 				Item:        &item,
 			}))
 
+			i.completedOutputItems = append(i.completedOutputItems, item)
 			i.toolCallItemStarted[idx] = false
 		}
 	}
 
 	return events
+}
+
+// finalOutputItems returns the accumulated output items for response.completed,
+// synthesizing an empty message shell when nothing was emitted. The Responses
+// spec requires a non-empty output on terminal events.
+func (i *ResponseInbound) finalOutputItems() []ResponsesItem {
+	if len(i.completedOutputItems) > 0 {
+		out := make([]ResponsesItem, len(i.completedOutputItems))
+		copy(out, i.completedOutputItems)
+		return out
+	}
+	emptyText := ""
+	return []ResponsesItem{
+		{
+			ID:   generateItemID(),
+			Type: "message",
+			Role: "assistant",
+			Content: &ResponsesInput{
+				Items: []ResponsesItem{
+					{Type: "output_text", Text: &emptyText},
+				},
+			},
+			Status: lo.ToPtr("completed"),
+		},
+	}
 }
 
 // GetInternalResponse returns the complete internal response for logging, statistics, etc.
@@ -925,6 +968,7 @@ type ResponsesRequest struct {
 	Reasoning         *ResponsesReasoning   `json:"reasoning,omitempty"`
 	Include           []string              `json:"include,omitempty"`
 	TopLogprobs       *int64                `json:"top_logprobs,omitempty"`
+	Truncation        *string               `json:"truncation,omitempty"`
 
 	// Pass-through fields for OpenAI Responses API
 	PreviousResponseID   *string         `json:"previous_response_id,omitempty"`
@@ -1105,14 +1149,15 @@ type ResponsesReasoning struct {
 // Response types
 
 type ResponsesResponse struct {
-	Object    string          `json:"object"`
-	ID        string          `json:"id"`
-	Model     string          `json:"model"`
-	CreatedAt int64           `json:"created_at"`
-	Output    []ResponsesItem `json:"output"`
-	Status    *string         `json:"status,omitempty"`
-	Usage     *ResponsesUsage `json:"usage,omitempty"`
-	Error     *ResponsesError `json:"error,omitempty"`
+	Object     string          `json:"object"`
+	ID         string          `json:"id"`
+	Model      string          `json:"model"`
+	CreatedAt  int64           `json:"created_at"`
+	Output     []ResponsesItem `json:"output"`
+	Status     *string         `json:"status,omitempty"`
+	Truncation *string         `json:"truncation,omitempty"`
+	Usage      *ResponsesUsage `json:"usage,omitempty"`
+	Error      *ResponsesError `json:"error,omitempty"`
 }
 
 type ResponsesUsage struct {
@@ -1165,6 +1210,7 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 		Stream:              req.Stream,
 		Store:               req.Store,
 		ServiceTier:         req.ServiceTier,
+		Truncation:          req.Truncation,
 		User:                req.User,
 		Metadata:            req.Metadata,
 		MaxCompletionTokens: req.MaxOutputTokens,
