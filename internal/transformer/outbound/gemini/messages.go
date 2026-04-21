@@ -830,6 +830,27 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		}
 	}
 
+	// cachedContent reference (G-H8): forward so the upstream reuses the
+	// managed cached prefix instead of re-reading the bytes.
+	if request.GeminiCachedContentRef != nil {
+		if ref := strings.TrimSpace(*request.GeminiCachedContentRef); ref != "" {
+			geminiReq.CachedContent = ref
+		}
+	}
+
+	// Labels (G-H8): Gemini accepts arbitrary string→string tags for
+	// billing / analytics attribution. We reuse the OpenAI-style Metadata
+	// channel since both APIs model the same concept (k/v tags). Callers
+	// targeting Gemini specifically can set request.Metadata and know it
+	// will surface as `labels` on the wire.
+	if len(request.Metadata) > 0 {
+		labels := make(map[string]string, len(request.Metadata))
+		for k, v := range request.Metadata {
+			labels[k] = v
+		}
+		geminiReq.Labels = labels
+	}
+
 	return geminiReq
 
 }

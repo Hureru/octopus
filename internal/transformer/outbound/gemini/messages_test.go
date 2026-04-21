@@ -209,6 +209,59 @@ func stringPtr(v string) *string {
 	return &v
 }
 
+// TestConvertGeminiRequestCachedContentAndLabels verifies G-H8:
+//   - InternalLLMRequest.GeminiCachedContentRef populates the top-level
+//     `cachedContent` field on the Gemini wire body.
+//   - InternalLLMRequest.Metadata is forwarded as `labels` (same k/v
+//     semantics on both sides).
+//   - Empty / whitespace-only cached-content refs are dropped (wire omits
+//     the field entirely thanks to omitempty).
+func TestConvertGeminiRequestCachedContentAndLabels(t *testing.T) {
+	ref := "cachedContents/abc123"
+	req := &model.InternalLLMRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+		GeminiCachedContentRef: &ref,
+		Metadata: map[string]string{
+			"project": "demo",
+			"team":    "eng",
+		},
+	}
+	out := convertLLMToGeminiRequest(req)
+	if out.CachedContent != ref {
+		t.Errorf("expected cachedContent=%q, got %q", ref, out.CachedContent)
+	}
+	if out.Labels["project"] != "demo" || out.Labels["team"] != "eng" {
+		t.Errorf("expected labels to include project/team, got %+v", out.Labels)
+	}
+
+	// Whitespace-only ref should drop the field.
+	blank := "   "
+	req.GeminiCachedContentRef = &blank
+	out = convertLLMToGeminiRequest(req)
+	if out.CachedContent != "" {
+		t.Errorf("expected blank cachedContent to be dropped, got %q", out.CachedContent)
+	}
+
+	// Nil ref + nil metadata -> wire body omits both keys.
+	req.GeminiCachedContentRef = nil
+	req.Metadata = nil
+	out = convertLLMToGeminiRequest(req)
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	wire := string(b)
+	if strings.Contains(wire, `"cachedContent"`) {
+		t.Errorf("expected omitempty on cachedContent, wire=%s", wire)
+	}
+	if strings.Contains(wire, `"labels"`) {
+		t.Errorf("expected omitempty on labels, wire=%s", wire)
+	}
+}
+
 // TestConvertGeminiRequestSystemInstructionWireShape asserts the Gemini
 // request JSON uses the camelCase `systemInstruction` key (not snake_case)
 // and that the system instruction content omits `role` entirely, matching

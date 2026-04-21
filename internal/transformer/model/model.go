@@ -299,6 +299,15 @@ type InternalLLMRequest struct {
 	ReasoningGenerateSummary *string         `json:"-"`
 	RawInputItems            json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
 
+	// Gemini-specific pass-through fields (only meaningful for Gemini outbound).
+	//
+	// GeminiCachedContentRef is the resource name of a Google-managed cached
+	// content entry (e.g. "cachedContents/xxxxxxxx"). When set, the outbound
+	// transformer adds `cachedContent` to the Gemini request so the upstream
+	// can reuse the cached prefix instead of re-reading the bytes.
+	// Ref: https://ai.google.dev/gemini-api/docs/caching
+	GeminiCachedContentRef *string `json:"-"`
+
 	// Query stores the original query parameters from the inbound request.
 	// This is a help field and will not be sent to the llm service.
 	Query url.Values `json:"-"`

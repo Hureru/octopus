@@ -14,6 +14,19 @@ type GeminiGenerateContentRequest struct {
 	ToolConfig        *GeminiToolConfig       `json:"toolConfig,omitempty"`
 	GenerationConfig  *GeminiGenerationConfig `json:"generationConfig,omitempty"`
 	SafetySettings    []*GeminiSafetySetting  `json:"safetySettings,omitempty"`
+
+	// CachedContent references a Google-managed cached content resource
+	// (e.g. "cachedContents/xxxxxxxx"). When set, the upstream reuses the
+	// cached prefix tokens instead of re-reading the bytes, cutting latency
+	// and per-request cost. G-H8.
+	// Ref: https://ai.google.dev/gemini-api/docs/caching
+	CachedContent string `json:"cachedContent,omitempty"`
+
+	// Labels are arbitrary key/value tags carried through to Gemini for
+	// billing attribution and analytics. Max 64 entries, keys up to 63
+	// chars, values up to 63 chars. G-H8.
+	// Ref: https://ai.google.dev/api/generate-content#GenerateContentRequest
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // GeminiToolConfig configures tool/function calling behavior.
