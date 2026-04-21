@@ -1061,7 +1061,6 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			var contentParts []model.MessageContentPart
 			var toolCalls []model.ToolCall
 			var reasoningContent *string
-			var hasInlineData bool
 			// hasStructuredPart flags parts that cannot be serialised as a
 			// plain string (inline data, server_tool_use, server_tool_result).
 			// When true the message must use MultipleContent instead of the
@@ -1112,7 +1111,6 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 				}
 				// Handle inline data (images, audio, etc.)
 				if part.InlineData != nil {
-					hasInlineData = true
 					hasStructuredPart = true
 					// Convert to data URL format: data:{mimeType};base64,{data}
 					dataURL := fmt.Sprintf("data:%s;base64,%s", part.InlineData.MimeType, part.InlineData.Data)
