@@ -75,12 +75,16 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 	request.NormalizeMessages()
 	request.FlattenUnsupportedBlocks(model.AlternationProviderOpenAI)
 
-	// Convert developer role to system role for compatibility
-	for i := range request.Messages {
-		if request.Messages[i].Role == "developer" {
-			request.Messages[i].Role = "system"
-		}
-	}
+	// developer role is preserved as-is on OpenAI outbound (O-L5). OpenAI
+	// 2025+ model spec treats "developer" as the canonical instruction
+	// role for reasoning models; the latest Chat Completions API accepts
+	// it natively and silently maps "system" to "developer" on reasoning
+	// models for backward compatibility. Previously we forced
+	// developer → system which worked on gpt-4 / gpt-4o (where the two
+	// are interchangeable) but lost the semantic distinction on gpt-5
+	// reasoning models. Keep the original role so upstreams that depend
+	// on it (and downstreams that replay it) see the caller's intent.
+	// Ref: https://platform.openai.com/docs/api-reference/chat
 
 	if request.Stream != nil && *request.Stream {
 		if request.StreamOptions == nil {

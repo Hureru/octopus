@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
@@ -147,7 +148,43 @@ func TestBuildChatCompletionsRequestForwards2025Fields(t *testing.T) {
 	}
 }
 
-// TestTransformRequestAttachesOrgAndProjectHeaders verifies O-M7: the
+// TestTransformRequestPreservesDeveloperRole verifies O-L5: the Chat
+// outbound no longer downgrades `developer` messages to `system`.
+// OpenAI 2025+ model spec treats developer as the canonical instruction
+// role for reasoning models, and the API accepts it natively, so we
+// forward the caller's original role to keep gpt-5-series behaviour
+// correct.
+func TestTransformRequestPreservesDeveloperRole(t *testing.T) {
+	outbound := &ChatOutbound{}
+	content := "you are terse"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-5",
+		Messages: []model.Message{
+			{Role: "developer", Content: model.MessageContent{Content: &content}},
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+	}
+	httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.openai.com", "sk-test")
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	body, err := io.ReadAll(httpReq.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	var payload struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(payload.Messages) < 1 {
+		t.Fatalf("expected messages, got %+v", payload)
+	}
+	if role := payload.Messages[0]["role"]; role != "developer" {
+		t.Errorf("expected first message role=developer, got %q", role)
+	}
+}
 // Chat outbound forwards OpenAI-Organization / OpenAI-Project when they
 // are present in TransformerMetadata, and skips them cleanly when absent
 // or blank.
