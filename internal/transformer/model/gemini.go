@@ -341,6 +341,118 @@ type GeminiCandidate struct {
 	FinishReason  *string               `json:"finishReason,omitempty"`
 	Index         int                   `json:"index"`
 	SafetyRatings []*GeminiSafetyRating `json:"safetyRatings,omitempty"`
+
+	// GroundingMetadata is emitted when the googleSearch (or broader
+	// retrieval) tool is active on the request. Carries the search
+	// queries Gemini issued, the chunks of text it grounded on, and
+	// per-span support indices. G-H10.
+	// Ref: https://ai.google.dev/api/generate-content#GroundingMetadata
+	GroundingMetadata *GeminiGroundingMetadata `json:"groundingMetadata,omitempty"`
+
+	// CitationMetadata is emitted when the model produces attributed
+	// output. Each citationSource is a span in the generated text tied
+	// to a source URI. G-H10.
+	// Ref: https://ai.google.dev/api/generate-content#CitationMetadata
+	CitationMetadata *GeminiCitationMetadata `json:"citationMetadata,omitempty"`
+
+	// UrlContextMetadata is emitted when the urlContext tool was enabled.
+	// Carries the per-URL fetch status so callers can see which URLs were
+	// successfully retrieved. G-H10.
+	// Ref: https://ai.google.dev/api/generate-content#UrlContextMetadata
+	UrlContextMetadata *GeminiUrlContextMetadata `json:"urlContextMetadata,omitempty"`
+}
+
+// GeminiGroundingMetadata mirrors Gemini's groundingMetadata response field.
+// Fields are populated best-effort — older models and simpler grounded
+// responses may omit the support / entry-point sub-objects.
+type GeminiGroundingMetadata struct {
+	// SearchEntryPoint carries the HTML snippet Google requires grounded
+	// UIs to display (the Search suggestion chip).
+	SearchEntryPoint *GeminiSearchEntryPoint `json:"searchEntryPoint,omitempty"`
+
+	// GroundingChunks are the source documents / web pages this response
+	// drew on. Each chunk is a discriminated union; for now only the
+	// "web" variant is modelled explicitly.
+	GroundingChunks []*GeminiGroundingChunk `json:"groundingChunks,omitempty"`
+
+	// GroundingSupports tie spans of the generated text to indices into
+	// GroundingChunks. One support entry per span.
+	GroundingSupports []*GeminiGroundingSupport `json:"groundingSupports,omitempty"`
+
+	// WebSearchQueries lists the queries Gemini actually issued when
+	// grounding the response.
+	WebSearchQueries []string `json:"webSearchQueries,omitempty"`
+
+	// RetrievalMetadata is an opaque JSON blob some variants emit; we
+	// preserve it for passthrough without interpreting.
+	RetrievalMetadata json.RawMessage `json:"retrievalMetadata,omitempty"`
+}
+
+// GeminiSearchEntryPoint carries the required Google Search suggestion UI
+// chip so grounded apps can display it verbatim.
+type GeminiSearchEntryPoint struct {
+	RenderedContent string `json:"renderedContent,omitempty"`
+	SDKBlob         string `json:"sdkBlob,omitempty"`
+}
+
+// GeminiGroundingChunk is a single source document / web page reference.
+// Currently only the Web variant is modelled; other shapes are preserved
+// via the raw field.
+type GeminiGroundingChunk struct {
+	Web *GeminiGroundingChunkWeb `json:"web,omitempty"`
+}
+
+// GeminiGroundingChunkWeb is the URL/title pair for a web-sourced chunk.
+type GeminiGroundingChunkWeb struct {
+	URI     string `json:"uri,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Snippet string `json:"snippet,omitempty"`
+}
+
+// GeminiGroundingSupport ties a span of the generated text to the source
+// chunks that supported it. GroundingChunkIndices are indices into the
+// sibling GroundingChunks slice.
+type GeminiGroundingSupport struct {
+	Segment               *GeminiGroundingSegment `json:"segment,omitempty"`
+	GroundingChunkIndices []int                   `json:"groundingChunkIndices,omitempty"`
+	ConfidenceScores      []float64               `json:"confidenceScores,omitempty"`
+}
+
+// GeminiGroundingSegment is a byte-offset span into the generated text,
+// with the literal text included for convenience.
+type GeminiGroundingSegment struct {
+	StartIndex int    `json:"startIndex,omitempty"`
+	EndIndex   int    `json:"endIndex,omitempty"`
+	Text       string `json:"text,omitempty"`
+	PartIndex  int    `json:"partIndex,omitempty"`
+}
+
+// GeminiCitationMetadata mirrors Gemini's citationMetadata response field.
+type GeminiCitationMetadata struct {
+	CitationSources []*GeminiCitationSource `json:"citationSources,omitempty"`
+}
+
+// GeminiCitationSource is a single inline citation: a span of the generated
+// text tied to a source URI and optional license.
+type GeminiCitationSource struct {
+	StartIndex int    `json:"startIndex,omitempty"`
+	EndIndex   int    `json:"endIndex,omitempty"`
+	URI        string `json:"uri,omitempty"`
+	Title      string `json:"title,omitempty"`
+	License    string `json:"license,omitempty"`
+}
+
+// GeminiUrlContextMetadata mirrors the urlContext tool's per-URL retrieval
+// status payload.
+type GeminiUrlContextMetadata struct {
+	URLMetadata []*GeminiURLMetadata `json:"urlMetadata,omitempty"`
+}
+
+// GeminiURLMetadata is a single URL fetch status entry.
+type GeminiURLMetadata struct {
+	RetrievedURL        string `json:"retrievedUrl,omitempty"`
+	URLRetrievalStatus  string `json:"urlRetrievalStatus,omitempty"`
+	URL                 string `json:"url,omitempty"` // some variants emit "url" instead
 }
 
 // GeminiSafetyRating represents content safety evaluation

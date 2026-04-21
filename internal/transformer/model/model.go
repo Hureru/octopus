@@ -1205,6 +1205,116 @@ type Choice struct {
 	StopSequence *string `json:"stop_sequence,omitempty"`
 
 	Logprobs *LogprobsContent `json:"logprobs,omitempty"`
+
+	// Grounding carries search / retrieval metadata surfaced by providers
+	// that support grounded generation (Gemini googleSearch tool, future
+	// Anthropic web_search result consolidation). Non-grounded responses
+	// leave this nil. The json:"-" tag keeps the field off the default
+	// OpenAI-compatible wire path; inbound transformers that understand the
+	// structure (Gemini inbound, Anthropic inbound) expose it via their
+	// provider-native shape. G-H10.
+	Grounding *GroundingInfo `json:"-"`
+
+	// Citations carries inline citation spans (start/end offsets +
+	// source URLs / licenses) emitted by Gemini's citationMetadata or
+	// equivalent. json:"-" for the same reason as Grounding. G-H10.
+	Citations []Citation `json:"-"`
+
+	// URLContext carries per-URL retrieval status for Gemini's urlContext
+	// tool (whether each URL was fetched successfully). G-H10.
+	URLContext *URLContextInfo `json:"-"`
+
+	// SafetyRatings carries per-category safety evaluation data for
+	// providers that surface it (Gemini safetyRatings on the candidate and
+	// on promptFeedback). json:"-" so the field doesn't pollute the
+	// OpenAI-compatible wire body. G-M9.
+	SafetyRatings []SafetyRating `json:"-"`
+}
+
+// GroundingInfo captures cross-provider search / retrieval grounding data.
+// Fields are populated best-effort from the provider's native payload —
+// callers should treat missing fields as "not surfaced by this provider"
+// rather than "empty".
+type GroundingInfo struct {
+	// SearchQueries holds the queries the provider actually issued. Gemini
+	// surfaces this in groundingMetadata.webSearchQueries.
+	SearchQueries []string `json:"search_queries,omitempty"`
+
+	// Sources is the list of upstream documents / web pages the response
+	// was grounded on. For Gemini this comes from groundingChunks; for
+	// Anthropic's web_search_tool_result the URLs are folded here too.
+	Sources []GroundingSource `json:"sources,omitempty"`
+
+	// Supports ties spans of the generated text to the indices in Sources
+	// that supported that span. Empty when the provider did not surface
+	// span-level attributions.
+	Supports []GroundingSupport `json:"supports,omitempty"`
+
+	// SearchEntryPointHTML is the provider-rendered "search entry point"
+	// HTML snippet (Gemini surfaces this so UIs can display the required
+	// Google Search suggestion chip). Empty for providers that don't
+	// supply an entry point.
+	SearchEntryPointHTML string `json:"search_entry_point_html,omitempty"`
+}
+
+// GroundingSource identifies a single upstream document / web page that a
+// grounded response drew on.
+type GroundingSource struct {
+	URI     string `json:"uri,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Snippet string `json:"snippet,omitempty"`
+}
+
+// GroundingSupport ties a span of the generated text to the source indices
+// (into GroundingInfo.Sources) that supported that span. ConfidenceScores
+// mirrors Gemini's per-chunk confidence floats; providers that don't surface
+// confidence leave it nil.
+type GroundingSupport struct {
+	// SegmentStartIndex / SegmentEndIndex are byte offsets into the
+	// generated text. Gemini sometimes omits startIndex when the segment
+	// starts at 0 — callers should default to 0 in that case.
+	SegmentStartIndex int `json:"segment_start_index,omitempty"`
+	SegmentEndIndex   int `json:"segment_end_index,omitempty"`
+	// SegmentText is the literal text this support covers (redundant with
+	// the offsets but cheaper for callers that want to display the span).
+	SegmentText string `json:"segment_text,omitempty"`
+	// SourceIndices points into GroundingInfo.Sources.
+	SourceIndices    []int     `json:"source_indices,omitempty"`
+	ConfidenceScores []float64 `json:"confidence_scores,omitempty"`
+}
+
+// Citation is the inline citation span emitted by providers that generate
+// attributed output (Gemini citationMetadata). StartIndex / EndIndex are
+// byte offsets into the generated text. License is optional (Gemini
+// sometimes surfaces the license associated with the cited source).
+type Citation struct {
+	StartIndex int    `json:"start_index,omitempty"`
+	EndIndex   int    `json:"end_index,omitempty"`
+	URI        string `json:"uri,omitempty"`
+	Title      string `json:"title,omitempty"`
+	License    string `json:"license,omitempty"`
+}
+
+// URLContextInfo carries per-URL retrieval status for Gemini's urlContext
+// tool: whether the URL was successfully fetched and, if not, why.
+type URLContextInfo struct {
+	URLs []URLContextEntry `json:"urls,omitempty"`
+}
+
+// URLContextEntry is a single URL's retrieval status.
+type URLContextEntry struct {
+	URL    string `json:"url,omitempty"`
+	Status string `json:"status,omitempty"` // e.g. URL_RETRIEVAL_STATUS_SUCCESS / FAILED / INVALID_URL
+}
+
+// SafetyRating mirrors a provider's per-category content safety evaluation.
+// Gemini surfaces these on both candidates and promptFeedback; Anthropic's
+// refusal responses carry a coarser variant that can flow through the same
+// shape. G-M9.
+type SafetyRating struct {
+	Category    string `json:"category,omitempty"`
+	Probability string `json:"probability,omitempty"`
+	Blocked     bool   `json:"blocked,omitempty"`
 }
 
 // LogprobsContent represents logprobs information.

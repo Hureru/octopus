@@ -312,6 +312,180 @@ func TestConvertGeminiResponseCodeExecutionResultFailedOutcome(t *testing.T) {
 	}
 }
 
+// TestConvertGeminiResponseGroundingMetadata verifies G-H10: Gemini's
+// groundingMetadata surfaces on Choice.Grounding with all four sub-fields
+// populated (queries, sources, supports, entry-point HTML). Empty
+// groundingMetadata payloads leave Choice.Grounding nil so consumers can
+// branch cheaply.
+func TestConvertGeminiResponseGroundingMetadata(t *testing.T) {
+	reason := "STOP"
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{
+			{
+				Index:        0,
+				FinishReason: &reason,
+				Content: &model.GeminiContent{
+					Role:  "model",
+					Parts: []*model.GeminiPart{{Text: "Paris is the capital of France."}},
+				},
+				GroundingMetadata: &model.GeminiGroundingMetadata{
+					SearchEntryPoint: &model.GeminiSearchEntryPoint{
+						RenderedContent: "<div>search chip</div>",
+					},
+					WebSearchQueries: []string{"capital of France"},
+					GroundingChunks: []*model.GeminiGroundingChunk{
+						{Web: &model.GeminiGroundingChunkWeb{
+							URI:   "https://example.com/paris",
+							Title: "Paris - Wikipedia",
+						}},
+					},
+					GroundingSupports: []*model.GeminiGroundingSupport{
+						{
+							Segment: &model.GeminiGroundingSegment{
+								StartIndex: 0,
+								EndIndex:   29,
+								Text:       "Paris is the capital of France.",
+							},
+							GroundingChunkIndices: []int{0},
+							ConfidenceScores:      []float64{0.95},
+						},
+					},
+				},
+			},
+		},
+	}
+	internal := convertGeminiToLLMResponse(resp, false, nil)
+	g := internal.Choices[0].Grounding
+	if g == nil {
+		t.Fatalf("expected Choice.Grounding populated, got nil")
+	}
+	if len(g.SearchQueries) != 1 || g.SearchQueries[0] != "capital of France" {
+		t.Errorf("expected search queries, got %+v", g.SearchQueries)
+	}
+	if len(g.Sources) != 1 || g.Sources[0].URI != "https://example.com/paris" {
+		t.Errorf("expected source URI, got %+v", g.Sources)
+	}
+	if len(g.Supports) != 1 || g.Supports[0].SegmentEndIndex != 29 {
+		t.Errorf("expected support span, got %+v", g.Supports)
+	}
+	if g.SearchEntryPointHTML != "<div>search chip</div>" {
+		t.Errorf("expected entry-point HTML, got %q", g.SearchEntryPointHTML)
+	}
+
+	// Empty groundingMetadata should leave Choice.Grounding nil.
+	resp2 := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{{
+			Index:             0,
+			FinishReason:      &reason,
+			Content:           &model.GeminiContent{Role: "model", Parts: []*model.GeminiPart{{Text: "hi"}}},
+			GroundingMetadata: &model.GeminiGroundingMetadata{},
+		}},
+	}
+	if convertGeminiToLLMResponse(resp2, false, nil).Choices[0].Grounding != nil {
+		t.Errorf("expected empty groundingMetadata to leave Grounding nil")
+	}
+}
+
+// TestConvertGeminiResponseCitationMetadata verifies G-H10 citation spans
+// round-trip with offsets and source URIs intact.
+func TestConvertGeminiResponseCitationMetadata(t *testing.T) {
+	reason := "STOP"
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{{
+			Index:        0,
+			FinishReason: &reason,
+			Content:      &model.GeminiContent{Role: "model", Parts: []*model.GeminiPart{{Text: "text"}}},
+			CitationMetadata: &model.GeminiCitationMetadata{
+				CitationSources: []*model.GeminiCitationSource{
+					{StartIndex: 10, EndIndex: 42, URI: "https://example.com/src", License: "MIT"},
+					{StartIndex: 50, EndIndex: 88, URI: "https://example.com/src2"},
+				},
+			},
+		}},
+	}
+	cites := convertGeminiToLLMResponse(resp, false, nil).Choices[0].Citations
+	if len(cites) != 2 {
+		t.Fatalf("expected 2 citations, got %d", len(cites))
+	}
+	if cites[0].URI != "https://example.com/src" || cites[0].License != "MIT" {
+		t.Errorf("first citation: %+v", cites[0])
+	}
+	if cites[1].StartIndex != 50 || cites[1].EndIndex != 88 {
+		t.Errorf("second citation offsets: %+v", cites[1])
+	}
+}
+
+// TestConvertGeminiResponseURLContextMetadata verifies G-H10 URL context
+// metadata is carried through with status preserved, including the
+// retrievedUrl → url fallback.
+func TestConvertGeminiResponseURLContextMetadata(t *testing.T) {
+	reason := "STOP"
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{{
+			Index:        0,
+			FinishReason: &reason,
+			Content:      &model.GeminiContent{Role: "model", Parts: []*model.GeminiPart{{Text: "text"}}},
+			UrlContextMetadata: &model.GeminiUrlContextMetadata{
+				URLMetadata: []*model.GeminiURLMetadata{
+					{RetrievedURL: "https://a.example/", URLRetrievalStatus: "URL_RETRIEVAL_STATUS_SUCCESS"},
+					{URL: "https://b.example/", URLRetrievalStatus: "URL_RETRIEVAL_STATUS_FAILED"},
+				},
+			},
+		}},
+	}
+	u := convertGeminiToLLMResponse(resp, false, nil).Choices[0].URLContext
+	if u == nil || len(u.URLs) != 2 {
+		t.Fatalf("expected 2 URL entries, got %+v", u)
+	}
+	if u.URLs[0].URL != "https://a.example/" || u.URLs[0].Status != "URL_RETRIEVAL_STATUS_SUCCESS" {
+		t.Errorf("first url: %+v", u.URLs[0])
+	}
+	// Fallback when only `url` is set (no retrievedUrl).
+	if u.URLs[1].URL != "https://b.example/" {
+		t.Errorf("expected URL fallback from retrievedUrl to url, got %+v", u.URLs[1])
+	}
+}
+
+// TestConvertGeminiResponseSafetyRatings verifies G-M9: per-candidate and
+// promptFeedback safety ratings both land on the Choice, including the
+// synthetic-choice path when the prompt was blocked.
+func TestConvertGeminiResponseSafetyRatings(t *testing.T) {
+	reason := "STOP"
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{{
+			Index:        0,
+			FinishReason: &reason,
+			Content:      &model.GeminiContent{Role: "model", Parts: []*model.GeminiPart{{Text: "hi"}}},
+			SafetyRatings: []*model.GeminiSafetyRating{
+				{Category: "HARM_CATEGORY_HARASSMENT", Probability: "NEGLIGIBLE"},
+				{Category: "HARM_CATEGORY_HATE_SPEECH", Probability: "LOW"},
+			},
+		}},
+	}
+	sr := convertGeminiToLLMResponse(resp, false, nil).Choices[0].SafetyRatings
+	if len(sr) != 2 || sr[0].Category != "HARM_CATEGORY_HARASSMENT" {
+		t.Fatalf("expected 2 safety ratings on candidate, got %+v", sr)
+	}
+
+	// Blocked-prompt path: promptFeedback.safetyRatings surface on the
+	// synthetic choice even when the candidates slice is empty.
+	blocked := &model.GeminiGenerateContentResponse{
+		PromptFeedback: &model.GeminiPromptFeedback{
+			BlockReason: "SAFETY",
+			SafetyRatings: []*model.GeminiSafetyRating{
+				{Category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", Probability: "HIGH", Blocked: true},
+			},
+		},
+	}
+	choices := convertGeminiToLLMResponse(blocked, false, nil).Choices
+	if len(choices) != 1 {
+		t.Fatalf("expected synthetic choice for blocked prompt, got %d", len(choices))
+	}
+	if len(choices[0].SafetyRatings) != 1 || !choices[0].SafetyRatings[0].Blocked {
+		t.Errorf("expected promptFeedback safety ratings on synthetic choice, got %+v", choices[0].SafetyRatings)
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }
