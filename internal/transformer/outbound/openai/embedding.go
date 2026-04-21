@@ -73,6 +73,7 @@ func (o *EmbeddingOutbound) TransformRequest(ctx context.Context, request *model
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
+	applyOpenAIOrgProjectHeaders(req, request)
 
 	parsedUrl, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
 	if err != nil {

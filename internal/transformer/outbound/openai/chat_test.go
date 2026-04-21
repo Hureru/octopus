@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -143,5 +144,44 @@ func TestBuildChatCompletionsRequestForwards2025Fields(t *testing.T) {
 	search, ok := payload["web_search_options"].(map[string]any)
 	if !ok || search["search_context_size"] != "low" {
 		t.Fatalf("expected web_search_options to be forwarded, got %#v", payload["web_search_options"])
+	}
+}
+
+// TestTransformRequestAttachesOrgAndProjectHeaders verifies O-M7: the
+// Chat outbound forwards OpenAI-Organization / OpenAI-Project when they
+// are present in TransformerMetadata, and skips them cleanly when absent
+// or blank.
+func TestTransformRequestAttachesOrgAndProjectHeaders(t *testing.T) {
+	outbound := &ChatOutbound{}
+	content := "hi"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-5",
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: &content}},
+		},
+		TransformerMetadata: map[string]string{
+			"openai_organization": "org-abc",
+			"openai_project":      "proj-xyz",
+		},
+	}
+	httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.openai.com", "sk-test")
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	if got := httpReq.Header.Get("OpenAI-Organization"); got != "org-abc" {
+		t.Errorf("OpenAI-Organization: got %q, want %q", got, "org-abc")
+	}
+	if got := httpReq.Header.Get("OpenAI-Project"); got != "proj-xyz" {
+		t.Errorf("OpenAI-Project: got %q, want %q", got, "proj-xyz")
+	}
+
+	// Whitespace-only values are skipped so the header is not sent blank.
+	req.TransformerMetadata["openai_organization"] = "   "
+	httpReq, err = outbound.TransformRequest(context.Background(), req, "https://api.openai.com", "sk-test")
+	if err != nil {
+		t.Fatalf("TransformRequest blank: %v", err)
+	}
+	if got := httpReq.Header.Get("OpenAI-Organization"); got != "" {
+		t.Errorf("expected OpenAI-Organization omitted for blank value, got %q", got)
 	}
 }

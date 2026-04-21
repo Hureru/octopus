@@ -48,6 +48,7 @@ func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
+	applyOpenAIOrgProjectHeaders(req, request)
 
 	// Parse and set URL
 	parsedUrl, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
@@ -89,6 +90,9 @@ func (o *ResponseOutbound) TransformRequestRaw(ctx context.Context, rawBody []by
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
+	// OpenAI-Organization / OpenAI-Project are forwarded by the relay's
+	// copyHeaders on the raw-passthrough path, so no explicit application
+	// is needed here (O-M7).
 
 	parsedURL, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
 	if err != nil {

@@ -103,6 +103,7 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+key)
+	applyOpenAIOrgProjectHeaders(req, request)
 
 	parsedUrl, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
 	if err != nil {
@@ -112,6 +113,26 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 	req.URL = parsedUrl
 	req.Method = http.MethodPost
 	return req, nil
+}
+
+// applyOpenAIOrgProjectHeaders forwards the optional OpenAI-Organization and
+// OpenAI-Project headers from TransformerMetadata. Both headers are scoped
+// to multi-org / multi-project deployments where a single API key can hit
+// several billing scopes; callers set the metadata keys upstream (in relay
+// configuration or per-request overrides) and the outbound transformer
+// blindly forwards the values. Empty / whitespace-only values are dropped
+// so we don't emit header keys with blank values. O-M7.
+// Ref: https://platform.openai.com/docs/api-reference/debugging-requests
+func applyOpenAIOrgProjectHeaders(req *http.Request, request *model.InternalLLMRequest) {
+	if req == nil || request == nil || request.TransformerMetadata == nil {
+		return
+	}
+	if org := strings.TrimSpace(request.TransformerMetadata["openai_organization"]); org != "" {
+		req.Header.Set("OpenAI-Organization", org)
+	}
+	if project := strings.TrimSpace(request.TransformerMetadata["openai_project"]); project != "" {
+		req.Header.Set("OpenAI-Project", project)
+	}
 }
 
 func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatCompletionsRequest {
