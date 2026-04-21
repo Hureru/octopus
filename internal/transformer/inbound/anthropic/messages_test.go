@@ -32,6 +32,31 @@ func TestTransformRequestPreservesAnthropicUserIDInTransformerMetadataOnly(t *te
 	}
 }
 
+// A-H3: TransformRequest should surface Anthropic `top_k` and `service_tier`
+// onto the internal request so outbound transformers (Anthropic, Gemini, and
+// OpenAI-compat models such as Qwen) can forward them upstream.
+func TestTransformRequestExtractsTopKAndServiceTier(t *testing.T) {
+	inbound := &MessagesInbound{}
+	body := []byte(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":"hello"}],
+		"top_k":32,
+		"service_tier":"priority"
+	}`)
+
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	if req.TopK == nil || *req.TopK != 32 {
+		t.Fatalf("expected top_k=32 on internal request, got %+v", req.TopK)
+	}
+	if req.ServiceTier == nil || *req.ServiceTier != "priority" {
+		t.Fatalf("expected service_tier=priority on internal request, got %+v", req.ServiceTier)
+	}
+}
+
 func TestTransformStreamDoesNotStopMissingContentBlock(t *testing.T) {
 	inbound := &MessagesInbound{}
 

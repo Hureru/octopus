@@ -427,9 +427,14 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 		Model:       req.Model,
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
+		TopK:        req.TopK,
 		Stream:      req.Stream,
 		MaxTokens:   resolveMaxTokens(req),
 		System:      convertSystemPrompt(req),
+	}
+
+	if req.ServiceTier != nil {
+		result.ServiceTier = strings.TrimSpace(*req.ServiceTier)
 	}
 
 	if userID := resolveAnthropicUserID(req); userID != "" {
@@ -468,6 +473,11 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 		}
 	}
 
+	// A-H4: Anthropic rejects temperature != 1 and any top_p/top_k when
+	// extended thinking is active. Force the sampling knobs to the only
+	// values the API accepts so downstream 400s don't leak to the caller.
+	applyThinkingParamConstraints(result)
+
 	// Convert tool choice
 	if tc := convertToolChoice(req.ToolChoice); tc != nil {
 		result.ToolChoice = tc
@@ -479,6 +489,26 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 	pruneCacheBreakpoints(result)
 
 	return result
+}
+
+// applyThinkingParamConstraints enforces Anthropic's documented restrictions
+// on sampling parameters when extended thinking is active. The API requires
+// temperature == 1.0 and rejects top_p / top_k outright; callers that set
+// conflicting values would otherwise receive a 400 upstream. We normalise
+// silently so pass-through requests keep working across clients that do not
+// know the rule.
+func applyThinkingParamConstraints(req *anthropicModel.MessageRequest) {
+	if req == nil || req.Thinking == nil {
+		return
+	}
+	switch req.Thinking.Type {
+	case anthropicModel.ThinkingTypeEnabled, anthropicModel.ThinkingTypeAdaptive:
+	default:
+		return
+	}
+	req.Temperature = lo.ToPtr(1.0)
+	req.TopP = nil
+	req.TopK = nil
 }
 
 func resolveAnthropicUserID(req *model.InternalLLMRequest) string {

@@ -48,10 +48,14 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 		MaxTokens:           &anthropicReq.MaxTokens,
 		Temperature:         anthropicReq.Temperature,
 		TopP:                anthropicReq.TopP,
+		TopK:                anthropicReq.TopK,
 		Stream:              anthropicReq.Stream,
 		Metadata:            map[string]string{},
 		RawAPIFormat:        model.APIFormatAnthropicMessage,
 		TransformerMetadata: map[string]string{},
+	}
+	if tier := strings.TrimSpace(anthropicReq.ServiceTier); tier != "" {
+		chatReq.ServiceTier = &tier
 	}
 	if anthropicReq.Metadata != nil {
 		if userID := strings.TrimSpace(anthropicReq.Metadata.UserID); userID != "" {
