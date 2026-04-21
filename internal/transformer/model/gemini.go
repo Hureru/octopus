@@ -262,6 +262,13 @@ type GeminiGenerateContentResponse struct {
 	PromptFeedback *GeminiPromptFeedback `json:"promptFeedback,omitempty"`
 	UsageMetadata  *GeminiUsageMetadata  `json:"usageMetadata,omitempty"`
 	ModelVersion   string                `json:"modelVersion,omitempty"`
+	// ResponseId is a unique identifier that Gemini assigns to every response
+	// (non-streaming and each streaming chunk). Round-trip it through
+	// InternalLLMResponse.ID so downstream logs / dashboards stay consistent.
+	ResponseId string `json:"responseId,omitempty"`
+	// CreateTime is an RFC3339 timestamp for when the response was produced.
+	// Mapped onto InternalLLMResponse.Created (unix seconds).
+	CreateTime string `json:"createTime,omitempty"`
 }
 
 // GeminiCandidate represents a generated response candidate
@@ -296,4 +303,22 @@ type GeminiUsageMetadata struct {
 
 	// ThoughtsTokenCount is the number of tokens in the model's thoughts
 	ThoughtsTokenCount int `json:"thoughtsTokenCount,omitempty"`
+
+	// ToolUsePromptTokenCount is the subset of PromptTokenCount consumed by
+	// tool use prompts during multi-turn function calling.
+	ToolUsePromptTokenCount int `json:"toolUsePromptTokenCount,omitempty"`
+
+	// Per-modality breakdowns. Each entry carries {modality, tokenCount}.
+	// See https://ai.google.dev/api/generate-content#UsageMetadata
+	PromptTokensDetails        []GeminiModalityTokenCount `json:"promptTokensDetails,omitempty"`
+	CandidatesTokensDetails    []GeminiModalityTokenCount `json:"candidatesTokensDetails,omitempty"`
+	CacheTokensDetails         []GeminiModalityTokenCount `json:"cacheTokensDetails,omitempty"`
+	ToolUsePromptTokensDetails []GeminiModalityTokenCount `json:"toolUsePromptTokensDetails,omitempty"`
+}
+
+// GeminiModalityTokenCount carries a single modality's contribution to a
+// token count (e.g. TEXT=120, IMAGE=34).
+type GeminiModalityTokenCount struct {
+	Modality   string `json:"modality"`
+	TokenCount int    `json:"tokenCount"`
 }

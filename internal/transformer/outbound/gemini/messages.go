@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -908,6 +909,20 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 		resp.Object = "chat.completion"
 	}
 
+	if geminiResp.ResponseId != "" {
+		resp.ID = geminiResp.ResponseId
+	}
+	if geminiResp.ModelVersion != "" {
+		resp.Model = geminiResp.ModelVersion
+	}
+	if geminiResp.CreateTime != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, geminiResp.CreateTime); err == nil {
+			resp.Created = parsed.Unix()
+		} else if parsed, err := time.Parse(time.RFC3339, geminiResp.CreateTime); err == nil {
+			resp.Created = parsed.Unix()
+		}
+	}
+
 	// Convert candidates to choices
 	for _, candidate := range geminiResp.Candidates {
 		choice := model.Choice{
@@ -1099,10 +1114,102 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			usage.CompletionTokensDetails.ReasoningTokens = int64(geminiResp.UsageMetadata.ThoughtsTokenCount)
 		}
 
+		if geminiResp.UsageMetadata.ToolUsePromptTokenCount > 0 {
+			usage.ToolUsePromptTokens = int64(geminiResp.UsageMetadata.ToolUsePromptTokenCount)
+		}
+
+		if len(geminiResp.UsageMetadata.PromptTokensDetails) > 0 {
+			if usage.PromptTokensDetails == nil {
+				usage.PromptTokensDetails = &model.PromptTokensDetails{}
+			}
+			applyGeminiModalityToPromptDetails(usage.PromptTokensDetails, geminiResp.UsageMetadata.PromptTokensDetails)
+			usage.PromptModalityTokenDetails = toInternalModalityCounts(geminiResp.UsageMetadata.PromptTokensDetails)
+		}
+
+		if len(geminiResp.UsageMetadata.CandidatesTokensDetails) > 0 {
+			if usage.CompletionTokensDetails == nil {
+				usage.CompletionTokensDetails = &model.CompletionTokensDetails{}
+			}
+			applyGeminiModalityToCompletionDetails(usage.CompletionTokensDetails, geminiResp.UsageMetadata.CandidatesTokensDetails)
+			usage.CompletionModalityTokenDetails = toInternalModalityCounts(geminiResp.UsageMetadata.CandidatesTokensDetails)
+		}
+
 		resp.Usage = usage
 	}
 
+	// When the prompt is blocked Gemini returns no candidates, only
+	// promptFeedback.blockReason. Surface a synthetic choice so downstream
+	// inbounds can translate to a proper content_filter / refusal finish
+	// reason instead of returning an empty 200.
+	if len(geminiResp.Candidates) == 0 && geminiResp.PromptFeedback != nil && geminiResp.PromptFeedback.BlockReason != "" {
+		reason := model.FinishReasonFromGemini(geminiResp.PromptFeedback.BlockReason).String()
+		if reason == "" {
+			reason = string(model.FinishReasonContentFilter)
+		}
+		resp.Choices = append(resp.Choices, model.Choice{
+			Index:        0,
+			Message:      &model.Message{Role: "assistant"},
+			FinishReason: &reason,
+		})
+	}
+
 	return resp
+}
+
+// applyGeminiModalityToPromptDetails folds per-modality Gemini breakdowns into
+// the internal PromptTokensDetails (TEXT/IMAGE/VIDEO/AUDIO/DOCUMENT).
+func applyGeminiModalityToPromptDetails(details *model.PromptTokensDetails, counts []model.GeminiModalityTokenCount) {
+	if details == nil {
+		return
+	}
+	for _, mt := range counts {
+		switch strings.ToUpper(mt.Modality) {
+		case "TEXT":
+			details.TextTokens += int64(mt.TokenCount)
+		case "IMAGE":
+			details.ImageTokens += int64(mt.TokenCount)
+		case "VIDEO":
+			details.VideoTokens += int64(mt.TokenCount)
+		case "AUDIO":
+			details.AudioTokens += int64(mt.TokenCount)
+		case "DOCUMENT":
+			details.DocumentTokens += int64(mt.TokenCount)
+		}
+	}
+}
+
+// applyGeminiModalityToCompletionDetails folds per-modality Gemini breakdowns
+// into the internal CompletionTokensDetails.
+func applyGeminiModalityToCompletionDetails(details *model.CompletionTokensDetails, counts []model.GeminiModalityTokenCount) {
+	if details == nil {
+		return
+	}
+	for _, mt := range counts {
+		switch strings.ToUpper(mt.Modality) {
+		case "TEXT":
+			details.TextTokens += int64(mt.TokenCount)
+		case "IMAGE":
+			details.ImageTokens += int64(mt.TokenCount)
+		case "VIDEO":
+			details.VideoTokens += int64(mt.TokenCount)
+		case "AUDIO":
+			details.AudioTokens += int64(mt.TokenCount)
+		}
+	}
+}
+
+func toInternalModalityCounts(counts []model.GeminiModalityTokenCount) []model.ModalityTokenCount {
+	if len(counts) == 0 {
+		return nil
+	}
+	result := make([]model.ModalityTokenCount, 0, len(counts))
+	for _, mt := range counts {
+		result = append(result, model.ModalityTokenCount{
+			Modality:   mt.Modality,
+			TokenCount: int64(mt.TokenCount),
+		})
+	}
+	return result
 }
 
 // convertGeminiFinishReason maps a Gemini finishReason to the canonical

@@ -1230,6 +1230,11 @@ type Usage struct {
 	// Output only. A detailed breakdown of the token count for each modality in the candidates.
 	CompletionModalityTokenDetails []ModalityTokenCount `json:"-"`
 
+	// ToolUsePromptTokens is the portion of PromptTokens consumed by tool-use
+	// prompts in multi-turn function calling (Gemini-specific). Included in
+	// PromptTokens, surfaced separately for observability.
+	ToolUsePromptTokens int64 `json:"tool_use_prompt_tokens,omitempty"`
+
 	// Anthropic-style cache accounting. Presence of either CacheCreationInputTokens or
 	// CacheReadInputTokens implies PromptTokens excludes cached tokens.
 	CacheCreationInputTokens   int64 `json:"cache_creation_input_tokens,omitempty"`
@@ -1328,12 +1333,23 @@ type CompletionTokensDetails struct {
 	ReasoningTokens          int64 `json:"reasoning_tokens"`
 	AcceptedPredictionTokens int64 `json:"accepted_prediction_tokens"`
 	RejectedPredictionTokens int64 `json:"rejected_prediction_tokens"`
+	// TextTokens / ImageTokens / VideoTokens are populated when upstream providers
+	// (Gemini today) report per-modality output breakdowns.
+	TextTokens  int64 `json:"text_tokens,omitempty"`
+	ImageTokens int64 `json:"image_tokens,omitempty"`
+	VideoTokens int64 `json:"video_tokens,omitempty"`
 }
 
 // PromptTokensDetails Breakdown of tokens used in the prompt.
 type PromptTokensDetails struct {
 	AudioTokens  int64 `json:"audio_tokens"`
 	CachedTokens int64 `json:"cached_tokens"`
+	// TextTokens / ImageTokens / VideoTokens / DocumentTokens are populated
+	// when upstream providers (Gemini today) report per-modality input breakdowns.
+	TextTokens     int64 `json:"text_tokens,omitempty"`
+	ImageTokens    int64 `json:"image_tokens,omitempty"`
+	VideoTokens    int64 `json:"video_tokens,omitempty"`
+	DocumentTokens int64 `json:"document_tokens,omitempty"`
 }
 
 // ResponseError represents an error response.
