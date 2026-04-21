@@ -655,7 +655,12 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 				IncludeThoughts: decision.IncludeThoughts,
 			}
 			if decision.UseLevel {
-				thinkingConfig.ThinkingLevel = decision.Level
+				// Empty Level signals "server-side dynamic default" for
+				// Gemini 3.x — we deliberately avoid emitting an unsupported
+				// "dynamic" / "none" string by leaving the field unset.
+				if decision.Level != "" {
+					thinkingConfig.ThinkingLevel = decision.Level
+				}
 			} else {
 				b := decision.Budget
 				thinkingConfig.ThinkingBudget = &b
