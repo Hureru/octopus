@@ -15,6 +15,44 @@ import (
 
 type ChatOutbound struct{}
 
+// ChatCompletionsRequest is the explicit OpenAI chat/completions wire payload.
+// Keeping this as a whitelist prevents internal/provider-specific fields on the
+// shared InternalLLMRequest from leaking to OpenAI-compatible upstreams.
+type ChatCompletionsRequest struct {
+	Messages []model.Message `json:"messages"`
+	Model    string          `json:"model"`
+
+	FrequencyPenalty    *float64              `json:"frequency_penalty,omitempty"`
+	Logprobs            *bool                 `json:"logprobs,omitempty"`
+	MaxCompletionTokens *int64                `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *int64                `json:"max_tokens,omitempty"`
+	PresencePenalty     *float64              `json:"presence_penalty,omitempty"`
+	Seed                *int64                `json:"seed,omitempty"`
+	Store               *bool                 `json:"store,omitempty"`
+	Temperature         *float64              `json:"temperature,omitempty"`
+	TopLogprobs         *int64                `json:"top_logprobs,omitempty"`
+	TopP                *float64              `json:"top_p,omitempty"`
+	LogitBias           map[string]int64      `json:"logit_bias,omitempty"`
+	Metadata            map[string]string     `json:"metadata,omitempty"`
+	Modalities          []string              `json:"modalities,omitempty"`
+	Audio               *ChatCompletionsAudio `json:"audio,omitempty"`
+	ReasoningEffort     string                `json:"reasoning_effort,omitempty"`
+	ServiceTier         *string               `json:"service_tier,omitempty"`
+	Stop                *model.Stop           `json:"stop,omitempty"`
+	Stream              *bool                 `json:"stream,omitempty"`
+	StreamOptions       *model.StreamOptions  `json:"stream_options,omitempty"`
+	ParallelToolCalls   *bool                 `json:"parallel_tool_calls,omitempty"`
+	Tools               []model.Tool          `json:"tools,omitempty"`
+	ToolChoice          *model.ToolChoice     `json:"tool_choice,omitempty"`
+	ResponseFormat      *model.ResponseFormat `json:"response_format,omitempty"`
+	SafetyIdentifier    *string               `json:"safety_identifier,omitempty"`
+}
+
+type ChatCompletionsAudio struct {
+	Format string `json:"format,omitempty"`
+	Voice  string `json:"voice,omitempty"`
+}
+
 func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.InternalLLMRequest, baseUrl, key string) (*http.Request, error) {
 	request.ClearHelpFields()
 	request.NormalizeMessages()
@@ -35,7 +73,7 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 		}
 	}
 
-	body, err := json.Marshal(request)
+	body, err := json.Marshal(buildChatCompletionsRequest(request))
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -57,6 +95,49 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 	req.URL = parsedUrl
 	req.Method = http.MethodPost
 	return req, nil
+}
+
+func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatCompletionsRequest {
+	if request == nil {
+		return &ChatCompletionsRequest{}
+	}
+
+	result := &ChatCompletionsRequest{
+		Messages:            request.Messages,
+		Model:               request.Model,
+		FrequencyPenalty:    request.FrequencyPenalty,
+		Logprobs:            request.Logprobs,
+		MaxCompletionTokens: request.MaxCompletionTokens,
+		MaxTokens:           request.MaxTokens,
+		PresencePenalty:     request.PresencePenalty,
+		Seed:                request.Seed,
+		Store:               request.Store,
+		Temperature:         request.Temperature,
+		TopLogprobs:         request.TopLogprobs,
+		TopP:                request.TopP,
+		LogitBias:           request.LogitBias,
+		Metadata:            request.Metadata,
+		Modalities:          request.Modalities,
+		ReasoningEffort:     request.ReasoningEffort,
+		ServiceTier:         request.ServiceTier,
+		Stop:                request.Stop,
+		Stream:              request.Stream,
+		StreamOptions:       request.StreamOptions,
+		ParallelToolCalls:   request.ParallelToolCalls,
+		Tools:               request.Tools,
+		ToolChoice:          request.ToolChoice,
+		ResponseFormat:      request.ResponseFormat,
+		SafetyIdentifier:    request.SafetyIdentifier,
+	}
+
+	if request.Audio != nil {
+		result.Audio = &ChatCompletionsAudio{
+			Format: request.Audio.Format,
+			Voice:  request.Audio.Voice,
+		}
+	}
+
+	return result
 }
 
 func (o *ChatOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {

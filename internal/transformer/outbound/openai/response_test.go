@@ -70,6 +70,39 @@ func TestMarshalResponsesInputItemsBuildsArrayInput(t *testing.T) {
 	}
 }
 
+func TestConvertToResponsesRequestOmitsDeprecatedUser(t *testing.T) {
+	user := "legacy-user"
+	req := &model.InternalLLMRequest{
+		Model:    "gpt-4o",
+		User:     &user,
+		Metadata: map[string]string{"trace_id": "abc123"},
+		Messages: []model.Message{{
+			Role: "user",
+			Content: model.MessageContent{
+				Content: stringPtr("hello"),
+			},
+		}},
+	}
+
+	responsesReq := ConvertToResponsesRequest(req)
+	body, err := json.Marshal(responsesReq)
+	if err != nil {
+		t.Fatalf("marshal responses request failed: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal responses request failed: %v", err)
+	}
+
+	if _, ok := payload["user"]; ok {
+		t.Fatalf("expected deprecated user to be omitted, got %#v", payload["user"])
+	}
+	if _, ok := payload["metadata"]; !ok {
+		t.Fatalf("expected metadata to remain available, got %#v", payload)
+	}
+}
+
 func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
 	outbound := &ResponseOutbound{}
 

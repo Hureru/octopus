@@ -475,6 +475,9 @@ type ResponsesStreamEvent struct {
 // Conversion functions
 
 func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest {
+	// `user` is deprecated on OpenAI text APIs and is rejected by some
+	// OpenAI-compatible upstreams, so keep the modern identifiers
+	// (`prompt_cache_key` / `safety_identifier`) and omit the legacy field.
 	result := &ResponsesRequest{
 		Model:             req.Model,
 		Temperature:       req.Temperature,
@@ -482,7 +485,6 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 		Stream:            req.Stream,
 		Store:             req.Store,
 		ServiceTier:       req.ServiceTier,
-		User:              req.User,
 		Metadata:          req.Metadata,
 		MaxOutputTokens:   req.MaxCompletionTokens,
 		ParallelToolCalls: req.ParallelToolCalls,
