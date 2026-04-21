@@ -8,6 +8,30 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/model"
 )
 
+// TestTransformRequestCapturesMCPServersAndContainer verifies A-H6:
+// incoming mcp_servers / container payloads land on the internal request's
+// Anthropic raw passthrough channels so outbound can replay them.
+func TestTransformRequestCapturesMCPServersAndContainer(t *testing.T) {
+	inbound := &MessagesInbound{}
+	body := []byte(`{
+		"model":"claude-opus-4",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":"hi"}],
+		"mcp_servers":[{"type":"url","url":"https://example.invalid/mcp","name":"demo"}],
+		"container":{"id":"cntr-1"}
+	}`)
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	if !strings.Contains(string(req.AnthropicMCPServers), "example.invalid/mcp") {
+		t.Errorf("expected mcp_servers captured, got %s", req.AnthropicMCPServers)
+	}
+	if !strings.Contains(string(req.AnthropicContainer), "cntr-1") {
+		t.Errorf("expected container captured, got %s", req.AnthropicContainer)
+	}
+}
+
 func TestTransformRequestPreservesAnthropicUserIDInTransformerMetadataOnly(t *testing.T) {
 	inbound := &MessagesInbound{}
 	body := []byte(`{

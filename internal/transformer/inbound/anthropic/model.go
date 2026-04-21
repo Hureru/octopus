@@ -85,6 +85,19 @@ type MessageRequest struct {
 
 	// Stream is an optional flag to enable streaming.
 	Stream *bool `json:"stream,omitempty"`
+
+	// MCPServers carries the Anthropic MCP connector payload
+	// (mcp-client-2025-11-20 beta). Each entry is an object with
+	// type/url/name/authorization_token/tool_configuration. Preserved as
+	// raw JSON so spec-level fields (that change faster than Octopus
+	// releases) round-trip verbatim. A-H6.
+	// Ref: https://platform.claude.com/docs/en/agents-and-tools/mcp-connector
+	MCPServers json.RawMessage `json:"mcp_servers,omitempty"`
+
+	// Container configures Anthropic's code-execution sandbox (Claude 4
+	// container). Preserved as raw JSON for the same reason as
+	// MCPServers. A-H6.
+	Container json.RawMessage `json:"container,omitempty"`
 }
 
 type AnthropicMetadata struct {

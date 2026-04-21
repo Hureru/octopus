@@ -73,6 +73,39 @@ func stringPtr(v string) *string {
 	return &v
 }
 
+// TestConvertToAnthropicRequestForwardsMCPServersAndContainer verifies A-H6:
+// the raw mcp_servers and container payloads captured by inbound are
+// written back on the outbound request verbatim. Both fields are opaque
+// JSON in MessageRequest so the bytes are expected to round-trip with
+// no per-field rewriting.
+func TestConvertToAnthropicRequestForwardsMCPServersAndContainer(t *testing.T) {
+	mcp := []byte(`[{"type":"url","url":"https://example.invalid/mcp","name":"demo","authorization_token":"sk-test"}]`)
+	container := []byte(`{"id":"cntr-1","env":{"PYTHONPATH":"/app"}}`)
+	req := &model.InternalLLMRequest{
+		Model: "claude-opus-4",
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+		AnthropicMCPServers: mcp,
+		AnthropicContainer:  container,
+	}
+	out := convertToAnthropicRequest(req)
+	if string(out.MCPServers) != string(mcp) {
+		t.Errorf("mcp_servers roundtrip: got %s, want %s", out.MCPServers, mcp)
+	}
+	if string(out.Container) != string(container) {
+		t.Errorf("container roundtrip: got %s, want %s", out.Container, container)
+	}
+
+	// Independence check: mutating the inbound slice after conversion must
+	// not affect the outbound body. The `append(x[:0], src...)` copy
+	// pattern we used guarantees this.
+	mcp[0] = 'X'
+	if out.MCPServers[0] == 'X' {
+		t.Errorf("outbound MCPServers aliased the inbound slice (should be a copy)")
+	}
+}
+
 // TestTransformRequestAddsExtendedCacheTTLBetaHeader verifies that when any
 // cache_control.ttl="1h" breakpoint is present anywhere in the outbound
 // payload, the `anthropic-beta: extended-cache-ttl-2025-04-11` header is

@@ -314,6 +314,19 @@ type InternalLLMRequest struct {
 	// the schema is deeply nested and shared with the Live API. G-H11.
 	GeminiSpeechConfig json.RawMessage `json:"-"`
 
+	// Anthropic-specific pass-through fields (only meaningful for
+	// Anthropic outbound).
+	//
+	// AnthropicMCPServers carries the raw `mcp_servers` array from an
+	// incoming Anthropic request so it can be forwarded back to the
+	// upstream without per-field modelling. Triggers the
+	// mcp-client-2025-11-20 beta header automatically. A-H6.
+	AnthropicMCPServers json.RawMessage `json:"-"`
+
+	// AnthropicContainer carries the raw `container` object (Claude 4
+	// code-execution sandbox configuration). A-H6.
+	AnthropicContainer json.RawMessage `json:"-"`
+
 	// Query stores the original query parameters from the inbound request.
 	// This is a help field and will not be sent to the llm service.
 	Query url.Values `json:"-"`

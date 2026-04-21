@@ -62,6 +62,15 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 			chatReq.TransformerMetadata["anthropic_user_id"] = userID
 		}
 	}
+	// mcp_servers / container (A-H6): preserve the raw payload for
+	// round-trip on the Anthropic→Anthropic same-protocol path. Triggers
+	// the mcp-client-2025-11-20 beta header downstream (A-H7).
+	if len(anthropicReq.MCPServers) > 0 {
+		chatReq.AnthropicMCPServers = append(chatReq.AnthropicMCPServers[:0], anthropicReq.MCPServers...)
+	}
+	if len(anthropicReq.Container) > 0 {
+		chatReq.AnthropicContainer = append(chatReq.AnthropicContainer[:0], anthropicReq.Container...)
+	}
 
 	// Convert messages
 	messages := make([]model.Message, 0, len(anthropicReq.Messages))

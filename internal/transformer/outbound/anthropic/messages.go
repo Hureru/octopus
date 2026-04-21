@@ -441,6 +441,17 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 		result.Metadata = &anthropicModel.AnthropicMetadata{UserID: userID}
 	}
 
+	// mcp_servers / container (A-H6): write the raw payload back if the
+	// inbound preserved one. Allocating fresh byte slices keeps the
+	// outbound request independent from the shared InternalLLMRequest in
+	// case downstream handlers re-emit the same request body.
+	if len(req.AnthropicMCPServers) > 0 {
+		result.MCPServers = append(result.MCPServers[:0], req.AnthropicMCPServers...)
+	}
+	if len(req.AnthropicContainer) > 0 {
+		result.Container = append(result.Container[:0], req.AnthropicContainer...)
+	}
+
 	// Convert messages
 	result.Messages = convertMessages(req)
 
