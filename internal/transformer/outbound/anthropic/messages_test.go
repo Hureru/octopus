@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	anthropicModel "github.com/bestruirui/octopus/internal/transformer/inbound/anthropic"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 )
 
@@ -47,6 +48,145 @@ func TestTransformRequestRawRewritesModel(t *testing.T) {
 	if got := payload["custom_flag"]; got != true {
 		t.Fatalf("expected custom fields to survive rewrite, got %#v", got)
 	}
+}
+
+// TestCollectBetaHeadersAutomation covers A-H7 — each new signal drives a
+// specific anthropic-beta header. The test is table-driven so adding a
+// future trigger only needs a new row, not a whole test function.
+func TestCollectBetaHeadersAutomation(t *testing.T) {
+	tt := true
+	t.Run("mcp_servers", func(t *testing.T) {
+		anthropicReq := &anthropicModel.MessageRequest{
+			Model:      "claude-opus-4",
+			MaxTokens:  16,
+			MCPServers: []byte(`[{"type":"url","url":"x","name":"d"}]`),
+		}
+		internal := &model.InternalLLMRequest{}
+		betas := collectAnthropicBetaHeaders(anthropicReq, internal)
+		if !containsBeta(betas, "mcp-client-2025-11-20") {
+			t.Errorf("expected mcp-client beta, got %v", betas)
+		}
+	})
+
+	t.Run("structured_outputs_json_schema", func(t *testing.T) {
+		anthropicReq := &anthropicModel.MessageRequest{Model: "claude-sonnet-4-5", MaxTokens: 16}
+		internal := &model.InternalLLMRequest{
+			ResponseFormat: &model.ResponseFormat{Type: "json_schema"},
+		}
+		betas := collectAnthropicBetaHeaders(anthropicReq, internal)
+		if !containsBeta(betas, "structured-outputs-2025-11-13") {
+			t.Errorf("expected structured-outputs beta, got %v", betas)
+		}
+	})
+
+	t.Run("interleaved_thinking_and_tool_use", func(t *testing.T) {
+		tool := "tool_use"
+		thought := "thinking"
+		txt := "think..."
+		anthropicReq := &anthropicModel.MessageRequest{
+			Model:     "claude-sonnet-4-5",
+			MaxTokens: 16,
+			Thinking:  &anthropicModel.Thinking{Type: anthropicModel.ThinkingTypeEnabled},
+			Messages: []anthropicModel.MessageParam{
+				{Role: "assistant", Content: anthropicModel.MessageContent{
+					MultipleContent: []anthropicModel.MessageContentBlock{
+						{Type: thought, Thinking: &txt},
+						{Type: tool, ID: "call_1"},
+					},
+				}},
+			},
+		}
+		betas := collectAnthropicBetaHeaders(anthropicReq, &model.InternalLLMRequest{})
+		if !containsBeta(betas, "interleaved-thinking-2025-05-14") {
+			t.Errorf("expected interleaved-thinking beta, got %v", betas)
+		}
+	})
+
+	t.Run("context_1m_sonnet4_with_flag", func(t *testing.T) {
+		anthropicReq := &anthropicModel.MessageRequest{
+			Model:     "claude-sonnet-4-5",
+			MaxTokens: 16,
+		}
+		internal := &model.InternalLLMRequest{
+			TransformerMetadata: map[string]string{"anthropic_context_1m": "true"},
+		}
+		betas := collectAnthropicBetaHeaders(anthropicReq, internal)
+		if !containsBeta(betas, "context-1m-2025-08-07") {
+			t.Errorf("expected context-1m beta, got %v", betas)
+		}
+
+		// Opus 4.6 supports 1M natively — no beta expected even with the flag.
+		anthropicReq.Model = "claude-opus-4-6"
+		betas = collectAnthropicBetaHeaders(anthropicReq, internal)
+		if containsBeta(betas, "context-1m-2025-08-07") {
+			t.Errorf("opus 4.6 should not trigger context-1m beta, got %v", betas)
+		}
+	})
+
+	t.Run("files_api_source", func(t *testing.T) {
+		anthropicReq := &anthropicModel.MessageRequest{
+			Model: "claude-sonnet-4-5", MaxTokens: 16,
+			Messages: []anthropicModel.MessageParam{{
+				Role: "user",
+				Content: anthropicModel.MessageContent{
+					MultipleContent: []anthropicModel.MessageContentBlock{
+						{Type: "document", Source: &anthropicModel.ImageSource{
+							Type: "file", Data: "file-abc123",
+						}},
+					},
+				},
+			}},
+		}
+		betas := collectAnthropicBetaHeaders(anthropicReq, &model.InternalLLMRequest{})
+		if !containsBeta(betas, "files-api-2025-04-14") {
+			t.Errorf("expected files-api beta, got %v", betas)
+		}
+	})
+
+	t.Run("fine_grained_tool_streaming", func(t *testing.T) {
+		anthropicReq := &anthropicModel.MessageRequest{
+			Model: "claude-sonnet-4-5", MaxTokens: 16,
+			Stream: &tt,
+			Tools: []anthropicModel.Tool{
+				{Name: "search", Description: "find", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			},
+		}
+		betas := collectAnthropicBetaHeaders(anthropicReq, &model.InternalLLMRequest{})
+		if !containsBeta(betas, "fine-grained-tool-streaming-2025-05-14") {
+			t.Errorf("expected fine-grained-tool-streaming beta, got %v", betas)
+		}
+
+		// No tools → no beta.
+		anthropicReq.Tools = nil
+		betas = collectAnthropicBetaHeaders(anthropicReq, &model.InternalLLMRequest{})
+		if containsBeta(betas, "fine-grained-tool-streaming-2025-05-14") {
+			t.Errorf("expected no fine-grained beta without tools, got %v", betas)
+		}
+	})
+
+	t.Run("tool_search_defer_loading", func(t *testing.T) {
+		defer1 := true
+		anthropicReq := &anthropicModel.MessageRequest{
+			Model: "claude-sonnet-4-5", MaxTokens: 16,
+			Tools: []anthropicModel.Tool{
+				{Name: "big", Description: "lazy", InputSchema: json.RawMessage(`{"type":"object"}`), DeferLoading: &defer1},
+			},
+		}
+		betas := collectAnthropicBetaHeaders(anthropicReq, &model.InternalLLMRequest{})
+		if !containsBeta(betas, "tool-search-tool-2025-10-19") {
+			t.Errorf("expected tool-search-tool beta, got %v", betas)
+		}
+	})
+}
+
+// containsBeta is a tiny helper for the beta-header table tests.
+func containsBeta(betas []string, want string) bool {
+	for _, b := range betas {
+		if b == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestConvertToAnthropicRequestUsesUserFallbackForMetadata(t *testing.T) {

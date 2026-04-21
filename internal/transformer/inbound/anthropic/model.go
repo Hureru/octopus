@@ -209,6 +209,13 @@ type Tool struct {
 	InputSchema  json.RawMessage `json:"input_schema"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 
+	// DeferLoading marks a tool as lazily-loaded for the tool-search-tool
+	// beta (tool-search-tool-2025-10-19). When any tool in a request has
+	// this true, collectAnthropicBetaHeaders adds the matching beta
+	// header. For server tools the flag lives inside RawBody so MarshalJSON
+	// does not need special-casing. A-H7.
+	DeferLoading *bool `json:"defer_loading,omitempty"`
+
 	// RawBody preserves the full incoming JSON for server tools so outbound
 	// can passthrough spec-specific fields without per-variant modelling.
 	// Populated by UnmarshalJSON; consumed by MarshalJSON.
