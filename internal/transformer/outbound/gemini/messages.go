@@ -58,6 +58,15 @@ func (o *MessagesOutbound) TransformRequest(ctx context.Context, request *model.
 		return nil, fmt.Errorf("failed to parse base url: %w", err)
 	}
 
+	// G-H5: When the channel BaseURL omits the API version segment
+	// (`https://generativelanguage.googleapis.com`), the downstream request
+	// would land on `/models/...` which 404s. Fall back to `/v1beta` when
+	// no version prefix is configured; leave explicit `/v1` or `/v1beta`
+	// paths alone.
+	if !pathHasGeminiVersion(parsedUrl.Path) {
+		parsedUrl.Path = strings.TrimRight(parsedUrl.Path, "/") + "/v1beta"
+	}
+
 	// Determine if streaming
 	isStream := request.Stream != nil && *request.Stream
 	method := "generateContent"
@@ -72,13 +81,14 @@ func (o *MessagesOutbound) TransformRequest(ctx context.Context, request *model.
 	}
 	parsedUrl.Path = fmt.Sprintf("%s/%s:%s", parsedUrl.Path, modelName, method)
 
-	// Add API key as query parameter
-	q := parsedUrl.Query()
-	q.Set("key", key)
+	// G-H6: Carry the API key in `x-goog-api-key` — the query-string form
+	// still works but leaks the secret into proxy access logs and is
+	// discouraged by Google's current docs.
 	if isStream {
+		q := parsedUrl.Query()
 		q.Set("alt", "sse")
+		parsedUrl.RawQuery = q.Encode()
 	}
-	parsedUrl.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, parsedUrl.String(), bytes.NewReader(body))
 	if err != nil {
@@ -87,6 +97,9 @@ func (o *MessagesOutbound) TransformRequest(ctx context.Context, request *model.
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if key != "" {
+		req.Header.Set("x-goog-api-key", key)
+	}
 
 	return req, nil
 }
@@ -146,6 +159,28 @@ func reasoningToThinkingBudget(effort string) int32 {
 		// 防御性：未知值走动态
 		return -1
 	}
+}
+
+// pathHasGeminiVersion reports whether the configured base-URL path already
+// contains a Gemini API version segment (`/v1`, `/v1beta`, etc.). Used by
+// G-H5 to decide whether to prepend `/v1beta` as a fallback when channels
+// were provisioned with a bare hostname. Matching on a leading `/v` prefix
+// covers the versions Google documents (v1, v1beta, v1beta2, v1alpha) and
+// will survive future bumps without churn.
+func pathHasGeminiVersion(p string) bool {
+	segment := strings.Trim(p, "/")
+	if segment == "" {
+		return false
+	}
+	first := segment
+	if idx := strings.Index(segment, "/"); idx >= 0 {
+		first = segment[:idx]
+	}
+	if len(first) < 2 || first[0] != 'v' {
+		return false
+	}
+	// Must be `v<digit>...`; `/viewer` etc. should not count.
+	return first[1] >= '0' && first[1] <= '9'
 }
 
 // canonicalGeminiModality normalises a client-supplied modality keyword into
