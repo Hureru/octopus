@@ -42,12 +42,12 @@
 
 | 编号 | 标题 | 状态 | 完成时间 | Commit | 备注 |
 |------|------|------|----------|--------|------|
-| A-H1 | `stop_sequence` 双向透传 | ⏸ | | | |
-| A-H2 | 流式 TotalTokens 含缓存 | ⏸ | | | |
-| G-H2 | Gemini response 元数据补齐 | ⏸ | | | |
-| G-H3 | UsageMetadata 新字段 | ⏸ | | | |
-| O-H3 | `response.completed.output` 非空 | ⏸ | | | |
-| O-H5 | `truncation` 字段 | ⏸ | | | |
+| A-H1 | `stop_sequence` 双向透传 | ✅ | 2026-04-21 | c5a068e | Choice.StopSequence 新字段；outbound 从 resp.StopSequence + streamEvent.Delta.StopSequence 提取；inbound 非流式/流式均回写 |
+| A-H2 | 流式 TotalTokens 含缓存 | ✅ | 2026-04-21 | c5a068e | message_delta 保留 message_start 的 cache 字段并用 EffectiveInputTokens() 重算 TotalTokens |
+| G-H2 | Gemini response 元数据补齐 | ✅ | 2026-04-21 | 72c2a66 | 新增 responseId/createTime/modelVersion 字段；PromptFeedback.BlockReason 合成 choice；time.Parse RFC3339 |
+| G-H3 | UsageMetadata 新字段 | ✅ | 2026-04-21 | 72c2a66 | ToolUsePromptTokenCount + 四个 *TokensDetails 数组；PromptTokensDetails 扩 Text/Image/Video/Document；Usage 新增 ToolUsePromptTokens |
+| O-H3 | `response.completed.output` 非空 | ✅ | 2026-04-21 | 400bbf2 | completedOutputItems 缓冲每个 output_item.done 的 Item；终态事件回显；无 item 时 finalOutputItems 合成空 message shell |
+| O-H5 | `truncation` 字段 | ✅ | 2026-04-21 | 400bbf2 | 入站/出站 ResponsesRequest + ResponsesResponse 都补 Truncation；InternalLLMRequest.Truncation 透传 |
 
 ## P4 - 参数 / 边界 / 安全
 
@@ -109,6 +109,7 @@
 | 2026-04-21 | 标记 O-C3 / O-M2 已解决（commit ada6701 引入 OpenAI Responses 原生直通） | Hureru |
 | 2026-04-21 | P1 批次全部完成（G-C1 7b85e07 / G-C2 b61d5ce / G-C3 5ba1d59 / G-C5 aec360b / A-C1 669295e / A-C3 9cf1c18 / O-C1 6995f17 / O-C2 9db70ef / O-C4 3312354） | Claude Code |
 | 2026-04-21 | P2 批次全部完成（A-C2 801d892 / O-H1 2d2b2e6 / O-H4 832b6c0 / A-H5 e92c993 / G-C4+G-H7 fe6ae8a） | Claude Code |
+| 2026-04-21 | P3 批次全部完成（A-H1+A-H2 c5a068e / G-H2+G-H3 72c2a66 / O-H3+O-H5 400bbf2） | Claude Code |
 
 ---
 
