@@ -366,7 +366,7 @@ type ImageSource struct {
 // StreamEvent represents events in Anthropic streaming response.
 type StreamEvent struct {
 	// Any of "message_start", "message_delta", "message_stop", "content_block_start",
-	// "content_block_delta", "content_block_stop".
+	// "content_block_delta", "content_block_stop", "error".
 	Type string `json:"type"`
 
 	// Message will be present if type is "message_start".
@@ -382,6 +382,9 @@ type StreamEvent struct {
 	Delta *StreamDelta `json:"delta,omitempty"`
 
 	Usage *Usage `json:"usage,omitempty"`
+
+	// Error will be present if type is "error".
+	Error *ErrorDetail `json:"error,omitempty"`
 }
 
 // StreamDelta represents delta in streaming response.

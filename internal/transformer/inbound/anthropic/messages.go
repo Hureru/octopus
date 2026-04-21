@@ -625,6 +625,29 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 }
 
 func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.InternalLLMResponse) ([]byte, error) {
+	// Handle upstream error event: forward as Anthropic SSE `event: error` and
+	// terminate the stream. Reference:
+	// https://docs.anthropic.com/en/api/messages-streaming#error-events
+	if stream != nil && stream.Error != nil {
+		errType := stream.Error.Detail.Type
+		if errType == "" {
+			errType = "api_error"
+		}
+		errPayload := StreamEvent{
+			Type: "error",
+			Error: &ErrorDetail{
+				Type:    errType,
+				Message: stream.Error.Detail.Message,
+			},
+		}
+		data, err := json.Marshal(errPayload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal error event: %w", err)
+		}
+		i.messageStopped = true
+		return formatSSEEvent("error", data), nil
+	}
+
 	// Handle [DONE] marker
 	if stream.Object == "[DONE]" {
 		if i.hasFinished && !i.messageStopped {

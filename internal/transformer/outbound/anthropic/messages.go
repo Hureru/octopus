@@ -381,6 +381,19 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 	case "content_block_stop", "ping":
 		return nil, nil
 
+	case "error":
+		if streamEvent.Error == nil {
+			return nil, nil
+		}
+		resp.Error = &model.ResponseError{
+			StatusCode: mapAnthropicErrorTypeToStatus(streamEvent.Error.Type),
+			Detail: model.ErrorDetail{
+				Type:    streamEvent.Error.Type,
+				Message: streamEvent.Error.Message,
+			},
+		}
+		resp.Choices = nil
+
 	default:
 		return nil, nil
 	}
@@ -1442,6 +1455,32 @@ func convertStopReason(stopReason *string) *string {
 	}
 	s := reason.String()
 	return &s
+}
+
+// mapAnthropicErrorTypeToStatus maps Anthropic API error `type` strings to HTTP
+// status codes so streaming error events can be surfaced with the correct code.
+// Reference: https://docs.anthropic.com/en/api/errors
+func mapAnthropicErrorTypeToStatus(errType string) int {
+	switch errType {
+	case "invalid_request_error":
+		return http.StatusBadRequest
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "permission_error":
+		return http.StatusForbidden
+	case "not_found_error":
+		return http.StatusNotFound
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "overloaded_error":
+		return 529
+	case "api_error":
+		return http.StatusInternalServerError
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func convertAnthropicUsage(usage *anthropicModel.Usage) *model.Usage {

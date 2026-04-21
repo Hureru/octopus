@@ -69,3 +69,51 @@ func TestTransformStreamDoesNotStopMissingContentBlock(t *testing.T) {
 func stringPtr(v string) *string {
 	return &v
 }
+
+// A-C2: when the outbound layer surfaces an upstream error chunk, the
+// Anthropic inbound must emit an Anthropic-compatible `event: error` SSE frame
+// so clients see the failure reason instead of a truncated response.
+func TestTransformStreamSurfacesErrorAsSSE(t *testing.T) {
+	inbound := &MessagesInbound{}
+
+	out, err := inbound.TransformStream(context.Background(), &model.InternalLLMResponse{
+		Error: &model.ResponseError{
+			StatusCode: 529,
+			Detail: model.ErrorDetail{
+				Type:    "overloaded_error",
+				Message: "Overloaded",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("TransformStream() error = %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, "event:error") {
+		t.Fatalf("expected `event:error` SSE frame, got %q", text)
+	}
+	if !strings.Contains(text, `"type":"overloaded_error"`) {
+		t.Fatalf("expected error type to be preserved, got %q", text)
+	}
+	if !strings.Contains(text, `"message":"Overloaded"`) {
+		t.Fatalf("expected error message to be preserved, got %q", text)
+	}
+}
+
+// A-C2 (fallback): missing error.type should degrade to `api_error` so the
+// Anthropic SSE payload remains schema-valid.
+func TestTransformStreamErrorDefaultsTypeWhenEmpty(t *testing.T) {
+	inbound := &MessagesInbound{}
+
+	out, err := inbound.TransformStream(context.Background(), &model.InternalLLMResponse{
+		Error: &model.ResponseError{
+			Detail: model.ErrorDetail{Message: "unknown"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("TransformStream() error = %v", err)
+	}
+	if !strings.Contains(string(out), `"type":"api_error"`) {
+		t.Fatalf("expected fallback type=api_error, got %q", string(out))
+	}
+}

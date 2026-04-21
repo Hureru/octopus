@@ -192,3 +192,57 @@ func TestConvertSingleMessageServerToolResultWireType(t *testing.T) {
 		})
 	}
 }
+
+// A-C2: Anthropic streaming "error" event must be surfaced via
+// InternalLLMResponse.Error with a reasonable HTTP status mapping, instead of
+// being swallowed by the default branch. Reference:
+// https://docs.anthropic.com/en/api/messages-streaming#error-events
+func TestTransformStreamErrorEventSurfacesResponseError(t *testing.T) {
+	cases := []struct {
+		name       string
+		payload    string
+		wantStatus int
+		wantType   string
+	}{
+		{
+			name:       "overloaded",
+			payload:    `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+			wantStatus: 529,
+			wantType:   "overloaded_error",
+		},
+		{
+			name:       "invalid_request",
+			payload:    `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`,
+			wantStatus: 400,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "rate_limit",
+			payload:    `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`,
+			wantStatus: 429,
+			wantType:   "rate_limit_error",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := &MessageOutbound{}
+			resp, err := o.TransformStream(context.Background(), []byte(tc.payload))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp == nil || resp.Error == nil {
+				t.Fatalf("expected non-nil InternalLLMResponse.Error, got %+v", resp)
+			}
+			if resp.Error.StatusCode != tc.wantStatus {
+				t.Fatalf("status want=%d got=%d", tc.wantStatus, resp.Error.StatusCode)
+			}
+			if resp.Error.Detail.Type != tc.wantType {
+				t.Fatalf("type want=%q got=%q", tc.wantType, resp.Error.Detail.Type)
+			}
+			if len(resp.Choices) != 0 {
+				t.Fatalf("expected no choices on error chunk, got %d", len(resp.Choices))
+			}
+		})
+	}
+}
