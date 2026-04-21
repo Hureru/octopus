@@ -640,6 +640,27 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			hasConfig = true
 		}
 	}
+
+	// SpeechConfig (G-H11): prefer the explicit raw passthrough, otherwise
+	// synthesise a minimal speechConfig from request.Audio.Voice so the
+	// generic {format, voice} pair still reaches Gemini audio-output
+	// models without the caller having to build the full schema.
+	if len(request.GeminiSpeechConfig) > 0 {
+		config.SpeechConfig = request.GeminiSpeechConfig
+		hasConfig = true
+	} else if request.Audio != nil && strings.TrimSpace(request.Audio.Voice) != "" {
+		voice := strings.TrimSpace(request.Audio.Voice)
+		if synth, err := json.Marshal(map[string]any{
+			"voiceConfig": map[string]any{
+				"prebuiltVoiceConfig": map[string]any{
+					"voiceName": voice,
+				},
+			},
+		}); err == nil {
+			config.SpeechConfig = synth
+			hasConfig = true
+		}
+	}
 	if request.Stop != nil && request.Stop.MultipleStop != nil {
 		config.StopSequences = request.Stop.MultipleStop
 		hasConfig = true

@@ -202,6 +202,20 @@ type GeminiGenerationConfig struct {
 	// TransformerMetadata["gemini_media_resolution"]. G-H1.
 	MediaResolution string `json:"mediaResolution,omitempty"`
 
+	// SpeechConfig carries Gemini's audio-output configuration (voice
+	// selection, language code, multi-speaker setup). The schema is
+	// deeply nested and shared with the Live API, so we treat it as an
+	// opaque passthrough — callers either supply the raw JSON via
+	// InternalLLMRequest.GeminiSpeechConfig or synthesize it from the
+	// generic request.Audio {format, voice} pair. G-H11.
+	// Ref: https://ai.google.dev/api/generate-content#SpeechConfig
+	SpeechConfig json.RawMessage `json:"speechConfig,omitempty"`
+
+	// AudioTimestamp toggles per-part audio timestamp emission for
+	// transcription-style workloads. Left nil to inherit the upstream
+	// default. G-H11.
+	AudioTimestamp *bool `json:"audioTimestamp,omitempty"`
+
 	// ThinkingConfig is the thinking features configuration
 	ThinkingConfig *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }

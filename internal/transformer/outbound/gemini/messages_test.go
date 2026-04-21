@@ -486,6 +486,70 @@ func TestConvertGeminiResponseSafetyRatings(t *testing.T) {
 	}
 }
 
+// TestConvertGeminiRequestSpeechConfigRawPassthrough verifies G-H11 when
+// the caller supplies a fully-formed speechConfig JSON blob: the outbound
+// transformer forwards the bytes verbatim into generationConfig.
+func TestConvertGeminiRequestSpeechConfigRawPassthrough(t *testing.T) {
+	raw := json.RawMessage(`{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}},"languageCode":"en-US"}`)
+	req := &model.InternalLLMRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+		GeminiSpeechConfig: raw,
+	}
+	out := convertLLMToGeminiRequest(req)
+	if out.GenerationConfig == nil || len(out.GenerationConfig.SpeechConfig) == 0 {
+		t.Fatalf("expected speechConfig on generationConfig, got %+v", out.GenerationConfig)
+	}
+	if !strings.Contains(string(out.GenerationConfig.SpeechConfig), "Kore") {
+		t.Errorf("expected raw speechConfig preserved, got %s", out.GenerationConfig.SpeechConfig)
+	}
+}
+
+// TestConvertGeminiRequestSpeechConfigSynthesizeFromAudioVoice verifies
+// G-H11 when the caller only supplies the generic request.Audio.Voice
+// pair: the transformer synthesises a minimal prebuiltVoiceConfig.
+func TestConvertGeminiRequestSpeechConfigSynthesizeFromAudioVoice(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+		Audio: &struct {
+			Format string `json:"format,omitempty"`
+			Voice  string `json:"voice,omitempty"`
+		}{Voice: "Charon"},
+	}
+	out := convertLLMToGeminiRequest(req)
+	if out.GenerationConfig == nil || len(out.GenerationConfig.SpeechConfig) == 0 {
+		t.Fatalf("expected synthesised speechConfig, got %+v", out.GenerationConfig)
+	}
+	wire := string(out.GenerationConfig.SpeechConfig)
+	if !strings.Contains(wire, "Charon") || !strings.Contains(wire, "prebuiltVoiceConfig") {
+		t.Errorf("expected prebuiltVoiceConfig with voiceName, got %s", wire)
+	}
+}
+
+// TestConvertGeminiRequestSpeechConfigOmittedWhenAbsent verifies that no
+// speechConfig key is emitted when neither channel is set.
+func TestConvertGeminiRequestSpeechConfigOmittedWhenAbsent(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+	}
+	out := convertLLMToGeminiRequest(req)
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "speechConfig") {
+		t.Errorf("expected omitempty speechConfig, wire=%s", b)
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }

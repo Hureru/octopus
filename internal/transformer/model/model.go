@@ -308,6 +308,12 @@ type InternalLLMRequest struct {
 	// Ref: https://ai.google.dev/gemini-api/docs/caching
 	GeminiCachedContentRef *string `json:"-"`
 
+	// GeminiSpeechConfig forwards a raw Gemini speechConfig object into
+	// generationConfig.speechConfig. Used for audio-output models where
+	// callers need voice / language selection. Left as raw JSON because
+	// the schema is deeply nested and shared with the Live API. G-H11.
+	GeminiSpeechConfig json.RawMessage `json:"-"`
+
 	// Query stores the original query parameters from the inbound request.
 	// This is a help field and will not be sent to the llm service.
 	Query url.Values `json:"-"`
