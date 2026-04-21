@@ -213,7 +213,35 @@ func stringPtr(v string) *string {
 	return &v
 }
 
-// TestConvertToAnthropicRequestForwardsMCPServersAndContainer verifies A-H6:
+// TestConvertStopSequencesCapsArrayLength verifies A-L5: arrays longer
+// than Anthropic's empirical ceiling are truncated instead of surfacing
+// an opaque 400 from the upstream. The single-string form is left
+// unchanged.
+func TestConvertStopSequencesCapsArrayLength(t *testing.T) {
+	// Shorten the cap so the fixture stays readable.
+	orig := anthropicMaxStopSequences
+	anthropicMaxStopSequences = 2
+	defer func() { anthropicMaxStopSequences = orig }()
+
+	stop := &model.Stop{MultipleStop: []string{"a", "b", "c", "d"}}
+	seqs := convertStopSequences(stop)
+	if len(seqs) != 2 || seqs[0] != "a" || seqs[1] != "b" {
+		t.Errorf("expected first 2 entries kept, got %+v", seqs)
+	}
+
+	// Short array is untouched.
+	stop = &model.Stop{MultipleStop: []string{"only"}}
+	if seqs = convertStopSequences(stop); len(seqs) != 1 || seqs[0] != "only" {
+		t.Errorf("expected short array unchanged, got %+v", seqs)
+	}
+
+	// Single-string form is preserved.
+	s := "stop-here"
+	stop = &model.Stop{Stop: &s}
+	if seqs = convertStopSequences(stop); len(seqs) != 1 || seqs[0] != "stop-here" {
+		t.Errorf("expected single-string form preserved, got %+v", seqs)
+	}
+}
 // the raw mcp_servers and container payloads captured by inbound are
 // written back on the outbound request verbatim. Both fields are opaque
 // JSON in MessageRequest so the bytes are expected to round-trip with

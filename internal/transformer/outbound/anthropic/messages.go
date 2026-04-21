@@ -1233,17 +1233,29 @@ func convertTools(tools []model.Tool) []anthropicModel.Tool {
 	return result
 }
 
+// anthropicMaxStopSequences caps the stop_sequences array sent to
+// Anthropic. The API documents a limit but only surfaces it as an
+// opaque "stop_sequences: too many items" 400 when exceeded; 4 is the
+// empirically-observed ceiling as of 2026-04. Declared as a var so
+// tests can tighten the threshold without allocating fixture entries.
+// A-L5. Ref: https://docs.anthropic.com/en/api/messages
+var anthropicMaxStopSequences = 4
+
 func convertStopSequences(stop *model.Stop) []string {
 	if stop == nil {
 		return nil
 	}
+	var seqs []string
 	if stop.Stop != nil {
-		return []string{*stop.Stop}
+		seqs = []string{*stop.Stop}
+	} else if len(stop.MultipleStop) > 0 {
+		seqs = stop.MultipleStop
 	}
-	if len(stop.MultipleStop) > 0 {
-		return stop.MultipleStop
+	if len(seqs) > anthropicMaxStopSequences {
+		log.Warnf("anthropic: stop_sequences has %d entries; truncating to %d to avoid upstream 400", len(seqs), anthropicMaxStopSequences)
+		seqs = seqs[:anthropicMaxStopSequences]
 	}
-	return nil
+	return seqs
 }
 
 func convertCacheControl(cc *model.CacheControl) *anthropicModel.CacheControl {
