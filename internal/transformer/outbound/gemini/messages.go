@@ -312,6 +312,13 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 	// Convert messages
 	var systemInstruction *model.GeminiContent
 	degradedToolCalls := map[string]string{}
+	// toolCallNamesByID captures the Function.Name of every assistant tool
+	// call seen so far, keyed by the call's ID. Gemini requires
+	// `functionResponse.name` to match the originating `functionCall.name`
+	// byte-for-byte, so we use this map to look the name up when a
+	// subsequent tool-result message only carries an ID. Preserved across
+	// assistant turns so multi-round conversations still resolve correctly.
+	toolCallNamesByID := map[string]string{}
 
 	for _, msg := range request.Messages {
 		switch msg.Role {
@@ -415,6 +422,9 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			// Handle tool calls
 			if len(msg.ToolCalls) > 0 {
 				for _, toolCall := range msg.ToolCalls {
+					if toolCall.ID != "" && toolCall.Function.Name != "" {
+						toolCallNamesByID[toolCall.ID] = toolCall.Function.Name
+					}
 					var args map[string]interface{}
 					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 						log.Warnf("gemini: failed to unmarshal tool call arguments for %s: %v", toolCall.Function.Name, err)
@@ -466,7 +476,8 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			// Tool result. If the corresponding assistant functionCall had to be
 			// downgraded to plain text because no Gemini thoughtSignature was
 			// available, degrade the tool result too so the request stays valid.
-			content := convertLLMToolResultToGeminiContent(&msg)
+			functionName := resolveGeminiToolResponseName(&msg, toolCallNamesByID)
+			content := convertLLMToolResultToGeminiContent(&msg, functionName)
 			if msg.ToolCallID != nil {
 				if toolName, ok := degradedToolCalls[*msg.ToolCallID]; ok {
 					content = convertLLMToolResultToGeminiTextContent(&msg, toolName)
@@ -690,7 +701,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 
 }
 
-func convertLLMToolResultToGeminiContent(msg *model.Message) *model.GeminiContent {
+func convertLLMToolResultToGeminiContent(msg *model.Message, functionName string) *model.GeminiContent {
 	content := &model.GeminiContent{
 		Role: "user", // Function responses come from user role in Gemini
 	}
@@ -707,7 +718,7 @@ func convertLLMToolResultToGeminiContent(msg *model.Message) *model.GeminiConten
 	}
 
 	fp := &model.GeminiFunctionResponse{
-		Name:     lo.FromPtrOr(msg.ToolCallID, ""),
+		Name:     functionName,
 		Response: responseData,
 	}
 
@@ -716,6 +727,36 @@ func convertLLMToolResultToGeminiContent(msg *model.Message) *model.GeminiConten
 	}
 
 	return content
+}
+
+// resolveGeminiToolResponseName looks up the originating function name for a
+// tool-result message. Gemini requires `functionResponse.name` to match the
+// upstream `functionCall.name` byte-for-byte; falling back to the tool-call
+// ID (as the previous implementation did) produces
+// `INVALID_ARGUMENT: Function response name does not match any function call
+// name`.
+//
+// Precedence:
+//  1. `msg.ToolCallName` — populated by the inbound layer when available.
+//  2. `toolCallNamesByID[msg.ToolCallID]` — name observed on a prior assistant
+//     turn within the same request.
+//  3. Empty string — caller is expected to downgrade the turn (degradedToolCalls
+//     path) so Gemini still receives a well-formed message.
+func resolveGeminiToolResponseName(msg *model.Message, toolCallNamesByID map[string]string) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.ToolCallName != nil {
+		if name := strings.TrimSpace(*msg.ToolCallName); name != "" {
+			return name
+		}
+	}
+	if msg.ToolCallID != nil {
+		if name, ok := toolCallNamesByID[*msg.ToolCallID]; ok {
+			return name
+		}
+	}
+	return ""
 }
 
 func decodeGeminiToolResponse(raw string) (map[string]any, bool) {

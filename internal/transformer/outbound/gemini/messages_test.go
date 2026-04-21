@@ -123,6 +123,86 @@ func TestDecodeGeminiToolResponseAcceptsScalarJSON(t *testing.T) {
 	}
 }
 
+// TestConvertGeminiRequestFunctionResponseName verifies that a signed
+// assistant→tool turn reaches Gemini with functionResponse.name equal to the
+// originating functionCall.name, not the tool-call ID. Prior implementation
+// filled Name with msg.ToolCallID, producing
+// `INVALID_ARGUMENT: Function response name does not match any function call
+// name` on any non-single-turn flow. (G-C2)
+func TestConvertGeminiRequestFunctionResponseNameFromAssistantLookup(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-3.1-pro",
+		Messages: []model.Message{
+			{
+				Role: "assistant",
+				ReasoningBlocks: []model.ReasoningBlock{
+					{Kind: model.ReasoningBlockKindSignature, Signature: "sig-call", Provider: "gemini"},
+				},
+				ToolCalls: []model.ToolCall{
+					{
+						ID:   "call_Bash_0",
+						Type: "function",
+						Function: model.FunctionCall{
+							Name:      "Bash",
+							Arguments: `{"cmd":"pwd"}`,
+						},
+					},
+				},
+			},
+			{
+				Role:       "tool",
+				ToolCallID: stringPtr("call_Bash_0"),
+				Content: model.MessageContent{
+					Content: stringPtr(`{"stdout":"/tmp"}`),
+				},
+			},
+		},
+	}
+	out := convertLLMToGeminiRequest(req)
+	if len(out.Contents) < 2 {
+		t.Fatalf("expected assistant + tool contents, got %d", len(out.Contents))
+	}
+	toolContent := out.Contents[1]
+	fr := toolContent.Parts[0].FunctionResponse
+	if fr == nil {
+		t.Fatalf("expected functionResponse part, got %+v", toolContent.Parts[0])
+	}
+	if fr.Name != "Bash" {
+		t.Fatalf("expected functionResponse.name=%q, got %q", "Bash", fr.Name)
+	}
+}
+
+// TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName covers the
+// case where the inbound layer already resolved the function name and placed
+// it on Message.ToolCallName; this path should win over the ID lookup.
+func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.T) {
+	nameOnly := "preferred_name"
+	req := &model.InternalLLMRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.Message{
+			{
+				Role:         "tool",
+				ToolCallID:   stringPtr("call_99"),
+				ToolCallName: &nameOnly,
+				Content: model.MessageContent{
+					Content: stringPtr(`{"ok":true}`),
+				},
+			},
+		},
+	}
+	out := convertLLMToGeminiRequest(req)
+	if len(out.Contents) != 1 {
+		t.Fatalf("expected 1 content, got %d", len(out.Contents))
+	}
+	fr := out.Contents[0].Parts[0].FunctionResponse
+	if fr == nil {
+		t.Fatalf("expected functionResponse part, got %+v", out.Contents[0].Parts[0])
+	}
+	if fr.Name != nameOnly {
+		t.Fatalf("expected functionResponse.name=%q, got %q", nameOnly, fr.Name)
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }
