@@ -1149,6 +1149,7 @@ func (t *geminiSchemaTransformer) transform(schemaNode any) {
 			"title", "$schema", "$ref", "strict",
 			"exclusiveMaximum", "exclusiveMinimum",
 			"additionalProperties", "oneOf", "default",
+			"propertyNames",
 			"$defs",
 		} {
 			delete(node, k)

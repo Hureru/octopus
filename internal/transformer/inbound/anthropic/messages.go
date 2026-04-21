@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -52,7 +53,10 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 		TransformerMetadata: map[string]string{},
 	}
 	if anthropicReq.Metadata != nil {
-		chatReq.Metadata["user_id"] = anthropicReq.Metadata.UserID
+		if userID := strings.TrimSpace(anthropicReq.Metadata.UserID); userID != "" {
+			chatReq.User = &userID
+			chatReq.TransformerMetadata["anthropic_user_id"] = userID
+		}
 	}
 
 	// Convert messages

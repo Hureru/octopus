@@ -76,16 +76,24 @@ func (o *MessageOutbound) TransformRequest(ctx context.Context, request *model.I
 	return req, nil
 }
 
-// TransformRequestRaw 把客户端原始 Anthropic 请求字节直接转发给上游，不做字段白名单解析与重序列化。
+// TransformRequestRaw 把客户端原始 Anthropic 请求字节直接转发给上游，仅重写顶层 model 为
+// 当前命中的实际上游模型，不做其他字段白名单解析。
 // 用于 Anthropic → Anthropic 的同协议直通路径，保证 anthropic-beta 相关字段（context_management、
-// betas 等）、内容块原始顺序、extended thinking 签名等信息完整传递到上游。
+// betas 等）、内容块原始顺序、extended thinking 签名等信息尽量完整传递到上游。
 //
 // 仅设置上游必需的鉴权/URL；Accept、Content-Type、Anthropic-Version、anthropic-beta 等请求头由
 // 上层 copyHeaders 从客户端透传（已被 hop-by-hop 过滤保护，x-api-key/authorization 不会覆盖）。
 // 注意：为了 HTTP/2 与 401/429/5xx 重试时可以重放 body，同时设置 ContentLength 与 GetBody。
-func (o *MessageOutbound) TransformRequestRaw(ctx context.Context, rawBody []byte, baseUrl, key string, query url.Values) (*http.Request, error) {
+func (o *MessageOutbound) TransformRequestRaw(ctx context.Context, rawBody []byte, modelName, baseUrl, key string, query url.Values) (*http.Request, error) {
 	if len(rawBody) == 0 {
 		return nil, fmt.Errorf("raw body is empty")
+	}
+	if strings.TrimSpace(modelName) != "" {
+		rewrittenBody, err := rewriteRawRequestModel(rawBody, modelName)
+		if err != nil {
+			return nil, err
+		}
+		rawBody = rewrittenBody
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(rawBody))
@@ -118,6 +126,19 @@ func (o *MessageOutbound) TransformRequestRaw(ctx context.Context, rawBody []byt
 	req.URL = parsedUrl
 
 	return req, nil
+}
+
+func rewriteRawRequestModel(rawBody []byte, modelName string) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to decode raw anthropic request: %w", err)
+	}
+	payload["model"] = strings.TrimSpace(modelName)
+	rewrittenBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode raw anthropic request: %w", err)
+	}
+	return rewrittenBody, nil
 }
 
 func (o *MessageOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {
@@ -375,8 +396,8 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 		System:      convertSystemPrompt(req),
 	}
 
-	if req.Metadata != nil && req.Metadata["user_id"] != "" {
-		result.Metadata = &anthropicModel.AnthropicMetadata{UserID: req.Metadata["user_id"]}
+	if userID := resolveAnthropicUserID(req); userID != "" {
+		result.Metadata = &anthropicModel.AnthropicMetadata{UserID: userID}
 	}
 
 	// Convert messages
@@ -422,6 +443,26 @@ func convertToAnthropicRequest(req *model.InternalLLMRequest) *anthropicModel.Me
 	pruneCacheBreakpoints(result)
 
 	return result
+}
+
+func resolveAnthropicUserID(req *model.InternalLLMRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.Metadata != nil {
+		if userID := strings.TrimSpace(req.Metadata["user_id"]); userID != "" {
+			return userID
+		}
+	}
+	if req.TransformerMetadata != nil {
+		if userID := strings.TrimSpace(req.TransformerMetadata["anthropic_user_id"]); userID != "" {
+			return userID
+		}
+	}
+	if req.User != nil {
+		return strings.TrimSpace(*req.User)
+	}
+	return ""
 }
 
 // convertToolChoice maps the internal ToolChoice into the Anthropic wire

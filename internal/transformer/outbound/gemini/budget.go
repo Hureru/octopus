@@ -9,7 +9,7 @@ import "strings"
 //   - thinkingBudget: an int token cap (0 disables thinking, -1 lets the model
 //     decide dynamically, any positive value is a hard cap).
 //   - thinkingLevel: a string on Gemini 3.x that selects the reasoning tier
-//     (low / medium / high / dynamic) without pinning a token budget.
+//     (low / medium / high) without pinning a token budget.
 //
 // resolveThinkingConfig picks the right lever for a given model family and
 // falls back through three priority tiers:
@@ -18,7 +18,7 @@ import "strings"
 //   3. model-family default (off for classic flash-lite, dynamic otherwise)
 //
 // If the client set AdaptiveThinking the whole result reduces to the dynamic
-// sentinel (-1 for budget, "dynamic" for Gemini 3 level) regardless of the
+// sentinel (-1 budget) regardless of the
 // explicit budget/effort — adaptive thinking is precisely the opt-in to let
 // the model pick per-turn.
 
@@ -99,9 +99,7 @@ func classifyGeminiFamily(modelID string) geminiFamily {
 }
 
 func dynamicDecision(fam geminiFamily) thinkingDecision {
-	if fam == geminiFamily3 {
-		return thinkingDecision{Supported: true, UseLevel: true, Level: "dynamic", IncludeThoughts: true}
-	}
+	_ = fam
 	return thinkingDecision{Supported: true, Budget: -1, IncludeThoughts: true}
 }
 
@@ -129,7 +127,14 @@ func decisionFromBudget(fam geminiFamily, budget int64) thinkingDecision {
 func decisionFromEffort(fam geminiFamily, effort string) thinkingDecision {
 	if fam == geminiFamily3 {
 		level := map3EffortToLevel(effort)
-		return thinkingDecision{Supported: true, UseLevel: true, Level: level, IncludeThoughts: level != "none"}
+		switch level {
+		case "none":
+			return thinkingDecision{Supported: true, Budget: 0, IncludeThoughts: false}
+		case "dynamic":
+			return dynamicDecision(fam)
+		default:
+			return thinkingDecision{Supported: true, UseLevel: true, Level: level, IncludeThoughts: true}
+		}
 	}
 	b := map25EffortToBudget(effort)
 	if b == 0 {
@@ -159,8 +164,9 @@ func map25EffortToBudget(effort string) int32 {
 
 // map3EffortToLevel maps the OpenAI reasoning_effort keyword to Gemini 3.x
 // thinkingLevel tier. Gemini 3 exposes "low", "medium", "high" plus the
-// special "dynamic" tier; "minimal" is coerced to "low" (Gemini has no
-// "minimal" tier).
+// "minimal" is coerced to "low" (Gemini has no "minimal" tier). Unknown
+// values fall back to the budget-based dynamic path instead of emitting a
+// thinkingLevel the upstream may reject.
 func map3EffortToLevel(effort string) string {
 	switch effort {
 	case "none", "off":

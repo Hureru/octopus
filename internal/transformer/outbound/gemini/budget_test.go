@@ -8,9 +8,9 @@ func TestResolveThinkingConfigAdaptive(t *testing.T) {
 	if !d.Supported || d.UseLevel || d.Budget != -1 || !d.IncludeThoughts {
 		t.Fatalf("adaptive 2.5: got %+v", d)
 	}
-	// Gemini 3 adaptive -> dynamic level
+	// Gemini 3 adaptive -> dynamic budget (-1), avoid emitting unsupported dynamic level
 	d = resolveThinkingConfig("gemini-3.0-pro", nil, "", true)
-	if !d.Supported || !d.UseLevel || d.Level != "dynamic" {
+	if !d.Supported || d.UseLevel || d.Budget != -1 || !d.IncludeThoughts {
 		t.Fatalf("adaptive 3: got %+v", d)
 	}
 }

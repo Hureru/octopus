@@ -362,14 +362,14 @@ func (ra *relayAttempt) forward() (int, error) {
 		if ra.internalRequest.TransformerMetadata != nil && strings.TrimSpace(ra.internalRequest.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact" {
 			shouldTryWS = false
 		} else {
-		wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
-		if wsUpgradeEnabled {
-			// 设置启用：无论客户端协议都主动尝试 WS 上游
-			shouldTryWS = true
-		} else {
-			// 设置禁用：仅当客户端也是 WS 时才尝试 WS 上游
-			shouldTryWS = (ra.c == nil)
-		}
+			wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
+			if wsUpgradeEnabled {
+				// 设置启用：无论客户端协议都主动尝试 WS 上游
+				shouldTryWS = true
+			} else {
+				// 设置禁用：仅当客户端也是 WS 时才尝试 WS 上游
+				shouldTryWS = (ra.c == nil)
+			}
 		}
 
 		if shouldTryWS {
@@ -916,6 +916,7 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughAnthropic(ctx context.Context) 
 	outboundRequest, err := anthropicOut.TransformRequestRaw(
 		ctx,
 		ra.rawBody,
+		ra.internalRequest.Model,
 		ra.channel.GetBaseUrl(),
 		ra.usedKey.ChannelKey,
 		ra.internalRequest.Query,
@@ -925,8 +926,10 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughAnthropic(ctx context.Context) 
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// 记录上行 payload（用 rawBody 估算 token），与标准路径保持一致
-	ra.metrics.SetTransportRequestPayload(ra.rawBody, ra.internalRequest.Model)
+	// 记录实际上行 payload；直通路径会在这里把顶层 model 改写成命中的上游模型。
+	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
+		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	}
 
 	// 复制客户端请求头（hop-by-hop 过滤保证 x-api-key/authorization/host/content-length
 	// /accept-encoding 不会覆盖出站设置的关键头；anthropic-beta / anthropic-version /
