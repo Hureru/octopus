@@ -55,8 +55,10 @@ func TestBuildChatCompletionsRequestUsesExplicitWhitelist(t *testing.T) {
 	if _, ok := payload["metadata"]; !ok {
 		t.Fatalf("expected metadata to be preserved, got %#v", payload)
 	}
-	if _, ok := payload["user"]; ok {
-		t.Fatalf("expected deprecated user to be omitted, got %#v", payload["user"])
+	// O-H1: `user` is a legacy but still-accepted OpenAI field; forward it when
+	// the client supplied one so downstreams keying on it keep working.
+	if got := payload["user"]; got != user {
+		t.Fatalf("expected legacy user to be forwarded, got %#v", got)
 	}
 	if _, ok := payload["enable_thinking"]; ok {
 		t.Fatalf("expected provider-specific enable_thinking to be omitted, got %#v", payload["enable_thinking"])
@@ -100,5 +102,46 @@ func TestBuildChatCompletionsRequestForwardsPromptCacheKey(t *testing.T) {
 	}
 	if got := payload["prompt_cache_key"]; got != cacheKey {
 		t.Fatalf("expected prompt_cache_key=%q in chat payload, got %#v", cacheKey, got)
+	}
+}
+
+// O-H1: 2025 Chat fields (verbosity, prediction, web_search_options) must land
+// on the outbound payload when the client supplied them. Before this fix the
+// whitelist simply dropped them, so gpt-5 verbosity and predicted outputs were
+// silently unavailable through the aggregator.
+func TestBuildChatCompletionsRequestForwards2025Fields(t *testing.T) {
+	content := "hello"
+	verbosity := "high"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-5",
+		Messages: []model.Message{{
+			Role:    "user",
+			Content: model.MessageContent{Content: &content},
+		}},
+		Verbosity:        &verbosity,
+		Prediction:       json.RawMessage(`{"type":"content","content":"code edit preview"}`),
+		WebSearchOptions: json.RawMessage(`{"search_context_size":"low"}`),
+	}
+
+	wire := buildChatCompletionsRequest(req)
+	body, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got := payload["verbosity"]; got != "high" {
+		t.Fatalf("expected verbosity=high, got %#v", got)
+	}
+	prediction, ok := payload["prediction"].(map[string]any)
+	if !ok || prediction["type"] != "content" {
+		t.Fatalf("expected prediction to be forwarded, got %#v", payload["prediction"])
+	}
+	search, ok := payload["web_search_options"].(map[string]any)
+	if !ok || search["search_context_size"] != "low" {
+		t.Fatalf("expected web_search_options to be forwarded, got %#v", payload["web_search_options"])
 	}
 }

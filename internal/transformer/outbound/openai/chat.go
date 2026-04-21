@@ -51,6 +51,18 @@ type ChatCompletionsRequest struct {
 	// inbound carries its own ResponsesPromptCacheKey pass-through that
 	// stays isolated from this builder.
 	PromptCacheKey *string `json:"prompt_cache_key,omitempty"`
+	// User is OpenAI's legacy caller-supplied end-user identifier. OpenAI now
+	// prefers `safety_identifier` + `prompt_cache_key`, but the field is still
+	// accepted for backward compatibility; we forward it when the client sets
+	// it so downstreams that key on `user` keep working.
+	User *string `json:"user,omitempty"`
+	// Verbosity is the gpt-5 detail-level knob ("low" | "medium" | "high").
+	Verbosity *string `json:"verbosity,omitempty"`
+	// Prediction forwards the OpenAI "predicted outputs" payload verbatim.
+	Prediction json.RawMessage `json:"prediction,omitempty"`
+	// WebSearchOptions configures the Chat Completions built-in web search
+	// tool; kept as raw JSON for schema stability.
+	WebSearchOptions json.RawMessage `json:"web_search_options,omitempty"`
 }
 
 type ChatCompletionsAudio struct {
@@ -134,6 +146,10 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 		ResponseFormat:      request.ResponseFormat,
 		SafetyIdentifier:    request.SafetyIdentifier,
 		PromptCacheKey:      request.PromptCacheKey,
+		User:                request.User,
+		Verbosity:           request.Verbosity,
+		Prediction:          request.Prediction,
+		WebSearchOptions:    request.WebSearchOptions,
 	}
 
 	if request.Audio != nil {

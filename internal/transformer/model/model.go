@@ -144,6 +144,25 @@ type InternalLLMRequest struct {
 	// [Learn more](https://platform.openai.com/docs/guides/safety-best-practices#safety-identifiers).
 	User *string `json:"user,omitempty"`
 
+	// Verbosity controls the detail level of GPT-5 family completions
+	// ("low" | "medium" | "high"). Only forwarded when explicitly set;
+	// undefined lets the upstream apply its own default.
+	// [Learn more](https://platform.openai.com/docs/api-reference/chat/create#chat-create-verbosity).
+	Verbosity *string `json:"verbosity,omitempty"`
+
+	// Prediction is the OpenAI "predicted outputs" payload used to bias the
+	// decoder when the caller already knows a large portion of the expected
+	// output (typical for code / doc edits). Kept as RawMessage so we pass the
+	// upstream schema through verbatim rather than risk coercing it.
+	// [Learn more](https://platform.openai.com/docs/guides/predicted-outputs).
+	Prediction json.RawMessage `json:"prediction,omitempty"`
+
+	// WebSearchOptions configures the built-in `web_search` tool for Chat
+	// Completions (search_context_size, user_location, ...). Treated as an
+	// opaque passthrough to avoid drifting from the rapidly-evolving schema.
+	// [Learn more](https://platform.openai.com/docs/guides/tools-web-search).
+	WebSearchOptions json.RawMessage `json:"web_search_options,omitempty"`
+
 	// Parameters for audio output. Required when audio output is requested with
 	// `modalities: ["audio"]`.
 	// [Learn more](https://platform.openai.com/docs/guides/audio).
