@@ -58,3 +58,24 @@ func Warnf(template string, args ...interface{}) {
 func Debugf(template string, args ...interface{}) {
 	Logger.Debugf(template, args...)
 }
+
+// Infow / Warnw / Errorf / Debugw emit structured key-value log entries —
+// the message is the event name, and keysAndValues are flattened into the
+// log line as `key=value` pairs (zap SugaredLogger semantics). Prefer the
+// w-suffix variants for audit / telemetry style events so downstream log
+// pipelines (loki, elk, grep) can parse the fields reliably.
+func Infow(msg string, keysAndValues ...interface{}) {
+	Logger.Infow(msg, keysAndValues...)
+}
+
+func Warnw(msg string, keysAndValues ...interface{}) {
+	Logger.Warnw(msg, keysAndValues...)
+}
+
+func Errorw(msg string, keysAndValues ...interface{}) {
+	Logger.Errorw(msg, keysAndValues...)
+}
+
+func Debugw(msg string, keysAndValues ...interface{}) {
+	Logger.Debugw(msg, keysAndValues...)
+}

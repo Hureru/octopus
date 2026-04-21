@@ -19,6 +19,7 @@ type ResponseInbound struct {
 	hasMessageItemStarted   bool
 	hasReasoningItemStarted bool
 	hasContentPartStarted   bool
+	hasRefusalPartStarted   bool
 	hasFinished             bool
 	responseCompleted       bool
 	finalFinishReason       string
@@ -34,10 +35,20 @@ type ResponseInbound struct {
 	sequenceNumber int
 	currentItemID  string
 
+	// messageContentOrder preserves the order content parts were emitted so
+	// closeMessageItem can rebuild the final ResponsesInput.Items array with
+	// the correct output_text / refusal sequencing.
+	messageContentOrder []string
+
 	// Content accumulation
 	accumulatedText      strings.Builder
 	accumulatedReasoning strings.Builder
-	accumulatedSignature strings.Builder
+	accumulatedRefusal   strings.Builder
+
+	// reasoningBlockSignatures preserves per-thinking-block signatures in
+	// arrival order. 0 → no encrypted_content, 1 → raw string (common case),
+	// N → JSON-encoded array string so information is not lost.
+	reasoningBlockSignatures []string
 
 	// Tool call tracking
 	toolCalls           map[int]*model.ToolCall
@@ -145,20 +156,43 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 	if len(stream.Choices) > 0 {
 		choice := stream.Choices[0]
 
-		// Handle reasoning content delta
+		// Handle reasoning content delta (thinking text still arrives via legacy
+		// ReasoningContent from all providers; ReasoningBlocks only carries
+		// signature / redacted in the stream path).
 		if choice.Delta != nil && choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 			events = append(events, i.handleReasoningContent(choice.Delta.ReasoningContent)...)
 		}
 
-		// Handle reasoning signature delta (accumulate for encrypted_content)
-		if choice.Delta != nil && choice.Delta.ReasoningSignature != nil && *choice.Delta.ReasoningSignature != "" {
-			i.accumulatedSignature.WriteString(*choice.Delta.ReasoningSignature)
-		}
-
-		// Handle redacted thinking blocks
-		if choice.Delta != nil && len(choice.Delta.RedactedThinkingBlocks) > 0 {
-			// Redacted thinking is part of reasoning, ensure reasoning item is started
-			if !i.hasReasoningItemStarted {
+		// Handle per-block reasoning signatures + redacted blocks. Prefer the
+		// structured ReasoningBlocks representation introduced in P0.1; fall
+		// back to the flat legacy fields for providers still on the pre-P0.1
+		// wire (OpenRouter, Ollama compat, etc.).
+		if choice.Delta != nil && len(choice.Delta.ReasoningBlocks) > 0 {
+			for _, b := range choice.Delta.ReasoningBlocks {
+				switch b.Kind {
+				case model.ReasoningBlockKindSignature:
+					if b.Signature != "" {
+						i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, b.Signature)
+					}
+				case model.ReasoningBlockKindRedacted:
+					if !i.hasReasoningItemStarted {
+						events = append(events, i.handleReasoningContent(lo.ToPtr(""))...)
+					}
+				case model.ReasoningBlockKindThinking:
+					if b.Text != "" {
+						text := b.Text
+						events = append(events, i.handleReasoningContent(&text)...)
+					}
+					if b.Signature != "" {
+						i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, b.Signature)
+					}
+				}
+			}
+		} else if choice.Delta != nil {
+			if choice.Delta.ReasoningSignature != nil && *choice.Delta.ReasoningSignature != "" {
+				i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, *choice.Delta.ReasoningSignature)
+			}
+			if len(choice.Delta.RedactedThinkingBlocks) > 0 && !i.hasReasoningItemStarted {
 				events = append(events, i.handleReasoningContent(lo.ToPtr(""))...)
 			}
 		}
@@ -166,6 +200,11 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		// Handle text content delta
 		if choice.Delta != nil && choice.Delta.Content.Content != nil && *choice.Delta.Content.Content != "" {
 			events = append(events, i.handleTextContent(choice.Delta.Content.Content)...)
+		}
+
+		// Handle refusal delta
+		if choice.Delta != nil && choice.Delta.Refusal != "" {
+			events = append(events, i.handleRefusalContent(choice.Delta.Refusal)...)
 		}
 
 		// Handle tool calls
@@ -290,6 +329,11 @@ func (i *ResponseInbound) handleTextContent(content *string) [][]byte {
 		events = append(events, i.closeReasoningItem()...)
 	}
 
+	// Close refusal part if active — text becomes a new content part
+	if i.hasRefusalPartStarted {
+		events = append(events, i.closeCurrentContentPart()...)
+	}
+
 	// Start message output item if not started
 	if !i.hasMessageItemStarted {
 		i.hasMessageItemStarted = true
@@ -311,12 +355,13 @@ func (i *ResponseInbound) handleTextContent(content *string) [][]byte {
 	// Start content part if not started
 	if !i.hasContentPartStarted {
 		i.hasContentPartStarted = true
+		i.messageContentOrder = append(i.messageContentOrder, "output_text")
 
 		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
 			Type:         "response.content_part.added",
 			ItemID:       &i.currentItemID,
 			OutputIndex:  lo.ToPtr(i.outputIndex),
-			ContentIndex: &i.contentIndex,
+			ContentIndex: lo.ToPtr(i.contentIndex),
 			Part: &ResponsesContentPart{
 				Type: "output_text",
 				Text: lo.ToPtr(""),
@@ -332,8 +377,76 @@ func (i *ResponseInbound) handleTextContent(content *string) [][]byte {
 		Type:         "response.output_text.delta",
 		ItemID:       &i.currentItemID,
 		OutputIndex:  lo.ToPtr(i.outputIndex),
-		ContentIndex: &i.contentIndex,
+		ContentIndex: lo.ToPtr(i.contentIndex),
 		Delta:        *content,
+	}))
+
+	return events
+}
+
+// handleRefusalContent mirrors handleTextContent but emits refusal-family
+// stream events (response.content_part.added with Part.Type="refusal",
+// response.refusal.delta). Refusal is a distinct content part: if a text
+// part was open it is closed first so the two parts land at separate
+// content_index values.
+func (i *ResponseInbound) handleRefusalContent(content string) [][]byte {
+	var events [][]byte
+
+	// Close reasoning item if it was started
+	if i.hasReasoningItemStarted {
+		events = append(events, i.closeReasoningItem()...)
+	}
+
+	// Close text part if active — refusal becomes a new content part
+	if i.hasContentPartStarted {
+		events = append(events, i.closeCurrentContentPart()...)
+	}
+
+	// Start message output item if not started
+	if !i.hasMessageItemStarted {
+		i.hasMessageItemStarted = true
+		i.currentItemID = generateItemID()
+
+		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+			Type:        "response.output_item.added",
+			OutputIndex: lo.ToPtr(i.outputIndex),
+			Item: &ResponsesItem{
+				ID:      i.currentItemID,
+				Type:    "message",
+				Status:  lo.ToPtr("in_progress"),
+				Role:    "assistant",
+				Content: &ResponsesInput{Items: []ResponsesItem{}},
+			},
+		}))
+	}
+
+	// Start refusal content part if not started
+	if !i.hasRefusalPartStarted {
+		i.hasRefusalPartStarted = true
+		i.messageContentOrder = append(i.messageContentOrder, "refusal")
+
+		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+			Type:         "response.content_part.added",
+			ItemID:       &i.currentItemID,
+			OutputIndex:  lo.ToPtr(i.outputIndex),
+			ContentIndex: lo.ToPtr(i.contentIndex),
+			Part: &ResponsesContentPart{
+				Type: "refusal",
+				Text: lo.ToPtr(""),
+			},
+		}))
+	}
+
+	// Accumulate refusal content
+	i.accumulatedRefusal.WriteString(content)
+
+	// Emit refusal.delta
+	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+		Type:         "response.refusal.delta",
+		ItemID:       &i.currentItemID,
+		OutputIndex:  lo.ToPtr(i.outputIndex),
+		ContentIndex: lo.ToPtr(i.contentIndex),
+		Delta:        content,
 	}))
 
 	return events
@@ -445,7 +558,11 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 		Part:         &ResponsesContentPart{Type: "summary_text", Text: &fullReasoning},
 	}))
 
-	// Emit output_item.done with encrypted_content if signature was accumulated
+	// Emit output_item.done with encrypted_content if signatures were accumulated.
+	// Single signature is emitted as a bare string (the common Anthropic extended-thinking
+	// case — one thinking block per turn — so the field round-trips verbatim). Multiple
+	// signatures are JSON-encoded into an array string so per-block provenance is not
+	// lost; downstream consumers that only read the scalar still see non-empty content.
 	item := ResponsesItem{
 		ID:   i.currentItemID,
 		Type: "reasoning",
@@ -455,9 +572,17 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 		}},
 	}
 
-	if i.accumulatedSignature.Len() > 0 {
-		sig := i.accumulatedSignature.String()
+	switch len(i.reasoningBlockSignatures) {
+	case 0:
+		// no encrypted_content
+	case 1:
+		sig := i.reasoningBlockSignatures[0]
 		item.EncryptedContent = &sig
+	default:
+		if encoded, err := json.Marshal(i.reasoningBlockSignatures); err == nil {
+			sig := string(encoded)
+			item.EncryptedContent = &sig
+		}
 	}
 
 	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
@@ -468,7 +593,7 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 
 	i.outputIndex++
 	i.accumulatedReasoning.Reset()
-	i.accumulatedSignature.Reset()
+	i.reasoningBlockSignatures = nil
 
 	return events
 }
@@ -480,23 +605,51 @@ func (i *ResponseInbound) closeMessageItem() [][]byte {
 
 	var events [][]byte
 	i.hasMessageItemStarted = false
-	fullText := i.accumulatedText.String()
 
-	// Close content part first
+	// Close whichever content part (text or refusal) is still open
 	events = append(events, i.closeCurrentContentPart()...)
 
-	// Emit output_item.done
+	fullText := i.accumulatedText.String()
+	fullRefusal := i.accumulatedRefusal.String()
+
+	contentItems := make([]ResponsesItem, 0, 2)
+	for _, t := range i.messageContentOrder {
+		switch t {
+		case "output_text":
+			if fullText != "" {
+				text := fullText
+				contentItems = append(contentItems, ResponsesItem{
+					Type: "output_text",
+					Text: &text,
+				})
+			}
+		case "refusal":
+			if fullRefusal != "" {
+				refusal := fullRefusal
+				contentItems = append(contentItems, ResponsesItem{
+					Type: "refusal",
+					Text: &refusal,
+				})
+			}
+		}
+	}
+
+	// Preserve legacy shape: a message with no accumulated text still
+	// produces a single empty output_text item so downstream clients never
+	// see a zero-length content array.
+	if len(contentItems) == 0 {
+		contentItems = append(contentItems, ResponsesItem{
+			Type: "output_text",
+			Text: lo.ToPtr(fullText),
+		})
+	}
+
 	item := ResponsesItem{
-		ID:     i.currentItemID,
-		Type:   "message",
-		Status: lo.ToPtr("completed"),
-		Role:   "assistant",
-		Content: &ResponsesInput{
-			Items: []ResponsesItem{{
-				Type: "output_text",
-				Text: &fullText,
-			}},
-		},
+		ID:      i.currentItemID,
+		Type:    "message",
+		Status:  lo.ToPtr("completed"),
+		Role:    "assistant",
+		Content: &ResponsesInput{Items: contentItems},
 	}
 
 	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
@@ -508,39 +661,70 @@ func (i *ResponseInbound) closeMessageItem() [][]byte {
 	i.outputIndex++
 	i.contentIndex = 0
 	i.accumulatedText.Reset()
+	i.accumulatedRefusal.Reset()
+	i.messageContentOrder = nil
 
 	return events
 }
 
+// closeCurrentContentPart flushes whichever content part (output_text or
+// refusal) is currently open. The accumulated text for the part is NOT
+// reset here — closeMessageItem reads both accumulators to build the final
+// output_item.done content array, then resets at message level.
 func (i *ResponseInbound) closeCurrentContentPart() [][]byte {
-	if !i.hasContentPartStarted {
-		return nil
-	}
-
 	var events [][]byte
-	i.hasContentPartStarted = false
-	fullText := i.accumulatedText.String()
 
-	// Emit output_text.done
-	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-		Type:         "response.output_text.done",
-		ItemID:       &i.currentItemID,
-		OutputIndex:  lo.ToPtr(i.outputIndex),
-		ContentIndex: &i.contentIndex,
-		Text:         fullText,
-	}))
+	switch {
+	case i.hasContentPartStarted:
+		i.hasContentPartStarted = false
+		fullText := i.accumulatedText.String()
 
-	// Emit content_part.done
-	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-		Type:         "response.content_part.done",
-		ItemID:       &i.currentItemID,
-		OutputIndex:  lo.ToPtr(i.outputIndex),
-		ContentIndex: &i.contentIndex,
-		Part: &ResponsesContentPart{
-			Type: "output_text",
-			Text: lo.ToPtr(fullText),
-		},
-	}))
+		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+			Type:         "response.output_text.done",
+			ItemID:       &i.currentItemID,
+			OutputIndex:  lo.ToPtr(i.outputIndex),
+			ContentIndex: lo.ToPtr(i.contentIndex),
+			Text:         fullText,
+		}))
+
+		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+			Type:         "response.content_part.done",
+			ItemID:       &i.currentItemID,
+			OutputIndex:  lo.ToPtr(i.outputIndex),
+			ContentIndex: lo.ToPtr(i.contentIndex),
+			Part: &ResponsesContentPart{
+				Type: "output_text",
+				Text: lo.ToPtr(fullText),
+			},
+		}))
+
+		i.contentIndex++
+
+	case i.hasRefusalPartStarted:
+		i.hasRefusalPartStarted = false
+		fullRefusal := i.accumulatedRefusal.String()
+
+		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+			Type:         "response.refusal.done",
+			ItemID:       &i.currentItemID,
+			OutputIndex:  lo.ToPtr(i.outputIndex),
+			ContentIndex: lo.ToPtr(i.contentIndex),
+			Text:         fullRefusal,
+		}))
+
+		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+			Type:         "response.content_part.done",
+			ItemID:       &i.currentItemID,
+			OutputIndex:  lo.ToPtr(i.outputIndex),
+			ContentIndex: lo.ToPtr(i.contentIndex),
+			Part: &ResponsesContentPart{
+				Type: "refusal",
+				Text: lo.ToPtr(fullRefusal),
+			},
+		}))
+
+		i.contentIndex++
+	}
 
 	return events
 }

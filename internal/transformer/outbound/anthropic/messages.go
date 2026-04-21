@@ -14,6 +14,7 @@ import (
 
 	anthropicModel "github.com/bestruirui/octopus/internal/transformer/inbound/anthropic"
 	"github.com/bestruirui/octopus/internal/transformer/model"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xurl"
 )
 
@@ -137,6 +138,15 @@ func (o *MessageOutbound) TransformResponse(ctx context.Context, response *http.
 	if response.StatusCode >= 400 {
 		var errResp anthropicModel.AnthropicError
 		if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
+			if strings.Contains(strings.ToLower(errResp.Error.Message), "signature") {
+				log.Warnw("transformer.reasoning.signature.passthrough",
+					"provider", "anthropic",
+					"direction", "error",
+					"status_code", response.StatusCode,
+					"error_type", errResp.Error.Type,
+					"error_message", truncateForAudit(errResp.Error.Message, 256),
+				)
+			}
 			return nil, &model.ResponseError{
 				StatusCode: response.StatusCode,
 				Detail: model.ErrorDetail{
@@ -814,7 +824,55 @@ func emitThinkingBlocks(msg model.Message) []anthropicModel.MessageContentBlock 
 			}
 		}
 	}
+
+	logAnthropicSignatureAudit("inject", anthropicBlocks)
+
 	return out
+}
+
+// logAnthropicSignatureAudit emits the audit counter for Anthropic
+// reasoning signature passthrough. direction is one of inject / extract;
+// the event name `transformer.reasoning.signature.passthrough` is fixed so
+// downstream log pipelines can aggregate by (provider, direction). Called
+// at Debug level so it only fires when diagnostic logging is enabled.
+func logAnthropicSignatureAudit(direction string, blocks []model.ReasoningBlock) {
+	var thinking, redacted, sigCount int
+	for _, rb := range blocks {
+		switch rb.Kind {
+		case model.ReasoningBlockKindThinking:
+			thinking++
+			if rb.Signature != "" {
+				sigCount++
+			}
+		case model.ReasoningBlockKindRedacted:
+			redacted++
+			sigCount++
+		case model.ReasoningBlockKindSignature:
+			if rb.Signature != "" {
+				sigCount++
+			}
+		}
+	}
+	if thinking == 0 && redacted == 0 && sigCount == 0 {
+		return
+	}
+	log.Debugw("transformer.reasoning.signature.passthrough",
+		"provider", "anthropic",
+		"direction", direction,
+		"thinking_count", thinking,
+		"redacted_count", redacted,
+		"signature_count", sigCount,
+	)
+}
+
+// truncateForAudit keeps audit log fields bounded to avoid logging entire
+// multi-KB provider error payloads. Byte-level truncation is fine for
+// audit purposes.
+func truncateForAudit(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 func emitThinkingBlocksLegacy(msg model.Message) []anthropicModel.MessageContentBlock {
@@ -1262,6 +1320,8 @@ func convertToLLMResponse(resp *anthropicModel.Message) *model.InternalLLMRespon
 
 	result.Choices = []model.Choice{choice}
 	result.Usage = convertAnthropicUsage(resp.Usage)
+
+	logAnthropicSignatureAudit("extract", reasoningBlocks)
 
 	return result
 }

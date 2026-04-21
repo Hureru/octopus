@@ -254,6 +254,38 @@ func nextGeminiSignature(sigs []string, cursor *int) (string, bool) {
 	return s, true
 }
 
+// logGeminiSignatureAudit emits the audit counter for Gemini thoughtSignature
+// extraction (signatures attached to text / function_call parts from the
+// upstream response). direction is "extract" for now; inject is logged
+// inline in convertLLMToGeminiRequest. Fixed event name
+// `transformer.reasoning.signature.passthrough` allows downstream log
+// pipelines to aggregate across providers.
+func logGeminiSignatureAudit(direction string, blocks []model.ReasoningBlock) {
+	var thinking, sigCount int
+	for _, rb := range blocks {
+		switch rb.Kind {
+		case model.ReasoningBlockKindThinking:
+			thinking++
+			if rb.Signature != "" {
+				sigCount++
+			}
+		case model.ReasoningBlockKindSignature:
+			if rb.Signature != "" {
+				sigCount++
+			}
+		}
+	}
+	if thinking == 0 && sigCount == 0 {
+		return
+	}
+	log.Debugw("transformer.reasoning.signature.passthrough",
+		"provider", "gemini",
+		"direction", direction,
+		"thinking_count", thinking,
+		"signature_count", sigCount,
+	)
+}
+
 func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiGenerateContentRequest {
 	geminiReq := &model.GeminiGenerateContentRequest{
 		Contents: []*model.GeminiContent{},
@@ -386,6 +418,15 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 				}
 			}
 			geminiReq.Contents = append(geminiReq.Contents, content)
+
+			if sigIdx > 0 {
+				log.Debugw("transformer.reasoning.signature.passthrough",
+					"provider", "gemini",
+					"direction", "inject",
+					"signature_count", sigIdx,
+					"available_signatures", len(geminiSigs),
+				)
+			}
 
 		case "tool":
 			// Tool result
@@ -763,6 +804,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			// replay them verbatim on the next turn (mandatory for Gemini 3 function calls).
 			if len(reasoningBlocks) > 0 {
 				msg.ReasoningBlocks = reasoningBlocks
+				logGeminiSignatureAudit("extract", reasoningBlocks)
 			}
 
 			// Set tool calls
