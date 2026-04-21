@@ -54,7 +54,6 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 	}
 	if anthropicReq.Metadata != nil {
 		if userID := strings.TrimSpace(anthropicReq.Metadata.UserID); userID != "" {
-			chatReq.User = &userID
 			chatReq.TransformerMetadata["anthropic_user_id"] = userID
 		}
 	}
@@ -627,6 +626,16 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.InternalLLMResponse) ([]byte, error) {
 	// Handle [DONE] marker
 	if stream.Object == "[DONE]" {
+		if i.hasFinished && !i.messageStopped {
+			events, err := i.finalizeStreamMessage(nil)
+			if err != nil {
+				return nil, err
+			}
+			if len(events) == 0 {
+				return nil, nil
+			}
+			return joinSSEEvents(events), nil
+		}
 		return nil, nil
 	}
 
@@ -985,15 +994,18 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 		if choice.FinishReason != nil && !i.hasFinished {
 			i.hasFinished = true
 
-			stopEvent := StreamEvent{
-				Type:  "content_block_stop",
-				Index: &i.contentIndex,
+			if i.hasOpenContentBlock() {
+				stopEvent := StreamEvent{
+					Type:  "content_block_stop",
+					Index: &i.contentIndex,
+				}
+				data, err := json.Marshal(stopEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal content_block_stop event: %w", err)
+				}
+				events = append(events, formatSSEEvent("content_block_stop", data))
+				i.resetOpenContentState()
 			}
-			data, err := json.Marshal(stopEvent)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal content_block_stop event: %w", err)
-			}
-			events = append(events, formatSSEEvent("content_block_stop", data))
 
 			// Convert finish reason to Anthropic format
 			stopReason := model.ParseFinishReason(*choice.FinishReason).ToAnthropic()
@@ -1009,42 +1021,70 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 
 	// Handle usage chunk after finish_reason
 	if stream.Usage != nil && i.hasFinished && !i.messageStopped {
-		msgDeltaEvent := StreamEvent{
-			Type: "message_delta",
-		}
-
-		if i.stopReason != nil {
-			msgDeltaEvent.Delta = &StreamDelta{
-				StopReason: i.stopReason,
-			}
-		}
-
-		msgDeltaEvent.Usage = i.convertUsage(stream.Usage)
-
-		data, err := json.Marshal(msgDeltaEvent)
+		finalEvents, err := i.finalizeStreamMessage(stream.Usage)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal message_delta event: %w", err)
+			return nil, err
 		}
-		events = append(events, formatSSEEvent("message_delta", data))
-
-		// Generate message_stop
-		msgStopEvent := StreamEvent{
-			Type: "message_stop",
-		}
-		data, err = json.Marshal(msgStopEvent)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal message_stop event: %w", err)
-		}
-		events = append(events, formatSSEEvent("message_stop", data))
-
-		i.messageStopped = true
+		events = append(events, finalEvents...)
 	}
 
 	if len(events) == 0 {
 		return nil, nil
 	}
 
-	// Join events with newlines for SSE format
+	return joinSSEEvents(events), nil
+}
+
+func (i *MessagesInbound) hasOpenContentBlock() bool {
+	return i.hasTextContentStarted || i.hasThinkingContentStarted || i.hasToolContentStarted
+}
+
+func (i *MessagesInbound) resetOpenContentState() {
+	i.hasTextContentStarted = false
+	i.hasThinkingContentStarted = false
+	i.hasToolContentStarted = false
+}
+
+func (i *MessagesInbound) finalizeStreamMessage(usage *model.Usage) ([][]byte, error) {
+	if i.messageStopped {
+		return nil, nil
+	}
+
+	msgDeltaEvent := StreamEvent{
+		Type: "message_delta",
+	}
+
+	if i.stopReason != nil {
+		msgDeltaEvent.Delta = &StreamDelta{
+			StopReason: i.stopReason,
+		}
+	}
+
+	if usage != nil {
+		msgDeltaEvent.Usage = i.convertUsage(usage)
+	}
+
+	data, err := json.Marshal(msgDeltaEvent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal message_delta event: %w", err)
+	}
+
+	msgStopEvent := StreamEvent{
+		Type: "message_stop",
+	}
+	stopData, err := json.Marshal(msgStopEvent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal message_stop event: %w", err)
+	}
+
+	i.messageStopped = true
+	return [][]byte{
+		formatSSEEvent("message_delta", data),
+		formatSSEEvent("message_stop", stopData),
+	}, nil
+}
+
+func joinSSEEvents(events [][]byte) []byte {
 	result := make([]byte, 0)
 	for idx, event := range events {
 		if idx > 0 {
@@ -1052,8 +1092,7 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 		}
 		result = append(result, event...)
 	}
-
-	return result, nil
+	return result
 }
 
 func (i *MessagesInbound) convertUsage(usage *model.Usage) *Usage {
