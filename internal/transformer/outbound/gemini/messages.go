@@ -558,12 +558,52 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		config.TopP = request.TopP
 		hasConfig = true
 	}
-	// TopK is stored in metadata if present
-	if topKStr, ok := request.TransformerMetadata["gemini_top_k"]; ok {
+	// G-H1 + A-H3 follow-up: prefer the native TopK field; fall back to the
+	// legacy TransformerMetadata hook so older callers still work.
+	if request.TopK != nil {
+		topK := int(*request.TopK)
+		config.TopK = &topK
+		hasConfig = true
+	} else if topKStr, ok := request.TransformerMetadata["gemini_top_k"]; ok {
 		var topK int
 		fmt.Sscanf(topKStr, "%d", &topK)
 		config.TopK = &topK
 		hasConfig = true
+	}
+	if request.PresencePenalty != nil {
+		config.PresencePenalty = request.PresencePenalty
+		hasConfig = true
+	}
+	if request.FrequencyPenalty != nil {
+		config.FrequencyPenalty = request.FrequencyPenalty
+		hasConfig = true
+	}
+	if request.Seed != nil {
+		config.Seed = request.Seed
+		hasConfig = true
+	}
+	if request.Logprobs != nil {
+		enabled := *request.Logprobs
+		config.ResponseLogprobs = &enabled
+		hasConfig = true
+	}
+	if request.TopLogprobs != nil {
+		// Gemini caps logprobs at 5; anything higher would 400 upstream.
+		n := int(*request.TopLogprobs)
+		if n > 5 {
+			n = 5
+		}
+		if n < 0 {
+			n = 0
+		}
+		config.Logprobs = &n
+		hasConfig = true
+	}
+	if mr, ok := request.TransformerMetadata["gemini_media_resolution"]; ok {
+		if trimmed := strings.TrimSpace(mr); trimmed != "" {
+			config.MediaResolution = trimmed
+			hasConfig = true
+		}
 	}
 	if request.Stop != nil && request.Stop.MultipleStop != nil {
 		config.StopSequences = request.Stop.MultipleStop

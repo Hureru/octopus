@@ -138,6 +138,29 @@ type GeminiGenerationConfig struct {
 	ResponseSchema     *GeminiSchema `json:"responseSchema,omitempty"`
 	ResponseModalities []string      `json:"responseModalities,omitempty"`
 
+	// PresencePenalty / FrequencyPenalty mirror the OpenAI knobs. Gemini
+	// accepts them since 1.5 on a [-2.0, 2.0] range; left unset the upstream
+	// default applies. G-H1.
+	PresencePenalty  *float64 `json:"presencePenalty,omitempty"`
+	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
+
+	// ResponseLogprobs toggles emission of per-token logprobs on candidates.
+	// When nil the upstream default (disabled) applies. G-H1.
+	ResponseLogprobs *bool `json:"responseLogprobs,omitempty"`
+
+	// Logprobs sets how many of the top candidates to return logprobs for.
+	// Gemini caps this at 5 per token; callers that exceed get clamped by
+	// the outbound transformer. G-H1.
+	Logprobs *int `json:"logprobs,omitempty"`
+
+	// Seed pins the generation RNG for reproducible sampling. G-H1.
+	Seed *int64 `json:"seed,omitempty"`
+
+	// MediaResolution controls media-understanding fidelity
+	// ("MEDIA_RESOLUTION_LOW|MEDIUM|HIGH"). Forwarded as a passthrough from
+	// TransformerMetadata["gemini_media_resolution"]. G-H1.
+	MediaResolution string `json:"mediaResolution,omitempty"`
+
 	// ThinkingConfig is the thinking features configuration
 	ThinkingConfig *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
