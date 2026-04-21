@@ -70,3 +70,35 @@ func TestBuildChatCompletionsRequestUsesExplicitWhitelist(t *testing.T) {
 		t.Fatalf("expected audio settings to be preserved, got %#v", payload["audio"])
 	}
 }
+
+// TestBuildChatCompletionsRequestForwardsPromptCacheKey verifies that a
+// client-supplied prompt_cache_key on the Chat entrypoint reaches the
+// upstream Chat Completions payload. Before O-C4, PromptCacheKey was a
+// *bool that json.Unmarshal never populated from a string wire value, so
+// the cache key was silently dropped — losing up to ~90% input-cost savings
+// for any client that relied on prompt-cache bucketing.
+func TestBuildChatCompletionsRequestForwardsPromptCacheKey(t *testing.T) {
+	cacheKey := "session-abc-123"
+	content := "hi"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-4o",
+		Messages: []model.Message{{
+			Role:    "user",
+			Content: model.MessageContent{Content: &content},
+		}},
+		PromptCacheKey: &cacheKey,
+	}
+
+	wire := buildChatCompletionsRequest(req)
+	body, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := payload["prompt_cache_key"]; got != cacheKey {
+		t.Fatalf("expected prompt_cache_key=%q in chat payload, got %#v", cacheKey, got)
+	}
+}

@@ -123,9 +123,12 @@ type InternalLLMRequest struct {
 	TopP *float64 `json:"top_p,omitempty"`
 
 	// Used by OpenAI to cache responses for similar requests to optimize your cache
-	// hit rates. Replaces the `user` field.
+	// hit rates. Replaces the `user` field. The OpenAI spec defines this as a
+	// string up to 128 characters (stable identifier, e.g. hash(userID) or
+	// session ID). Using *bool here silently corrupted requests that set
+	// this field; the type is corrected to *string as of O-C4.
 	// [Learn more](https://platform.openai.com/docs/guides/prompt-caching).
-	PromptCacheKey *bool `json:"prompt_cache_key,omitzero"`
+	PromptCacheKey *string `json:"prompt_cache_key,omitempty"`
 
 	// A stable identifier used to help detect users of your application that may be
 	// violating OpenAI's usage policies. The IDs should be a string that uniquely

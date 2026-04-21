@@ -46,6 +46,11 @@ type ChatCompletionsRequest struct {
 	ToolChoice          *model.ToolChoice     `json:"tool_choice,omitempty"`
 	ResponseFormat      *model.ResponseFormat `json:"response_format,omitempty"`
 	SafetyIdentifier    *string               `json:"safety_identifier,omitempty"`
+	// PromptCacheKey mirrors the top-level model field. Only forwarded when
+	// the client populated the field on the Chat entrypoint — Responses
+	// inbound carries its own ResponsesPromptCacheKey pass-through that
+	// stays isolated from this builder.
+	PromptCacheKey *string `json:"prompt_cache_key,omitempty"`
 }
 
 type ChatCompletionsAudio struct {
@@ -128,6 +133,7 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 		ToolChoice:          request.ToolChoice,
 		ResponseFormat:      request.ResponseFormat,
 		SafetyIdentifier:    request.SafetyIdentifier,
+		PromptCacheKey:      request.PromptCacheKey,
 	}
 
 	if request.Audio != nil {
