@@ -288,6 +288,15 @@ func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte
 			if respErr != nil {
 				resp.Error = respErr
 			}
+			// A response may "complete" while still carrying function_call
+			// items in its output. The non-streaming path already applies
+			// this same override (see convertToLLMResponseFromResponses);
+			// mirror it here so the streaming Chat Completions finish_reason
+			// correctly signals "tool_calls" — Agent SDKs rely on the value
+			// to decide whether to run the requested tool.
+			if finishReason != nil && *finishReason == "stop" && o.responseCarriesFunctionCall(streamEvent.Response) {
+				finishReason = lo.ToPtr("tool_calls")
+			}
 			resp.Choices = []model.Choice{
 				{
 					Index:        0,
@@ -1299,6 +1308,37 @@ func normalizeResponsesFinishReason(status *string, errDetail *ResponsesError) (
 	default:
 		return nil, respErr
 	}
+}
+
+// responseCarriesFunctionCall reports whether a terminal Responses event
+// contains at least one function_call output item. Used by the streaming
+// response.completed branch to override a "stop" finish_reason to
+// "tool_calls" when the upstream chose to invoke a client-defined tool.
+//
+// The lookup prefers the fully-populated `response.output` Array attached
+// to the completed event; when the upstream omits it (some OpenAI-compat
+// upstreams do), we fall back to the items we have been tracking during
+// the stream via mergeOutputItemAdded / mergeFunctionCallDelta.
+func (o *ResponseOutbound) responseCarriesFunctionCall(resp *ResponsesResponse) bool {
+	if resp != nil {
+		for _, item := range resp.Output {
+			if item.Type == "function_call" {
+				return true
+			}
+		}
+		if len(resp.Output) > 0 {
+			return false
+		}
+	}
+	if o == nil || len(o.outputItems) == 0 {
+		return false
+	}
+	for _, item := range o.outputItems {
+		if item.Type == "function_call" {
+			return true
+		}
+	}
+	return false
 }
 
 func convertResponsesUsage(usage *ResponsesUsage) *model.Usage {

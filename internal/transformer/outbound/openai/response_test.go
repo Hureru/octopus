@@ -330,3 +330,62 @@ func TestTransformStreamIncompleteEventMapsToLength(t *testing.T) {
 		t.Fatalf("want length, got %q", *resp.Choices[0].FinishReason)
 	}
 }
+
+// TestTransformStreamCompletedWithFunctionCallMapsToToolCalls verifies the
+// override introduced for O-C2: when a `response.completed` event carries
+// a function_call item in its output, the Chat Completions finish_reason
+// must be tool_calls, not stop. Under the bug the non-streaming path
+// already did the right thing but the streaming path reported stop, so
+// Agent SDKs silently skipped the tool invocation.
+func TestTransformStreamCompletedWithFunctionCallMapsToToolCalls(t *testing.T) {
+	o := &ResponseOutbound{}
+	event := `{
+		"type":"response.completed",
+		"response":{
+			"status":"completed",
+			"output":[
+				{"type":"function_call","call_id":"call_1","name":"Bash","arguments":"{}"}
+			]
+		}
+	}`
+	resp, err := o.TransformStream(context.Background(), []byte(event))
+	if err != nil {
+		t.Fatalf("TransformStream: %v", err)
+	}
+	if resp == nil || len(resp.Choices) != 1 || resp.Choices[0].FinishReason == nil {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if *resp.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("want finish_reason=tool_calls, got %q", *resp.Choices[0].FinishReason)
+	}
+}
+
+// TestTransformStreamCompletedFallsBackToTrackedFunctionCall exercises the
+// path where the terminal event omits `response.output` (some OpenAI-
+// compat upstreams do this) and the tool_calls decision must consult
+// the items tracked during the stream.
+func TestTransformStreamCompletedFallsBackToTrackedFunctionCall(t *testing.T) {
+	o := &ResponseOutbound{}
+	// Prime the tracked output items by sending an added event first.
+	addedEvent := `{
+		"type":"response.output_item.added",
+		"output_index":0,
+		"item":{"type":"function_call","call_id":"c1","name":"Bash"}
+	}`
+	if _, err := o.TransformStream(context.Background(), []byte(addedEvent)); err != nil {
+		t.Fatalf("prime added: %v", err)
+	}
+	// Now the completed event without an output array should still surface
+	// tool_calls because the tracked items remember the function_call.
+	completed := `{"type":"response.completed","response":{"status":"completed"}}`
+	resp, err := o.TransformStream(context.Background(), []byte(completed))
+	if err != nil {
+		t.Fatalf("TransformStream completed: %v", err)
+	}
+	if resp == nil || len(resp.Choices) != 1 || resp.Choices[0].FinishReason == nil {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if *resp.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("want tool_calls from tracked items, got %q", *resp.Choices[0].FinishReason)
+	}
+}
