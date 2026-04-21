@@ -1,5 +1,10 @@
 package model
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // GeminiGenerateContentRequest represents a Gemini API request
 // Shared by both inbound and outbound transformers.
 type GeminiGenerateContentRequest struct {
@@ -138,8 +143,11 @@ type GeminiGenerationConfig struct {
 // parameters accept. Fields not explicitly listed here (e.g. $ref,
 // additionalProperties, if/then/else) are rejected by the API.
 type GeminiSchema struct {
-	// Type is the primitive JSON Schema type: "string", "number", "integer",
-	// "boolean", "array", "object". Gemini rejects missing or unknown types.
+	// Type is the primitive JSON Schema type. In-memory we store the
+	// Draft-07 lowercase form ("string", "number", "integer", "boolean",
+	// "array", "object"); MarshalJSON normalises to Gemini's required
+	// UPPER_SNAKE_CASE at serialization time. Missing or unknown types are
+	// rejected by Gemini at the API boundary.
 	Type string `json:"type"`
 
 	// Description is the free-form natural-language hint shown to the model.
@@ -185,6 +193,45 @@ type GeminiSchema struct {
 	// not oneOf / allOf — callers converting from Draft-07 should prefer
 	// anyOf or fall back to ErrSchemaLossy.
 	AnyOf []*GeminiSchema `json:"anyOf,omitempty"`
+}
+
+// MarshalJSON renders the schema in Gemini's wire shape. Gemini rejects
+// Draft-07 lowercase `type` values ("string" / "object" / …) and requires
+// UPPER_SNAKE_CASE enum values ("STRING" / "OBJECT" / "INTEGER" / …). We
+// keep GeminiSchema.Type lowercase in-memory (matching the Draft-07 source)
+// and normalise to Gemini's expected casing only at serialization time.
+// Format is intentionally left untouched — Gemini accepts lowercase format
+// tokens like "int32" / "date-time" / "enum".
+func (g GeminiSchema) MarshalJSON() ([]byte, error) {
+	type alias GeminiSchema
+	a := alias(g)
+	a.Type = normalizeGeminiSchemaType(a.Type)
+	return json.Marshal(a)
+}
+
+// normalizeGeminiSchemaType maps JSON Schema Draft-07 `type` values to the
+// UPPER_SNAKE_CASE enum Gemini's API expects. Unknown values are upper-cased
+// as a best-effort so caller-provided custom types still reach the upstream.
+// Empty input is preserved so omitempty on the field keeps working.
+func normalizeGeminiSchemaType(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "":
+		return ""
+	case "string":
+		return "STRING"
+	case "number":
+		return "NUMBER"
+	case "integer":
+		return "INTEGER"
+	case "boolean":
+		return "BOOLEAN"
+	case "array":
+		return "ARRAY"
+	case "object":
+		return "OBJECT"
+	default:
+		return strings.ToUpper(t)
+	}
 }
 
 // GeminiThinkingConfig is the thinking features configuration
