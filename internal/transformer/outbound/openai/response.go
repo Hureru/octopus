@@ -475,6 +475,20 @@ type ResponsesItem struct {
 	// Reasoning fields
 	Summary          []ResponsesReasoningSummary `json:"summary,omitempty"`
 	EncryptedContent *string                     `json:"encrypted_content,omitempty"`
+
+	// Multimodal input passthrough for Responses→Responses routing. O-H6.
+	FileID     *string              `json:"file_id,omitempty"`
+	Filename   *string              `json:"filename,omitempty"`
+	FileData   *string              `json:"file_data,omitempty"`
+	FileURL    *string              `json:"file_url,omitempty"`
+	InputAudio *ResponsesInputAudio `json:"input_audio,omitempty"`
+}
+
+// ResponsesInputAudio mirrors OpenAI's nested `input_audio` object for audio
+// content parts on Responses input. O-H6.
+type ResponsesInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format,omitempty"`
 }
 
 type ResponsesReasoningSummary struct {
@@ -783,6 +797,42 @@ func convertUserMessageToResponses(msg model.Message) ResponsesItem {
 						Detail:   p.ImageURL.Detail,
 					})
 				}
+			case "file":
+				// O-H6: reproduce whichever file representation the
+				// caller used originally.
+				if p.File == nil {
+					continue
+				}
+				item := ResponsesItem{Type: "input_file"}
+				if p.File.FileID != "" {
+					item.FileID = lo.ToPtr(p.File.FileID)
+				}
+				if p.File.FileURL != "" {
+					item.FileURL = lo.ToPtr(p.File.FileURL)
+				}
+				if p.File.Filename != "" {
+					item.Filename = lo.ToPtr(p.File.Filename)
+				}
+				if p.File.FileData != "" {
+					item.FileData = lo.ToPtr(p.File.FileData)
+				}
+				if item.FileID == nil && item.FileURL == nil && item.FileData == nil {
+					continue
+				}
+				contentItems = append(contentItems, item)
+			case "input_audio":
+				// O-H6: audio on Responses rides in a nested object
+				// rather than a flat field.
+				if p.Audio == nil {
+					continue
+				}
+				contentItems = append(contentItems, ResponsesItem{
+					Type: "input_audio",
+					InputAudio: &ResponsesInputAudio{
+						Data:   p.Audio.Data,
+						Format: p.Audio.Format,
+					},
+				})
 			}
 		}
 	}

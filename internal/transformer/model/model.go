@@ -954,6 +954,13 @@ type File struct {
 	Filename string `json:"filename"`
 	// The base64 encoded data of the file.
 	FileData string `json:"file_data"`
+	// FileID is OpenAI's uploaded-file handle ("file-abc123"). When set,
+	// Responses outbound emits `{type:"input_file", file_id:...}` without
+	// touching Filename / FileData. O-H6.
+	FileID string `json:"file_id,omitempty"`
+	// FileURL points at an externally-hosted file that the provider fetches
+	// itself. O-H6.
+	FileURL string `json:"file_url,omitempty"`
 }
 
 // ResponseFormat specifies the format of the response.

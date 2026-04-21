@@ -1040,6 +1040,26 @@ type ResponsesItem struct {
 	// Reasoning fields
 	Summary          []ResponsesReasoningSummary `json:"summary,omitempty"`
 	EncryptedContent *string                     `json:"encrypted_content,omitempty"`
+
+	// Multimodal input fields. OpenAI Responses accepts an `input_file`
+	// item as either { file_id } for an uploaded file, { filename,
+	// file_data } with an inline base64 (optionally a data URL), or
+	// { file_url } for fetch-on-demand. O-H6.
+	FileID   *string `json:"file_id,omitempty"`
+	Filename *string `json:"filename,omitempty"`
+	FileData *string `json:"file_data,omitempty"`
+	FileURL  *string `json:"file_url,omitempty"`
+
+	// InputAudio carries the `input_audio` nested object for audio inputs.
+	// O-H6.
+	InputAudio *ResponsesInputAudio `json:"input_audio,omitempty"`
+}
+
+// ResponsesInputAudio mirrors OpenAI's `input_audio` content shape used for
+// audio inputs on Responses requests. O-H6.
+type ResponsesInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format,omitempty"`
 }
 
 func (item ResponsesItem) isOutputMessageContent() bool {
@@ -1547,6 +1567,43 @@ func convertInputToMessageContent(input ResponsesInput) model.MessageContent {
 					},
 				})
 			}
+		case "input_file":
+			// O-H6: OpenAI Responses accepts three shapes for input_file —
+			// keep whichever representation the caller provided so
+			// downstream transformers can route the reference verbatim.
+			file := &model.File{}
+			if item.FileID != nil {
+				file.FileID = *item.FileID
+			}
+			if item.FileURL != nil {
+				file.FileURL = *item.FileURL
+			}
+			if item.Filename != nil {
+				file.Filename = *item.Filename
+			}
+			if item.FileData != nil {
+				file.FileData = *item.FileData
+			}
+			if file.FileID == "" && file.FileURL == "" && file.FileData == "" {
+				continue
+			}
+			parts = append(parts, model.MessageContentPart{
+				Type: "file",
+				File: file,
+			})
+		case "input_audio":
+			// O-H6: `input_audio` rides in a nested object per the
+			// Responses schema ({ data, format }).
+			if item.InputAudio == nil {
+				continue
+			}
+			parts = append(parts, model.MessageContentPart{
+				Type: "input_audio",
+				Audio: &model.Audio{
+					Format: item.InputAudio.Format,
+					Data:   item.InputAudio.Data,
+				},
+			})
 		}
 	}
 
