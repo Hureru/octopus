@@ -261,6 +261,16 @@ func (c *MessageContent) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &blocks)
 	if err == nil {
 		c.MultipleContent = blocks
+		c.Content = nil
+		return nil
+	}
+
+	var block MessageContentBlock
+
+	err = json.Unmarshal(data, &block)
+	if err == nil && block.Type != "" {
+		c.MultipleContent = []MessageContentBlock{block}
+		c.Content = nil
 		return nil
 	}
 
@@ -269,6 +279,7 @@ func (c *MessageContent) UnmarshalJSON(data []byte) error {
 	err = json.Unmarshal(data, &str)
 	if err == nil {
 		c.Content = &str
+		c.MultipleContent = nil
 		return nil
 	}
 
