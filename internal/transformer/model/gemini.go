@@ -9,7 +9,7 @@ import (
 // Shared by both inbound and outbound transformers.
 type GeminiGenerateContentRequest struct {
 	Contents          []*GeminiContent        `json:"contents"`
-	SystemInstruction *GeminiContent          `json:"system_instruction,omitempty"`
+	SystemInstruction *GeminiContent          `json:"systemInstruction,omitempty"`
 	Tools             []*GeminiTool           `json:"tools,omitempty"`
 	ToolConfig        *GeminiToolConfig       `json:"toolConfig,omitempty"`
 	GenerationConfig  *GeminiGenerationConfig `json:"generationConfig,omitempty"`
@@ -30,9 +30,13 @@ type GeminiFunctionCallingConfig struct {
 	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
-// GeminiContent represents a message content in Gemini format
+// GeminiContent represents a message content in Gemini format.
+// Role is "user" / "model" for turns inside `contents`; for
+// `systemInstruction` Gemini requires the role to be absent, which
+// `omitempty` handles automatically so long as callers leave the field
+// blank there.
 type GeminiContent struct {
-	Role  string        `json:"role"`
+	Role  string        `json:"role,omitempty"`
 	Parts []*GeminiPart `json:"parts"`
 }
 

@@ -1,6 +1,8 @@
 package gemini
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
@@ -205,4 +207,41 @@ func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.
 
 func stringPtr(v string) *string {
 	return &v
+}
+
+// TestConvertGeminiRequestSystemInstructionWireShape asserts the Gemini
+// request JSON uses the camelCase `systemInstruction` key (not snake_case)
+// and that the system instruction content omits `role` entirely, matching
+// Gemini's REST spec. (G-C3)
+// Ref: https://ai.google.dev/api/generate-content#request-body
+func TestConvertGeminiRequestSystemInstructionWireShape(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.Message{
+			{Role: "system", Content: model.MessageContent{Content: stringPtr("be concise")}},
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+		},
+	}
+	out := convertLLMToGeminiRequest(req)
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	wire := string(b)
+	if !strings.Contains(wire, `"systemInstruction":`) {
+		t.Errorf("expected camelCase systemInstruction key, got %s", wire)
+	}
+	if strings.Contains(wire, `"system_instruction"`) {
+		t.Errorf("unexpected snake_case key in wire: %s", wire)
+	}
+	// The systemInstruction body must not carry a role field. We look for
+	// `"role":""` specifically; user / model roles are still allowed
+	// elsewhere.
+	if strings.Contains(wire, `"role":""`) {
+		t.Errorf("systemInstruction should omit empty role, wire=%s", wire)
+	}
+	// Sanity-check the user turn still carries its role.
+	if !strings.Contains(wire, `"role":"user"`) {
+		t.Errorf("expected user role preserved, wire=%s", wire)
+	}
 }
