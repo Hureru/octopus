@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -667,6 +668,22 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 	} else if request.Stop != nil && request.Stop.Stop != nil {
 		config.StopSequences = []string{*request.Stop.Stop}
 		hasConfig = true
+	}
+
+	// CandidateCount (G-M8): Gemini supports multi-candidate sampling but
+	// the cross-provider InternalLLMRequest does not expose `n` as a
+	// first-class field (it's commented out to enforce "n=1" elsewhere).
+	// Use a TransformerMetadata escape hatch so Gemini-aware callers can
+	// opt in without breaking the invariant. Ignore non-positive or
+	// unparseable values — they either match the default or would 400
+	// upstream.
+	if raw, ok := request.TransformerMetadata["gemini_candidate_count"]; ok {
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			if n, err := strconv.Atoi(trimmed); err == nil && n > 1 {
+				config.CandidateCount = n
+				hasConfig = true
+			}
+		}
 	}
 
 	if request.ReasoningEffort != "" || request.ReasoningBudget != nil || request.AdaptiveThinking {

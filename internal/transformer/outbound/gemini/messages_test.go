@@ -486,6 +486,40 @@ func TestConvertGeminiResponseSafetyRatings(t *testing.T) {
 	}
 }
 
+// TestConvertGeminiRequestCandidateCount verifies G-M8: a numeric value
+// in TransformerMetadata["gemini_candidate_count"] populates
+// generationConfig.candidateCount. Non-positive / invalid values leave
+// the field at its zero default (which Gemini treats as 1).
+func TestConvertGeminiRequestCandidateCount(t *testing.T) {
+	mk := func(meta map[string]string) *model.InternalLLMRequest {
+		return &model.InternalLLMRequest{
+			Model: "gemini-2.5-flash",
+			Messages: []model.Message{
+				{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
+			},
+			TransformerMetadata: meta,
+		}
+	}
+
+	out := convertLLMToGeminiRequest(mk(map[string]string{"gemini_candidate_count": "3"}))
+	if out.GenerationConfig == nil || out.GenerationConfig.CandidateCount != 3 {
+		t.Fatalf("expected candidateCount=3, got %+v", out.GenerationConfig)
+	}
+
+	// n=1 is the default — we deliberately skip writing it to avoid a
+	// redundant field on the wire.
+	out = convertLLMToGeminiRequest(mk(map[string]string{"gemini_candidate_count": "1"}))
+	if out.GenerationConfig != nil && out.GenerationConfig.CandidateCount != 0 {
+		t.Errorf("expected candidateCount unset for n=1, got %d", out.GenerationConfig.CandidateCount)
+	}
+
+	// Invalid value → field stays unset.
+	out = convertLLMToGeminiRequest(mk(map[string]string{"gemini_candidate_count": "abc"}))
+	if out.GenerationConfig != nil && out.GenerationConfig.CandidateCount != 0 {
+		t.Errorf("expected candidateCount unset for unparseable value")
+	}
+}
+
 // TestConvertGeminiRequestSpeechConfigRawPassthrough verifies G-H11 when
 // the caller supplies a fully-formed speechConfig JSON blob: the outbound
 // transformer forwards the bytes verbatim into generationConfig.
