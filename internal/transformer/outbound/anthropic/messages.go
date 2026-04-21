@@ -59,6 +59,9 @@ func (o *MessageOutbound) TransformRequest(ctx context.Context, request *model.I
 	}
 	req.Header.Set("Anthropic-Version", "2023-06-01")
 	req.Header.Set("X-API-Key", key)
+	if betas := collectAnthropicBetaHeaders(anthropicReq); len(betas) > 0 {
+		req.Header.Set("anthropic-beta", strings.Join(betas, ","))
+	}
 
 	// Parse and set URL
 	parsedUrl, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
@@ -1174,6 +1177,60 @@ func convertCacheControl(cc *model.CacheControl) *anthropicModel.CacheControl {
 		Type: cc.Type,
 		TTL:  ttl,
 	}
+}
+
+// collectAnthropicBetaHeaders scans the outbound MessageRequest for features
+// that require an `anthropic-beta` header and returns the gated values.
+// Today we only detect cache_control.ttl == "1h" (extended-cache-ttl-2025-04-11);
+// other server-tool betas (web-search-2025-03-05, code-execution-2025-05-22,
+// computer-use-2025-01-24) will slot in here once A-H5 lands.
+//
+// Returning a slice (de-duplicated, order-preserving) lets callers join with
+// a comma; multiple beta tags are valid in a single header per the Anthropic
+// beta-headers spec.
+// Ref: https://docs.anthropic.com/en/api/beta-headers
+// Ref: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+func collectAnthropicBetaHeaders(req *anthropicModel.MessageRequest) []string {
+	if req == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 2)
+	add := func(beta string) {
+		if beta == "" {
+			return
+		}
+		if _, ok := seen[beta]; ok {
+			return
+		}
+		seen[beta] = struct{}{}
+		out = append(out, beta)
+	}
+
+	inspect := func(cc *anthropicModel.CacheControl) {
+		if cc == nil {
+			return
+		}
+		if cc.TTL == model.CacheTTL1h {
+			add("extended-cache-ttl-2025-04-11")
+		}
+	}
+
+	if req.System != nil {
+		for i := range req.System.MultiplePrompts {
+			inspect(req.System.MultiplePrompts[i].CacheControl)
+		}
+	}
+	for i := range req.Tools {
+		inspect(req.Tools[i].CacheControl)
+	}
+	for i := range req.Messages {
+		msg := &req.Messages[i]
+		for j := range msg.Content.MultipleContent {
+			inspect(msg.Content.MultipleContent[j].CacheControl)
+		}
+	}
+	return out
 }
 
 // pruneCacheBreakpoints walks the Anthropic request after conversion and drops cache_control

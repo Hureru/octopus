@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
@@ -70,6 +71,64 @@ func TestConvertToAnthropicRequestUsesUserFallbackForMetadata(t *testing.T) {
 
 func stringPtr(v string) *string {
 	return &v
+}
+
+// TestTransformRequestAddsExtendedCacheTTLBetaHeader verifies that when any
+// cache_control.ttl="1h" breakpoint is present anywhere in the outbound
+// payload, the `anthropic-beta: extended-cache-ttl-2025-04-11` header is
+// attached; Anthropic responds with 400 invalid_request_error otherwise.
+// (A-C3) Ref: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+func TestTransformRequestAddsExtendedCacheTTLBetaHeader(t *testing.T) {
+	outbound := &MessageOutbound{}
+	cc1h := &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h}
+	req := &model.InternalLLMRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []model.Message{
+			{
+				Role: "user",
+				Content: model.MessageContent{
+					MultipleContent: []model.MessageContentPart{
+						{Type: "text", Text: stringPtr("hello"), CacheControl: cc1h},
+					},
+				},
+			},
+		},
+	}
+	httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.anthropic.com", "sk-test")
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	if got := httpReq.Header.Get("anthropic-beta"); !strings.Contains(got, "extended-cache-ttl-2025-04-11") {
+		t.Fatalf("expected extended-cache-ttl beta header, got %q", got)
+	}
+}
+
+// TestTransformRequestSkipsBetaWhenNoLongTTL ensures we do not attach the
+// beta header (which changes Anthropic's billing behaviour) when the
+// request only uses default 5m breakpoints or no caching at all.
+func TestTransformRequestSkipsBetaWhenNoLongTTL(t *testing.T) {
+	outbound := &MessageOutbound{}
+	cc5m := &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL5m}
+	req := &model.InternalLLMRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []model.Message{
+			{
+				Role: "user",
+				Content: model.MessageContent{
+					MultipleContent: []model.MessageContentPart{
+						{Type: "text", Text: stringPtr("hello"), CacheControl: cc5m},
+					},
+				},
+			},
+		},
+	}
+	httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.anthropic.com", "sk-test")
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	if got := httpReq.Header.Get("anthropic-beta"); got != "" {
+		t.Fatalf("did not expect beta header for 5m TTL, got %q", got)
+	}
 }
 
 // TestConvertSingleMessageServerToolResultWireType verifies that the
