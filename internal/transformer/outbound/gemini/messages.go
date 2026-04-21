@@ -1062,6 +1062,12 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 			var toolCalls []model.ToolCall
 			var reasoningContent *string
 			var hasInlineData bool
+			// hasStructuredPart flags parts that cannot be serialised as a
+			// plain string (inline data, server_tool_use, server_tool_result).
+			// When true the message must use MultipleContent instead of the
+			// scalar Content field, or the structured parts are silently
+			// dropped. G-H9.
+			var hasStructuredPart bool
 			var reasoningBlocks []model.ReasoningBlock
 			assignIndex := func() int {
 				if idx := nextReasoningIndex(); idx >= 0 {
@@ -1107,6 +1113,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 				// Handle inline data (images, audio, etc.)
 				if part.InlineData != nil {
 					hasInlineData = true
+					hasStructuredPart = true
 					// Convert to data URL format: data:{mimeType};base64,{data}
 					dataURL := fmt.Sprintf("data:%s;base64,%s", part.InlineData.MimeType, part.InlineData.Data)
 					contentParts = append(contentParts, model.MessageContentPart{
@@ -1146,10 +1153,58 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 						})
 					}
 				}
+
+				// ExecutableCode / CodeExecutionResult (G-H9): Gemini emits
+				// these parts when the sandboxed code_execution tool runs.
+				// We fold them into the cross-provider ServerToolUse /
+				// ServerToolResult envelopes with BlockType="code_execution"
+				// so the existing passthrough infrastructure (P1.1) carries
+				// them through. ID ties use→result for clients that care.
+				if part.ExecutableCode != nil {
+					input, _ := json.Marshal(map[string]any{
+						"language": part.ExecutableCode.Language,
+						"code":     part.ExecutableCode.Code,
+					})
+					codeID := fmt.Sprintf("gemini_code_exec_%d", idx)
+					hasStructuredPart = true
+					contentParts = append(contentParts, model.MessageContentPart{
+						Type: "server_tool_use",
+						ServerToolUse: &model.ServerToolUseBlock{
+							ID:    codeID,
+							Name:  "code_execution",
+							Input: input,
+						},
+					})
+				}
+				if part.CodeExecutionResult != nil {
+					resultPayload, _ := json.Marshal(map[string]any{
+						"outcome": part.CodeExecutionResult.Outcome,
+						"output":  part.CodeExecutionResult.Output,
+					})
+					isError := part.CodeExecutionResult.Outcome != "" &&
+						part.CodeExecutionResult.Outcome != "OUTCOME_OK" &&
+						part.CodeExecutionResult.Outcome != "OUTCOME_UNSPECIFIED"
+					hasStructuredPart = true
+					contentParts = append(contentParts, model.MessageContentPart{
+						Type: "server_tool_result",
+						ServerToolResult: &model.ServerToolResultBlock{
+							Content:   resultPayload,
+							IsError:   &isError,
+							BlockType: "code_execution_tool_result",
+						},
+					})
+				}
 			}
 
-			// Set content - use MultipleContent if we have inline data (images)
-			if hasInlineData {
+			// Set content - use MultipleContent if we have any structured
+			// parts (inline data or server-tool blocks), otherwise fall back
+			// to the scalar string form. G-H9 widened this from
+			// hasInlineData-only so code_execution parts aren't dropped.
+			//
+			// Text parts are also already appended to contentParts in order
+			// (see the text branch above), so the multipart path preserves
+			// the full sequence.
+			if hasStructuredPart {
 				msg.Content = model.MessageContent{
 					MultipleContent: contentParts,
 				}

@@ -205,6 +205,113 @@ func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.
 	}
 }
 
+// TestConvertGeminiResponseCodeExecutionParts verifies G-H9: when Gemini
+// returns ExecutableCode and CodeExecutionResult parts (emitted by the
+// sandboxed code_execution tool), the outbound transformer folds them
+// into MessageContentPart entries with ServerToolUse / ServerToolResult
+// envelopes so the existing cross-provider passthrough picks them up.
+// Previously these parts were silently dropped during unmarshaling.
+func TestConvertGeminiResponseCodeExecutionParts(t *testing.T) {
+	reason := "STOP"
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{
+			{
+				Index:        0,
+				FinishReason: &reason,
+				Content: &model.GeminiContent{
+					Role: "model",
+					Parts: []*model.GeminiPart{
+						{Text: "Let me compute that."},
+						{ExecutableCode: &model.GeminiExecutableCode{
+							Language: "PYTHON",
+							Code:     "print(1+1)",
+						}},
+						{CodeExecutionResult: &model.GeminiCodeExecutionResult{
+							Outcome: "OUTCOME_OK",
+							Output:  "2\n",
+						}},
+					},
+				},
+			},
+		},
+	}
+	internal := convertGeminiToLLMResponse(resp, false, nil)
+	if len(internal.Choices) != 1 {
+		t.Fatalf("expected 1 choice, got %d", len(internal.Choices))
+	}
+	msg := internal.Choices[0].Message
+	if msg == nil {
+		t.Fatalf("expected message, got nil")
+	}
+	parts := msg.Content.MultipleContent
+	if len(parts) < 2 {
+		t.Fatalf("expected at least 2 structured parts, got %d: %+v", len(parts), parts)
+	}
+
+	var sawUse, sawResult bool
+	for _, p := range parts {
+		if p.Type == "server_tool_use" && p.ServerToolUse != nil {
+			sawUse = true
+			if p.ServerToolUse.Name != "code_execution" {
+				t.Errorf("expected server_tool_use.Name=code_execution, got %q", p.ServerToolUse.Name)
+			}
+			if !strings.Contains(string(p.ServerToolUse.Input), "PYTHON") {
+				t.Errorf("expected server_tool_use.Input to carry language, got %s", string(p.ServerToolUse.Input))
+			}
+		}
+		if p.Type == "server_tool_result" && p.ServerToolResult != nil {
+			sawResult = true
+			if p.ServerToolResult.BlockType != "code_execution_tool_result" {
+				t.Errorf("expected BlockType=code_execution_tool_result, got %q", p.ServerToolResult.BlockType)
+			}
+			if p.ServerToolResult.IsError == nil || *p.ServerToolResult.IsError {
+				t.Errorf("expected IsError=false for OUTCOME_OK, got %+v", p.ServerToolResult.IsError)
+			}
+			if !strings.Contains(string(p.ServerToolResult.Content), "2") {
+				t.Errorf("expected result.Content to carry output, got %s", string(p.ServerToolResult.Content))
+			}
+		}
+	}
+	if !sawUse {
+		t.Errorf("expected server_tool_use part, got %+v", parts)
+	}
+	if !sawResult {
+		t.Errorf("expected server_tool_result part, got %+v", parts)
+	}
+}
+
+// TestConvertGeminiResponseCodeExecutionResultFailedOutcome verifies the
+// IsError flag is set for non-OK outcomes so downstream consumers can
+// distinguish failed runs from successful ones.
+func TestConvertGeminiResponseCodeExecutionResultFailedOutcome(t *testing.T) {
+	reason := "STOP"
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{
+			{
+				Index:        0,
+				FinishReason: &reason,
+				Content: &model.GeminiContent{
+					Role: "model",
+					Parts: []*model.GeminiPart{
+						{CodeExecutionResult: &model.GeminiCodeExecutionResult{
+							Outcome: "OUTCOME_FAILED",
+							Output:  "SyntaxError",
+						}},
+					},
+				},
+			},
+		},
+	}
+	internal := convertGeminiToLLMResponse(resp, false, nil)
+	parts := internal.Choices[0].Message.Content.MultipleContent
+	if len(parts) != 1 || parts[0].ServerToolResult == nil {
+		t.Fatalf("expected single server_tool_result part, got %+v", parts)
+	}
+	if parts[0].ServerToolResult.IsError == nil || !*parts[0].ServerToolResult.IsError {
+		t.Errorf("expected IsError=true for OUTCOME_FAILED, got %+v", parts[0].ServerToolResult.IsError)
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }

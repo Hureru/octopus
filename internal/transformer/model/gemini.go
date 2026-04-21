@@ -62,11 +62,39 @@ type GeminiPart struct {
 	FileData         *GeminiFileData         `json:"fileData,omitempty"`
 	VideoMetadata    *GeminiVideoMetadata    `json:"videoMetadata,omitempty"`
 
+	// ExecutableCode carries a codeExecution tool invocation emitted by
+	// Gemini when the sandboxed code_execution tool is enabled. Mirrors the
+	// upstream {language, code} shape. G-H9.
+	ExecutableCode *GeminiExecutableCode `json:"executableCode,omitempty"`
+
+	// CodeExecutionResult carries the outcome of a prior executableCode
+	// part. Mirrors the upstream {outcome, output} shape. G-H9.
+	CodeExecutionResult *GeminiCodeExecutionResult `json:"codeExecutionResult,omitempty"`
+
 	// Thought indicates if the part is thought from the model
 	Thought bool `json:"thought,omitempty"`
 
 	// ThoughtSignature is an opaque signature for the thought
 	ThoughtSignature string `json:"thoughtSignature,omitempty"`
+}
+
+// GeminiExecutableCode mirrors the code_execution tool's code-emitting
+// payload. Language is an enum ("LANGUAGE_UNSPECIFIED" / "PYTHON" at time
+// of writing). Code is the literal source Gemini wants to run.
+// Ref: https://ai.google.dev/api/caching#ExecutableCode
+type GeminiExecutableCode struct {
+	Language string `json:"language,omitempty"`
+	Code     string `json:"code,omitempty"`
+}
+
+// GeminiCodeExecutionResult mirrors the code_execution tool's result
+// payload. Outcome is an enum ("OUTCOME_UNSPECIFIED" / "OUTCOME_OK" /
+// "OUTCOME_FAILED" / "OUTCOME_DEADLINE_EXCEEDED"). Output is the literal
+// stdout / stderr text Gemini produced.
+// Ref: https://ai.google.dev/api/caching#CodeExecutionResult
+type GeminiCodeExecutionResult struct {
+	Outcome string `json:"outcome,omitempty"`
+	Output  string `json:"output,omitempty"`
 }
 
 // GeminiBlob represents inline binary data
