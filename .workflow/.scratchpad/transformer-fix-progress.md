@@ -53,14 +53,14 @@
 
 | 编号 | 标题 | 状态 | 完成时间 | Commit | 备注 |
 |------|------|------|----------|--------|------|
-| A-H3 | Anthropic top_k / service_tier 透传 | ⏸ | | | 合并 A-M1 |
-| A-H4 | thinking 时参数约束 | ⏸ | | | |
-| G-H1 | GenerationConfig 缺参数 | ⏸ | | | |
-| G-H5 | baseUrl 缺 `/v1beta` 兜底 | ⏸ | | | |
-| G-H6 | API key 改用请求头 | ⏸ | | | |
+| A-H3 | Anthropic top_k / service_tier 透传 | ✅ | 2026-04-21 | e3e5569 | InternalLLMRequest 新增 TopK *int64；inbound 提取 top_k/service_tier，outbound 回写；合并 A-M1 |
+| A-H4 | thinking 时参数约束 | ✅ | 2026-04-21 | e3e5569 | 新增 applyThinkingParamConstraints：enabled/adaptive 模式强制 temperature=1.0、清空 top_p/top_k |
+| G-H1 | GenerationConfig 缺参数 | ✅ | 2026-04-21 | 4985b11 | presencePenalty/frequencyPenalty/seed/responseLogprobs/logprobs(clamp 5)/mediaResolution；TopK 优先原生字段 |
+| G-H5 | baseUrl 缺 `/v1beta` 兜底 | ✅ | 2026-04-21 | 38588b7 | pathHasGeminiVersion 检测 `/v[0-9]`，缺则前置 `/v1beta` |
+| G-H6 | API key 改用请求头 | ✅ | 2026-04-21 | 38588b7 | 从 query `?key=` 改为 `x-goog-api-key` header；streaming 保留 `alt=sse` |
 | G-H7 | 多并发 thoughtSignature 按名配对 | ✅ | 2026-04-21 | fe6ae8a | ReasoningBlock 加 ToolCallID/ToolCallName；outbound 新增 collectGeminiSignaturesByName 优先按 name 查找；随 G-C4 合并 |
-| O-H2 | Chat 入站设 RawAPIFormat | ⏸ | | | |
-| O-H6 | Responses 多模态输入补齐 | ⏸ | | | |
+| O-H2 | Chat 入站设 RawAPIFormat | ✅ | 2026-04-21 | 8fb3a03 | Chat inbound 标记 APIFormatOpenAIChatCompletion |
+| O-H6 | Responses 多模态输入补齐 | ✅ | 2026-04-21 | d0309a9 | ResponsesItem 加 FileID/Filename/FileData/FileURL + InputAudio；model.File 加 FileID/FileURL；inbound/outbound 双向映射 |
 
 ## P5 - Medium
 
@@ -110,6 +110,7 @@
 | 2026-04-21 | P1 批次全部完成（G-C1 7b85e07 / G-C2 b61d5ce / G-C3 5ba1d59 / G-C5 aec360b / A-C1 669295e / A-C3 9cf1c18 / O-C1 6995f17 / O-C2 9db70ef / O-C4 3312354） | Claude Code |
 | 2026-04-21 | P2 批次全部完成（A-C2 801d892 / O-H1 2d2b2e6 / O-H4 832b6c0 / A-H5 e92c993 / G-C4+G-H7 fe6ae8a） | Claude Code |
 | 2026-04-21 | P3 批次全部完成（A-H1+A-H2 c5a068e / G-H2+G-H3 72c2a66 / O-H3+O-H5 400bbf2） | Claude Code |
+| 2026-04-21 | P4 批次全部完成（A-H3+A-H4 e3e5569 / G-H1 4985b11 / G-H5+G-H6 38588b7 / O-H2 8fb3a03 / O-H6 d0309a9） | Claude Code |
 
 ---
 
