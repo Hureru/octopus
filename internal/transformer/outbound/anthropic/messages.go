@@ -1003,9 +1003,13 @@ func convertMultiplePartContent(msg model.Message) anthropicModel.MessageContent
 			// bytes so Anthropic receives the same shape the upstream
 			// model produced.
 			toolUseID := part.ServerToolResult.ToolUseID
-			wireType := "web_search_tool_result"
-			if part.ServerToolUse != nil && part.ServerToolUse.Name == "code_execution_20250522" {
-				wireType = "code_execution_tool_result"
+			// BlockType preserves the exact Anthropic wire type seen by the
+			// inbound layer (web_search_tool_result / code_execution_tool_result).
+			// Falling back to web_search_tool_result keeps backwards
+			// compatibility with callers that don't set BlockType.
+			wireType := part.ServerToolResult.BlockType
+			if wireType == "" {
+				wireType = "web_search_tool_result"
 			}
 			var contentWrap *anthropicModel.MessageContent
 			if len(part.ServerToolResult.Content) > 0 {

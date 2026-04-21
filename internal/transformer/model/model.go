@@ -875,6 +875,14 @@ type ServerToolResultBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
 	IsError   *bool           `json:"is_error,omitempty"`
+
+	// BlockType preserves the exact Anthropic wire type the result arrived as
+	// ("web_search_tool_result", "code_execution_tool_result", …). The
+	// outbound layer uses it to re-emit the correct block type when
+	// forwarding to Anthropic. Empty string means the caller did not know
+	// the upstream type and the outbound should default to
+	// "web_search_tool_result" (Anthropic's original server-tool result).
+	BlockType string `json:"-"`
 }
 
 // ImageURL represents an image URL with optional detail level.

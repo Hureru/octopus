@@ -253,6 +253,7 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 					result := &model.ServerToolResultBlock{
 						ToolUseID: lo.FromPtr(block.ToolUseID),
 						IsError:   block.IsError,
+						BlockType: block.Type,
 					}
 					if block.Content != nil {
 						if block.Content.Content != nil {
