@@ -107,11 +107,15 @@ func TestConvertGeminiRequestDowngradesUnsignedHistoricalToolUse(t *testing.T) {
 	}
 
 	out := convertLLMToGeminiRequest(req)
-	if got := out.Contents[0].Parts[0].FunctionCall; got != nil {
-		t.Fatalf("expected unsigned tool call to downgrade to text, got %+v", out.Contents[0].Parts[0])
+	// After fix: unsigned tool calls are now sent as functionCall parts (not degraded to text)
+	if got := out.Contents[0].Parts[0].FunctionCall; got == nil {
+		t.Fatalf("expected unsigned tool call to be sent as functionCall, got %+v", out.Contents[0].Parts[0])
 	}
-	if out.Contents[1].Parts[0].FunctionResponse != nil {
-		t.Fatalf("expected matching tool result to downgrade to text, got %+v", out.Contents[1].Parts[0])
+	if got := out.Contents[0].Parts[0].FunctionCall; got.Name != "Bash" {
+		t.Fatalf("expected functionCall name to be 'Bash', got %+v", got)
+	}
+	if out.Contents[1].Parts[0].FunctionResponse == nil {
+		t.Fatalf("expected matching tool result to be sent as functionResponse, got %+v", out.Contents[1].Parts[0])
 	}
 }
 

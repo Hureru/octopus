@@ -1192,6 +1192,7 @@ func (i *MessagesInbound) GetInternalResponse(ctx context.Context) (*model.Inter
 
 	// Aggregate stream chunks for stream scenario
 	if len(i.streamChunks) == 0 {
+		log.Debugf("GetInternalResponse: no stream chunks available (stream may not be complete)")
 		return nil, nil
 	}
 

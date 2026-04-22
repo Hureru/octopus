@@ -586,22 +586,12 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 						}
 					}
 
+					// ThoughtSignature is optional - attach if available for multi-turn reasoning
 					if sig != "" {
 						part.ThoughtSignature = sig
-						content.Parts = append(content.Parts, part)
-						continue
 					}
-
-					// Cross-provider tool histories (for example Anthropic inbound ->
-					// Gemini outbound) don't carry Gemini thoughtSignatures. Degrade the
-					// historical function call into plain text context instead of sending
-					// an invalid functionCall part that Gemini rejects with 400.
-					if fallback := formatGeminiToolCallFallback(toolCall); fallback != "" {
-						content.Parts = append(content.Parts, &model.GeminiPart{Text: fallback})
-					}
-					if toolCall.ID != "" {
-						degradedToolCalls[toolCall.ID] = toolCall.Function.Name
-					}
+					// Always send functionCall part, even without signature (cross-provider compatibility)
+					content.Parts = append(content.Parts, part)
 				}
 			}
 			geminiReq.Contents = append(geminiReq.Contents, content)

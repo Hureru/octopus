@@ -283,7 +283,10 @@ func (ra *relayAttempt) attempt() attemptResult {
 
 	if fwdErr == nil {
 		// ====== 成功 ======
-		ra.collectResponse()
+		// Only collect response if NOT using passthrough (passthrough collects at stream end)
+		if !ra.shouldPassthroughAnthropic() {
+			ra.collectResponse()
+		}
 		ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
 		op.ChannelKeyUpdate(ra.usedKey)
 
@@ -897,16 +900,26 @@ func (ra *relayAttempt) handleResponse(ctx context.Context, response *http.Respo
 
 // collectResponse 收集响应信息
 func (ra *relayAttempt) collectResponse() {
+	if ra == nil || ra.inAdapter == nil || ra.metrics == nil {
+		return
+	}
 	internalResponse, err := ra.inAdapter.GetInternalResponse(ra.requestContext())
-	if err != nil || internalResponse == nil {
+	if err != nil {
+		log.Debugf("collectResponse: failed to get internal response: %v", err)
+		return
+	}
+	if internalResponse == nil {
+		log.Debugf("collectResponse: internal response is nil (stream may not be complete)")
 		return
 	}
 
 	actualModel := strings.TrimSpace(internalResponse.Model)
-	if actualModel == "" {
+	if actualModel == "" && ra.internalRequest != nil {
 		actualModel = strings.TrimSpace(ra.internalRequest.Model)
 	}
-	ra.metrics.SetSelectedChannel(ra.channel.ID)
+	if ra.channel != nil {
+		ra.metrics.SetSelectedChannel(ra.channel.ID)
+	}
 	ra.metrics.SetInternalResponse(internalResponse, actualModel)
 }
 
@@ -1318,12 +1331,14 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 		case r, ok := <-results:
 			if !ok {
 				ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
+				ra.collectResponse()
 				log.Infof("stream end")
 				return nil
 			}
 			if r.err != nil {
 				if r.err == io.EOF {
 					ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
+					ra.collectResponse()
 					log.Infof("stream end")
 					return nil
 				}
@@ -1396,6 +1411,7 @@ func (ra *relayAttempt) handleResponsePassthroughAnthropic(ctx context.Context, 
 	}
 	if internalResponse, terr := ra.outAdapter.TransformResponse(ctx, sidecarResp); terr == nil && internalResponse != nil {
 		_, _ = ra.inAdapter.TransformResponse(ctx, internalResponse)
+		ra.collectResponse()
 	}
 	return nil
 }
