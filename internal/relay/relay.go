@@ -731,7 +731,20 @@ func (ra *relayAttempt) getStreamWriter() StreamWriter {
 func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
 	if ra.c != nil {
 		for key, values := range ra.c.Request.Header {
-			if hopByHopHeaders[strings.ToLower(key)] {
+			lowerKey := strings.ToLower(key)
+			if hopByHopHeaders[lowerKey] {
+				continue
+			}
+			// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉
+			// 透传路径预置的 prompt-caching / extended-cache-ttl 基线。
+			if lowerKey == "anthropic-beta" {
+				existing := outboundRequest.Header.Get(key)
+				for _, value := range values {
+					existing = mergeBetaHeader(existing, value)
+				}
+				if existing != "" {
+					outboundRequest.Header.Set(key, existing)
+				}
 				continue
 			}
 			for _, value := range values {
@@ -744,6 +757,26 @@ func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
 			outboundRequest.Header.Set(header.HeaderKey, header.HeaderValue)
 		}
 	}
+}
+
+// mergeBetaHeader 合并两个逗号分隔的 anthropic-beta 字段值，去重并保留先后顺序。
+func mergeBetaHeader(existing, incoming string) string {
+	seen := make(map[string]struct{}, 8)
+	merged := make([]string, 0, 8)
+	for _, source := range []string{existing, incoming} {
+		for _, entry := range strings.Split(source, ",") {
+			normalized := strings.TrimSpace(entry)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seen[normalized]; ok {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			merged = append(merged, normalized)
+		}
+	}
+	return strings.Join(merged, ",")
 }
 
 // sendRequest 发送 HTTP 请求

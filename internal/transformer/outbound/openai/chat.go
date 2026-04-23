@@ -177,6 +177,22 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 		WebSearchOptions:    request.WebSearchOptions,
 	}
 
+	// Anthropic 的 stop_sequences 语义比 Chat Completions 的 stop 更宽松
+	// （Anthropic 只在模型明确输出该序列时截断，而 Chat 在子串层面进行匹配），
+	// 透传会导致 Chat 上游在第一个分段（如 "\n\n"）就提前触发 finish_reason="stop"，
+	// 表现为"回一句话就中断"。仅在 inbound 是 Anthropic 时剥离。
+	if request.RawAPIFormat == model.APIFormatAnthropicMessage {
+		result.Stop = nil
+	}
+
+	// 推理系列模型（o1/o3/o4/gpt-5）把 max_tokens 弃用，改为 max_completion_tokens。
+	// 若上层只填了 MaxTokens，将其重定向到新字段，避免新模型在还没输出可见内容前
+	// 就被 max_tokens 限额打断。
+	if result.MaxCompletionTokens == nil && result.MaxTokens != nil && isReasoningChatModel(result.Model) {
+		result.MaxCompletionTokens = result.MaxTokens
+		result.MaxTokens = nil
+	}
+
 	if request.Audio != nil {
 		result.Audio = &ChatCompletionsAudio{
 			Format: request.Audio.Format,
@@ -185,6 +201,23 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 	}
 
 	return result
+}
+
+// isReasoningChatModel 判断 Chat Completions 端的模型是否属于推理系列
+// （o1/o3/o4/gpt-5）。这些系列只接受 max_completion_tokens，旧的 max_tokens
+// 会被 OpenAI 官方 API 直接拒绝或悄悄忽略。
+func isReasoningChatModel(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, "o1") || strings.HasPrefix(name, "o3") || strings.HasPrefix(name, "o4") {
+		return true
+	}
+	if strings.HasPrefix(name, "gpt-5") {
+		return true
+	}
+	return false
 }
 
 func (o *ChatOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {

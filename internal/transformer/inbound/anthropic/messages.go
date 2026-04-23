@@ -979,8 +979,13 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 
 				// Initialize tool call if it doesn't exist
 				if !i.toolCallIndices[toolCallIndex] {
-					// Start a new tool use block, we should stop the previous tool use block
-					if toolCallIndex > 0 {
+					// 只有当此前确实已经打开过一个 tool_use 块（即将开启第二个或之后的
+					// 工具块）时才发 stop；用 toolCallIndex>0 判断不可靠，因为上游
+					// （尤其是 Responses API）把 OutputIndex 写入该字段，首个工具块
+					// 的 OutputIndex 往往已经大于 0（前面可能先出现 message/reasoning
+					// item），此时若发出 content_block_stop 会引用一个从未打开的块，
+					// 触发客户端 "Content block not found"。
+					if i.hasToolContentStarted {
 						stopEvent := StreamEvent{
 							Type:  "content_block_stop",
 							Index: &i.contentIndex,

@@ -28,6 +28,11 @@ type MessageOutbound struct {
 	initialized bool
 }
 
+// DefaultAnthropicPassthroughBeta 是 Anthropic→Anthropic 直通路径在未从客户端收到
+// 显式 anthropic-beta 时写入的默认基线；同时作为 copyHeaders 合并客户端值时的基线。
+// 取这两个主要是为了让扩展缓存 TTL（1h）以及新版缓存作用域稳定生效。
+const DefaultAnthropicPassthroughBeta = "prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11"
+
 func (o *MessageOutbound) TransformRequest(ctx context.Context, request *model.InternalLLMRequest, baseUrl, key string) (*http.Request, error) {
 	if request == nil {
 		return nil, fmt.Errorf("request is nil")
@@ -111,11 +116,14 @@ func (o *MessageOutbound) TransformRequestRaw(ctx context.Context, rawBody []byt
 	}
 
 	// 默认请求头：上层 copyHeaders 随后会用客户端真实值覆盖 Content-Type / Accept /
-	// Anthropic-Version / anthropic-beta；x-api-key 与 authorization 被 hop-by-hop 过滤，
-	// 因此 Set 的上游密钥不会被客户端请求头覆盖。
+	// Anthropic-Version；anthropic-beta 在 copyHeaders 里会与此默认值做合并去重，
+	// 确保即使客户端未显式声明也能触发 prompt-caching / extended-cache-ttl 等缓存
+	// 相关 beta（参考 metapi headerUtils.mergeClaudeBetaHeader 的做法）。
+	// x-api-key 与 authorization 被 hop-by-hop 过滤，因此上游密钥不会被客户端覆盖。
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Anthropic-Version", "2023-06-01")
+	req.Header.Set("anthropic-beta", DefaultAnthropicPassthroughBeta)
 	req.Header.Set("X-API-Key", key)
 
 	parsedUrl, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
@@ -131,17 +139,123 @@ func (o *MessageOutbound) TransformRequestRaw(ctx context.Context, rawBody []byt
 	return req, nil
 }
 
+// rewriteRawRequestModel 仅替换顶层 "model" 字段的 JSON 字符串值，保持其他字节原封不动，
+// 以保留 Anthropic prompt cache 所依赖的字节级稳定性（字段顺序、空白、数字编码都会影响上游 hash）。
+// 找不到顶层 model 字段时退回整体 unmarshal/marshal。嵌套对象里的 "model" 不会被误伤。
 func rewriteRawRequestModel(rawBody []byte, modelName string) ([]byte, error) {
+	modelName = strings.TrimSpace(modelName)
+	valueStart, valueEnd, ok := findTopLevelStringField(rawBody, "model")
+	if ok {
+		encoded, err := json.Marshal(modelName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode model value: %w", err)
+		}
+		result := make([]byte, 0, len(rawBody)-(valueEnd-valueStart)+len(encoded))
+		result = append(result, rawBody[:valueStart]...)
+		result = append(result, encoded...)
+		result = append(result, rawBody[valueEnd:]...)
+		return result, nil
+	}
+
+	// fallback：顶层没有 model 字段（理论上不该发生，Anthropic 请求必填）；保持旧行为。
 	var payload map[string]any
 	if err := json.Unmarshal(rawBody, &payload); err != nil {
 		return nil, fmt.Errorf("failed to decode raw anthropic request: %w", err)
 	}
-	payload["model"] = strings.TrimSpace(modelName)
+	payload["model"] = modelName
 	rewrittenBody, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode raw anthropic request: %w", err)
 	}
 	return rewrittenBody, nil
+}
+
+// findTopLevelStringField 在顶层 JSON 对象中定位指定字符串字段的 value 字节范围
+// （含首尾引号）。只匹配深度为 1 的 key，避免命中嵌套对象中的同名字段。
+// 返回 value 的起止字节 offset 以及是否命中。
+func findTopLevelStringField(raw []byte, field string) (int, int, bool) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+
+	tok, err := dec.Token()
+	if err != nil {
+		return 0, 0, false
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return 0, 0, false
+	}
+
+	depth := 1
+	expectKey := true
+	var currentKey string
+
+	for dec.More() || depth > 0 {
+		tok, err = dec.Token()
+		if err != nil {
+			return 0, 0, false
+		}
+
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '{', '[':
+				depth++
+				expectKey = false
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return 0, 0, false
+				}
+				expectKey = (v == '}') && depth == 1
+			}
+		case string:
+			if depth == 1 && expectKey {
+				currentKey = v
+				expectKey = false
+			} else {
+				if depth == 1 && currentKey == field {
+					// dec.InputOffset() 指向 value token 结束后的位置，
+					// 对字符串值而言即闭合引号之后的 offset。
+					valueEnd := int(dec.InputOffset())
+					valueStart := findPrecedingStringStart(raw, valueEnd-1)
+					if valueStart >= 0 {
+						return valueStart, valueEnd, true
+					}
+					return 0, 0, false
+				}
+				if depth == 1 {
+					expectKey = true
+				}
+			}
+		default:
+			if depth == 1 {
+				expectKey = true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// findPrecedingStringStart 给定字符串 value 闭合引号的 offset，回溯找到起始引号位置。
+func findPrecedingStringStart(raw []byte, closingQuoteIdx int) int {
+	if closingQuoteIdx < 0 || closingQuoteIdx >= len(raw) || raw[closingQuoteIdx] != '"' {
+		return -1
+	}
+	escaped := false
+	for i := closingQuoteIdx - 1; i >= 0; i-- {
+		if raw[i] == '"' {
+			// 检查是否被奇数个反斜杠转义
+			backslashes := 0
+			for j := i - 1; j >= 0 && raw[j] == '\\'; j-- {
+				backslashes++
+			}
+			if backslashes%2 == 0 {
+				_ = escaped
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func (o *MessageOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {
