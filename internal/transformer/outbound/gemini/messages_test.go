@@ -178,9 +178,6 @@ func TestConvertGeminiRequestFunctionResponseNameFromAssistantLookup(t *testing.
 	}
 }
 
-// TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName covers the
-// case where the inbound layer already resolved the function name and placed
-// it on Message.ToolCallName; this path should win over the ID lookup.
 func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.T) {
 	nameOnly := "preferred_name"
 	req := &model.InternalLLMRequest{
@@ -209,8 +206,60 @@ func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.
 	}
 }
 
+func TestConvertGeminiRequestPrefersToolCallIDForThoughtSignature(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-3.1-pro",
+		Messages: []model.Message{{
+			Role: "assistant",
+			ReasoningBlocks: []model.ReasoningBlock{
+				{Kind: model.ReasoningBlockKindSignature, Signature: "sig-by-id", Provider: "gemini", ToolCallID: "call-2", ToolCallName: "shared"},
+				{Kind: model.ReasoningBlockKindSignature, Signature: "sig-by-name", Provider: "gemini", ToolCallName: "shared"},
+			},
+			ToolCalls: []model.ToolCall{
+				{ID: "call-1", Type: "function", Function: model.FunctionCall{Name: "shared", Arguments: `{}`}},
+				{ID: "call-2", Type: "function", Function: model.FunctionCall{Name: "shared", Arguments: `{}`}},
+			},
+		}},
+	}
+
+	out := convertLLMToGeminiRequest(req)
+	parts := out.Contents[0].Parts
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 function call parts, got %d: %+v", len(parts), parts)
+	}
+	if parts[0].FunctionCall == nil || parts[0].ThoughtSignature != "sig-by-name" {
+		t.Fatalf("expected first shared call to use name fallback signature, got %+v", parts[0])
+	}
+	if parts[1].FunctionCall == nil || parts[1].ThoughtSignature != "sig-by-id" {
+		t.Fatalf("expected second shared call to use ID-bound signature, got %+v", parts[1])
+	}
+}
+
+func TestConvertGeminiRequestFallsBackToOrdinalThoughtSignature(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-3.1-pro",
+		Messages: []model.Message{{
+			Role: "assistant",
+			ReasoningBlocks: []model.ReasoningBlock{{
+				Kind: model.ReasoningBlockKindSignature, Signature: "sig-ordinal", Provider: "gemini",
+			}},
+			ToolCalls: []model.ToolCall{{
+				ID: "call-1", Type: "function", Function: model.FunctionCall{Name: "lookup", Arguments: `{}`},
+			}},
+		}},
+	}
+
+	out := convertLLMToGeminiRequest(req)
+	parts := out.Contents[0].Parts
+	if len(parts) != 1 || parts[0].FunctionCall == nil {
+		t.Fatalf("expected one function call part, got %+v", parts)
+	}
+	if parts[0].ThoughtSignature != "sig-ordinal" {
+		t.Fatalf("expected ordinal fallback signature, got %+v", parts[0])
+	}
+}
+
 // TestConvertGeminiResponseCodeExecutionParts verifies G-H9: when Gemini
-// returns ExecutableCode and CodeExecutionResult parts (emitted by the
 // sandboxed code_execution tool), the outbound transformer folds them
 // into MessageContentPart entries with ServerToolUse / ServerToolResult
 // envelopes so the existing cross-provider passthrough picks them up.

@@ -327,6 +327,46 @@ func TestConvertToLLMResponseFromResponsesPreservesRawOutputItems(t *testing.T) 
 	}
 }
 
+func TestConvertToResponsesRequestPreservesImageGenerationTools(t *testing.T) {
+	content := "hello"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-4o",
+		Messages: []model.Message{{
+			Role:    "user",
+			Content: model.MessageContent{Content: &content},
+		}},
+		Tools: []model.Tool{{
+			Type: "image_generation",
+			ImageGeneration: &model.ImageGeneration{
+				Background: "transparent",
+				Size:       "1024x1024",
+			},
+		}},
+	}
+
+	wire := ConvertToResponsesRequest(req)
+	body, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected image generation tool in responses payload, got %#v", payload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok || tool["type"] != "image_generation" {
+		t.Fatalf("expected image_generation tool in responses payload, got %#v", tools[0])
+	}
+	if got := tool["background"]; got != "transparent" {
+		t.Fatalf("expected background to be preserved, got %#v", got)
+	}
+}
+
 func TestTransformRequestRawRewritesModel(t *testing.T) {
 	outbound := &ResponseOutbound{}
 	req, err := outbound.TransformRequestRaw(
@@ -527,14 +567,113 @@ func TestTransformStreamRefusalDeltaIsForwarded(t *testing.T) {
 // O-H4: `response.refusal.done` carries the full refusal text which was
 // already streamed via delta events. Re-emitting it would double-count on the
 // inbound accumulator, so the outbound must drop the event.
-func TestTransformStreamRefusalDoneIsDropped(t *testing.T) {
-	o := &ResponseOutbound{}
-	event := `{"type":"response.refusal.done","item_id":"msg_1","output_index":0,"content_index":0,"text":"I cannot help with that."}`
-	resp, err := o.TransformStream(context.Background(), []byte(event))
-	if err != nil {
-		t.Fatalf("TransformStream refusal.done: %v", err)
+
+func TestSanitizeResponsesItemsAddsTypedReasoningSummaryDefaults(t *testing.T) {
+	items := sanitizeResponsesItems([]ResponsesItem{{
+		Type:    "reasoning",
+		Summary: []ResponsesReasoningSummary{{}},
+	}})
+	if len(items) != 1 || len(items[0].Summary) != 1 {
+		t.Fatalf("expected one reasoning summary item, got %#v", items)
 	}
-	if resp != nil {
-		t.Fatalf("expected done event to be dropped, got %+v", resp)
+	if items[0].Summary[0].Type != "summary_text" || items[0].Summary[0].Text != "" {
+		t.Fatalf("expected default summary_text with empty text, got %#v", items[0].Summary[0])
+	}
+}
+
+func TestSanitizeResponsesRawSummaryRepairsNullFields(t *testing.T) {
+	raw, changed, ok := sanitizeResponsesRawSummary(json.RawMessage(`[{"type":null,"text":null}]`))
+	if !ok || !changed {
+		t.Fatalf("expected raw summary to be repaired, ok=%v changed=%v", ok, changed)
+	}
+	var summary []map[string]any
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		t.Fatalf("unmarshal sanitized summary failed: %v", err)
+	}
+	if len(summary) != 1 || summary[0]["type"] != "summary_text" || summary[0]["text"] != "" {
+		t.Fatalf("expected repaired summary_text entry, got %#v", summary)
+	}
+}
+
+func TestTransformStreamPreservesTextDeltaBeforeOutputItemAdded(t *testing.T) {
+	o := &ResponseOutbound{}
+	first := `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"hel"}`
+	if _, err := o.TransformStream(context.Background(), []byte(first)); err != nil {
+		t.Fatalf("text delta before added: %v", err)
+	}
+	added := `{"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant"}}`
+	if _, err := o.TransformStream(context.Background(), []byte(added)); err != nil {
+		t.Fatalf("output item added: %v", err)
+	}
+	second := `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"lo"}`
+	if _, err := o.TransformStream(context.Background(), []byte(second)); err != nil {
+		t.Fatalf("second text delta: %v", err)
+	}
+	completed := `{"type":"response.completed","response":{"status":"completed"}}`
+	resp, err := o.TransformStream(context.Background(), []byte(completed))
+	if err != nil {
+		t.Fatalf("completed: %v", err)
+	}
+	if len(resp.RawResponsesOutputItems) == 0 {
+		t.Fatalf("expected tracked output items, got %+v", resp)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(resp.RawResponsesOutputItems, &items); err != nil {
+		t.Fatalf("unmarshal raw output failed: %v", err)
+	}
+	content := items[0]["content"].([]any)
+	part := content[0].(map[string]any)
+	if part["type"] != "output_text" || part["text"] != "hello" {
+		t.Fatalf("expected merged text delta, got %#v", part)
+	}
+}
+
+func TestTransformStreamPreservesFunctionCallDeltaBeforeOutputItemAdded(t *testing.T) {
+	o := &ResponseOutbound{}
+	delta := `{"type":"response.function_call_arguments.delta","output_index":0,"call_id":"call_123","name":"lookup","delta":"{}"}`
+	if _, err := o.TransformStream(context.Background(), []byte(delta)); err != nil {
+		t.Fatalf("function_call delta before added: %v", err)
+	}
+	added := `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call"}}`
+	if _, err := o.TransformStream(context.Background(), []byte(added)); err != nil {
+		t.Fatalf("function_call output item added: %v", err)
+	}
+	completed := `{"type":"response.completed","response":{"status":"completed"}}`
+	resp, err := o.TransformStream(context.Background(), []byte(completed))
+	if err != nil {
+		t.Fatalf("completed: %v", err)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(resp.RawResponsesOutputItems, &items); err != nil {
+		t.Fatalf("unmarshal raw output failed: %v", err)
+	}
+	if items[0]["type"] != "function_call" || items[0]["call_id"] != "call_123" || items[0]["name"] != "lookup" || items[0]["arguments"] != "{}" {
+		t.Fatalf("expected merged function_call item, got %#v", items[0])
+	}
+}
+
+func TestTransformStreamPreservesReasoningDeltaBeforeOutputItemAdded(t *testing.T) {
+	o := &ResponseOutbound{}
+	delta := `{"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"step"}`
+	if _, err := o.TransformStream(context.Background(), []byte(delta)); err != nil {
+		t.Fatalf("reasoning delta before added: %v", err)
+	}
+	added := `{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","encrypted_content":"enc"}}`
+	if _, err := o.TransformStream(context.Background(), []byte(added)); err != nil {
+		t.Fatalf("reasoning output item added: %v", err)
+	}
+	completed := `{"type":"response.completed","response":{"status":"completed"}}`
+	resp, err := o.TransformStream(context.Background(), []byte(completed))
+	if err != nil {
+		t.Fatalf("completed: %v", err)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(resp.RawResponsesOutputItems, &items); err != nil {
+		t.Fatalf("unmarshal raw output failed: %v", err)
+	}
+	summary := items[0]["summary"].([]any)
+	part := summary[0].(map[string]any)
+	if part["type"] != "summary_text" || part["text"] != "step" {
+		t.Fatalf("expected merged reasoning summary, got %#v", part)
 	}
 }

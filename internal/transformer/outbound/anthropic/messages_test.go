@@ -209,6 +209,68 @@ func TestConvertToAnthropicRequestUsesUserFallbackForMetadata(t *testing.T) {
 	}
 }
 
+
+func TestPruneCacheBreakpointsKeepsSystemThenToolsThenMessages(t *testing.T) {
+	req := &anthropicModel.MessageRequest{
+		System: &anthropicModel.SystemPrompt{
+			MultiplePrompts: []anthropicModel.SystemPromptPart{
+				{Type: "text", Text: "sys-1", CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+				{Type: "text", Text: "sys-2", CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+			},
+		},
+		Tools: []anthropicModel.Tool{
+			{Name: "tool-1", CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+			{Name: "tool-2", CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+		},
+		Messages: []anthropicModel.MessageParam{{
+			Role: "user",
+			Content: anthropicModel.MessageContent{MultipleContent: []anthropicModel.MessageContentBlock{{
+				Type: "text", Text: stringPtr("msg-1"), CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral},
+			}}},
+		}},
+	}
+
+	pruneCacheBreakpoints(req)
+
+	if req.System.MultiplePrompts[0].CacheControl == nil || req.System.MultiplePrompts[1].CacheControl == nil {
+		t.Fatalf("expected system breakpoints to be kept first, got %+v", req.System.MultiplePrompts)
+	}
+	if req.Tools[0].CacheControl == nil || req.Tools[1].CacheControl == nil {
+		t.Fatalf("expected tool breakpoints to be kept before messages, got %+v", req.Tools)
+	}
+	if req.Messages[0].Content.MultipleContent[0].CacheControl != nil {
+		t.Fatalf("expected message breakpoint beyond limit to be pruned, got %+v", req.Messages[0].Content.MultipleContent[0])
+	}
+}
+
+func TestPruneCacheBreakpointsCountsToolUseAndToolResultContent(t *testing.T) {
+	lookup := stringPtr("lookup")
+	callID := stringPtr("call_1")
+	req := &anthropicModel.MessageRequest{
+		Messages: []anthropicModel.MessageParam{{
+			Role: "assistant",
+			Content: anthropicModel.MessageContent{MultipleContent: []anthropicModel.MessageContentBlock{
+				{Type: "text", Text: stringPtr("m1"), CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+				{Type: "tool_use", ID: "call_1", Name: lookup, CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+				{Type: "tool_result", ToolUseID: callID, CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+				{Type: "text", Text: stringPtr("m4"), CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+				{Type: "text", Text: stringPtr("m5"), CacheControl: &anthropicModel.CacheControl{Type: model.CacheControlTypeEphemeral}},
+			}},
+		}},
+	}
+
+	pruneCacheBreakpoints(req)
+	parts := req.Messages[0].Content.MultipleContent
+	for i := 0; i < model.AnthropicMaxCacheBreakpoints; i++ {
+		if parts[i].CacheControl == nil {
+			t.Fatalf("expected breakpoint %d to be preserved, got %+v", i, parts)
+		}
+	}
+	if parts[4].CacheControl != nil {
+		t.Fatalf("expected fifth breakpoint to be pruned, got %+v", parts[4])
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }

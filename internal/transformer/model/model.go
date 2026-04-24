@@ -1620,15 +1620,6 @@ func (c *CacheControl) Validate() error {
 
 type toolJSONMarshaller Tool
 
-func (t Tool) MarshalJSON() ([]byte, error) {
-	// TODO: find a better way to save the image generation tool to the request body.
-	m := toolJSONMarshaller(t)
-	// ImageGeneration is not a valid field for chat completion, so we should remove it from the request.
-	m.ImageGeneration = nil
-
-	return json.Marshal(m)
-}
-
 // Function represents a function definition.
 type Function struct {
 	Name        string          `json:"name"`

@@ -188,6 +188,40 @@ func TestTransformRequestPreservesDeveloperRole(t *testing.T) {
 // Chat outbound forwards OpenAI-Organization / OpenAI-Project when they
 // are present in TransformerMetadata, and skips them cleanly when absent
 // or blank.
+func TestBuildChatCompletionsRequestDropsImageGenerationTools(t *testing.T) {
+	content := "hello"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-4o",
+		Messages: []model.Message{{
+			Role:    "user",
+			Content: model.MessageContent{Content: &content},
+		}},
+		Tools: []model.Tool{
+			{Type: "function", Function: model.Function{Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}},
+			{Type: "image_generation", ImageGeneration: &model.ImageGeneration{Background: "transparent"}},
+		},
+	}
+
+	wire := buildChatCompletionsRequest(req)
+	body, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected only function tool in chat payload, got %#v", payload["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok || tool["type"] != "function" {
+		t.Fatalf("expected function tool in chat payload, got %#v", tools[0])
+	}
+}
+
 func TestTransformRequestAttachesOrgAndProjectHeaders(t *testing.T) {
 	outbound := &ChatOutbound{}
 	content := "hi"

@@ -352,18 +352,38 @@ func collectGeminiSignatures(blocks []model.ReasoningBlock) []string {
 	return out
 }
 
+// collectGeminiSignaturesByToolCallID indexes Signature-kind blocks by the tool
+// call ID they originated from. This is the strongest anchor for replaying a
+// Gemini thoughtSignature onto the matching functionCall in multi-tool turns.
+func collectGeminiSignaturesByToolCallID(blocks []model.ReasoningBlock) map[string]string {
+	out := make(map[string]string, len(blocks))
+	for _, b := range blocks {
+		if b.Kind != model.ReasoningBlockKindSignature || b.Signature == "" {
+			continue
+		}
+		id := strings.TrimSpace(b.ToolCallID)
+		if id == "" {
+			continue
+		}
+		if _, exists := out[id]; exists {
+			continue
+		}
+		out[id] = b.Signature
+	}
+	return out
+}
+
 // collectGeminiSignaturesByName indexes Signature-kind blocks by the tool
 // call they originated from (ToolCallName). This lets the outbound replay
-// attach each signature to its matching functionCall, which is required for
-// multi-tool turns — Gemini 3 rejects the request if a signature is bound
-// to the wrong functionCall. See G-H7.
-//
-// Blocks without a ToolCallName are ignored; the caller falls back to the
-// ordinal list returned by collectGeminiSignatures for them.
+// attach each signature to its matching functionCall when an ID anchor is not
+// available. See G-H7.
 func collectGeminiSignaturesByName(blocks []model.ReasoningBlock) map[string]string {
 	out := make(map[string]string, len(blocks))
 	for _, b := range blocks {
 		if b.Kind != model.ReasoningBlockKindSignature || b.Signature == "" {
+			continue
+		}
+		if strings.TrimSpace(b.ToolCallID) != "" {
 			continue
 		}
 		name := strings.TrimSpace(b.ToolCallName)
@@ -374,6 +394,20 @@ func collectGeminiSignaturesByName(blocks []model.ReasoningBlock) map[string]str
 			continue
 		}
 		out[name] = b.Signature
+	}
+	return out
+}
+
+func collectGeminiLooseSignatures(blocks []model.ReasoningBlock) []string {
+	out := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Kind != model.ReasoningBlockKindSignature || b.Signature == "" {
+			continue
+		}
+		if strings.TrimSpace(b.ToolCallID) != "" || strings.TrimSpace(b.ToolCallName) != "" {
+			continue
+		}
+		out = append(out, b.Signature)
 	}
 	return out
 }
@@ -548,7 +582,8 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			// signature blocks for matching functionCall parts only.
 			geminiBlocks := msg.ReasoningBlocksByProvider("gemini")
 			content.Parts = append(content.Parts, buildGeminiThoughtParts(geminiBlocks)...)
-			geminiSigs := collectGeminiSignatures(geminiBlocks)
+			geminiSigByToolCallID := collectGeminiSignaturesByToolCallID(geminiBlocks)
+				geminiSigs := collectGeminiLooseSignatures(geminiBlocks)
 			geminiSigByName := collectGeminiSignaturesByName(geminiBlocks)
 			sigIdx := 0
 			// Handle text content
@@ -574,11 +609,12 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 
 					sig := strings.TrimSpace(toolCall.ThoughtSignature)
 					if sig == "" {
-						// Prefer a name-indexed lookup so multi-tool turns bind
-						// the correct signature to each functionCall; fall back
-						// to the ordinal cursor only if no name-match exists
-						// (mostly legacy or single-tool traces). See G-H7.
-						if named, ok := geminiSigByName[toolCall.Function.Name]; ok && named != "" {
+						// Prefer the strongest anchor first: explicit tool-call ID,
+						// then function name, then legacy ordinal fallback.
+						if byID, ok := geminiSigByToolCallID[toolCall.ID]; ok && byID != "" {
+							sig = byID
+							delete(geminiSigByToolCallID, toolCall.ID)
+						} else if named, ok := geminiSigByName[toolCall.Function.Name]; ok && named != "" {
 							sig = named
 							delete(geminiSigByName, toolCall.Function.Name)
 						} else if fallbackSig, ok := nextGeminiSignature(geminiSigs, &sigIdx); ok {

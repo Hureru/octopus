@@ -15,6 +15,14 @@ import (
 
 type ChatOutbound struct{}
 
+// ChatCompletionsTool is the explicit OpenAI chat/completions wire tool payload.
+// Keeping this separate from the shared model prevents provider-specific fields
+// from leaking into the Chat request body.
+type ChatCompletionsTool struct {
+	Type     string               `json:"type,omitempty"`
+	Function model.Function       `json:"function,omitempty"`
+}
+
 // ChatCompletionsRequest is the explicit OpenAI chat/completions wire payload.
 // Keeping this as a whitelist prevents internal/provider-specific fields on the
 // shared InternalLLMRequest from leaking to OpenAI-compatible upstreams.
@@ -42,7 +50,7 @@ type ChatCompletionsRequest struct {
 	Stream              *bool                 `json:"stream,omitempty"`
 	StreamOptions       *model.StreamOptions  `json:"stream_options,omitempty"`
 	ParallelToolCalls   *bool                 `json:"parallel_tool_calls,omitempty"`
-	Tools               []model.Tool          `json:"tools,omitempty"`
+	Tools               []ChatCompletionsTool `json:"tools,omitempty"`
 	ToolChoice          *model.ToolChoice     `json:"tool_choice,omitempty"`
 	ResponseFormat      *model.ResponseFormat `json:"response_format,omitempty"`
 	SafetyIdentifier    *string               `json:"safety_identifier,omitempty"`
@@ -166,7 +174,7 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 		Stream:              request.Stream,
 		StreamOptions:       request.StreamOptions,
 		ParallelToolCalls:   request.ParallelToolCalls,
-		Tools:               request.Tools,
+		Tools:               convertToolsToChatCompletions(request.Tools),
 		ToolChoice:          request.ToolChoice,
 		ResponseFormat:      request.ResponseFormat,
 		SafetyIdentifier:    request.SafetyIdentifier,
@@ -218,6 +226,20 @@ func isReasoningChatModel(modelName string) bool {
 		return true
 	}
 	return false
+}
+
+func convertToolsToChatCompletions(tools []model.Tool) []ChatCompletionsTool {
+	result := make([]ChatCompletionsTool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "function" {
+			continue
+		}
+		result = append(result, ChatCompletionsTool{
+			Type:     "function",
+			Function: tool.Function,
+		})
+	}
+	return result
 }
 
 func (o *ChatOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {
