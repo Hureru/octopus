@@ -3,6 +3,8 @@ package openai
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -604,23 +606,208 @@ type ResponsesStreamEvent struct {
 	Message        string             `json:"message,omitempty"`
 }
 
-// Conversion functions
+const anthropicPromptCacheRetention24h = "24h"
+
+func anthropicCacheMetadataForResponses(req *model.InternalLLMRequest) (*string, *string) {
+	if req == nil {
+		return nil, nil
+	}
+	if req.ResponsesPromptCacheKey != nil || req.PromptCacheRetention != nil {
+		return req.ResponsesPromptCacheKey, req.PromptCacheRetention
+	}
+
+	payload := buildAnthropicCacheKeyPayload(req)
+	if len(payload) == 0 {
+		return nil, nil
+	}
+
+	sum := sha256.Sum256(payload)
+	key := "anthropic-cache-" + hex.EncodeToString(sum[:])
+
+	var retention *string
+	if anthropicCacheTTLPresent(req, model.CacheTTL1h) {
+		value := anthropicPromptCacheRetention24h
+		retention = &value
+	}
+	return &key, retention
+}
+
+func buildAnthropicCacheKeyPayload(req *model.InternalLLMRequest) []byte {
+	if req == nil {
+		return nil
+	}
+
+	type cacheTool struct {
+		Name        string          `json:"name,omitempty"`
+		Description string          `json:"description,omitempty"`
+		Parameters  json.RawMessage `json:"parameters,omitempty"`
+		Type        string          `json:"type,omitempty"`
+		TTL         string          `json:"ttl,omitempty"`
+	}
+	type cachePart struct {
+		Type        string `json:"type,omitempty"`
+		Text        string `json:"text,omitempty"`
+		ToolCallID  string `json:"tool_call_id,omitempty"`
+		ToolName    string `json:"tool_name,omitempty"`
+		IsError     bool   `json:"is_error,omitempty"`
+		TTL         string `json:"ttl,omitempty"`
+	}
+	type cacheMessage struct {
+		Role  string      `json:"role,omitempty"`
+		Parts []cachePart `json:"parts,omitempty"`
+	}
+	type cachePayload struct {
+		Instructions string         `json:"instructions,omitempty"`
+		Tools        []cacheTool    `json:"tools,omitempty"`
+		Messages     []cacheMessage `json:"messages,omitempty"`
+	}
+
+	payload := cachePayload{
+		Instructions: strings.TrimSpace(convertInstructionsFromMessages(req.Messages)),
+	}
+
+	for _, tool := range req.Tools {
+		if tool.CacheControl == nil {
+			continue
+		}
+		payload.Tools = append(payload.Tools, cacheTool{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			Parameters:  cloneRawJSON(tool.Function.Parameters),
+			Type:        tool.CacheControl.Type,
+			TTL:         tool.CacheControl.TTL,
+		})
+	}
+
+	for _, msg := range req.Messages {
+		cacheMsg := cacheMessage{Role: msg.Role}
+		if msg.Content.Content != nil && msg.CacheControl != nil {
+			cacheMsg.Parts = append(cacheMsg.Parts, cachePart{
+				Type: "text",
+				Text: strings.TrimSpace(*msg.Content.Content),
+				TTL:  msg.CacheControl.TTL,
+			})
+		}
+		for _, part := range msg.Content.MultipleContent {
+			if part.CacheControl == nil {
+				continue
+			}
+			cachePart := cachePart{Type: part.Type, TTL: part.CacheControl.TTL}
+			switch part.Type {
+			case "text":
+				if part.Text != nil {
+					cachePart.Text = strings.TrimSpace(*part.Text)
+				}
+			case "server_tool_use":
+				if part.ServerToolUse != nil {
+					cachePart.ToolCallID = part.ServerToolUse.ID
+					cachePart.ToolName = part.ServerToolUse.Name
+				}
+			case "server_tool_result":
+				if part.ServerToolResult != nil {
+					cachePart.ToolCallID = part.ServerToolResult.ToolUseID
+					cachePart.IsError = part.ServerToolResult.IsError != nil && *part.ServerToolResult.IsError
+					cachePart.Text = strings.TrimSpace(string(part.ServerToolResult.Content))
+				}
+			}
+			cacheMsg.Parts = append(cacheMsg.Parts, cachePart)
+		}
+		if msg.ToolCallID != nil && msg.CacheControl != nil {
+			cachePart := cachePart{
+				Type:       "tool_result",
+				ToolCallID: *msg.ToolCallID,
+				TTL:        msg.CacheControl.TTL,
+			}
+			if msg.ToolCallName != nil {
+				cachePart.ToolName = *msg.ToolCallName
+			}
+			if msg.ToolCallIsError != nil {
+				cachePart.IsError = *msg.ToolCallIsError
+			}
+			if msg.Content.Content != nil {
+				cachePart.Text = strings.TrimSpace(*msg.Content.Content)
+			}
+			cacheMsg.Parts = append(cacheMsg.Parts, cachePart)
+		}
+		for _, toolCall := range msg.ToolCalls {
+			if toolCall.CacheControl == nil {
+				continue
+			}
+			cacheMsg.Parts = append(cacheMsg.Parts, cachePart{
+				Type:       "tool_use",
+				ToolCallID: toolCall.ID,
+				ToolName:   toolCall.Function.Name,
+				Text:       strings.TrimSpace(toolCall.Function.Arguments),
+				TTL:        toolCall.CacheControl.TTL,
+			})
+		}
+		if len(cacheMsg.Parts) > 0 {
+			payload.Messages = append(payload.Messages, cacheMsg)
+		}
+	}
+
+	if payload.Instructions == "" && len(payload.Tools) == 0 && len(payload.Messages) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func anthropicCacheTTLPresent(req *model.InternalLLMRequest, ttl string) bool {
+	if req == nil || ttl == "" {
+		return false
+	}
+	for _, msg := range req.Messages {
+		if msg.CacheControl != nil && msg.CacheControl.TTL == ttl {
+			return true
+		}
+		for _, part := range msg.Content.MultipleContent {
+			if part.CacheControl != nil && part.CacheControl.TTL == ttl {
+				return true
+			}
+		}
+		for _, toolCall := range msg.ToolCalls {
+			if toolCall.CacheControl != nil && toolCall.CacheControl.TTL == ttl {
+				return true
+			}
+		}
+	}
+	for _, tool := range req.Tools {
+		if tool.CacheControl != nil && tool.CacheControl.TTL == ttl {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneRawJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
+}
 
 func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest {
 	// `user` is deprecated on OpenAI text APIs and is rejected by some
 	// OpenAI-compatible upstreams, so keep the modern identifiers
 	// (`prompt_cache_key` / `safety_identifier`) and omit the legacy field.
+	promptCacheKey, promptCacheRetention := anthropicCacheMetadataForResponses(req)
 	result := &ResponsesRequest{
-		Model:             req.Model,
-		Temperature:       req.Temperature,
-		TopP:              req.TopP,
-		Stream:            req.Stream,
-		Store:             req.Store,
-		ServiceTier:       req.ServiceTier,
-		Truncation:        req.Truncation,
-		Metadata:          req.Metadata,
-		MaxOutputTokens:   req.MaxCompletionTokens,
-		ParallelToolCalls: req.ParallelToolCalls,
+		Model:                req.Model,
+		Temperature:          req.Temperature,
+		TopP:                 req.TopP,
+		Stream:               req.Stream,
+		Store:                req.Store,
+		ServiceTier:          req.ServiceTier,
+		Truncation:           req.Truncation,
+		Metadata:             req.Metadata,
+		MaxOutputTokens:      req.MaxCompletionTokens,
+		ParallelToolCalls:    req.ParallelToolCalls,
+		PromptCacheKey:       promptCacheKey,
+		PromptCacheRetention: promptCacheRetention,
 	}
 
 	// Convert instructions from system messages
@@ -686,8 +873,12 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 	result.PreviousResponseID = req.PreviousResponseID
 	result.Background = req.Background
 	result.Prompt = req.Prompt
-	result.PromptCacheKey = req.ResponsesPromptCacheKey
-	result.PromptCacheRetention = req.PromptCacheRetention
+	if result.PromptCacheKey == nil {
+		result.PromptCacheKey = req.ResponsesPromptCacheKey
+	}
+	if result.PromptCacheRetention == nil {
+		result.PromptCacheRetention = req.PromptCacheRetention
+	}
 	result.SafetyIdentifier = req.SafetyIdentifier
 	result.MaxToolCalls = req.MaxToolCalls
 	result.Conversation = req.Conversation

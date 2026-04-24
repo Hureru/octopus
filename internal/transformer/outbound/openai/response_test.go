@@ -184,6 +184,84 @@ func TestConvertToResponsesRequestOmitsDeprecatedUser(t *testing.T) {
 	}
 }
 
+func TestConvertToResponsesRequestDerivesPromptCacheKeyFromAnthropicCacheControl(t *testing.T) {
+	system := "You are helpful."
+	user := "hello"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-5.4",
+		Messages: []model.Message{
+			{
+				Role: "system",
+				Content: model.MessageContent{Content: &system},
+				CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL5m},
+			},
+			{
+				Role: "user",
+				Content: model.MessageContent{Content: &user},
+			},
+		},
+	}
+
+	out := ConvertToResponsesRequest(req)
+	if out.PromptCacheKey == nil || *out.PromptCacheKey == "" {
+		t.Fatalf("expected derived prompt_cache_key, got %+v", out.PromptCacheKey)
+	}
+	if out.PromptCacheRetention != nil {
+		t.Fatalf("expected no retention for 5m cache control, got %+v", out.PromptCacheRetention)
+	}
+
+	out2 := ConvertToResponsesRequest(req)
+	if out2.PromptCacheKey == nil || *out2.PromptCacheKey != *out.PromptCacheKey {
+		t.Fatalf("expected deterministic prompt_cache_key, got %v and %v", out.PromptCacheKey, out2.PromptCacheKey)
+	}
+}
+
+func TestConvertToResponsesRequestDerivesRetentionFromAnthropicCacheControlTTL1h(t *testing.T) {
+	toolName := "lookup"
+	req := &model.InternalLLMRequest{
+		Model: "gpt-5.4",
+		Tools: []model.Tool{{
+			Type: "function",
+			Function: model.Function{
+				Name:       toolName,
+				Parameters: json.RawMessage(`{"type":"object"}`),
+			},
+			CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h},
+		}},
+	}
+
+	out := ConvertToResponsesRequest(req)
+	if out.PromptCacheKey == nil || *out.PromptCacheKey == "" {
+		t.Fatalf("expected derived prompt_cache_key, got %+v", out.PromptCacheKey)
+	}
+	if out.PromptCacheRetention == nil || *out.PromptCacheRetention != anthropicPromptCacheRetention24h {
+		t.Fatalf("expected retention %q, got %+v", anthropicPromptCacheRetention24h, out.PromptCacheRetention)
+	}
+}
+
+func TestConvertToResponsesRequestPreservesExplicitResponsesCacheFields(t *testing.T) {
+	key := "client-key"
+	retention := "12h"
+	req := &model.InternalLLMRequest{
+		Model:                 "gpt-5.4",
+		ResponsesPromptCacheKey: &key,
+		PromptCacheRetention:    &retention,
+		Messages: []model.Message{{
+			Role: "system",
+			Content: model.MessageContent{Content: stringPtr("ignored")},
+			CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h},
+		}},
+	}
+
+	out := ConvertToResponsesRequest(req)
+	if out.PromptCacheKey == nil || *out.PromptCacheKey != key {
+		t.Fatalf("expected explicit prompt_cache_key preserved, got %+v", out.PromptCacheKey)
+	}
+	if out.PromptCacheRetention == nil || *out.PromptCacheRetention != retention {
+		t.Fatalf("expected explicit retention preserved, got %+v", out.PromptCacheRetention)
+	}
+}
+
 func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
 	outbound := &ResponseOutbound{}
 
