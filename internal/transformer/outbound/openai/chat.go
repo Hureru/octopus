@@ -19,8 +19,8 @@ type ChatOutbound struct{}
 // Keeping this separate from the shared model prevents provider-specific fields
 // from leaking into the Chat request body.
 type ChatCompletionsTool struct {
-	Type     string               `json:"type,omitempty"`
-	Function model.Function       `json:"function,omitempty"`
+	Type     string         `json:"type,omitempty"`
+	Function model.Function `json:"function,omitempty"`
 }
 
 // ChatCompletionsRequest is the explicit OpenAI chat/completions wire payload.
@@ -147,6 +147,17 @@ func applyOpenAIOrgProjectHeaders(req *http.Request, request *model.InternalLLMR
 	}
 }
 
+func chatPromptCacheKey(request *model.InternalLLMRequest) *string {
+	if request == nil {
+		return nil
+	}
+	if request.PromptCacheKey != nil {
+		return request.PromptCacheKey
+	}
+	key, _ := derivedAnthropicCacheMetadata(request)
+	return key
+}
+
 func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatCompletionsRequest {
 	if request == nil {
 		return &ChatCompletionsRequest{}
@@ -178,7 +189,7 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 		ToolChoice:          request.ToolChoice,
 		ResponseFormat:      request.ResponseFormat,
 		SafetyIdentifier:    request.SafetyIdentifier,
-		PromptCacheKey:      request.PromptCacheKey,
+		PromptCacheKey:      chatPromptCacheKey(request),
 		User:                request.User,
 		Verbosity:           request.Verbosity,
 		Prediction:          request.Prediction,

@@ -107,6 +107,20 @@ func TestBuildChatCompletionsRequestForwardsPromptCacheKey(t *testing.T) {
 	}
 }
 
+func TestBuildChatCompletionsRequestDerivesAnthropicPromptCacheKey(t *testing.T) {
+	first := anthropicCacheRequest("latest question")
+	second := anthropicCacheRequest("different latest question")
+
+	firstWire := buildChatCompletionsRequest(first)
+	secondWire := buildChatCompletionsRequest(second)
+	if firstWire.PromptCacheKey == nil || secondWire.PromptCacheKey == nil {
+		t.Fatalf("expected derived chat prompt_cache_key, got %+v and %+v", firstWire.PromptCacheKey, secondWire.PromptCacheKey)
+	}
+	if *firstWire.PromptCacheKey != *secondWire.PromptCacheKey {
+		t.Fatalf("expected latest user changes to keep stable chat cache key, got %q and %q", *firstWire.PromptCacheKey, *secondWire.PromptCacheKey)
+	}
+}
+
 // O-H1: 2025 Chat fields (verbosity, prediction, web_search_options) must land
 // on the outbound payload when the client supplied them. Before this fix the
 // whitelist simply dropped them, so gpt-5 verbosity and predicted outputs were
@@ -185,6 +199,7 @@ func TestTransformRequestPreservesDeveloperRole(t *testing.T) {
 		t.Errorf("expected first message role=developer, got %q", role)
 	}
 }
+
 // Chat outbound forwards OpenAI-Organization / OpenAI-Project when they
 // are present in TransformerMetadata, and skips them cleanly when absent
 // or blank.

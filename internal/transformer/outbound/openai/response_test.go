@@ -188,15 +188,16 @@ func TestConvertToResponsesRequestDerivesPromptCacheKeyFromAnthropicCacheControl
 	system := "You are helpful."
 	user := "hello"
 	req := &model.InternalLLMRequest{
-		Model: "gpt-5.4",
+		Model:        "gpt-5.4",
+		RawAPIFormat: model.APIFormatAnthropicMessage,
 		Messages: []model.Message{
 			{
-				Role: "system",
-				Content: model.MessageContent{Content: &system},
+				Role:         "system",
+				Content:      model.MessageContent{Content: &system},
 				CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL5m},
 			},
 			{
-				Role: "user",
+				Role:    "user",
 				Content: model.MessageContent{Content: &user},
 			},
 		},
@@ -213,6 +214,56 @@ func TestConvertToResponsesRequestDerivesPromptCacheKeyFromAnthropicCacheControl
 	out2 := ConvertToResponsesRequest(req)
 	if out2.PromptCacheKey == nil || *out2.PromptCacheKey != *out.PromptCacheKey {
 		t.Fatalf("expected deterministic prompt_cache_key, got %v and %v", out.PromptCacheKey, out2.PromptCacheKey)
+	}
+}
+
+func TestConvertToResponsesRequestUsesStableAnthropicCachePrefix(t *testing.T) {
+	base := anthropicCacheRequest("latest question")
+	changedLatest := anthropicCacheRequest("different latest question")
+	changedSystem := anthropicCacheRequest("latest question")
+	changedSystem.Messages[0].Content.Content = stringPtr("Different instructions")
+
+	baseOut := ConvertToResponsesRequest(base)
+	changedLatestOut := ConvertToResponsesRequest(changedLatest)
+	changedSystemOut := ConvertToResponsesRequest(changedSystem)
+	if baseOut.PromptCacheKey == nil || changedLatestOut.PromptCacheKey == nil {
+		t.Fatalf("expected cache keys, got %+v and %+v", baseOut.PromptCacheKey, changedLatestOut.PromptCacheKey)
+	}
+	if *baseOut.PromptCacheKey != *changedLatestOut.PromptCacheKey {
+		t.Fatalf("expected latest user changes to keep stable cache key, got %q and %q", *baseOut.PromptCacheKey, *changedLatestOut.PromptCacheKey)
+	}
+	if changedSystemOut.PromptCacheKey == nil || *changedSystemOut.PromptCacheKey == *baseOut.PromptCacheKey {
+		t.Fatalf("expected system change to alter cache key, got %v and %v", baseOut.PromptCacheKey, changedSystemOut.PromptCacheKey)
+	}
+}
+
+func TestConvertToResponsesRequestCacheKeyIgnoresToolCallIDs(t *testing.T) {
+	first := anthropicCacheRequest("latest question")
+	second := anthropicCacheRequest("latest question")
+	first.Messages[2].ToolCalls = []model.ToolCall{{ID: "call_a", Type: "function", Function: model.FunctionCall{Name: "lookup", Arguments: `{"q":"octopus"}`}}}
+	second.Messages[2].ToolCalls = []model.ToolCall{{ID: "call_b", Type: "function", Function: model.FunctionCall{Name: "lookup", Arguments: `{"q":"octopus"}`}}}
+
+	firstOut := ConvertToResponsesRequest(first)
+	secondOut := ConvertToResponsesRequest(second)
+	if firstOut.PromptCacheKey == nil || secondOut.PromptCacheKey == nil || *firstOut.PromptCacheKey != *secondOut.PromptCacheKey {
+		t.Fatalf("expected tool call IDs to be ignored, got %v and %v", firstOut.PromptCacheKey, secondOut.PromptCacheKey)
+	}
+}
+
+func TestConvertToResponsesRequestRetentionUsesSelectedStableMarker(t *testing.T) {
+	stableLong := anthropicCacheRequest("latest question")
+	stableLong.Tools[0].CacheControl = &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h}
+	stableLongOut := ConvertToResponsesRequest(stableLong)
+	if stableLongOut.PromptCacheRetention == nil || *stableLongOut.PromptCacheRetention != anthropicPromptCacheRetention24h {
+		t.Fatalf("expected stable 1h marker to set retention, got %+v", stableLongOut.PromptCacheRetention)
+	}
+
+	unstableLong := anthropicCacheRequest("latest question")
+	unstableLong.Tools[0].CacheControl = nil
+	unstableLong.Messages[len(unstableLong.Messages)-1].CacheControl = &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h}
+	unstableLongOut := ConvertToResponsesRequest(unstableLong)
+	if unstableLongOut.PromptCacheRetention != nil {
+		t.Fatalf("expected excluded final 1h marker not to set retention, got %+v", unstableLongOut.PromptCacheRetention)
 	}
 }
 
@@ -243,12 +294,12 @@ func TestConvertToResponsesRequestPreservesExplicitResponsesCacheFields(t *testi
 	key := "client-key"
 	retention := "12h"
 	req := &model.InternalLLMRequest{
-		Model:                 "gpt-5.4",
+		Model:                   "gpt-5.4",
 		ResponsesPromptCacheKey: &key,
 		PromptCacheRetention:    &retention,
 		Messages: []model.Message{{
-			Role: "system",
-			Content: model.MessageContent{Content: stringPtr("ignored")},
+			Role:         "system",
+			Content:      model.MessageContent{Content: stringPtr("ignored")},
 			CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h},
 		}},
 	}
@@ -259,6 +310,45 @@ func TestConvertToResponsesRequestPreservesExplicitResponsesCacheFields(t *testi
 	}
 	if out.PromptCacheRetention == nil || *out.PromptCacheRetention != retention {
 		t.Fatalf("expected explicit retention preserved, got %+v", out.PromptCacheRetention)
+	}
+}
+
+func anthropicCacheRequest(latestUser string) *model.InternalLLMRequest {
+	system := "You are helpful."
+	previousUser := "Summarize this repository."
+	assistant := "I can help with that."
+	return &model.InternalLLMRequest{
+		Model:        "gpt-5.4",
+		RawAPIFormat: model.APIFormatAnthropicMessage,
+		Messages: []model.Message{
+			{
+				Role:         "system",
+				Content:      model.MessageContent{Content: &system},
+				CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL5m},
+			},
+			{
+				Role:         "user",
+				Content:      model.MessageContent{Content: &previousUser},
+				CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL5m},
+			},
+			{
+				Role:    "assistant",
+				Content: model.MessageContent{Content: &assistant},
+			},
+			{
+				Role:    "user",
+				Content: model.MessageContent{Content: &latestUser},
+			},
+		},
+		Tools: []model.Tool{{
+			Type: "function",
+			Function: model.Function{
+				Name:        "lookup",
+				Description: "Lookup repository information",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`),
+			},
+			CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL5m},
+		}},
 	}
 }
 

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -363,7 +365,7 @@ func (r *InternalLLMRequest) Validate() error {
 
 	if len(r.Messages) > 0 {
 		r.fillMissingToolCallIDsFromToolMessages()
-		// r.fillMissingToolCallIDs()
+		r.fillMissingToolCallIDs()
 	}
 
 	return nil
@@ -380,7 +382,6 @@ func (r *InternalLLMRequest) fillMissingToolCallIDs() {
 		}
 	}
 
-	sequence := 0
 	for messageIndex := range r.Messages {
 		for toolCallIndex := range r.Messages[messageIndex].ToolCalls {
 			toolCall := &r.Messages[messageIndex].ToolCalls[toolCallIndex]
@@ -388,21 +389,53 @@ func (r *InternalLLMRequest) fillMissingToolCallIDs() {
 				continue
 			}
 
-			candidate := fmt.Sprintf("call_octopus_%d_%d", messageIndex, toolCallIndex)
-			if _, exists := usedIDs[candidate]; exists {
-				for {
-					candidate = fmt.Sprintf("call_octopus_%d", sequence)
-					sequence++
-					if _, conflict := usedIDs[candidate]; !conflict {
-						break
-					}
+			base := stableToolCallID(*toolCall)
+			candidate := base
+			for sequence := 1; ; sequence++ {
+				if _, exists := usedIDs[candidate]; !exists {
+					break
 				}
+				candidate = fmt.Sprintf("%s_%d", base, sequence)
 			}
 
 			toolCall.ID = candidate
 			usedIDs[candidate] = struct{}{}
 		}
 	}
+}
+
+func stableToolCallID(toolCall ToolCall) string {
+	payload := struct {
+		Type      string `json:"type,omitempty"`
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	}{
+		Type:      toolCall.Type,
+		Name:      toolCall.Function.Name,
+		Arguments: canonicalJSONText(toolCall.Function.Arguments),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		data = []byte(toolCall.Type + "\x00" + toolCall.Function.Name + "\x00" + toolCall.Function.Arguments)
+	}
+	sum := sha256.Sum256(data)
+	return "call_octopus_" + hex.EncodeToString(sum[:8])
+}
+
+func canonicalJSONText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return trimmed
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return trimmed
+	}
+	return string(encoded)
 }
 
 func (r *InternalLLMRequest) fillMissingToolCallIDsFromToolMessages() {
