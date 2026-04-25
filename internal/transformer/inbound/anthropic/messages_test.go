@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -11,6 +12,130 @@ import (
 // TestTransformRequestCapturesMCPServersAndContainer verifies A-H6:
 // incoming mcp_servers / container payloads land on the internal request's
 // Anthropic raw passthrough channels so outbound can replay them.
+func TestAnthropicToolUseRoundTripsGeminiThoughtSignature(t *testing.T) {
+	inbound := &MessagesInbound{}
+	body := []byte(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":16,
+		"messages":[{
+			"role":"assistant",
+			"content":[{
+				"type":"tool_use",
+				"id":"call_Bash_2",
+				"name":"Bash",
+				"input":{"command":"pwd"},
+				"_octopus":{"provider_extensions":{"gemini":{"thought_signature":"sig-gemini"}}}
+			}]
+		}]
+	}`)
+
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %+v", req.Messages)
+	}
+	toolCall := req.Messages[0].ToolCalls[0]
+	if toolCall.ThoughtSignature != "sig-gemini" {
+		t.Fatalf("ThoughtSignature = %q, want sig-gemini", toolCall.ThoughtSignature)
+	}
+	if toolCall.ID != "call_Bash_2" || toolCall.Function.Name != "Bash" || toolCall.Function.Arguments != `{"command":"pwd"}` {
+		t.Fatalf("tool call fields changed: %+v", toolCall)
+	}
+}
+
+func TestTransformResponseEmitsGeminiThoughtSignatureExtension(t *testing.T) {
+	inbound := &MessagesInbound{}
+	out, err := inbound.TransformResponse(context.Background(), &model.InternalLLMResponse{
+		ID:    "msg_1",
+		Model: "gemini-3.1-pro",
+		Choices: []model.Choice{{
+			Message: &model.Message{
+				Role: "assistant",
+				ToolCalls: []model.ToolCall{{
+					ID: "call_Bash_2",
+					Function: model.FunctionCall{
+						Name:      "Bash",
+						Arguments: `{"command":"pwd"}`,
+					},
+					ThoughtSignature: "sig-gemini",
+				}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("TransformResponse() error = %v", err)
+	}
+
+	var resp Message
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v\n%s", err, out)
+	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("expected one content block, got %+v", resp.Content)
+	}
+	got := geminiThoughtSignatureFromExtension(resp.Content[0].Octopus)
+	if got != "sig-gemini" {
+		t.Fatalf("extension signature = %q, want sig-gemini; raw=%s", got, out)
+	}
+}
+
+func TestTransformResponseOmitsOctopusExtensionWithoutSignature(t *testing.T) {
+	inbound := &MessagesInbound{}
+	out, err := inbound.TransformResponse(context.Background(), &model.InternalLLMResponse{
+		ID:    "msg_1",
+		Model: "gemini-3.1-pro",
+		Choices: []model.Choice{{
+			Message: &model.Message{
+				Role: "assistant",
+				ToolCalls: []model.ToolCall{{
+					ID: "call_Bash_2",
+					Function: model.FunctionCall{
+						Name:      "Bash",
+						Arguments: `{}`,
+					},
+				}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("TransformResponse() error = %v", err)
+	}
+	if strings.Contains(string(out), "_octopus") {
+		t.Fatalf("unexpected _octopus extension without signature: %s", out)
+	}
+}
+
+func TestTransformStreamEmitsGeminiThoughtSignatureExtension(t *testing.T) {
+	inbound := &MessagesInbound{}
+	out, err := inbound.TransformStream(context.Background(), &model.InternalLLMResponse{
+		ID:     "msg_1",
+		Model:  "gemini-3.1-pro",
+		Object: "chat.completion.chunk",
+		Choices: []model.Choice{{
+			Delta: &model.Message{
+				Role: "assistant",
+				ToolCalls: []model.ToolCall{{
+					Index: 2,
+					ID:    "call_Bash_2",
+					Function: model.FunctionCall{
+						Name:      "Bash",
+						Arguments: `{"command":"pwd"}`,
+					},
+					ThoughtSignature: "sig-gemini",
+				}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("TransformStream() error = %v", err)
+	}
+	text := string(out)
+	if !strings.Contains(text, `"_octopus":{"provider_extensions":{"gemini":{"thought_signature":"sig-gemini"}}}`) {
+		t.Fatalf("expected stream tool_use extension, got %s", text)
+	}
+}
 func TestTransformRequestCapturesMCPServersAndContainer(t *testing.T) {
 	inbound := &MessagesInbound{}
 	body := []byte(`{

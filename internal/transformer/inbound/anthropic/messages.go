@@ -35,6 +35,25 @@ type MessagesInbound struct {
 	storedResponse *model.InternalLLMResponse
 }
 
+func geminiThoughtSignatureExtension(signature string) *OctopusExtension {
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return nil
+	}
+	return &OctopusExtension{
+		ProviderExtensions: &ProviderExtensions{
+			Gemini: &GeminiExtension{ThoughtSignature: signature},
+		},
+	}
+}
+
+func geminiThoughtSignatureFromExtension(ext *OctopusExtension) string {
+	if ext == nil || ext.ProviderExtensions == nil || ext.ProviderExtensions.Gemini == nil {
+		return ""
+	}
+	return strings.TrimSpace(ext.ProviderExtensions.Gemini.ThoughtSignature)
+}
+
 func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*model.InternalLLMRequest, error) {
 	var anthropicReq MessageRequest
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
@@ -236,7 +255,7 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 
 					messages = append(messages, toolMsg)
 				case "tool_use":
-					chatMsg.ToolCalls = append(chatMsg.ToolCalls, model.ToolCall{
+					toolCall := model.ToolCall{
 						ID:   block.ID,
 						Type: "function",
 						Function: model.FunctionCall{
@@ -244,7 +263,11 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 							Arguments: string(block.Input),
 						},
 						CacheControl: convertToLLMCacheControl(block.CacheControl),
-					})
+					}
+					if sig := geminiThoughtSignatureFromExtension(block.Octopus); sig != "" {
+						toolCall.ThoughtSignature = sig
+					}
+					chatMsg.ToolCalls = append(chatMsg.ToolCalls, toolCall)
 					hasContent = true
 				case "document":
 					part := convertDocumentBlockToLLM(block)
@@ -623,12 +646,16 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 						input = json.RawMessage("{}")
 					}
 
-					contentBlocks = append(contentBlocks, MessageContentBlock{
+					block := MessageContentBlock{
 						Type:  "tool_use",
 						ID:    toolCall.ID,
 						Name:  &toolCall.Function.Name,
 						Input: input,
-					})
+					}
+					if ext := geminiThoughtSignatureExtension(toolCall.ThoughtSignature); ext != nil {
+						block.Octopus = ext
+					}
+					contentBlocks = append(contentBlocks, block)
 				}
 			}
 
@@ -1002,15 +1029,20 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 					i.toolCallIndices[toolCallIndex] = true
 					i.hasToolContentStarted = true
 
+					startBlock := &MessageContentBlock{
+						Type:  "tool_use",
+						ID:    deltaToolCall.ID,
+						Name:  &deltaToolCall.Function.Name,
+						Input: json.RawMessage("{}"),
+					}
+					if ext := geminiThoughtSignatureExtension(deltaToolCall.ThoughtSignature); ext != nil {
+						startBlock.Octopus = ext
+					}
+
 					startEvent := StreamEvent{
-						Type:  "content_block_start",
-						Index: &i.contentIndex,
-						ContentBlock: &MessageContentBlock{
-							Type:  "tool_use",
-							ID:    deltaToolCall.ID,
-							Name:  &deltaToolCall.Function.Name,
-							Input: json.RawMessage("{}"),
-						},
+						Type:         "content_block_start",
+						Index:        &i.contentIndex,
+						ContentBlock: startBlock,
 					}
 					data, err := json.Marshal(startEvent)
 					if err != nil {

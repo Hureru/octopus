@@ -396,10 +396,11 @@ type MessageContentBlock struct {
 
 	// Tool use request
 	// tool_use or server_tool_use
-	ID           string          `json:"id,omitempty"`
-	Name         *string         `json:"name,omitempty"`
-	Input        json.RawMessage `json:"input,omitempty"`
-	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	ID           string            `json:"id,omitempty"`
+	Name         *string           `json:"name,omitempty"`
+	Input        json.RawMessage   `json:"input,omitempty"`
+	CacheControl *CacheControl     `json:"cache_control,omitempty"`
+	Octopus      *OctopusExtension `json:"_octopus,omitempty"`
 
 	// Tool result fields
 	ToolUseID *string `json:"tool_use_id,omitempty"`
@@ -407,6 +408,18 @@ type MessageContentBlock struct {
 	// Type can be "text" or "image".
 	Content *MessageContent `json:"content,omitempty"`
 	IsError *bool           `json:"is_error,omitempty"`
+}
+
+type OctopusExtension struct {
+	ProviderExtensions *ProviderExtensions `json:"provider_extensions,omitempty"`
+}
+
+type ProviderExtensions struct {
+	Gemini *GeminiExtension `json:"gemini,omitempty"`
+}
+
+type GeminiExtension struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 // DocumentCitationsControl mirrors document.citations on Anthropic document

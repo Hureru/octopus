@@ -139,8 +139,8 @@ func TestCollectGeminiSignaturesByNameReturnsFirstMatch(t *testing.T) {
 		{Kind: model.ReasoningBlockKindSignature, Signature: "sig-b", ToolCallName: "translate"},
 		{Kind: model.ReasoningBlockKindSignature, Signature: "sig-c", ToolCallName: "search"}, // duplicate name
 		{Kind: model.ReasoningBlockKindThinking, Signature: "sig-d", ToolCallName: "search"},  // wrong kind
-		{Kind: model.ReasoningBlockKindSignature, Signature: ""}, // empty
-		{Kind: model.ReasoningBlockKindSignature, Signature: "sig-e"}, // no name
+		{Kind: model.ReasoningBlockKindSignature, Signature: ""},                              // empty
+		{Kind: model.ReasoningBlockKindSignature, Signature: "sig-e"},                         // no name
 	}
 	got := collectGeminiSignaturesByName(blocks)
 	if got["search"] != "sig-a" {
@@ -234,6 +234,65 @@ func TestConvertLLMToGeminiRequestBindsSignaturesByName(t *testing.T) {
 	}
 	if sigByName["translate"] != "sig-translate" {
 		t.Fatalf("translate signature = %q, want sig-translate", sigByName["translate"])
+	}
+}
+
+func TestConvertLLMToGeminiRequestUsesToolCallThoughtSignature(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gemini-3.1-pro",
+		Messages: []model.Message{
+			{
+				Role:    "user",
+				Content: model.MessageContent{Content: stringPtrGemini("run pwd")},
+			},
+			{
+				Role: "assistant",
+				ToolCalls: []model.ToolCall{{
+					ID: "call_Bash_2",
+					Function: model.FunctionCall{
+						Name:      "Bash",
+						Arguments: `{"command":"pwd"}`,
+					},
+					ThoughtSignature: "sig-gemini",
+				}},
+			},
+			{
+				Role:         "tool",
+				ToolCallID:   stringPtrGemini("call_Bash_2"),
+				ToolCallName: stringPtrGemini("Bash"),
+				Content:      model.MessageContent{Content: stringPtrGemini("/tmp")},
+			},
+			{
+				Role:    "user",
+				Content: model.MessageContent{Content: stringPtrGemini("continue")},
+			},
+		},
+	}
+
+	gReq := convertLLMToGeminiRequest(req)
+	var functionCall *model.GeminiPart
+	var functionResponse *model.GeminiPart
+	for _, content := range gReq.Contents {
+		for _, part := range content.Parts {
+			if part.FunctionCall != nil {
+				functionCall = part
+			}
+			if part.FunctionResponse != nil {
+				functionResponse = part
+			}
+		}
+	}
+	if functionCall == nil {
+		t.Fatalf("Gemini request missing functionCall: %+v", gReq.Contents)
+	}
+	if functionCall.FunctionCall.Name != "Bash" {
+		t.Fatalf("functionCall name = %q, want Bash", functionCall.FunctionCall.Name)
+	}
+	if functionCall.ThoughtSignature != "sig-gemini" {
+		t.Fatalf("functionCall thoughtSignature = %q, want sig-gemini", functionCall.ThoughtSignature)
+	}
+	if functionResponse == nil || functionResponse.FunctionResponse.Name != "Bash" {
+		t.Fatalf("functionResponse name not resolved from tool call: %+v", functionResponse)
 	}
 }
 
