@@ -209,7 +209,6 @@ func TestConvertToAnthropicRequestUsesUserFallbackForMetadata(t *testing.T) {
 	}
 }
 
-
 func TestPruneCacheBreakpointsKeepsSystemThenToolsThenMessages(t *testing.T) {
 	req := &anthropicModel.MessageRequest{
 		System: &anthropicModel.SystemPrompt{
@@ -304,6 +303,7 @@ func TestConvertStopSequencesCapsArrayLength(t *testing.T) {
 		t.Errorf("expected single-string form preserved, got %+v", seqs)
 	}
 }
+
 // the raw mcp_servers and container payloads captured by inbound are
 // written back on the outbound request verbatim. Both fields are opaque
 // JSON in MessageRequest so the bytes are expected to round-trip with
@@ -333,6 +333,28 @@ func TestConvertToAnthropicRequestForwardsMCPServersAndContainer(t *testing.T) {
 	mcp[0] = 'X'
 	if out.MCPServers[0] == 'X' {
 		t.Errorf("outbound MCPServers aliased the inbound slice (should be a copy)")
+	}
+}
+
+func TestConvertToAnthropicRequestDropsUnsupportedCacheControlValues(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []model.Message{{
+			Role: "user",
+			Content: model.MessageContent{MultipleContent: []model.MessageContentPart{{
+				Type:         "text",
+				Text:         stringPtr("hello"),
+				CacheControl: &model.CacheControl{Type: "future_type", TTL: "future_ttl"},
+			}}},
+		}},
+	}
+
+	out := convertToAnthropicRequest(req)
+	if len(out.Messages) != 1 || len(out.Messages[0].Content.MultipleContent) != 1 {
+		t.Fatalf("expected one content block, got %+v", out.Messages)
+	}
+	if got := out.Messages[0].Content.MultipleContent[0].CacheControl; got != nil {
+		t.Fatalf("expected unsupported cache_control to be dropped, got %+v", got)
 	}
 }
 
@@ -555,8 +577,8 @@ func TestTransformRequestPreservesServerToolSpecAndBeta(t *testing.T) {
 				},
 				Tools: []model.Tool{
 					{
-						Type: tc.toolType,
-						Function: model.Function{Name: strings.Split(tc.toolType, "_")[0]},
+						Type:                tc.toolType,
+						Function:            model.Function{Name: strings.Split(tc.toolType, "_")[0]},
 						AnthropicServerSpec: json.RawMessage(tc.rawSpec),
 					},
 				},
@@ -605,14 +627,14 @@ func TestConvertToolsDropsServerToolWithoutSpec(t *testing.T) {
 // A-H5: anthropicServerToolBeta recognises each supported family prefix.
 func TestAnthropicServerToolBeta(t *testing.T) {
 	cases := map[string]string{
-		"":                          "",
-		"function":                  "",
-		"custom":                    "",
-		"web_search_20250305":       "web-search-2025-03-05",
-		"web_search_20260101":       "web-search-2025-03-05",
-		"code_execution_20250522":   "code-execution-2025-05-22",
-		"computer_20250124":         "computer-use-2025-01-24",
-		"something_unknown":         "",
+		"":                        "",
+		"function":                "",
+		"custom":                  "",
+		"web_search_20250305":     "web-search-2025-03-05",
+		"web_search_20260101":     "web-search-2025-03-05",
+		"code_execution_20250522": "code-execution-2025-05-22",
+		"computer_20250124":       "computer-use-2025-01-24",
+		"something_unknown":       "",
 	}
 	for in, want := range cases {
 		if got := anthropicServerToolBeta(in); got != want {

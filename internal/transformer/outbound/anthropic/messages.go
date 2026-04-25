@@ -1376,8 +1376,7 @@ func convertCacheControl(cc *model.CacheControl) *anthropicModel.CacheControl {
 	if cc == nil {
 		return nil
 	}
-	// Unknown values were already normalised at the inbound boundary; do a final safety check
-	// so a misbehaving intermediate cannot sneak a provider-rejected value past us.
+	// Drop provider-rejected values before emitting Anthropic wire payloads.
 	if cc.Type != "" && cc.Type != model.CacheControlTypeEphemeral {
 		return nil
 	}

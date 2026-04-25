@@ -81,6 +81,27 @@ func TestTransformRequestExtractsTopKAndServiceTier(t *testing.T) {
 	}
 }
 
+func TestTransformRequestPreservesUnknownCacheControlValues(t *testing.T) {
+	inbound := &MessagesInbound{}
+	body := []byte(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello","cache_control":{"type":"future_type","ttl":"future_ttl"}}]}]
+	}`)
+
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest: %v", err)
+	}
+	if len(req.Messages) != 1 || req.Messages[0].CacheControl == nil {
+		t.Fatalf("expected cache_control on simplified message, got %+v", req.Messages)
+	}
+	cc := req.Messages[0].CacheControl
+	if cc.Type != "future_type" || cc.TTL != "future_ttl" {
+		t.Fatalf("expected raw cache_control values preserved, got %+v", cc)
+	}
+}
+
 func TestTransformStreamDoesNotStopMissingContentBlock(t *testing.T) {
 	inbound := &MessagesInbound{}
 

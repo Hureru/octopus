@@ -536,7 +536,7 @@ func (i *ResponseInbound) handleToolCalls(toolCalls []model.ToolCall) [][]byte {
 			events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
 				Type:         "response.function_call_arguments.delta",
 				ItemID:       &itemID,
-				OutputIndex:  lo.ToPtr(i.outputIndex - 1),
+				OutputIndex:  lo.ToPtr(i.toolCallOutputIndex[toolCallIndex]),
 				ContentIndex: lo.ToPtr(0),
 				Delta:        tc.Function.Arguments,
 			}))
@@ -643,8 +643,8 @@ func (i *ResponseInbound) closeMessageItem() [][]byte {
 			if fullRefusal != "" {
 				refusal := fullRefusal
 				contentItems = append(contentItems, ResponsesItem{
-					Type: "refusal",
-					Text: &refusal,
+					Type:    "refusal",
+					Refusal: &refusal,
 				})
 			}
 		}
@@ -1016,6 +1016,7 @@ type ResponsesItem struct {
 	Content  *ResponsesInput `json:"content,omitempty"`
 	Status   *string         `json:"status,omitempty"`
 	Text     *string         `json:"text,omitempty"`
+	Refusal  *string         `json:"refusal,omitempty"`
 	ImageURL *string         `json:"image_url,omitempty"`
 	Detail   *string         `json:"detail,omitempty"`
 

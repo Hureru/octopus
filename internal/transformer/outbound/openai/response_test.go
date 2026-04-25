@@ -417,6 +417,32 @@ func TestConvertToLLMResponseFromResponsesPreservesRawOutputItems(t *testing.T) 
 	}
 }
 
+func TestConvertToLLMResponseFromResponsesPreservesRefusalContent(t *testing.T) {
+	refusal := "I cannot help with that."
+	resp := &ResponsesResponse{
+		ID:        "resp_refusal",
+		Object:    "response",
+		Model:     "gpt-4o",
+		CreatedAt: 1,
+		Output: []ResponsesItem{{
+			Type: "message",
+			Role: "assistant",
+			Content: &ResponsesInput{Items: []ResponsesItem{{
+				Type:    "refusal",
+				Refusal: &refusal,
+			}}},
+		}},
+	}
+
+	internalResp := convertToLLMResponseFromResponses(resp)
+	if len(internalResp.Choices) != 1 || internalResp.Choices[0].Message == nil {
+		t.Fatalf("expected assistant message, got %#v", internalResp.Choices)
+	}
+	if got := internalResp.Choices[0].Message.Refusal; got != refusal {
+		t.Fatalf("expected refusal %q, got %q", refusal, got)
+	}
+}
+
 func TestConvertToResponsesRequestPreservesImageGenerationTools(t *testing.T) {
 	content := "hello"
 	req := &model.InternalLLMRequest{
@@ -657,6 +683,35 @@ func TestTransformStreamRefusalDeltaIsForwarded(t *testing.T) {
 // O-H4: `response.refusal.done` carries the full refusal text which was
 // already streamed via delta events. Re-emitting it would double-count on the
 // inbound accumulator, so the outbound must drop the event.
+func TestTransformStreamRefusalDoneIsDropped(t *testing.T) {
+	o := &ResponseOutbound{}
+	event := `{"type":"response.refusal.done","item_id":"msg_1","output_index":0,"content_index":0,"refusal":"I cannot help with that."}`
+	resp, err := o.TransformStream(context.Background(), []byte(event))
+	if err != nil {
+		t.Fatalf("TransformStream refusal.done: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected refusal.done to be dropped, got %+v", resp)
+	}
+}
+
+func TestSanitizeResponsesItemsNormalizesRefusalTextField(t *testing.T) {
+	text := "I cannot help with that."
+	items := sanitizeResponsesItems([]ResponsesItem{{
+		Type: "message",
+		Content: &ResponsesInput{Items: []ResponsesItem{{
+			Type: "refusal",
+			Text: &text,
+		}}},
+	}})
+	refusalItem := items[0].Content.Items[0]
+	if refusalItem.Refusal == nil || *refusalItem.Refusal != text {
+		t.Fatalf("expected refusal field to be populated, got %+v", refusalItem)
+	}
+	if refusalItem.Text != nil {
+		t.Fatalf("expected text field to be cleared for refusal item, got %+v", refusalItem.Text)
+	}
+}
 
 func TestSanitizeResponsesItemsAddsTypedReasoningSummaryDefaults(t *testing.T) {
 	items := sanitizeResponsesItems([]ResponsesItem{{

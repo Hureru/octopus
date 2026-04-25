@@ -254,8 +254,71 @@ func TestStreamRefusalEvents(t *testing.T) {
 	if item == nil || item.Content == nil || len(item.Content.Items) == 0 {
 		t.Fatalf("message item.done missing; events=%v", types)
 	}
-	if item.Content.Items[0].Type != "refusal" {
-		t.Fatalf("item content should be refusal, got %+v", item.Content.Items[0])
+	if item.Content.Items[0].Refusal == nil || *item.Content.Items[0].Refusal != "I cannot help with that." {
+		t.Fatalf("item refusal content lost: %+v", item.Content.Items[0].Refusal)
+	}
+}
+
+func TestStreamToolCallArgumentDeltaUsesStoredOutputIndex(t *testing.T) {
+	chunks := []*model.InternalLLMResponse{
+		chunkWithDelta("gpt-4o", &model.Message{
+			ToolCalls: []model.ToolCall{{
+				Index: 0,
+				ID:    "call_a",
+				Type:  "function",
+				Function: model.FunctionCall{
+					Name:      "first",
+					Arguments: `{"a":`,
+				},
+			}},
+		}),
+		chunkWithDelta("gpt-4o", &model.Message{
+			ToolCalls: []model.ToolCall{{
+				Index: 1,
+				ID:    "call_b",
+				Type:  "function",
+				Function: model.FunctionCall{
+					Name:      "second",
+					Arguments: `{"b":1}`,
+				},
+			}},
+		}),
+		chunkWithDelta("gpt-4o", &model.Message{
+			ToolCalls: []model.ToolCall{{
+				Index: 0,
+				ID:    "call_a",
+				Type:  "function",
+				Function: model.FunctionCall{
+					Arguments: `1}`,
+				},
+			}},
+		}),
+	}
+
+	events := feedStream(t, chunks)
+	var firstToolOutputIndex *int
+	for _, event := range events {
+		if event.Type == "response.output_item.added" && event.Item != nil && event.Item.CallID == "call_a" {
+			firstToolOutputIndex = event.OutputIndex
+			break
+		}
+	}
+	if firstToolOutputIndex == nil {
+		t.Fatalf("expected output_item.added for call_a; events=%v", eventTypes(events))
+	}
+
+	var lateDelta *ResponsesStreamEvent
+	for i := range events {
+		if events[i].Type == "response.function_call_arguments.delta" && events[i].ItemID != nil && *events[i].ItemID == "call_a" && events[i].Delta == `1}` {
+			lateDelta = &events[i]
+			break
+		}
+	}
+	if lateDelta == nil {
+		t.Fatalf("expected late argument delta for call_a; events=%v", eventTypes(events))
+	}
+	if lateDelta.OutputIndex == nil || *lateDelta.OutputIndex != *firstToolOutputIndex {
+		t.Fatalf("late call_a delta output_index=%v, want %d", lateDelta.OutputIndex, *firstToolOutputIndex)
 	}
 }
 
@@ -302,7 +365,7 @@ func TestStreamTextThenRefusal(t *testing.T) {
 	if item.Content.Items[0].Text == nil || !strings.Contains(*item.Content.Items[0].Text, "partial answer") {
 		t.Fatalf("text content lost: %+v", item.Content.Items[0].Text)
 	}
-	if item.Content.Items[1].Text == nil || *item.Content.Items[1].Text != "Actually I can't." {
-		t.Fatalf("refusal content lost: %+v", item.Content.Items[1].Text)
+	if item.Content.Items[1].Refusal == nil || *item.Content.Items[1].Refusal != "Actually I can't." {
+		t.Fatalf("refusal content lost: %+v", item.Content.Items[1].Refusal)
 	}
 }

@@ -457,6 +457,7 @@ type ResponsesItem struct {
 	Content  *ResponsesInput `json:"content,omitempty"`
 	Status   *string         `json:"status,omitempty"`
 	Text     *string         `json:"text,omitempty"`
+	Refusal  *string         `json:"refusal,omitempty"`
 	ImageURL *string         `json:"image_url,omitempty"`
 	Detail   *string         `json:"detail,omitempty"`
 
@@ -1333,6 +1334,7 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 	var (
 		contentParts     []model.MessageContentPart
 		textContent      strings.Builder
+		refusalContent   strings.Builder
 		reasoningContent strings.Builder
 		toolCalls        []model.ToolCall
 	)
@@ -1342,8 +1344,17 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 		case "message":
 			if outputItem.Content != nil {
 				for _, item := range outputItem.Content.Items {
-					if item.Type == "output_text" && item.Text != nil {
-						textContent.WriteString(*item.Text)
+					switch item.Type {
+					case "output_text":
+						if item.Text != nil {
+							textContent.WriteString(*item.Text)
+						}
+					case "refusal":
+						if item.Refusal != nil {
+							refusalContent.WriteString(*item.Refusal)
+						} else if item.Text != nil {
+							refusalContent.WriteString(*item.Text)
+						}
 					}
 				}
 			}
@@ -1391,6 +1402,9 @@ func convertToLLMResponseFromResponses(resp *ResponsesResponse) *model.InternalL
 	// Set reasoning content if present
 	if reasoningContent.Len() > 0 {
 		choice.Message.ReasoningContent = lo.ToPtr(reasoningContent.String())
+	}
+	if refusalContent.Len() > 0 {
+		choice.Message.Refusal = refusalContent.String()
 	}
 
 	// Set message content
@@ -1646,8 +1660,23 @@ func sanitizeResponsesItems(items []ResponsesItem) []ResponsesItem {
 	for i, item := range items {
 		sanitized[i] = item
 		ensureResponsesReasoningSummary(&sanitized[i])
+		ensureResponsesRefusalShape(&sanitized[i])
 	}
 	return sanitized
+}
+
+func ensureResponsesRefusalShape(item *ResponsesItem) {
+	if item == nil || item.Content == nil {
+		return
+	}
+	for i := range item.Content.Items {
+		contentItem := &item.Content.Items[i]
+		if contentItem.Type != "refusal" || contentItem.Refusal != nil || contentItem.Text == nil {
+			continue
+		}
+		contentItem.Refusal = contentItem.Text
+		contentItem.Text = nil
+	}
 }
 
 func ensureResponsesReasoningSummary(item *ResponsesItem) {
