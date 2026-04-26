@@ -29,29 +29,17 @@ type MessagesInbound struct {
 	toolCallIndices           map[int]bool // Track which tool call indices we've seen
 	inputToken                int64
 
-	// Stream chunks storage for aggregation
-	streamChunks []*model.InternalLLMResponse
+	streamAggregator model.StreamAggregator
 	// storedResponse stores the non-stream response
 	storedResponse *model.InternalLLMResponse
 }
 
 func geminiThoughtSignatureExtension(signature string) *OctopusExtension {
-	signature = strings.TrimSpace(signature)
-	if signature == "" {
-		return nil
-	}
-	return &OctopusExtension{
-		ProviderExtensions: &ProviderExtensions{
-			Gemini: &GeminiExtension{ThoughtSignature: signature},
-		},
-	}
+	return model.GeminiThoughtSignatureExtension(signature)
 }
 
 func geminiThoughtSignatureFromExtension(ext *OctopusExtension) string {
-	if ext == nil || ext.ProviderExtensions == nil || ext.ProviderExtensions.Gemini == nil {
-		return ""
-	}
-	return strings.TrimSpace(ext.ProviderExtensions.Gemini.ThoughtSignature)
+	return model.GeminiThoughtSignatureFromExtension(ext)
 }
 
 func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*model.InternalLLMRequest, error) {
@@ -263,6 +251,9 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 							Arguments: string(block.Input),
 						},
 						CacheControl: convertToLLMCacheControl(block.CacheControl),
+					}
+					if block.Octopus != nil {
+						toolCall.ProviderExtensions = block.Octopus.ProviderExtensions
 					}
 					if sig := geminiThoughtSignatureFromExtension(block.Octopus); sig != "" {
 						toolCall.ThoughtSignature = sig
@@ -652,7 +643,7 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 						Name:  &toolCall.Function.Name,
 						Input: input,
 					}
-					if ext := geminiThoughtSignatureExtension(toolCall.ThoughtSignature); ext != nil {
+					if ext := geminiThoughtSignatureExtension(toolCall.GetGeminiExtensions().ThoughtSignature); ext != nil {
 						block.Octopus = ext
 					}
 					contentBlocks = append(contentBlocks, block)
@@ -725,7 +716,7 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 	}
 
 	// Store the chunk for aggregation
-	i.streamChunks = append(i.streamChunks, stream)
+	i.streamAggregator.Add(stream)
 
 	var events [][]byte
 
@@ -1133,6 +1124,317 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 	return joinSSEEvents(events), nil
 }
 
+func (i *MessagesInbound) TransformStreamEvents(ctx context.Context, events []model.StreamEvent) ([]byte, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	if stream := model.InternalResponseFromStreamEvents(events); stream != nil && stream.Object != "[DONE]" {
+		i.streamAggregator.Add(stream)
+	}
+
+	var firstUsage *model.Usage
+	for _, event := range events {
+		if event.Usage != nil {
+			firstUsage = event.Usage
+			break
+		}
+	}
+
+	var out [][]byte
+	ensureStarted := func(event model.StreamEvent) error {
+		if event.ID != "" {
+			i.messageID = event.ID
+		}
+		if event.Model != "" {
+			i.modelName = event.Model
+		}
+		if i.hasStarted {
+			return nil
+		}
+		i.hasStarted = true
+		usage := &Usage{InputTokens: i.inputToken, OutputTokens: 1}
+		if firstUsage != nil {
+			usage = i.convertUsage(firstUsage)
+		}
+		startEvent := StreamEvent{
+			Type: "message_start",
+			Message: &StreamMessage{
+				ID:      i.messageID,
+				Type:    "message",
+				Role:    "assistant",
+				Model:   i.modelName,
+				Content: []MessageContentBlock{},
+				Usage:   usage,
+			},
+		}
+		data, err := json.Marshal(startEvent)
+		if err != nil {
+			return fmt.Errorf("failed to marshal message_start event: %w", err)
+		}
+		out = append(out, formatSSEEvent("message_start", data))
+		return nil
+	}
+	closeOpenBlock := func() error {
+		if !i.hasOpenContentBlock() {
+			return nil
+		}
+		stopEvent := StreamEvent{Type: "content_block_stop", Index: &i.contentIndex}
+		data, err := json.Marshal(stopEvent)
+		if err != nil {
+			return fmt.Errorf("failed to marshal content_block_stop event: %w", err)
+		}
+		out = append(out, formatSSEEvent("content_block_stop", data))
+		i.resetOpenContentState()
+		i.contentIndex++
+		return nil
+	}
+	startText := func() error {
+		if i.hasTextContentStarted {
+			return nil
+		}
+		if err := closeOpenBlock(); err != nil {
+			return err
+		}
+		i.hasTextContentStarted = true
+		startEvent := StreamEvent{Type: "content_block_start", Index: &i.contentIndex, ContentBlock: &MessageContentBlock{Type: "text", Text: lo.ToPtr("")}}
+		data, err := json.Marshal(startEvent)
+		if err != nil {
+			return fmt.Errorf("failed to marshal content_block_start event: %w", err)
+		}
+		out = append(out, formatSSEEvent("content_block_start", data))
+		return nil
+	}
+	startThinking := func() error {
+		if i.hasThinkingContentStarted {
+			return nil
+		}
+		if err := closeOpenBlock(); err != nil {
+			return err
+		}
+		i.hasThinkingContentStarted = true
+		startEvent := StreamEvent{Type: "content_block_start", Index: &i.contentIndex, ContentBlock: &MessageContentBlock{Type: "thinking", Thinking: lo.ToPtr(""), Signature: lo.ToPtr("")}}
+		data, err := json.Marshal(startEvent)
+		if err != nil {
+			return fmt.Errorf("failed to marshal content_block_start event: %w", err)
+		}
+		out = append(out, formatSSEEvent("content_block_start", data))
+		return nil
+	}
+	startTool := func(toolCall model.ToolCall) error {
+		if i.toolCallIndices == nil {
+			i.toolCallIndices = make(map[int]bool)
+		}
+		if i.toolCallIndices[toolCall.Index] {
+			return nil
+		}
+		if err := closeOpenBlock(); err != nil {
+			return err
+		}
+		i.toolCallIndices[toolCall.Index] = true
+		i.hasToolContentStarted = true
+		startBlock := &MessageContentBlock{Type: "tool_use", ID: toolCall.ID, Name: &toolCall.Function.Name, Input: json.RawMessage("{}")}
+		if ext := geminiThoughtSignatureExtension(toolCall.GetGeminiExtensions().ThoughtSignature); ext != nil {
+			startBlock.Octopus = ext
+		}
+		startEvent := StreamEvent{Type: "content_block_start", Index: &i.contentIndex, ContentBlock: startBlock}
+		data, err := json.Marshal(startEvent)
+		if err != nil {
+			return fmt.Errorf("failed to marshal content_block_start event: %w", err)
+		}
+		out = append(out, formatSSEEvent("content_block_start", data))
+		return nil
+	}
+
+	for _, event := range events {
+		if event.ID != "" {
+			i.messageID = event.ID
+		}
+		if event.Model != "" {
+			i.modelName = event.Model
+		}
+		switch event.Kind {
+		case model.StreamEventKindMessageStart:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+		case model.StreamEventKindTextDelta:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if event.Delta == nil || event.Delta.Text == "" {
+				continue
+			}
+			if err := startText(); err != nil {
+				return nil, err
+			}
+			text := event.Delta.Text
+			deltaEvent := StreamEvent{Type: "content_block_delta", Index: &i.contentIndex, Delta: &StreamDelta{Type: lo.ToPtr("text_delta"), Text: &text}}
+			data, err := json.Marshal(deltaEvent)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content_block_delta event: %w", err)
+			}
+			out = append(out, formatSSEEvent("content_block_delta", data))
+		case model.StreamEventKindThinkingDelta:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if event.Delta == nil {
+				continue
+			}
+			if event.Delta.Thinking != "" {
+				if err := startThinking(); err != nil {
+					return nil, err
+				}
+				thinking := event.Delta.Thinking
+				deltaEvent := StreamEvent{Type: "content_block_delta", Index: &i.contentIndex, Delta: &StreamDelta{Type: lo.ToPtr("thinking_delta"), Thinking: &thinking}}
+				data, err := json.Marshal(deltaEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal content_block_delta event: %w", err)
+				}
+				out = append(out, formatSSEEvent("content_block_delta", data))
+			}
+			if event.Delta.Signature != "" {
+				if err := startThinking(); err != nil {
+					return nil, err
+				}
+				signature := event.Delta.Signature
+				deltaEvent := StreamEvent{Type: "content_block_delta", Index: &i.contentIndex, Delta: &StreamDelta{Type: lo.ToPtr("signature_delta"), Signature: &signature}}
+				data, err := json.Marshal(deltaEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal signature_delta event: %w", err)
+				}
+				out = append(out, formatSSEEvent("content_block_delta", data))
+			}
+		case model.StreamEventKindSignatureDelta:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if event.Delta == nil || event.Delta.Signature == "" {
+				continue
+			}
+			if err := startThinking(); err != nil {
+				return nil, err
+			}
+			signature := event.Delta.Signature
+			deltaEvent := StreamEvent{Type: "content_block_delta", Index: &i.contentIndex, Delta: &StreamDelta{Type: lo.ToPtr("signature_delta"), Signature: &signature}}
+			data, err := json.Marshal(deltaEvent)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal signature_delta event: %w", err)
+			}
+			out = append(out, formatSSEEvent("content_block_delta", data))
+		case model.StreamEventKindContentBlockStart:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if event.ContentBlock == nil || event.ContentBlock.Type != "redacted_thinking" || event.ContentBlock.Data == "" {
+				continue
+			}
+			if err := closeOpenBlock(); err != nil {
+				return nil, err
+			}
+			startEvent := StreamEvent{Type: "content_block_start", Index: &i.contentIndex, ContentBlock: &MessageContentBlock{Type: "redacted_thinking", Data: event.ContentBlock.Data}}
+			data, err := json.Marshal(startEvent)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content_block_start event: %w", err)
+			}
+			out = append(out, formatSSEEvent("content_block_start", data))
+			stopEvent := StreamEvent{Type: "content_block_stop", Index: &i.contentIndex}
+			stopData, err := json.Marshal(stopEvent)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content_block_stop event: %w", err)
+			}
+			out = append(out, formatSSEEvent("content_block_stop", stopData))
+			i.contentIndex++
+		case model.StreamEventKindToolCallStart:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if event.ToolCall != nil {
+				if err := startTool(*event.ToolCall); err != nil {
+					return nil, err
+				}
+			}
+		case model.StreamEventKindToolCallDelta:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if event.ToolCall == nil {
+				continue
+			}
+			if err := startTool(*event.ToolCall); err != nil {
+				return nil, err
+			}
+			arguments := event.ToolCall.Function.Arguments
+			if event.Delta != nil && event.Delta.Arguments != "" {
+				arguments = event.Delta.Arguments
+			}
+			if arguments == "" {
+				continue
+			}
+			deltaEvent := StreamEvent{Type: "content_block_delta", Index: &i.contentIndex, Delta: &StreamDelta{Type: lo.ToPtr("input_json_delta"), PartialJSON: &arguments}}
+			data, err := json.Marshal(deltaEvent)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content_block_delta event: %w", err)
+			}
+			out = append(out, formatSSEEvent("content_block_delta", data))
+		case model.StreamEventKindToolCallStop, model.StreamEventKindContentBlockStop:
+			if err := closeOpenBlock(); err != nil {
+				return nil, err
+			}
+		case model.StreamEventKindMessageStop:
+			if err := ensureStarted(event); err != nil {
+				return nil, err
+			}
+			if err := closeOpenBlock(); err != nil {
+				return nil, err
+			}
+			stopReason := event.StopReason.ToAnthropic()
+			if stopReason == "" {
+				stopReason = "end_turn"
+			}
+			i.stopReason = &stopReason
+			i.stopSequence = event.StopSequence
+			i.hasFinished = true
+		case model.StreamEventKindUsageDelta:
+			if event.Usage != nil && i.hasFinished && !i.messageStopped {
+				finalEvents, err := i.finalizeStreamMessage(event.Usage)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, finalEvents...)
+			}
+		case model.StreamEventKindDone:
+			if i.hasFinished && !i.messageStopped {
+				finalEvents, err := i.finalizeStreamMessage(nil)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, finalEvents...)
+			}
+		case model.StreamEventKindError:
+			if event.Error == nil {
+				continue
+			}
+			errType := event.Error.Detail.Type
+			if errType == "" {
+				errType = "api_error"
+			}
+			errPayload := StreamEvent{Type: "error", Error: &ErrorDetail{Type: errType, Message: event.Error.Detail.Message}}
+			data, err := json.Marshal(errPayload)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal error event: %w", err)
+			}
+			i.messageStopped = true
+			out = append(out, formatSSEEvent("error", data))
+		}
+	}
+
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return joinSSEEvents(out), nil
+}
+
 func (i *MessagesInbound) hasOpenContentBlock() bool {
 	return i.hasTextContentStarted || i.hasThinkingContentStarted || i.hasToolContentStarted
 }
@@ -1222,143 +1524,10 @@ func (i *MessagesInbound) convertUsage(usage *model.Usage) *Usage {
 // For streaming: aggregates all stored stream chunks into a complete response
 // For non-streaming: returns the stored response
 func (i *MessagesInbound) GetInternalResponse(ctx context.Context) (*model.InternalLLMResponse, error) {
-	// Return stored response for non-stream scenario
 	if i.storedResponse != nil {
 		return i.storedResponse, nil
 	}
-
-	// Aggregate stream chunks for stream scenario
-	if len(i.streamChunks) == 0 {
-		log.Debugf("GetInternalResponse: no stream chunks available (stream may not be complete)")
-		return nil, nil
-	}
-
-	// Use the first chunk as the base
-	firstChunk := i.streamChunks[0]
-	result := &model.InternalLLMResponse{
-		ID:                firstChunk.ID,
-		Object:            "chat.completion",
-		Created:           firstChunk.Created,
-		Model:             firstChunk.Model,
-		SystemFingerprint: firstChunk.SystemFingerprint,
-		ServiceTier:       firstChunk.ServiceTier,
-	}
-
-	// Aggregate choices by index
-	choicesMap := make(map[int]*model.Choice)
-
-	for _, chunk := range i.streamChunks {
-		// Update ID and Model if they appear in later chunks
-		if chunk.ID != "" {
-			result.ID = chunk.ID
-		}
-		if chunk.Model != "" {
-			result.Model = chunk.Model
-		}
-
-		// Capture usage from the last chunk that has it
-		if chunk.Usage != nil {
-			result.Usage = chunk.Usage
-		}
-
-		for _, choice := range chunk.Choices {
-			existingChoice, exists := choicesMap[choice.Index]
-			if !exists {
-				existingChoice = &model.Choice{
-					Index:   choice.Index,
-					Message: &model.Message{},
-				}
-				choicesMap[choice.Index] = existingChoice
-			}
-
-			// Aggregate delta content into message
-			if choice.Delta != nil {
-				delta := choice.Delta
-
-				// Set role if present
-				if delta.Role != "" {
-					existingChoice.Message.Role = delta.Role
-				}
-
-				// Append content
-				if delta.Content.Content != nil {
-					if existingChoice.Message.Content.Content == nil {
-						existingChoice.Message.Content.Content = new(string)
-					}
-					*existingChoice.Message.Content.Content += *delta.Content.Content
-				}
-
-				// Append reasoning content
-				if delta.ReasoningContent != nil {
-					if existingChoice.Message.ReasoningContent == nil {
-						existingChoice.Message.ReasoningContent = new(string)
-					}
-					*existingChoice.Message.ReasoningContent += *delta.ReasoningContent
-				}
-
-				// Aggregate tool calls
-				for _, toolCall := range delta.ToolCalls {
-					existingChoice.Message.ToolCalls = mergeToolCall(existingChoice.Message.ToolCalls, toolCall)
-				}
-
-				// Aggregate redacted thinking blocks
-				if len(delta.RedactedThinkingBlocks) > 0 {
-					existingChoice.Message.RedactedThinkingBlocks = append(
-						existingChoice.Message.RedactedThinkingBlocks,
-						delta.RedactedThinkingBlocks...,
-					)
-					for _, data := range delta.RedactedThinkingBlocks {
-						existingChoice.Message.AppendReasoningBlock(model.ReasoningBlock{
-							Kind:     model.ReasoningBlockKindRedacted,
-							Index:    -1,
-							Data:     data,
-							Provider: "anthropic",
-						})
-					}
-				}
-
-				// Carry forward full reasoning blocks when the delta already provides them.
-				// Anthropic signature_delta chunks are handled via ReasoningSignature and merged
-				// into the last thinking block after aggregation (see finalize below).
-				if len(delta.ReasoningBlocks) > 0 {
-					for _, rb := range delta.ReasoningBlocks {
-						existingChoice.Message.AppendReasoningBlock(rb)
-					}
-				}
-
-				// Set refusal if present
-				if delta.Refusal != "" {
-					existingChoice.Message.Refusal = delta.Refusal
-				}
-			}
-
-			// Capture finish reason
-			if choice.FinishReason != nil {
-				existingChoice.FinishReason = choice.FinishReason
-			}
-
-			// Capture logprobs
-			if choice.Logprobs != nil {
-				if existingChoice.Logprobs == nil {
-					existingChoice.Logprobs = &model.LogprobsContent{}
-				}
-				existingChoice.Logprobs.Content = append(existingChoice.Logprobs.Content, choice.Logprobs.Content...)
-			}
-		}
-	}
-
-	// Convert map to slice, sorted by index
-	result.Choices = make([]model.Choice, 0, len(choicesMap))
-	for idx := 0; idx < len(choicesMap); idx++ {
-		if choice, exists := choicesMap[idx]; exists {
-			result.Choices = append(result.Choices, *choice)
-		}
-	}
-
-	// Clear stored chunks after aggregation
-	i.streamChunks = nil
-
-	return result, nil
+	return i.streamAggregator.BuildAndReset(), nil
 }
 
 // mergeToolCall merges a tool call delta into the existing tool calls slice

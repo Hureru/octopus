@@ -261,6 +261,65 @@ func TestTransformStreamDoesNotStopMissingContentBlock(t *testing.T) {
 	}
 }
 
+func TestTransformStreamEventsDirectAnthropicSSE(t *testing.T) {
+	inbound := &MessagesInbound{}
+	events := []model.StreamEvent{
+		{Kind: model.StreamEventKindMessageStart, ID: "msg_1", Model: "claude-test", Role: "assistant"},
+		{Kind: model.StreamEventKindThinkingDelta, ID: "msg_1", Model: "claude-test", Delta: &model.StreamDelta{Thinking: "think", Signature: "sig"}},
+		{Kind: model.StreamEventKindTextDelta, ID: "msg_1", Model: "claude-test", Delta: &model.StreamDelta{Text: "hello"}},
+		{Kind: model.StreamEventKindToolCallStart, ID: "msg_1", Model: "claude-test", Index: 0, ToolCall: &model.ToolCall{Index: 0, ID: "call_1", Function: model.FunctionCall{Name: "lookup"}}},
+		{Kind: model.StreamEventKindToolCallDelta, ID: "msg_1", Model: "claude-test", Index: 0, ToolCall: &model.ToolCall{Index: 0, ID: "call_1", Function: model.FunctionCall{Name: "lookup"}}, Delta: &model.StreamDelta{Arguments: `{"q":"x"}`}},
+		{Kind: model.StreamEventKindMessageStop, ID: "msg_1", Model: "claude-test", StopReason: model.FinishReasonToolCalls},
+		{Kind: model.StreamEventKindUsageDelta, ID: "msg_1", Model: "claude-test", Usage: &model.Usage{PromptTokens: 3, CompletionTokens: 4}},
+	}
+
+	out, err := inbound.TransformStreamEvents(context.Background(), events)
+	if err != nil {
+		t.Fatalf("TransformStreamEvents() error = %v", err)
+	}
+	text := string(out)
+	for _, want := range []string{
+		"event:message_start",
+		`"type":"thinking_delta"`,
+		`"type":"signature_delta"`,
+		`"type":"text_delta"`,
+		`"type":"tool_use"`,
+		`"partial_json":"{\"q\":\"x\"}"`,
+		`"stop_reason":"tool_use"`,
+		`"input_tokens":3`,
+		"event:message_stop",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in SSE, got %s", want, text)
+		}
+	}
+}
+
+func TestTransformStreamEventsDirectErrorAndDone(t *testing.T) {
+	inbound := &MessagesInbound{}
+	errOut, err := inbound.TransformStreamEvents(context.Background(), []model.StreamEvent{{Kind: model.StreamEventKindError, Error: &model.ResponseError{Detail: model.ErrorDetail{Message: "boom"}}}})
+	if err != nil {
+		t.Fatalf("error event: %v", err)
+	}
+	if !strings.Contains(string(errOut), `"type":"api_error"`) || !strings.Contains(string(errOut), `"message":"boom"`) {
+		t.Fatalf("expected api_error SSE, got %s", errOut)
+	}
+
+	inbound = &MessagesInbound{}
+	doneOut, err := inbound.TransformStreamEvents(context.Background(), []model.StreamEvent{
+		{Kind: model.StreamEventKindMessageStart, ID: "msg_1", Model: "claude-test"},
+		{Kind: model.StreamEventKindTextDelta, Delta: &model.StreamDelta{Text: "hi"}},
+		{Kind: model.StreamEventKindMessageStop, StopReason: model.FinishReasonStop},
+		{Kind: model.StreamEventKindDone},
+	})
+	if err != nil {
+		t.Fatalf("done event: %v", err)
+	}
+	if !strings.Contains(string(doneOut), "event:message_stop") {
+		t.Fatalf("expected done to finalize message, got %s", doneOut)
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }

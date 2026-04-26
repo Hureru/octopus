@@ -3,6 +3,8 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/bestruirui/octopus/internal/transformer/model"
 )
 
 // MessageRequest represents the Anthropic Messages API request format.
@@ -410,17 +412,11 @@ type MessageContentBlock struct {
 	IsError *bool           `json:"is_error,omitempty"`
 }
 
-type OctopusExtension struct {
-	ProviderExtensions *ProviderExtensions `json:"provider_extensions,omitempty"`
-}
+type OctopusExtension = model.OctopusExtension
 
-type ProviderExtensions struct {
-	Gemini *GeminiExtension `json:"gemini,omitempty"`
-}
+type ProviderExtensions = model.ProviderExtensions
 
-type GeminiExtension struct {
-	ThoughtSignature string `json:"thought_signature,omitempty"`
-}
+type GeminiExtension = model.GeminiExtension
 
 // DocumentCitationsControl mirrors document.citations on Anthropic document
 // blocks. A single `enabled` flag today; we preserve the struct shape for

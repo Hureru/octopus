@@ -42,16 +42,30 @@ func TestTransformStreamReasoningIndexIsGlobalAcrossChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first chunk: %v", err)
 	}
+	firstEvents, err := outbound.TransformStreamEvent(context.Background(), chunk1)
+	if err != nil {
+		t.Fatalf("first event chunk: %v", err)
+	}
 	second, err := outbound.TransformStream(context.Background(), chunk2)
 	if err != nil {
 		t.Fatalf("second chunk: %v", err)
+	}
+	secondEvents, err := outbound.TransformStreamEvent(context.Background(), chunk2)
+	if err != nil {
+		t.Fatalf("second event chunk: %v", err)
 	}
 
 	if got := firstReasoningBlockIndex(first); got != 0 {
 		t.Fatalf("first chunk reasoning index = %d, want 0", got)
 	}
-	if got := firstReasoningBlockIndex(second); got != 1 {
-		t.Fatalf("second chunk reasoning index = %d, want 1 (global counter)", got)
+	if got := firstThinkingEvent(firstEvents); got == nil || got.Delta.Thinking != "plan" || got.Delta.Signature != "sig-a" {
+		t.Fatalf("first event thinking mismatch: %+v", got)
+	}
+	if got := firstReasoningBlockIndex(second); got != 2 {
+		t.Fatalf("second chunk reasoning index = %d, want 2 (shared global counter)", got)
+	}
+	if got := firstThinkingEvent(secondEvents); got == nil || got.Delta.Thinking != "refine" || got.Delta.Signature != "sig-b" {
+		t.Fatalf("second event thinking mismatch: %+v", got)
 	}
 }
 
@@ -130,6 +144,64 @@ func TestConvertGeminiResponseAnchorsFunctionCallSignatures(t *testing.T) {
 	}
 }
 
+func TestTransformStreamEventMapsGeminiNativeChunk(t *testing.T) {
+	outbound := &MessagesOutbound{}
+	chunk := []byte(`{
+		"responseId":"resp-1",
+		"modelVersion":"gemini-3.1-pro",
+		"candidates":[{
+			"index":0,
+			"finishReason":"STOP",
+			"content":{"role":"model","parts":[
+				{"thought":true,"text":"plan","thoughtSignature":"sig-thought"},
+				{"text":"visible"},
+				{"functionCall":{"name":"lookup","args":{"q":"x"}},"thoughtSignature":"sig-tool"}
+			]}
+		}],
+		"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4,"totalTokenCount":14,"thoughtsTokenCount":2}
+	}`)
+
+	events, err := outbound.TransformStreamEvent(context.Background(), chunk)
+	if err != nil {
+		t.Fatalf("TransformStreamEvent: %v", err)
+	}
+	if got := firstThinkingEvent(events); got == nil || got.Delta.Thinking != "plan" || got.Delta.Signature != "sig-thought" {
+		t.Fatalf("thinking event mismatch: %+v", got)
+	}
+	var sawText, sawStop, sawUsage bool
+	for _, event := range events {
+		switch event.Kind {
+		case model.StreamEventKindTextDelta:
+			sawText = event.Delta != nil && event.Delta.Text == "visible"
+		case model.StreamEventKindMessageStop:
+			sawStop = event.StopReason == model.FinishReasonStop
+		case model.StreamEventKindUsageDelta:
+			sawUsage = event.Usage != nil && event.Usage.PromptTokens == 10 && event.Usage.CompletionTokensDetails != nil && event.Usage.CompletionTokensDetails.ReasoningTokens == 2
+		}
+	}
+	if !sawText || !sawStop || !sawUsage {
+		t.Fatalf("missing text/stop/usage events: %+v", events)
+	}
+	toolDelta := firstToolCallDeltaEvent(events)
+	if toolDelta == nil || toolDelta.ToolCall.Function.Name != "lookup" || toolDelta.Delta.Arguments != `{"q":"x"}` {
+		t.Fatalf("tool delta mismatch: %+v", toolDelta)
+	}
+	if toolDelta.ToolCall.ProviderExtensions == nil || toolDelta.ToolCall.ProviderExtensions.Gemini == nil || toolDelta.ToolCall.ProviderExtensions.Gemini.ThoughtSignature != "sig-tool" {
+		t.Fatalf("tool signature extension mismatch: %+v", toolDelta.ToolCall.ProviderExtensions)
+	}
+}
+
+func TestTransformStreamEventGeminiDone(t *testing.T) {
+	outbound := &MessagesOutbound{}
+	events, err := outbound.TransformStreamEvent(context.Background(), []byte("[DONE]"))
+	if err != nil {
+		t.Fatalf("TransformStreamEvent: %v", err)
+	}
+	if len(events) != 1 || events[0].Kind != model.StreamEventKindDone {
+		t.Fatalf("events = %+v, want done", events)
+	}
+}
+
 // G-H7: the replay path must consult the name index first, so multi-tool
 // assistant turns stay correctly paired even if the internal slice order
 // differs from the tool call order.
@@ -152,6 +224,24 @@ func TestCollectGeminiSignaturesByNameReturnsFirstMatch(t *testing.T) {
 	if _, has := got[""]; has {
 		t.Fatalf("should not index empty-name blocks: %+v", got)
 	}
+}
+
+func firstThinkingEvent(events []model.StreamEvent) *model.StreamEvent {
+	for i := range events {
+		if events[i].Kind == model.StreamEventKindThinkingDelta && events[i].Delta != nil {
+			return &events[i]
+		}
+	}
+	return nil
+}
+
+func firstToolCallDeltaEvent(events []model.StreamEvent) *model.StreamEvent {
+	for i := range events {
+		if events[i].Kind == model.StreamEventKindToolCallDelta && events[i].ToolCall != nil {
+			return &events[i]
+		}
+	}
+	return nil
 }
 
 func firstReasoningBlockIndex(resp *model.InternalLLMResponse) int {

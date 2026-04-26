@@ -292,3 +292,11 @@ func (o *ChatOutbound) TransformStream(ctx context.Context, eventData []byte) (*
 	}
 	return &resp, nil
 }
+
+func (o *ChatOutbound) TransformStreamEvent(ctx context.Context, eventData []byte) ([]model.StreamEvent, error) {
+	stream, err := o.TransformStream(ctx, eventData)
+	if err != nil {
+		return nil, err
+	}
+	return model.StreamEventsFromInternalResponse(stream), nil
+}

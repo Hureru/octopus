@@ -124,6 +124,96 @@ func (o *MessagesOutbound) TransformResponse(ctx context.Context, response *http
 	return convertGeminiToLLMResponse(&geminiResp, false, nil), nil
 }
 
+func (o *MessagesOutbound) TransformStreamEvent(ctx context.Context, eventData []byte) ([]model.StreamEvent, error) {
+	if bytes.HasPrefix(eventData, []byte("[DONE]")) || len(eventData) == 0 {
+		return []model.StreamEvent{{Kind: model.StreamEventKindDone}}, nil
+	}
+
+	var geminiResp model.GeminiGenerateContentResponse
+	if err := json.Unmarshal(eventData, &geminiResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal gemini stream chunk: %w", err)
+	}
+
+	events := make([]model.StreamEvent, 0, len(geminiResp.Candidates)*4+1)
+	for _, candidate := range geminiResp.Candidates {
+		if candidate == nil {
+			continue
+		}
+		base := model.StreamEvent{ID: geminiResp.ResponseId, Model: geminiResp.ModelVersion, Index: candidate.Index}
+		if candidate.Content != nil {
+			role := candidate.Content.Role
+			if role == "model" || role == "" {
+				role = "assistant"
+			}
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStart, ID: base.ID, Model: base.Model, Index: base.Index, Role: role})
+			for idx, part := range candidate.Content.Parts {
+				if part == nil {
+					continue
+				}
+				if part.Thought {
+					if part.Text != "" || part.ThoughtSignature != "" {
+						o.nextReasoningIndex(candidate.Index)
+						events = append(events, model.StreamEvent{Kind: model.StreamEventKindThinkingDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Thinking: part.Text, Signature: part.ThoughtSignature, ProviderExtensions: geminiThoughtSignatureProviderExtension(part.ThoughtSignature)}})
+					}
+					continue
+				}
+				if part.Text != "" {
+					events = append(events, model.StreamEvent{Kind: model.StreamEventKindTextDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Text: part.Text}})
+					if part.ThoughtSignature != "" {
+						o.nextReasoningIndex(candidate.Index)
+						events = append(events, model.StreamEvent{Kind: model.StreamEventKindSignatureDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Signature: part.ThoughtSignature, ProviderExtensions: geminiThoughtSignatureProviderExtension(part.ThoughtSignature)}})
+					}
+				}
+				if part.FunctionCall != nil {
+					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+					toolCall := model.ToolCall{
+						Index: idx,
+						ID:    fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, idx),
+						Type:  "function",
+						Function: model.FunctionCall{
+							Name: part.FunctionCall.Name,
+						},
+						ThoughtSignature:   part.ThoughtSignature,
+						ProviderExtensions: geminiThoughtSignatureProviderExtension(part.ThoughtSignature),
+					}
+					if part.ThoughtSignature != "" {
+						o.nextReasoningIndex(candidate.Index)
+						events = append(events, model.StreamEvent{Kind: model.StreamEventKindSignatureDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Signature: part.ThoughtSignature, ProviderExtensions: geminiThoughtSignatureProviderExtension(part.ThoughtSignature)}})
+					}
+					events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: toolCall.Index, ToolCall: &toolCall})
+					toolDelta := toolCall
+					toolDelta.Function.Arguments = string(argsJSON)
+					events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallDelta, ID: base.ID, Model: base.Model, Index: toolDelta.Index, ToolCall: &toolDelta, Delta: &model.StreamDelta{Arguments: string(argsJSON), ProviderExtensions: geminiThoughtSignatureProviderExtension(part.ThoughtSignature)}})
+					events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStop, ID: base.ID, Model: base.Model, Index: toolCall.Index, ToolCall: &toolCall})
+				}
+			}
+		}
+		if candidate.FinishReason != nil {
+			reason := convertGeminiFinishReason(*candidate.FinishReason)
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(reason)})
+		}
+	}
+	if usage := convertGeminiUsageMetadata(geminiResp.UsageMetadata); usage != nil {
+		events = append(events, model.StreamEvent{Kind: model.StreamEventKindUsageDelta, ID: geminiResp.ResponseId, Model: geminiResp.ModelVersion, Usage: usage})
+	}
+	if len(geminiResp.Candidates) == 0 && geminiResp.PromptFeedback != nil && geminiResp.PromptFeedback.BlockReason != "" {
+		reason := model.FinishReasonFromGemini(geminiResp.PromptFeedback.BlockReason)
+		if reason == "" {
+			reason = model.FinishReasonContentFilter
+		}
+		events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStart, ID: geminiResp.ResponseId, Model: geminiResp.ModelVersion, Role: "assistant"})
+		events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: geminiResp.ResponseId, Model: geminiResp.ModelVersion, StopReason: reason})
+	}
+	return events, nil
+}
+
+func geminiThoughtSignatureProviderExtension(signature string) *model.ProviderExtensions {
+	if signature == "" {
+		return nil
+	}
+	return &model.ProviderExtensions{Gemini: &model.GeminiExtension{ThoughtSignature: signature}}
+}
+
 func (o *MessagesOutbound) TransformStream(ctx context.Context, eventData []byte) (*model.InternalLLMResponse, error) {
 	// Handle [DONE] marker
 	if bytes.HasPrefix(eventData, []byte("[DONE]")) || len(eventData) == 0 {
@@ -583,7 +673,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 			geminiBlocks := msg.ReasoningBlocksByProvider("gemini")
 			content.Parts = append(content.Parts, buildGeminiThoughtParts(geminiBlocks)...)
 			geminiSigByToolCallID := collectGeminiSignaturesByToolCallID(geminiBlocks)
-				geminiSigs := collectGeminiLooseSignatures(geminiBlocks)
+			geminiSigs := collectGeminiLooseSignatures(geminiBlocks)
 			geminiSigByName := collectGeminiSignaturesByName(geminiBlocks)
 			sigIdx := 0
 			// Handle text content
@@ -607,7 +697,8 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 						},
 					}
 
-					sig := strings.TrimSpace(toolCall.ThoughtSignature)
+					ext := toolCall.GetGeminiExtensions()
+					sig := strings.TrimSpace(ext.ThoughtSignature)
 					if sig == "" {
 						// Prefer the strongest anchor first: explicit tool-call ID,
 						// then function name, then legacy ordinal fallback.
@@ -726,8 +817,9 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 	// synthesise a minimal speechConfig from request.Audio.Voice so the
 	// generic {format, voice} pair still reaches Gemini audio-output
 	// models without the caller having to build the full schema.
-	if len(request.GeminiSpeechConfig) > 0 {
-		config.SpeechConfig = request.GeminiSpeechConfig
+	geminiExt := request.GetGeminiExtensions()
+	if len(geminiExt.SpeechConfig) > 0 {
+		config.SpeechConfig = geminiExt.SpeechConfig
 		hasConfig = true
 	} else if request.Audio != nil && strings.TrimSpace(request.Audio.Voice) != "" {
 		voice := strings.TrimSpace(request.Audio.Voice)
@@ -950,8 +1042,8 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 
 	// cachedContent reference (G-H8): forward so the upstream reuses the
 	// managed cached prefix instead of re-reading the bytes.
-	if request.GeminiCachedContentRef != nil {
-		if ref := strings.TrimSpace(*request.GeminiCachedContentRef); ref != "" {
+	if geminiExt.CachedContentRef != nil {
+		if ref := strings.TrimSpace(*geminiExt.CachedContentRef); ref != "" {
 			geminiReq.CachedContent = ref
 		}
 	}
@@ -1115,6 +1207,53 @@ func flattenGeminiToolResultContent(msg *model.Message) string {
 		return string(body)
 	}
 	return ""
+}
+
+func convertGeminiUsageMetadata(metadata *model.GeminiUsageMetadata) *model.Usage {
+	if metadata == nil {
+		return nil
+	}
+	usage := &model.Usage{
+		PromptTokens:     int64(metadata.PromptTokenCount),
+		CompletionTokens: int64(metadata.CandidatesTokenCount),
+		TotalTokens:      int64(metadata.TotalTokenCount),
+	}
+
+	if metadata.CachedContentTokenCount > 0 {
+		if usage.PromptTokensDetails == nil {
+			usage.PromptTokensDetails = &model.PromptTokensDetails{}
+		}
+		usage.PromptTokensDetails.CachedTokens = int64(metadata.CachedContentTokenCount)
+	}
+
+	if metadata.ThoughtsTokenCount > 0 {
+		if usage.CompletionTokensDetails == nil {
+			usage.CompletionTokensDetails = &model.CompletionTokensDetails{}
+		}
+		usage.CompletionTokensDetails.ReasoningTokens = int64(metadata.ThoughtsTokenCount)
+	}
+
+	if metadata.ToolUsePromptTokenCount > 0 {
+		usage.ToolUsePromptTokens = int64(metadata.ToolUsePromptTokenCount)
+	}
+
+	if len(metadata.PromptTokensDetails) > 0 {
+		if usage.PromptTokensDetails == nil {
+			usage.PromptTokensDetails = &model.PromptTokensDetails{}
+		}
+		applyGeminiModalityToPromptDetails(usage.PromptTokensDetails, metadata.PromptTokensDetails)
+		usage.PromptModalityTokenDetails = toInternalModalityCounts(metadata.PromptTokensDetails)
+	}
+
+	if len(metadata.CandidatesTokensDetails) > 0 {
+		if usage.CompletionTokensDetails == nil {
+			usage.CompletionTokensDetails = &model.CompletionTokensDetails{}
+		}
+		applyGeminiModalityToCompletionDetails(usage.CompletionTokensDetails, metadata.CandidatesTokensDetails)
+		usage.CompletionModalityTokenDetails = toInternalModalityCounts(metadata.CandidatesTokensDetails)
+	}
+
+	return usage
 }
 
 func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse, isStream bool, streamIndexer func(candidateIndex int) int) *model.InternalLLMResponse {
@@ -1379,51 +1518,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 	}
 
 	// Convert usage metadata
-	if geminiResp.UsageMetadata != nil {
-		usage := &model.Usage{
-			PromptTokens:     int64(geminiResp.UsageMetadata.PromptTokenCount),
-			CompletionTokens: int64(geminiResp.UsageMetadata.CandidatesTokenCount),
-			TotalTokens:      int64(geminiResp.UsageMetadata.TotalTokenCount),
-		}
-
-		// Add cached tokens to prompt tokens details if present
-		if geminiResp.UsageMetadata.CachedContentTokenCount > 0 {
-			if usage.PromptTokensDetails == nil {
-				usage.PromptTokensDetails = &model.PromptTokensDetails{}
-			}
-			usage.PromptTokensDetails.CachedTokens = int64(geminiResp.UsageMetadata.CachedContentTokenCount)
-		}
-
-		// Add thoughts tokens to completion tokens details if present
-		if geminiResp.UsageMetadata.ThoughtsTokenCount > 0 {
-			if usage.CompletionTokensDetails == nil {
-				usage.CompletionTokensDetails = &model.CompletionTokensDetails{}
-			}
-			usage.CompletionTokensDetails.ReasoningTokens = int64(geminiResp.UsageMetadata.ThoughtsTokenCount)
-		}
-
-		if geminiResp.UsageMetadata.ToolUsePromptTokenCount > 0 {
-			usage.ToolUsePromptTokens = int64(geminiResp.UsageMetadata.ToolUsePromptTokenCount)
-		}
-
-		if len(geminiResp.UsageMetadata.PromptTokensDetails) > 0 {
-			if usage.PromptTokensDetails == nil {
-				usage.PromptTokensDetails = &model.PromptTokensDetails{}
-			}
-			applyGeminiModalityToPromptDetails(usage.PromptTokensDetails, geminiResp.UsageMetadata.PromptTokensDetails)
-			usage.PromptModalityTokenDetails = toInternalModalityCounts(geminiResp.UsageMetadata.PromptTokensDetails)
-		}
-
-		if len(geminiResp.UsageMetadata.CandidatesTokensDetails) > 0 {
-			if usage.CompletionTokensDetails == nil {
-				usage.CompletionTokensDetails = &model.CompletionTokensDetails{}
-			}
-			applyGeminiModalityToCompletionDetails(usage.CompletionTokensDetails, geminiResp.UsageMetadata.CandidatesTokensDetails)
-			usage.CompletionModalityTokenDetails = toInternalModalityCounts(geminiResp.UsageMetadata.CandidatesTokensDetails)
-		}
-
-		resp.Usage = usage
-	}
+	resp.Usage = convertGeminiUsageMetadata(geminiResp.UsageMetadata)
 
 	// When the prompt is blocked Gemini returns no candidates, only
 	// promptFeedback.blockReason. Surface a synthetic choice so downstream

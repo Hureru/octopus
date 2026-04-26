@@ -160,6 +160,153 @@ func (o *ResponseOutbound) TransformResponse(ctx context.Context, response *http
 	return convertToLLMResponseFromResponses(&resp), nil
 }
 
+func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData []byte) ([]model.StreamEvent, error) {
+	if len(eventData) == 0 {
+		return nil, nil
+	}
+	if bytes.HasPrefix(eventData, []byte("[DONE]")) {
+		return []model.StreamEvent{{Kind: model.StreamEventKindDone}}, nil
+	}
+
+	if !o.initialized {
+		o.initialized = true
+		o.outputItems = make(map[int]ResponsesItem)
+	}
+
+	var streamEvent ResponsesStreamEvent
+	if err := json.Unmarshal(eventData, &streamEvent); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stream event: %w", err)
+	}
+
+	if streamEvent.Response != nil {
+		if streamEvent.Response.ID != "" {
+			o.streamID = streamEvent.Response.ID
+		}
+		if streamEvent.Response.Model != "" {
+			o.streamModel = streamEvent.Response.Model
+		}
+	}
+
+	var events []model.StreamEvent
+	base := model.StreamEvent{ID: o.streamID, Model: o.streamModel, Index: 0}
+
+	switch streamEvent.Type {
+	case "response.created", "response.in_progress":
+		events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStart, ID: base.ID, Model: base.Model, Index: base.Index, Role: "assistant"})
+
+	case "response.output_text.delta":
+		o.mergeOutputTextDelta(streamEvent)
+		if streamEvent.Delta != "" {
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindTextDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Text: streamEvent.Delta}})
+		}
+
+	case "response.function_call_arguments.delta":
+		o.mergeFunctionCallDelta(streamEvent)
+		if streamEvent.Delta != "" {
+			toolCall := model.ToolCall{
+				Index: streamEvent.OutputIndex,
+				ID:    streamEvent.CallID,
+				Type:  "function",
+				Function: model.FunctionCall{
+					Name: streamEvent.Name,
+				},
+			}
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall})
+			toolCall.Function.Arguments = streamEvent.Delta
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallDelta, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall, Delta: &model.StreamDelta{Arguments: streamEvent.Delta}})
+		}
+
+	case "response.output_item.added":
+		o.mergeOutputItemAdded(streamEvent)
+		if streamEvent.Item != nil && streamEvent.Item.Type == "function_call" {
+			toolCall := model.ToolCall{
+				Index: streamEvent.OutputIndex,
+				ID:    streamEvent.Item.CallID,
+				Type:  "function",
+				Function: model.FunctionCall{
+					Name: streamEvent.Item.Name,
+				},
+			}
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall})
+		}
+
+	case "response.reasoning_summary_text.delta":
+		o.mergeReasoningDelta(streamEvent)
+		if streamEvent.Delta != "" {
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindThinkingDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Thinking: streamEvent.Delta}})
+		}
+
+	case "response.refusal.delta":
+		if streamEvent.Delta != "" {
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindTextDelta, ID: base.ID, Model: base.Model, Index: base.Index, Delta: &model.StreamDelta{Refusal: streamEvent.Delta}})
+		}
+
+	case "response.refusal.done":
+		return nil, nil
+
+	case "response.completed":
+		if streamEvent.Response != nil {
+			if len(streamEvent.Response.Output) > 0 {
+				if rawOutput, marshalErr := json.Marshal(sanitizeResponsesItems(streamEvent.Response.Output)); marshalErr == nil {
+					base.ProviderExtensions = &model.ProviderExtensions{OpenAI: &model.OpenAIExtension{RawResponseItems: rawOutput}}
+				}
+			} else if rawOutput, ok := o.marshalTrackedOutputItems(); ok {
+				base.ProviderExtensions = &model.ProviderExtensions{OpenAI: &model.OpenAIExtension{RawResponseItems: rawOutput}}
+			}
+			finishReason, respErr := normalizeResponsesFinishReason(streamEvent.Response.Status, streamEvent.Response.Error)
+			if respErr != nil {
+				events = append(events, model.StreamEvent{Kind: model.StreamEventKindError, ID: base.ID, Model: base.Model, Error: respErr})
+				return events, nil
+			}
+			if finishReason != nil && *finishReason == "stop" && o.responseCarriesFunctionCall(streamEvent.Response) {
+				finishReason = lo.ToPtr("tool_calls")
+			}
+			stopEvent := model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(lo.FromPtr(finishReason)), ProviderExtensions: base.ProviderExtensions}
+			events = append(events, stopEvent)
+			if streamEvent.Response.Usage != nil {
+				usage := convertResponsesUsage(streamEvent.Response.Usage)
+				usageEvent := model.StreamEvent{Kind: model.StreamEventKindUsageDelta, ID: base.ID, Model: base.Model, Usage: usage, ProviderExtensions: base.ProviderExtensions}
+				events = append(events, usageEvent)
+			}
+		}
+
+	case "response.failed", "response.incomplete", "error":
+		var reason *string
+		var respErr *model.ResponseError
+		switch streamEvent.Type {
+		case "response.incomplete":
+			reason = lo.ToPtr("length")
+		default:
+			reason = lo.ToPtr("stop")
+		}
+		if streamEvent.Response != nil && streamEvent.Response.Error != nil {
+			respErr = &model.ResponseError{
+				Detail: model.ErrorDetail{
+					Code:    fmt.Sprintf("%d", streamEvent.Response.Error.Code),
+					Message: streamEvent.Response.Error.Message,
+				},
+			}
+		} else if streamEvent.Code != "" || streamEvent.Message != "" {
+			respErr = &model.ResponseError{
+				Detail: model.ErrorDetail{
+					Code:    streamEvent.Code,
+					Message: streamEvent.Message,
+				},
+			}
+		}
+		if respErr != nil {
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindError, ID: base.ID, Model: base.Model, Error: respErr})
+		} else {
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(lo.FromPtr(reason))})
+		}
+
+	default:
+		return nil, nil
+	}
+
+	return events, nil
+}
+
 func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte) (*model.InternalLLMResponse, error) {
 	if len(eventData) == 0 {
 		return nil, nil
@@ -1017,11 +1164,12 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 }
 
 func buildResponsesInput(req *model.InternalLLMRequest) ResponsesInput {
-	if req != nil && len(req.RawInputItems) > 0 {
-		return ResponsesInput{Raw: sanitizeResponsesRawItems(append(json.RawMessage(nil), req.RawInputItems...))}
-	}
 	if req == nil {
 		return ResponsesInput{}
+	}
+	openaiExt := req.GetOpenAIExtensions()
+	if len(openaiExt.RawResponseItems) > 0 {
+		return ResponsesInput{Raw: sanitizeResponsesRawItems(append(json.RawMessage(nil), openaiExt.RawResponseItems...))}
 	}
 	return sanitizeResponsesInput(convertInputFromMessages(req.Messages, req.TransformOptions))
 }

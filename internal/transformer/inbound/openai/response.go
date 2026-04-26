@@ -65,8 +65,7 @@ type ResponseInbound struct {
 	// an empty output on response.completed as an error (O-H3).
 	completedOutputItems []ResponsesItem
 
-	// Stream chunks storage for aggregation
-	streamChunks []*model.InternalLLMResponse
+	streamAggregator model.StreamAggregator
 	// storedResponse stores the non-stream response
 	storedResponse *model.InternalLLMResponse
 }
@@ -115,7 +114,7 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 	}
 
 	// Store the chunk for aggregation
-	i.streamChunks = append(i.streamChunks, stream)
+	i.streamAggregator.Add(stream)
 
 	var events [][]byte
 
@@ -274,6 +273,137 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 
 	return result, nil
 }
+
+func (i *ResponseInbound) TransformStreamEvents(ctx context.Context, events []model.StreamEvent) ([]byte, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	if stream := model.InternalResponseFromStreamEvents(events); stream != nil && stream.Object != "[DONE]" {
+		i.streamAggregator.Add(stream)
+	}
+
+	var out [][]byte
+	for _, event := range events {
+		if event.ID != "" {
+			i.responseID = event.ID
+		}
+		if event.Model != "" {
+			i.model = event.Model
+		}
+
+		switch event.Kind {
+		case model.StreamEventKindMessageStart:
+			if !i.hasResponseCreated {
+				i.hasResponseCreated = true
+				response := &ResponsesResponse{
+					Object:     "response",
+					ID:         i.responseID,
+					Model:      i.model,
+					CreatedAt:  i.createdAt,
+					Status:     lo.ToPtr("in_progress"),
+					Truncation: i.truncation,
+					Output:     []ResponsesItem{},
+				}
+				out = append(out, i.enqueueEvent(&ResponsesStreamEvent{Type: "response.created", Response: response}))
+				out = append(out, i.enqueueEvent(&ResponsesStreamEvent{Type: "response.in_progress", Response: response}))
+			}
+
+		case model.StreamEventKindTextDelta:
+			if event.Delta == nil {
+				continue
+			}
+			if event.Delta.Refusal != "" {
+				out = append(out, i.handleRefusalContent(event.Delta.Refusal)...)
+			} else if event.Delta.Text != "" {
+				out = append(out, i.handleTextContent(&event.Delta.Text)...)
+			}
+
+		case model.StreamEventKindThinkingDelta:
+			if event.Delta != nil && event.Delta.Thinking != "" {
+				out = append(out, i.handleReasoningContent(&event.Delta.Thinking)...)
+			}
+
+		case model.StreamEventKindToolCallStart:
+			if event.ToolCall != nil {
+				out = append(out, i.handleToolCalls([]model.ToolCall{*event.ToolCall})...)
+			}
+
+		case model.StreamEventKindToolCallDelta:
+			if event.ToolCall != nil {
+				out = append(out, i.handleToolCalls([]model.ToolCall{*event.ToolCall})...)
+			}
+
+		case model.StreamEventKindMessageStop:
+			if !i.hasFinished {
+				i.hasFinished = true
+				i.finalFinishReason = event.StopReason.String()
+				out = append(out, i.closeCurrentContentPart()...)
+				out = append(out, i.closeCurrentOutputItem()...)
+			}
+
+		case model.StreamEventKindUsageDelta:
+			if event.Usage != nil && i.hasFinished && !i.responseCompleted {
+				i.responseCompleted = true
+				i.usage = event.Usage
+				eventType, status := responsesTerminalEvent(i.finalFinishReason)
+				output := i.finalOutputItems()
+				if event.ProviderExtensions != nil && event.ProviderExtensions.OpenAI != nil && len(event.ProviderExtensions.OpenAI.RawResponseItems) > 0 {
+					var items []ResponsesItem
+					if err := json.Unmarshal(event.ProviderExtensions.OpenAI.RawResponseItems, &items); err == nil {
+						output = items
+					}
+				}
+				response := &ResponsesResponse{
+					Object:     "response",
+					ID:         i.responseID,
+					Model:      i.model,
+					CreatedAt:  i.createdAt,
+					Status:     &status,
+					Truncation: i.truncation,
+					Output:     output,
+					Usage:      convertUsageToResponses(i.usage),
+				}
+				out = append(out, i.enqueueEvent(&ResponsesStreamEvent{Type: eventType, Response: response}))
+			}
+
+		case model.StreamEventKindDone:
+			if len(out) == 0 {
+				return []byte("data: [DONE]\n\n"), nil
+			}
+
+		case model.StreamEventKindError:
+			if event.Error == nil {
+				continue
+			}
+			i.responseCompleted = true
+			response := &ResponsesResponse{
+				Object:    "response",
+				ID:        i.responseID,
+				Model:     i.model,
+				CreatedAt: i.createdAt,
+				Status:    lo.ToPtr("failed"),
+				Error: &ResponsesError{
+					Code:    500,
+					Message: event.Error.Detail.Message,
+				},
+			}
+			out = append(out, i.enqueueEvent(&ResponsesStreamEvent{Type: "response.failed", Response: response}))
+		}
+	}
+
+	if len(out) == 0 {
+		return nil, nil
+	}
+
+	result := make([]byte, 0)
+	for _, event := range out {
+		if event != nil {
+			result = append(result, event...)
+		}
+	}
+	return result, nil
+}
+
 
 func (i *ResponseInbound) enqueueEvent(ev *ResponsesStreamEvent) []byte {
 	ev.SequenceNumber = i.sequenceNumber
@@ -829,117 +959,10 @@ func (i *ResponseInbound) finalOutputItems() []ResponsesItem {
 // For streaming: aggregates all stored stream chunks into a complete response
 // For non-streaming: returns the stored response
 func (i *ResponseInbound) GetInternalResponse(ctx context.Context) (*model.InternalLLMResponse, error) {
-	// Return stored response for non-stream scenario
 	if i.storedResponse != nil {
 		return i.storedResponse, nil
 	}
-
-	// Aggregate stream chunks for stream scenario
-	if len(i.streamChunks) == 0 {
-		return nil, nil
-	}
-
-	// Use the first chunk as the base
-	firstChunk := i.streamChunks[0]
-	result := &model.InternalLLMResponse{
-		ID:                firstChunk.ID,
-		Object:            "chat.completion",
-		Created:           firstChunk.Created,
-		Model:             firstChunk.Model,
-		SystemFingerprint: firstChunk.SystemFingerprint,
-		ServiceTier:       firstChunk.ServiceTier,
-	}
-
-	// Aggregate choices by index
-	choicesMap := make(map[int]*model.Choice)
-
-	for _, chunk := range i.streamChunks {
-		// Update ID and Model if they appear in later chunks
-		if chunk.ID != "" {
-			result.ID = chunk.ID
-		}
-		if chunk.Model != "" {
-			result.Model = chunk.Model
-		}
-
-		// Capture usage from the last chunk that has it
-		if chunk.Usage != nil {
-			result.Usage = chunk.Usage
-		}
-
-		for _, choice := range chunk.Choices {
-			existingChoice, exists := choicesMap[choice.Index]
-			if !exists {
-				existingChoice = &model.Choice{
-					Index:   choice.Index,
-					Message: &model.Message{},
-				}
-				choicesMap[choice.Index] = existingChoice
-			}
-
-			// Aggregate delta content into message
-			if choice.Delta != nil {
-				delta := choice.Delta
-
-				// Set role if present
-				if delta.Role != "" {
-					existingChoice.Message.Role = delta.Role
-				}
-
-				// Append content
-				if delta.Content.Content != nil {
-					if existingChoice.Message.Content.Content == nil {
-						existingChoice.Message.Content.Content = new(string)
-					}
-					*existingChoice.Message.Content.Content += *delta.Content.Content
-				}
-
-				// Append reasoning content
-				if delta.ReasoningContent != nil {
-					if existingChoice.Message.ReasoningContent == nil {
-						existingChoice.Message.ReasoningContent = new(string)
-					}
-					*existingChoice.Message.ReasoningContent += *delta.ReasoningContent
-				}
-
-				// Aggregate tool calls
-				for _, toolCall := range delta.ToolCalls {
-					existingChoice.Message.ToolCalls = mergeToolCall(existingChoice.Message.ToolCalls, toolCall)
-				}
-
-				// Set refusal if present
-				if delta.Refusal != "" {
-					existingChoice.Message.Refusal = delta.Refusal
-				}
-			}
-
-			// Capture finish reason
-			if choice.FinishReason != nil {
-				existingChoice.FinishReason = choice.FinishReason
-			}
-
-			// Capture logprobs
-			if choice.Logprobs != nil {
-				if existingChoice.Logprobs == nil {
-					existingChoice.Logprobs = &model.LogprobsContent{}
-				}
-				existingChoice.Logprobs.Content = append(existingChoice.Logprobs.Content, choice.Logprobs.Content...)
-			}
-		}
-	}
-
-	// Convert map to slice, sorted by index
-	result.Choices = make([]model.Choice, 0, len(choicesMap))
-	for idx := 0; idx < len(choicesMap); idx++ {
-		if choice, exists := choicesMap[idx]; exists {
-			result.Choices = append(result.Choices, *choice)
-		}
-	}
-
-	// Clear stored chunks after aggregation
-	i.streamChunks = nil
-
-	return result, nil
+	return i.streamAggregator.BuildAndReset(), nil
 }
 
 // formatSSEData formats data as SSE data line

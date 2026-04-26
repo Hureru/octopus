@@ -101,6 +101,82 @@ func TestChatInboundAggregatesAudioDelta(t *testing.T) {
 	}
 }
 
+func TestChatInboundAggregatesStreamWithModelAggregator(t *testing.T) {
+	inbound := &ChatInbound{}
+	ctx := context.Background()
+	text1 := "hel"
+	text2 := "lo"
+	finish := model.FinishReasonStop.String()
+
+	if _, err := inbound.TransformStream(ctx, &model.InternalLLMResponse{Object: "[DONE]"}); err != nil {
+		t.Fatalf("TransformStream done: %v", err)
+	}
+	if result, err := inbound.GetInternalResponse(ctx); err != nil || result != nil {
+		t.Fatalf("expected done chunk not to aggregate, got result=%#v err=%v", result, err)
+	}
+	if _, err := inbound.TransformStream(ctx, &model.InternalLLMResponse{
+		ID: "chunk-1",
+		Choices: []model.Choice{{
+			Index: 0,
+			Delta: &model.Message{
+				Role:    "assistant",
+				Content: model.MessageContent{Content: &text1},
+				ToolCalls: []model.ToolCall{{
+					ID:    "call_1",
+					Type:  "function",
+					Index: 0,
+					Function: model.FunctionCall{
+						Name:      "look",
+						Arguments: `{"q":`,
+					},
+				}},
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("TransformStream first: %v", err)
+	}
+	if _, err := inbound.TransformStream(ctx, &model.InternalLLMResponse{
+		ID: "chunk-2",
+		Choices: []model.Choice{{
+			Index: 0,
+			Delta: &model.Message{
+				Content: model.MessageContent{Content: &text2},
+				ToolCalls: []model.ToolCall{{
+					Index: 0,
+					Function: model.FunctionCall{
+						Name:      "up",
+						Arguments: `"octopus"}`,
+					},
+				}},
+			},
+			FinishReason: &finish,
+		}},
+	}); err != nil {
+		t.Fatalf("TransformStream second: %v", err)
+	}
+
+	result, err := inbound.GetInternalResponse(ctx)
+	if err != nil {
+		t.Fatalf("GetInternalResponse: %v", err)
+	}
+	if result == nil || len(result.Choices) != 1 || result.Choices[0].Message == nil {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	message := result.Choices[0].Message
+	if message.Content.Content == nil || *message.Content.Content != "hello" {
+		t.Fatalf("unexpected content: %#v", message.Content.Content)
+	}
+	if len(message.ToolCalls) != 1 || message.ToolCalls[0].Function.Name != "lookup" || message.ToolCalls[0].Function.Arguments != `{"q":"octopus"}` {
+		t.Fatalf("unexpected tool calls: %#v", message.ToolCalls)
+	}
+	if result.Choices[0].FinishReason == nil || *result.Choices[0].FinishReason != finish {
+		t.Fatalf("unexpected finish reason: %#v", result.Choices[0].FinishReason)
+	}
+	if second, err := inbound.GetInternalResponse(ctx); err != nil || second != nil {
+		t.Fatalf("expected aggregator reset, got result=%#v err=%v", second, err)
+	}
+}
+
 // O-H2: Chat inbound must tag the internal request with
 // APIFormatOpenAIChatCompletion so downstream transformers can tell Chat
 // requests apart from Responses requests.
