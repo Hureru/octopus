@@ -60,11 +60,7 @@ function MemberItem({
     const { Avatar: ModelAvatar } = getModelIcon(member.name);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const isDisabled = member.enabled === false;
-    const sourceLabel = [member.site_name, member.site_account_name, member.site_group_name]
-        .map((value) => value?.trim())
-        .filter(Boolean)
-        .join(' / ');
-    const metaLabel = [sourceLabel, member.endpoint_type?.trim()].filter(Boolean).join(' · ');
+    const sourceLabel = [member.channel_name, member.endpoint_type?.trim()].filter(Boolean).join(' · ');
 
     return (
         <div
@@ -122,7 +118,7 @@ function MemberItem({
                         </TooltipTrigger>
                         <TooltipContent key={member.name}>{member.name}</TooltipContent>
                     </Tooltip>
-                    <span className="text-[10px] text-muted-foreground truncate leading-tight">{metaLabel || member.channel_name}</span>
+                    <span className="text-[10px] text-muted-foreground truncate leading-tight">{sourceLabel}</span>
                 </div>
 
                 {showWeight && (
