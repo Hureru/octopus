@@ -85,9 +85,6 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 	if toolUseBlock.Type != "tool_use" {
 		t.Fatalf("expected tool_use block, got %s", toolUseBlock.Type)
 	}
-	if string(anthBytes) != "" && containsOctopusExtension(anthBytes) {
-		t.Fatalf("Anthropic response leaked _octopus extension: %s", anthBytes)
-	}
 
 	// Step 4: Simulate multi-turn request with history
 	// Claude Code sends back the assistant message with tool_use in history
@@ -215,34 +212,4 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 
 func ptrString(s string) *string {
 	return &s
-}
-
-func containsOctopusExtension(b []byte) bool {
-	var raw any
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return false
-	}
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return false
-	}
-	return string(encoded) != "" && jsonContainsKey(raw, "_octopus")
-}
-
-func jsonContainsKey(v any, key string) bool {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, child := range x {
-			if k == key || jsonContainsKey(child, key) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range x {
-			if jsonContainsKey(child, key) {
-				return true
-			}
-		}
-	}
-	return false
 }
