@@ -895,6 +895,25 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 
 // transformStreamData 转换流式数据
 func (ra *relayAttempt) transformStreamData(ctx context.Context, data string) ([]byte, error) {
+	if outEventAdapter, ok := ra.outAdapter.(model.OutboundStreamEventTransformer); ok {
+		if inEventAdapter, ok := ra.inAdapter.(model.InboundStreamEventTransformer); ok {
+			events, err := outEventAdapter.TransformStreamEvent(ctx, []byte(data))
+			if err != nil {
+				log.Warnf("failed to transform stream events: %v", err)
+				return nil, err
+			}
+			if len(events) == 0 {
+				return nil, nil
+			}
+			inStream, err := inEventAdapter.TransformStreamEvents(ctx, events)
+			if err != nil {
+				log.Warnf("failed to transform inbound stream events: %v", err)
+				return nil, err
+			}
+			return inStream, nil
+		}
+	}
+
 	internalStream, err := ra.outAdapter.TransformStream(ctx, []byte(data))
 	if err != nil {
 		log.Warnf("failed to transform stream: %v", err)
@@ -1154,6 +1173,21 @@ func (ra *relayAttempt) collectOpenAIResponsesPassthroughMetrics(ctx context.Con
 	if len(rawStream) == 0 {
 		return
 	}
+	outEventAdapter, outOk := ra.outAdapter.(model.OutboundStreamEventTransformer)
+	inEventAdapter, inOk := ra.inAdapter.(model.InboundStreamEventTransformer)
+	if outOk && inOk {
+		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+		for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+			if err != nil {
+				log.Debugf("openai responses passthrough metrics parse skipped: %v", err)
+				return
+			}
+			if events, terr := outEventAdapter.TransformStreamEvent(ctx, []byte(ev.Data)); terr == nil && len(events) > 0 {
+				_, _ = inEventAdapter.TransformStreamEvents(ctx, events)
+			}
+		}
+		return
+	}
 	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
 	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
 		if err != nil {
@@ -1408,6 +1442,21 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 
 func (ra *relayAttempt) collectAnthropicPassthroughMetrics(ctx context.Context, rawStream []byte) {
 	if len(rawStream) == 0 {
+		return
+	}
+	outEventAdapter, outOk := ra.outAdapter.(model.OutboundStreamEventTransformer)
+	inEventAdapter, inOk := ra.inAdapter.(model.InboundStreamEventTransformer)
+	if outOk && inOk {
+		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+		for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+			if err != nil {
+				log.Debugf("anthropic passthrough metrics parse skipped: %v", err)
+				return
+			}
+			if events, terr := outEventAdapter.TransformStreamEvent(ctx, []byte(ev.Data)); terr == nil && len(events) > 0 {
+				_, _ = inEventAdapter.TransformStreamEvents(ctx, events)
+			}
+		}
 		return
 	}
 	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
