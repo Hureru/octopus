@@ -288,18 +288,20 @@ type InternalLLMRequest struct {
 	Include []string `json:"-"`
 
 	// Responses API pass-through fields (only meaningful for OpenAI Response outbound)
-	PreviousResponseID       *string         `json:"-"`
-	Background               *bool           `json:"-"`
-	Prompt                   json.RawMessage `json:"-"`
-	ResponsesPromptCacheKey  *string         `json:"-"`
-	PromptCacheRetention     *string         `json:"-"`
-	MaxToolCalls             *int64          `json:"-"`
-	Conversation             json.RawMessage `json:"-"`
-	ContextManagement        json.RawMessage `json:"-"`
-	ResponsesStreamOptions   json.RawMessage `json:"-"`
-	ReasoningSummary         *string         `json:"-"`
-	ReasoningGenerateSummary *string         `json:"-"`
-	RawInputItems            json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
+	OpenAIResponsesPassthroughRequired bool            `json:"-"`
+	OpenAIResponsesPassthroughReason   string          `json:"-"`
+	PreviousResponseID                 *string         `json:"-"`
+	Background                         *bool           `json:"-"`
+	Prompt                             json.RawMessage `json:"-"`
+	ResponsesPromptCacheKey            *string         `json:"-"`
+	PromptCacheRetention               *string         `json:"-"`
+	MaxToolCalls                       *int64          `json:"-"`
+	Conversation                       json.RawMessage `json:"-"`
+	ContextManagement                  json.RawMessage `json:"-"`
+	ResponsesStreamOptions             json.RawMessage `json:"-"`
+	ReasoningSummary                   *string         `json:"-"`
+	ReasoningGenerateSummary           *string         `json:"-"`
+	RawInputItems                      json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
 
 	// Gemini-specific pass-through fields (only meaningful for Gemini outbound).
 	//
@@ -328,6 +330,10 @@ type InternalLLMRequest struct {
 	// AnthropicContainer carries the raw `container` object (Claude 4
 	// code-execution sandbox configuration). A-H6.
 	AnthropicContainer json.RawMessage `json:"-"`
+
+	// ProviderExtensions stores provider-specific request hints that are not part
+	// of the core cross-provider request model. It is internal-only.
+	ProviderExtensions *ProviderExtensions `json:"-"`
 
 	// Query stores the original query parameters from the inbound request.
 	// This is a help field and will not be sent to the llm service.
@@ -500,28 +506,50 @@ func (r *InternalLLMRequest) IsChatRequest() bool {
 }
 
 func (r *InternalLLMRequest) RequiresOpenAIResponsesPassthrough() bool {
-	if r == nil || r.TransformerMetadata == nil {
+	if r == nil {
+		return false
+	}
+	if r.OpenAIResponsesPassthroughRequired {
+		return true
+	}
+	if r.TransformerMetadata == nil {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired]), "true")
+}
+
+func (r *InternalLLMRequest) OpenAIResponsesPassthroughReasonText() string {
+	if r == nil {
+		return ""
+	}
+	if reason := strings.TrimSpace(r.OpenAIResponsesPassthroughReason); reason != "" {
+		return reason
+	}
+	if r.TransformerMetadata == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason])
 }
 
 func (r *InternalLLMRequest) MarkOpenAIResponsesPassthroughRequired(reason string) {
 	if r == nil {
 		return
 	}
+	r.OpenAIResponsesPassthroughRequired = true
+	reason = strings.TrimSpace(reason)
+	if reason != "" {
+		if existing := strings.TrimSpace(r.OpenAIResponsesPassthroughReason); existing != "" {
+			reason = existing + "," + reason
+		}
+		r.OpenAIResponsesPassthroughReason = reason
+	}
 	if r.TransformerMetadata == nil {
 		r.TransformerMetadata = map[string]string{}
 	}
 	r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired] = "true"
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return
+	if reason != "" {
+		r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason] = reason
 	}
-	if existing := strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason]); existing != "" {
-		reason = existing + "," + reason
-	}
-	r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason] = reason
 }
 
 func (r *InternalLLMRequest) ClearHelpFields() {
@@ -667,6 +695,9 @@ type Message struct {
 	// multi-turn tool-use scenarios (Anthropic extended thinking, Gemini 3 thoughtSignature) can be
 	// replayed to the upstream without signature_mismatch / FAILED_PRECONDITION errors.
 	ReasoningBlocks []ReasoningBlock `json:"-"`
+
+	// ProviderExtensions stores provider-specific message hints. It is internal-only.
+	ProviderExtensions *ProviderExtensions `json:"-"`
 
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	// This field is not serialized in JSON.
@@ -909,6 +940,9 @@ type MessageContentPart struct {
 	// dedicated server_* name so routing logic can distinguish them.
 	// json:"-" for the same reason as Document.
 	ServerToolResult *ServerToolResultBlock `json:"-"`
+
+	// ProviderExtensions stores provider-specific content-part hints. It is internal-only.
+	ProviderExtensions *ProviderExtensions `json:"-"`
 
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	// This field is not serialized in JSON.
@@ -1690,6 +1724,9 @@ type ToolCall struct {
 	// multi-turn tool use can be replayed without losing the provider-required
 	// signature binding. Help field only; never serialized to client JSON.
 	ThoughtSignature string `json:"-"`
+
+	// ProviderExtensions stores provider-specific tool-call hints. It is internal-only.
+	ProviderExtensions *ProviderExtensions `json:"-"`
 
 	// CacheControl is used for provider-specific cache control (e.g., Anthropic).
 	CacheControl *CacheControl `json:"-"`

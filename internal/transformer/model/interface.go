@@ -32,6 +32,16 @@ type Outbound interface {
 	TransformStream(ctx context.Context, eventData []byte) (*InternalLLMResponse, error)
 }
 
+type OutboundStreamEventTransformer interface {
+	// TransformStreamEvent converts provider stream bytes into explicit stream events.
+	TransformStreamEvent(ctx context.Context, eventData []byte) ([]StreamEvent, error)
+}
+
+type InboundStreamEventTransformer interface {
+	// TransformStreamEvents converts explicit stream events into the inbound wire format.
+	TransformStreamEvents(ctx context.Context, events []StreamEvent) ([]byte, error)
+}
+
 /*
 请求流程
 非流式
