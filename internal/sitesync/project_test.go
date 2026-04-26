@@ -322,7 +322,7 @@ func TestProjectAccountReusesOrphanManagedChannelWithSameName(t *testing.T) {
 	}
 
 	group := model.SiteUserGroup{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
-	orphanName := buildManagedChannelName(site, account, group, outbound.OutboundTypeOpenAIChat, shouldSplitByOutboundType(site))
+	orphanName := buildLegacyManagedChannelName(site, account, group, outbound.OutboundTypeOpenAIChat, shouldSplitByOutboundType(site))
 	orphanChannel := model.Channel{
 		Name:      orphanName,
 		Type:      outbound.OutboundTypeOpenAIChat,
@@ -358,8 +358,8 @@ func TestProjectAccountReusesOrphanManagedChannelWithSameName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChannelGet failed: %v", err)
 	}
-	if reloaded.Model != "gpt-4o-mini" {
-		t.Fatalf("expected reused orphan channel model to be refreshed, got %q", reloaded.Model)
+	if reloaded.Name != "DoneHub Projection Site/Primary Account/default-Chat" {
+		t.Fatalf("expected reused orphan channel to be renamed, got %q", reloaded.Name)
 	}
 }
 
@@ -432,6 +432,45 @@ func TestProjectAccountSyncsProjectedModelPrices(t *testing.T) {
 	}
 }
 
+func TestProjectAccountUsesSiteGroupRatioInManagedChannelName(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	price := model.SitePrice{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", GroupRatio: 2}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&price).Error; err != nil {
+		t.Fatalf("create site price failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount returned error: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	channel := channelsByGroup[model.SiteDefaultGroupKey]
+	if channel.Name != "Projection Site/Primary Account/default x2-Chat" {
+		t.Fatalf("expected ratio in projected channel name, got %q", channel.Name)
+	}
+}
+
+func TestProjectAccountFormatsFractionalSiteGroupRatioInManagedChannelName(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	price := model.SitePrice{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", GroupRatio: 1.5}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&price).Error; err != nil {
+		t.Fatalf("create site price failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount returned error: %v", err)
+	}
+
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	channel := channelsByGroup[model.SiteDefaultGroupKey]
+	if channel.Name != "Projection Site/Primary Account/default x1.5-Chat" {
+		t.Fatalf("expected fractional ratio in projected channel name, got %q", channel.Name)
+	}
+}
 func TestDeleteSiteAccountRemovesManagedChannelChain(t *testing.T) {
 	ctx := setupProjectTestDB(t)
 	site, account := createProjectionFixture(t, ctx)
@@ -677,22 +716,14 @@ func assertProjectedChannel(t *testing.T, channelsByGroup map[string]model.Chann
 	if len(channel.Keys) != 2 {
 		t.Fatalf("expected channel %q to carry both projected keys, got %d", groupKey, len(channel.Keys))
 	}
-	if wantSuffix {
-		if groupKey == "default::anthropic" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [Anthropic]" {
-			t.Fatalf("unexpected anthropic channel name: %q", channel.Name)
-		}
-		if groupKey == "default::gemini" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [Gemini]" {
-			t.Fatalf("unexpected gemini channel name: %q", channel.Name)
-		}
-		if groupKey == "default::volcengine" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [Volcengine]" {
-			t.Fatalf("unexpected volcengine channel name: %q", channel.Name)
-		}
-		if groupKey == "default::openai-embedding" && channel.Name != "[Site] Projection Site / Primary Account / default (default) [OpenAI Embedding]" {
-			t.Fatalf("unexpected embedding channel name: %q", channel.Name)
-		}
-		return
+	expectedNames := map[string]string{
+		"default":                   "Projection Site/Primary Account/default-Chat",
+		"default::anthropic":        "Projection Site/Primary Account/default-Anthropic",
+		"default::gemini":           "Projection Site/Primary Account/default-Gemini",
+		"default::volcengine":       "Projection Site/Primary Account/default-Volcengine",
+		"default::openai-embedding": "Projection Site/Primary Account/default-Embedding",
 	}
-	if channel.Name != "[Site] Projection Site / Primary Account / default (default)" {
-		t.Fatalf("unexpected OpenAI/default channel name: %q", channel.Name)
+	if expectedName, ok := expectedNames[groupKey]; ok && channel.Name != expectedName {
+		t.Fatalf("expected channel %q name %q, got %q", groupKey, expectedName, channel.Name)
 	}
 }

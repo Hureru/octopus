@@ -408,6 +408,27 @@ func SiteModelRouteTypeName(routeType SiteModelRouteType) string {
 	}
 }
 
+func CompactSiteModelRouteTypeName(routeType SiteModelRouteType) string {
+	switch NormalizeSiteModelRouteType(routeType) {
+	case SiteModelRouteTypeOpenAIChat:
+		return "Chat"
+	case SiteModelRouteTypeOpenAIResponse:
+		return "Response"
+	case SiteModelRouteTypeAnthropic:
+		return "Anthropic"
+	case SiteModelRouteTypeGemini:
+		return "Gemini"
+	case SiteModelRouteTypeVolcengine:
+		return "Volcengine"
+	case SiteModelRouteTypeOpenAIEmbedding:
+		return "Embedding"
+	case SiteModelRouteTypeUnknown:
+		return "Unsupported"
+	default:
+		return "Chat"
+	}
+}
+
 func ComposeSiteChannelBindingKey(groupKey string, routeType SiteModelRouteType, split bool) string {
 	groupKey = NormalizeSiteGroupKey(groupKey)
 	if !split {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -115,6 +116,10 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
 		baseUrls := []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}}
 		enabled := siteRecord.Enabled && account.Enabled && len(groupTokens) > 0
+		groupRatio, hasGroupRatio, err := op.SiteGroupRatioGet(ctx, account.ID, groupKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to lookup site group ratio: %w", err)
+		}
 
 		for routeType, bucketModels := range modelBuckets {
 			if len(bucketModels) == 0 {
@@ -124,7 +129,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			modelNames := extractSiteModelNames(bucketModels)
 			bindingKey := compositeBindingKey(groupKey, obType, shouldSplit)
 			channelPayload := model.Channel{
-				Name:         buildManagedChannelName(siteRecord, account, group, obType, shouldSplit),
+				Name:         buildManagedChannelName(siteRecord, account, group, obType, groupRatio, hasGroupRatio),
 				Type:         obType,
 				Enabled:      enabled,
 				BaseUrls:     baseUrls,
@@ -140,7 +145,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 
 			binding, exists := bindingMap[bindingKey]
 			if !exists {
-				reusedBinding, reused, err := reuseManagedChannelByName(ctx, siteRecord, account, group, bindingKey, channelPayload)
+				reusedBinding, reused, err := reuseManagedChannelByName(ctx, siteRecord, account, group, bindingKey, channelPayload, buildLegacyManagedChannelName(siteRecord, account, group, obType, shouldSplit))
 				if err != nil {
 					return nil, err
 				}
@@ -251,7 +256,16 @@ func ProjectSite(ctx context.Context, siteID int) error {
 	return nil
 }
 
-func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, obType outbound.OutboundType, split bool) string {
+func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, obType outbound.OutboundType, groupRatio float64, hasGroupRatio bool) string {
+	groupName := model.NormalizeSiteGroupName(group.GroupKey, group.Name)
+	formatName := model.CompactSiteModelRouteTypeName(model.SiteModelRouteTypeFromOutboundType(obType))
+	if hasGroupRatio && groupRatio > 0 {
+		return fmt.Sprintf("%s/%s/%s x%s-%s", siteRecord.Name, account.Name, groupName, formatGroupRatio(groupRatio), formatName)
+	}
+	return fmt.Sprintf("%s/%s/%s-%s", siteRecord.Name, account.Name, groupName, formatName)
+}
+
+func buildLegacyManagedChannelName(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, obType outbound.OutboundType, split bool) string {
 	base := fmt.Sprintf("[Site] %s / %s / %s (%s)", siteRecord.Name, account.Name, model.NormalizeSiteGroupName(group.GroupKey, group.Name), model.NormalizeSiteGroupKey(group.GroupKey))
 	if !split {
 		return base
@@ -262,8 +276,15 @@ func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount,
 	return base
 }
 
-func reuseManagedChannelByName(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, bindingKey string, channelPayload model.Channel) (*model.SiteChannelBinding, bool, error) {
+func formatGroupRatio(ratio float64) string {
+	return strconv.FormatFloat(ratio, 'f', -1, 64)
+}
+
+func reuseManagedChannelByName(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, bindingKey string, channelPayload model.Channel, legacyName string) (*model.SiteChannelBinding, bool, error) {
 	existingChannel, err := op.ChannelGetByName(channelPayload.Name, ctx)
+	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) && strings.TrimSpace(legacyName) != "" && legacyName != channelPayload.Name {
+		existingChannel, err = op.ChannelGetByName(legacyName, ctx)
+	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, false, nil

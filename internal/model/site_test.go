@@ -32,6 +32,29 @@ func TestNormalizeSiteTokenValueStatusRestoresReadyWhenTokenIsComplete(t *testin
 	}
 }
 
+func TestCompactSiteModelRouteTypeName(t *testing.T) {
+	tests := []struct {
+		name      string
+		routeType SiteModelRouteType
+		expected  string
+	}{
+		{name: "chat", routeType: SiteModelRouteTypeOpenAIChat, expected: "Chat"},
+		{name: "response", routeType: SiteModelRouteTypeOpenAIResponse, expected: "Response"},
+		{name: "anthropic", routeType: SiteModelRouteTypeAnthropic, expected: "Anthropic"},
+		{name: "gemini", routeType: SiteModelRouteTypeGemini, expected: "Gemini"},
+		{name: "embedding", routeType: SiteModelRouteTypeOpenAIEmbedding, expected: "Embedding"},
+		{name: "unknown", routeType: SiteModelRouteTypeUnknown, expected: "Unsupported"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if actual := CompactSiteModelRouteTypeName(tt.routeType); actual != tt.expected {
+				t.Fatalf("expected %q, got %q", tt.expected, actual)
+			}
+		})
+	}
+}
+
 func TestInferSiteModelRouteType(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -2,12 +2,14 @@ package op
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/cache"
+	"gorm.io/gorm"
 )
 
 // sitePriceCache：分片缓存，键为 "accountID:groupKey:modelName"（modelName 统一小写）。
@@ -25,6 +27,21 @@ func sitePriceCacheKey(accountID int, groupKey, modelName string) string {
 // SitePriceGet 查询指定 (账号, 分组, 模型) 的价格。
 func SitePriceGet(accountID int, groupKey, modelName string) (model.LLMPrice, bool) {
 	return sitePriceCache.Get(sitePriceCacheKey(accountID, groupKey, modelName))
+}
+
+func SiteGroupRatioGet(ctx context.Context, accountID int, groupKey string) (float64, bool, error) {
+	var price model.SitePrice
+	err := db.GetDB().WithContext(ctx).
+		Where("site_account_id = ? AND group_key = ? AND group_ratio > 0", accountID, model.NormalizeSiteGroupKey(groupKey)).
+		Order("id ASC").
+		First(&price).Error
+	if err == nil {
+		return price.GroupRatio, true, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, nil
+	}
+	return 0, false, err
 }
 
 // SitePriceReplaceAccount 用给定 prices 完整替换某账号下的缓存，并持久化到 DB。
