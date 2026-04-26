@@ -15,10 +15,6 @@ const (
 	ProviderExtensionNamespaceVolcengine ProviderExtensionNamespace = "volcengine"
 )
 
-type OctopusExtension struct {
-	ProviderExtensions *ProviderExtensions `json:"provider_extensions,omitempty"`
-}
-
 type ProviderExtensions struct {
 	Common     *CommonExtension     `json:"common,omitempty"`
 	Anthropic  *AnthropicExtension  `json:"anthropic,omitempty"`
@@ -53,25 +49,6 @@ type OpenAIExtension struct {
 
 type VolcengineExtension struct {
 	Raw json.RawMessage `json:"raw,omitempty"`
-}
-
-func GeminiThoughtSignatureExtension(signature string) *OctopusExtension {
-	signature = strings.TrimSpace(signature)
-	if signature == "" {
-		return nil
-	}
-	return &OctopusExtension{
-		ProviderExtensions: &ProviderExtensions{
-			Gemini: &GeminiExtension{ThoughtSignature: signature},
-		},
-	}
-}
-
-func GeminiThoughtSignatureFromExtension(ext *OctopusExtension) string {
-	if ext == nil || ext.ProviderExtensions == nil || ext.ProviderExtensions.Gemini == nil {
-		return ""
-	}
-	return strings.TrimSpace(ext.ProviderExtensions.Gemini.ThoughtSignature)
 }
 
 func (r *InternalLLMRequest) GetGeminiExtensions() GeminiExtension {

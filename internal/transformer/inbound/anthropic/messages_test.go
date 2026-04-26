@@ -9,23 +9,17 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/model"
 )
 
-// TestTransformRequestCapturesMCPServersAndContainer verifies A-H6:
-// incoming mcp_servers / container payloads land on the internal request's
-// Anthropic raw passthrough channels so outbound can replay them.
-func TestAnthropicToolUseRoundTripsGeminiThoughtSignature(t *testing.T) {
+func TestAnthropicRequestEmptyThinkingSignatureBecomesGeminiSignature(t *testing.T) {
 	inbound := &MessagesInbound{}
 	body := []byte(`{
 		"model":"claude-3-5-sonnet",
 		"max_tokens":16,
 		"messages":[{
 			"role":"assistant",
-			"content":[{
-				"type":"tool_use",
-				"id":"call_Bash_2",
-				"name":"Bash",
-				"input":{"command":"pwd"},
-				"_octopus":{"provider_extensions":{"gemini":{"thought_signature":"sig-gemini"}}}
-			}]
+			"content":[
+				{"type":"thinking","thinking":"","signature":"sig-gemini"},
+				{"type":"tool_use","id":"call_Bash_2","name":"Bash","input":{"command":"pwd"}}
+			]
 		}]
 	}`)
 
@@ -33,19 +27,51 @@ func TestAnthropicToolUseRoundTripsGeminiThoughtSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformRequest() error = %v", err)
 	}
-	if len(req.Messages) != 1 || len(req.Messages[0].ToolCalls) != 1 {
-		t.Fatalf("expected one tool call, got %+v", req.Messages)
+	msg := req.Messages[0]
+	if msg.ReasoningContent != nil || msg.ReasoningSignature != nil {
+		t.Fatalf("expected Gemini shim not to populate Anthropic flat reasoning fields, got content=%v signature=%v", msg.ReasoningContent, msg.ReasoningSignature)
 	}
-	toolCall := req.Messages[0].ToolCalls[0]
-	if toolCall.ThoughtSignature != "sig-gemini" {
-		t.Fatalf("ThoughtSignature = %q, want sig-gemini", toolCall.ThoughtSignature)
+	if len(msg.ReasoningBlocks) != 1 {
+		t.Fatalf("expected one reasoning block, got %+v", msg.ReasoningBlocks)
 	}
-	if toolCall.ID != "call_Bash_2" || toolCall.Function.Name != "Bash" || toolCall.Function.Arguments != `{"command":"pwd"}` {
-		t.Fatalf("tool call fields changed: %+v", toolCall)
+	block := msg.ReasoningBlocks[0]
+	if block.Kind != model.ReasoningBlockKindSignature || block.Provider != "gemini" || block.Signature != "sig-gemini" {
+		t.Fatalf("unexpected reasoning block: %+v", block)
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ThoughtSignature != "sig-gemini" {
+		t.Fatalf("expected signature bound to tool call, got %+v", msg.ToolCalls)
 	}
 }
 
-func TestTransformResponseEmitsGeminiThoughtSignatureExtension(t *testing.T) {
+func TestAnthropicRequestKeepsNonEmptyThinkingAnthropic(t *testing.T) {
+	inbound := &MessagesInbound{}
+	body := []byte(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":16,
+		"messages":[{
+			"role":"assistant",
+			"content":[{"type":"thinking","thinking":"real thought","signature":"sig-anthropic"}]
+		}]
+	}`)
+
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	msg := req.Messages[0]
+	if len(msg.ReasoningBlocks) != 1 {
+		t.Fatalf("expected one reasoning block, got %+v", msg.ReasoningBlocks)
+	}
+	block := msg.ReasoningBlocks[0]
+	if block.Kind != model.ReasoningBlockKindThinking || block.Provider != "anthropic" || block.Text != "real thought" || block.Signature != "sig-anthropic" {
+		t.Fatalf("unexpected reasoning block: %+v", block)
+	}
+	if msg.ReasoningContent == nil || *msg.ReasoningContent != "real thought" || msg.ReasoningSignature == nil || *msg.ReasoningSignature != "sig-anthropic" {
+		t.Fatalf("expected flat Anthropic reasoning fields, got content=%v signature=%v", msg.ReasoningContent, msg.ReasoningSignature)
+	}
+}
+
+func TestTransformResponseEmitsGeminiThoughtSignatureShim(t *testing.T) {
 	inbound := &MessagesInbound{}
 	out, err := inbound.TransformResponse(context.Background(), &model.InternalLLMResponse{
 		ID:    "msg_1",
@@ -53,6 +79,11 @@ func TestTransformResponseEmitsGeminiThoughtSignatureExtension(t *testing.T) {
 		Choices: []model.Choice{{
 			Message: &model.Message{
 				Role: "assistant",
+				ReasoningBlocks: []model.ReasoningBlock{{
+					Kind:      model.ReasoningBlockKindSignature,
+					Signature: "sig-gemini",
+					Provider:  "gemini",
+				}},
 				ToolCalls: []model.ToolCall{{
 					ID: "call_Bash_2",
 					Function: model.FunctionCall{
@@ -72,16 +103,19 @@ func TestTransformResponseEmitsGeminiThoughtSignatureExtension(t *testing.T) {
 	if err := json.Unmarshal(out, &resp); err != nil {
 		t.Fatalf("unmarshal response: %v\n%s", err, out)
 	}
-	if len(resp.Content) != 1 {
-		t.Fatalf("expected one content block, got %+v", resp.Content)
+	if len(resp.Content) != 2 {
+		t.Fatalf("expected thinking shim and tool_use, got %+v", resp.Content)
 	}
-	got := geminiThoughtSignatureFromExtension(resp.Content[0].Octopus)
-	if got != "sig-gemini" {
-		t.Fatalf("extension signature = %q, want sig-gemini; raw=%s", got, out)
+	shim := resp.Content[0]
+	if shim.Type != "thinking" || shim.Thinking == nil || *shim.Thinking != "" || shim.Signature == nil || *shim.Signature != "sig-gemini" {
+		t.Fatalf("unexpected shim block: %+v", shim)
+	}
+	if resp.Content[1].Type != "tool_use" {
+		t.Fatalf("expected tool_use after shim, got %+v", resp.Content[1])
 	}
 }
 
-func TestTransformResponseOmitsOctopusExtensionWithoutSignature(t *testing.T) {
+func TestTransformResponseOmitsOctopusExtension(t *testing.T) {
 	inbound := &MessagesInbound{}
 	out, err := inbound.TransformResponse(context.Background(), &model.InternalLLMResponse{
 		ID:    "msg_1",
@@ -107,7 +141,7 @@ func TestTransformResponseOmitsOctopusExtensionWithoutSignature(t *testing.T) {
 	}
 }
 
-func TestTransformStreamEmitsGeminiThoughtSignatureExtension(t *testing.T) {
+func TestTransformStreamEmitsGeminiThoughtSignatureShim(t *testing.T) {
 	inbound := &MessagesInbound{}
 	out, err := inbound.TransformStream(context.Background(), &model.InternalLLMResponse{
 		ID:     "msg_1",
@@ -116,8 +150,13 @@ func TestTransformStreamEmitsGeminiThoughtSignatureExtension(t *testing.T) {
 		Choices: []model.Choice{{
 			Delta: &model.Message{
 				Role: "assistant",
+				ReasoningBlocks: []model.ReasoningBlock{{
+					Kind:      model.ReasoningBlockKindSignature,
+					Signature: "sig-gemini",
+					Provider:  "gemini",
+				}},
 				ToolCalls: []model.ToolCall{{
-					Index: 2,
+					Index: 0,
 					ID:    "call_Bash_2",
 					Function: model.FunctionCall{
 						Name:      "Bash",
@@ -132,10 +171,21 @@ func TestTransformStreamEmitsGeminiThoughtSignatureExtension(t *testing.T) {
 		t.Fatalf("TransformStream() error = %v", err)
 	}
 	text := string(out)
-	if !strings.Contains(text, `"_octopus":{"provider_extensions":{"gemini":{"thought_signature":"sig-gemini"}}}`) {
-		t.Fatalf("expected stream tool_use extension, got %s", text)
+	for _, want := range []string{
+		`"type":"thinking"`,
+		`"type":"signature_delta"`,
+		`"signature":"sig-gemini"`,
+		`"type":"tool_use"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in stream, got %s", want, text)
+		}
+	}
+	if strings.Index(text, `"type":"signature_delta"`) > strings.Index(text, `"type":"tool_use"`) {
+		t.Fatalf("expected signature_delta before tool_use, got %s", text)
 	}
 }
+
 func TestTransformRequestCapturesMCPServersAndContainer(t *testing.T) {
 	inbound := &MessagesInbound{}
 	body := []byte(`{

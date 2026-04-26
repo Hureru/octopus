@@ -34,12 +34,21 @@ type MessagesInbound struct {
 	storedResponse *model.InternalLLMResponse
 }
 
-func geminiThoughtSignatureExtension(signature string) *OctopusExtension {
-	return model.GeminiThoughtSignatureExtension(signature)
+func geminiThoughtSignatureShim(block MessageContentBlock) string {
+	if block.Type != "thinking" || block.Thinking == nil || *block.Thinking != "" || block.Signature == nil {
+		return ""
+	}
+	return strings.TrimSpace(*block.Signature)
 }
 
-func geminiThoughtSignatureFromExtension(ext *OctopusExtension) string {
-	return model.GeminiThoughtSignatureFromExtension(ext)
+func countGeminiSignatureShims(blocks []MessageContentBlock) int {
+	count := 0
+	for _, block := range blocks {
+		if geminiThoughtSignatureShim(block) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*model.InternalLLMRequest, error) {
@@ -139,10 +148,22 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 			)
 
 			var reasoningSignature string
+			pendingGeminiThoughtSignatures := make([]string, 0)
 
 			for _, block := range msg.Content.MultipleContent {
 				switch block.Type {
 				case "thinking":
+					if sig := geminiThoughtSignatureShim(block); sig != "" {
+						pendingGeminiThoughtSignatures = append(pendingGeminiThoughtSignatures, sig)
+						chatMsg.AppendReasoningBlock(model.ReasoningBlock{
+							Kind:      model.ReasoningBlockKindSignature,
+							Index:     -1,
+							Signature: sig,
+							Provider:  "gemini",
+						})
+						continue
+					}
+
 					// Keep thinking content in MultipleContent to preserve order
 					thinkingText := ""
 					if block.Thinking != nil && *block.Thinking != "" {
@@ -252,11 +273,9 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 						},
 						CacheControl: convertToLLMCacheControl(block.CacheControl),
 					}
-					if block.Octopus != nil {
-						toolCall.ProviderExtensions = block.Octopus.ProviderExtensions
-					}
-					if sig := geminiThoughtSignatureFromExtension(block.Octopus); sig != "" {
-						toolCall.ThoughtSignature = sig
+					if len(pendingGeminiThoughtSignatures) > 0 {
+						toolCall.ThoughtSignature = pendingGeminiThoughtSignatures[0]
+						pendingGeminiThoughtSignatures = pendingGeminiThoughtSignatures[1:]
 					}
 					chatMsg.ToolCalls = append(chatMsg.ToolCalls, toolCall)
 					hasContent = true
@@ -317,6 +336,10 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 				chatMsg.Content = model.MessageContent{
 					MultipleContent: contentParts,
 				}
+				hasContent = true
+			}
+
+			if hasReasoningInContent || reasoningSignature != "" || len(chatMsg.ReasoningBlocks) > 0 {
 				hasContent = true
 			}
 
@@ -552,6 +575,16 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 								Data: rb.Data,
 							})
 						}
+					case model.ReasoningBlockKindSignature:
+						if rb.Provider == "gemini" && rb.Signature != "" {
+							thinking := ""
+							signature := rb.Signature
+							contentBlocks = append(contentBlocks, MessageContentBlock{
+								Type:      "thinking",
+								Thinking:  &thinking,
+								Signature: &signature,
+							})
+						}
 					}
 				}
 			} else {
@@ -624,6 +657,7 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 
 			// Handle tool calls
 			if len(message.ToolCalls) > 0 {
+				emittedSignatureShims := countGeminiSignatureShims(contentBlocks)
 				for _, toolCall := range message.ToolCalls {
 					var input json.RawMessage
 					if toolCall.Function.Arguments != "" {
@@ -643,8 +677,15 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 						Name:  &toolCall.Function.Name,
 						Input: input,
 					}
-					if ext := geminiThoughtSignatureExtension(toolCall.GetGeminiExtensions().ThoughtSignature); ext != nil {
-						block.Octopus = ext
+					if sig := strings.TrimSpace(toolCall.GetGeminiExtensions().ThoughtSignature); sig != "" && emittedSignatureShims < len(message.ToolCalls) {
+						thinking := ""
+						signature := sig
+						contentBlocks = append(contentBlocks, MessageContentBlock{
+							Type:      "thinking",
+							Thinking:  &thinking,
+							Signature: &signature,
+						})
+						emittedSignatureShims++
 					}
 					contentBlocks = append(contentBlocks, block)
 				}
@@ -763,6 +804,28 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 	if len(stream.Choices) > 0 {
 		choice := stream.Choices[0]
 
+		if choice.Delta != nil && len(choice.Delta.ReasoningBlocks) > 0 {
+			for _, rb := range choice.Delta.ReasoningBlocks {
+				switch rb.Kind {
+				case model.ReasoningBlockKindThinking:
+					if rb.Text != "" {
+						choice.Delta.ReasoningContent = &rb.Text
+					}
+					if rb.Signature != "" {
+						choice.Delta.ReasoningSignature = &rb.Signature
+					}
+				case model.ReasoningBlockKindSignature:
+					if rb.Provider == "gemini" && rb.Signature != "" {
+						choice.Delta.ReasoningSignature = &rb.Signature
+					}
+				case model.ReasoningBlockKindRedacted:
+					if rb.Data != "" {
+						choice.Delta.RedactedThinkingBlocks = append(choice.Delta.RedactedThinkingBlocks, rb.Data)
+					}
+				}
+			}
+		}
+
 		// Handle reasoning content (thinking) delta
 		if choice.Delta != nil && choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
 			// If the tool content has started before the thinking content, we need to stop it
@@ -820,6 +883,23 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 
 		// Add signature delta if signature is available
 		if choice.Delta != nil && choice.Delta.ReasoningSignature != nil && *choice.Delta.ReasoningSignature != "" {
+			if !i.hasThinkingContentStarted {
+				i.hasThinkingContentStarted = true
+				startEvent := StreamEvent{
+					Type:  "content_block_start",
+					Index: &i.contentIndex,
+					ContentBlock: &MessageContentBlock{
+						Type:      "thinking",
+						Thinking:  lo.ToPtr(""),
+						Signature: lo.ToPtr(""),
+					},
+				}
+				data, err := json.Marshal(startEvent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal content_block_start event: %w", err)
+				}
+				events = append(events, formatSSEEvent("content_block_start", data))
+			}
 			sigEvent := StreamEvent{
 				Type:  "content_block_delta",
 				Index: &i.contentIndex,
@@ -1026,10 +1106,6 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 						Name:  &deltaToolCall.Function.Name,
 						Input: json.RawMessage("{}"),
 					}
-					if ext := geminiThoughtSignatureExtension(deltaToolCall.ThoughtSignature); ext != nil {
-						startBlock.Octopus = ext
-					}
-
 					startEvent := StreamEvent{
 						Type:         "content_block_start",
 						Index:        &i.contentIndex,
@@ -1233,9 +1309,6 @@ func (i *MessagesInbound) TransformStreamEvents(ctx context.Context, events []mo
 		i.toolCallIndices[toolCall.Index] = true
 		i.hasToolContentStarted = true
 		startBlock := &MessageContentBlock{Type: "tool_use", ID: toolCall.ID, Name: &toolCall.Function.Name, Input: json.RawMessage("{}")}
-		if ext := geminiThoughtSignatureExtension(toolCall.GetGeminiExtensions().ThoughtSignature); ext != nil {
-			startBlock.Octopus = ext
-		}
 		startEvent := StreamEvent{Type: "content_block_start", Index: &i.contentIndex, ContentBlock: startBlock}
 		data, err := json.Marshal(startEvent)
 		if err != nil {

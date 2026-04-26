@@ -66,29 +66,27 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 		t.Fatalf("failed to transform to Anthropic format: %v", err)
 	}
 
-	// Verify Anthropic response has _octopus extension
+	// Verify Anthropic response carries the signature only through the standard thinking shim.
 	var anthResp anthropic.Message
 	if err := json.Unmarshal(anthBytes, &anthResp); err != nil {
 		t.Fatalf("failed to unmarshal Anthropic response: %v", err)
 	}
 
-	if len(anthResp.Content) != 1 {
-		t.Fatalf("expected 1 content block, got %d", len(anthResp.Content))
+	if len(anthResp.Content) != 2 {
+		t.Fatalf("expected thinking shim and tool_use block, got %d", len(anthResp.Content))
 	}
 
-	toolUseBlock := anthResp.Content[0]
+	shimBlock := anthResp.Content[0]
+	if shimBlock.Type != "thinking" || shimBlock.Thinking == nil || *shimBlock.Thinking != "" || shimBlock.Signature == nil || *shimBlock.Signature != "sig-abc-123" {
+		t.Fatalf("unexpected thinking shim block: %+v", shimBlock)
+	}
+
+	toolUseBlock := anthResp.Content[1]
 	if toolUseBlock.Type != "tool_use" {
 		t.Fatalf("expected tool_use block, got %s", toolUseBlock.Type)
 	}
-	if toolUseBlock.Octopus == nil {
-		t.Fatal("tool_use block missing _octopus extension")
-	}
-	if toolUseBlock.Octopus.ProviderExtensions == nil || toolUseBlock.Octopus.ProviderExtensions.Gemini == nil {
-		t.Fatal("_octopus extension missing Gemini provider extensions")
-	}
-	if toolUseBlock.Octopus.ProviderExtensions.Gemini.ThoughtSignature != "sig-abc-123" {
-		t.Errorf("_octopus.provider_extensions.gemini.thought_signature = %q, want sig-abc-123",
-			toolUseBlock.Octopus.ProviderExtensions.Gemini.ThoughtSignature)
+	if string(anthBytes) != "" && containsOctopusExtension(anthBytes) {
+		t.Fatalf("Anthropic response leaked _octopus extension: %s", anthBytes)
 	}
 
 	// Step 4: Simulate multi-turn request with history
@@ -108,11 +106,15 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 				Content: anthropic.MessageContent{
 					MultipleContent: []anthropic.MessageContentBlock{
 						{
-							Type:    "tool_use",
-							ID:      toolUseBlock.ID,
-							Name:    toolUseBlock.Name,
-							Input:   toolUseBlock.Input,
-							Octopus: toolUseBlock.Octopus, // This carries the signature
+							Type:      shimBlock.Type,
+							Thinking:  shimBlock.Thinking,
+							Signature: shimBlock.Signature,
+						},
+						{
+							Type:  "tool_use",
+							ID:    toolUseBlock.ID,
+							Name:  toolUseBlock.Name,
+							Input: toolUseBlock.Input,
 						},
 					},
 				},
@@ -213,4 +215,34 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 
 func ptrString(s string) *string {
 	return &s
+}
+
+func containsOctopusExtension(b []byte) bool {
+	var raw any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return false
+	}
+	return string(encoded) != "" && jsonContainsKey(raw, "_octopus")
+}
+
+func jsonContainsKey(v any, key string) bool {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			if k == key || jsonContainsKey(child, key) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range x {
+			if jsonContainsKey(child, key) {
+				return true
+			}
+		}
+	}
+	return false
 }

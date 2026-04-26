@@ -398,11 +398,10 @@ type MessageContentBlock struct {
 
 	// Tool use request
 	// tool_use or server_tool_use
-	ID           string            `json:"id,omitempty"`
-	Name         *string           `json:"name,omitempty"`
-	Input        json.RawMessage   `json:"input,omitempty"`
-	CacheControl *CacheControl     `json:"cache_control,omitempty"`
-	Octopus      *OctopusExtension `json:"_octopus,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         *string         `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 
 	// Tool result fields
 	ToolUseID *string `json:"tool_use_id,omitempty"`
@@ -411,8 +410,6 @@ type MessageContentBlock struct {
 	Content *MessageContent `json:"content,omitempty"`
 	IsError *bool           `json:"is_error,omitempty"`
 }
-
-type OctopusExtension = model.OctopusExtension
 
 type ProviderExtensions = model.ProviderExtensions
 
