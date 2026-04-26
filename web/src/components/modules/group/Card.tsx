@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui
 import type { SelectedMember } from './ItemList';
 import { MemberList } from './ItemList';
 import { GroupEditor, type GroupEditorValues } from './Editor';
-import { buildChannelNameByModelKey, modelChannelKey, MODE_LABELS } from './utils';
+import { modelChannelKey, MODE_LABELS } from './utils';
 import { GroupMode, type GroupUpdateRequest } from '@/api/endpoints/group';
 import {
     MorphingDialog,
@@ -83,11 +83,10 @@ export function GroupCard({ group }: { group: Group }) {
     const weightTimerRef = useRef<NodeJS.Timeout | null>(null);
     const membersRef = useRef<SelectedMember[]>([]);
 
-    const channelNameByKey = useMemo(() => buildChannelNameByModelKey(modelChannels), [modelChannels]);
-    const enabledByKey = useMemo(() => {
-        const map = new Map<string, boolean>();
+    const modelChannelByKey = useMemo(() => {
+        const map = new Map<string, typeof modelChannels[number]>();
         modelChannels.forEach((mc) => {
-            map.set(modelChannelKey(mc.channel_id, mc.name), mc.enabled);
+            map.set(modelChannelKey(mc.channel_id, mc.name), mc);
         });
         return map;
     }, [modelChannels]);
@@ -95,16 +94,21 @@ export function GroupCard({ group }: { group: Group }) {
     const displayMembers = useMemo((): SelectedMember[] =>
         [...(group.items || [])]
             .sort((a, b) => a.priority - b.priority)
-            .map((item) => ({
-                id: modelChannelKey(item.channel_id, item.model_name),
-                name: item.model_name,
-                enabled: enabledByKey.get(modelChannelKey(item.channel_id, item.model_name)) ?? true,
-                channel_id: item.channel_id,
-                channel_name: channelNameByKey.get(modelChannelKey(item.channel_id, item.model_name)) ?? `Channel ${item.channel_id}`,
-                item_id: item.id,
-                weight: item.weight,
-            })),
-        [group.items, channelNameByKey, enabledByKey]
+            .map((item) => {
+                const key = modelChannelKey(item.channel_id, item.model_name);
+                const modelChannel = modelChannelByKey.get(key);
+                return {
+                    ...modelChannel,
+                    id: key,
+                    name: item.model_name,
+                    enabled: modelChannel?.enabled ?? true,
+                    channel_id: item.channel_id,
+                    channel_name: modelChannel?.channel_name ?? `Channel ${item.channel_id}`,
+                    item_id: item.id,
+                    weight: item.weight,
+                };
+            }),
+        [group.items, modelChannelByKey]
     );
 
     const effectiveDisplayMembers = useMemo(
