@@ -624,6 +624,60 @@ func TestConvertToolsDropsServerToolWithoutSpec(t *testing.T) {
 	}
 }
 
+func TestTransformRequestPatchesOrphanedToolCalls(t *testing.T) {
+	outbound := &MessageOutbound{}
+	maxTokens := int64(16)
+	followup := "next question"
+	req := &model.InternalLLMRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: &maxTokens,
+		Messages: []model.Message{
+			{Role: "user", Content: model.MessageContent{Content: stringPtr("start")}},
+			{
+				Role: "assistant",
+				ToolCalls: []model.ToolCall{{
+					ID: "call_missing",
+					Function: model.FunctionCall{
+						Name:      "lookup",
+						Arguments: `{"q":"x"}`,
+					},
+				}},
+			},
+			{Role: "user", Content: model.MessageContent{Content: &followup}},
+		},
+	}
+
+	httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.anthropic.com", "sk-test")
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	body, err := io.ReadAll(httpReq.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(req.Body) error = %v", err)
+	}
+
+	var payload anthropicModel.MessageRequest
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal request: %v\n%s", err, body)
+	}
+	if len(payload.Messages) != 3 {
+		t.Fatalf("expected user, assistant, patched user messages, got %+v", payload.Messages)
+	}
+	blocks := payload.Messages[2].Content.MultipleContent
+	if len(blocks) < 2 {
+		t.Fatalf("expected synthetic tool_result merged with follow-up user content, got %+v", blocks)
+	}
+	if blocks[0].Type != "tool_result" || blocks[0].ToolUseID == nil || *blocks[0].ToolUseID != "call_missing" {
+		t.Fatalf("missing synthetic tool_result block: %+v", blocks)
+	}
+	if blocks[0].Content == nil || blocks[0].Content.Content == nil || *blocks[0].Content.Content != "" {
+		t.Fatalf("expected empty synthetic tool_result content, got %+v", blocks[0].Content)
+	}
+	if blocks[1].Type != "text" || blocks[1].Text == nil || *blocks[1].Text != followup {
+		t.Fatalf("follow-up content was not preserved after patch: %+v", blocks)
+	}
+}
+
 // A-H5: anthropicServerToolBeta recognises each supported family prefix.
 func TestAnthropicServerToolBeta(t *testing.T) {
 	cases := map[string]string{

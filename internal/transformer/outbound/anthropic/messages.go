@@ -12,6 +12,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/bestruirui/octopus/internal/transformer/compat"
 	anthropicModel "github.com/bestruirui/octopus/internal/transformer/inbound/anthropic"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -40,6 +41,7 @@ func (o *MessageOutbound) TransformRequest(ctx context.Context, request *model.I
 
 	request.NormalizeMessages()
 	request.EnforceMessageAlternation(model.AlternationProviderAnthropic)
+	compat.PatchAnthropicRequest(request)
 
 	// Convert to Anthropic request format
 	anthropicReq := convertToAnthropicRequest(request)
