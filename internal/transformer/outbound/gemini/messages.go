@@ -1389,7 +1389,8 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 							Name:      part.FunctionCall.Name,
 							Arguments: string(argsJSON),
 						},
-						ThoughtSignature: part.ThoughtSignature,
+						ThoughtSignature:   part.ThoughtSignature,
+						ProviderExtensions: geminiThoughtSignatureProviderExtension(part.ThoughtSignature),
 					}
 					toolCalls = append(toolCalls, toolCall)
 					if part.ThoughtSignature != "" {
