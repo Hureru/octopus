@@ -115,6 +115,49 @@ func TestTransformResponseEmitsGeminiThoughtSignatureShim(t *testing.T) {
 	}
 }
 
+func TestAnthropicRequestRestoresGeminiThoughtSignatureFromCache(t *testing.T) {
+	inbound := &MessagesInbound{}
+	_, err := inbound.TransformResponse(context.Background(), &model.InternalLLMResponse{
+		ID:    "msg_1",
+		Model: "gemini-3.1-pro",
+		Choices: []model.Choice{{
+			Message: &model.Message{
+				Role: "assistant",
+				ToolCalls: []model.ToolCall{{
+					ID: "call_restore_1",
+					Function: model.FunctionCall{
+						Name:      "default_api:Bash",
+						Arguments: `{"command":"pwd"}`,
+					},
+					ThoughtSignature: "sig-from-cache",
+				}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("TransformResponse() error = %v", err)
+	}
+
+	body := []byte(`{
+		"model":"claude-3-5-sonnet",
+		"max_tokens":16,
+		"messages":[{
+			"role":"assistant",
+			"content":[{"type":"tool_use","id":"call_restore_1","name":"default_api:Bash","input":{"command":"pwd"}}]
+		}]
+	}`)
+	req, err := inbound.TransformRequest(context.Background(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected one restored tool call, got %+v", req.Messages)
+	}
+	if got := req.Messages[0].ToolCalls[0].ThoughtSignature; got != "sig-from-cache" {
+		t.Fatalf("restored signature = %q, want sig-from-cache", got)
+	}
+}
+
 func TestTransformResponseOmitsOctopusExtension(t *testing.T) {
 	inbound := &MessagesInbound{}
 	out, err := inbound.TransformResponse(context.Background(), &model.InternalLLMResponse{

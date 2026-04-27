@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bestruirui/octopus/internal/transformer/compat"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/tokenizer"
@@ -276,6 +277,8 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 					if len(pendingGeminiThoughtSignatures) > 0 {
 						toolCall.ThoughtSignature = pendingGeminiThoughtSignatures[0]
 						pendingGeminiThoughtSignatures = pendingGeminiThoughtSignatures[1:]
+					} else if sig := compat.RestoreGeminiThoughtSignature(toolCall.ID, toolCall.Function.Name); sig != "" {
+						toolCall.ThoughtSignature = sig
 					}
 					chatMsg.ToolCalls = append(chatMsg.ToolCalls, toolCall)
 					hasContent = true
@@ -677,7 +680,12 @@ func (i *MessagesInbound) TransformResponse(ctx context.Context, response *model
 						Name:  &toolCall.Function.Name,
 						Input: input,
 					}
-					if sig := strings.TrimSpace(toolCall.GetGeminiExtensions().ThoughtSignature); sig != "" && emittedSignatureShims < len(message.ToolCalls) {
+					if sig := strings.TrimSpace(toolCall.GetGeminiExtensions().ThoughtSignature); sig != "" {
+						compat.SaveGeminiThoughtSignature(toolCall.ID, toolCall.Function.Name, sig)
+						if emittedSignatureShims >= len(message.ToolCalls) {
+							contentBlocks = append(contentBlocks, block)
+							continue
+						}
 						thinking := ""
 						signature := sig
 						contentBlocks = append(contentBlocks, MessageContentBlock{
@@ -1106,6 +1114,9 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 						Name:  &deltaToolCall.Function.Name,
 						Input: json.RawMessage("{}"),
 					}
+					if sig := strings.TrimSpace(deltaToolCall.GetGeminiExtensions().ThoughtSignature); sig != "" {
+						compat.SaveGeminiThoughtSignature(deltaToolCall.ID, deltaToolCall.Function.Name, sig)
+					}
 					startEvent := StreamEvent{
 						Type:         "content_block_start",
 						Index:        &i.contentIndex,
@@ -1309,6 +1320,9 @@ func (i *MessagesInbound) TransformStreamEvents(ctx context.Context, events []mo
 		i.toolCallIndices[toolCall.Index] = true
 		i.hasToolContentStarted = true
 		startBlock := &MessageContentBlock{Type: "tool_use", ID: toolCall.ID, Name: &toolCall.Function.Name, Input: json.RawMessage("{}")}
+		if sig := strings.TrimSpace(toolCall.GetGeminiExtensions().ThoughtSignature); sig != "" {
+			compat.SaveGeminiThoughtSignature(toolCall.ID, toolCall.Function.Name, sig)
+		}
 		startEvent := StreamEvent{Type: "content_block_start", Index: &i.contentIndex, ContentBlock: startBlock}
 		data, err := json.Marshal(startEvent)
 		if err != nil {

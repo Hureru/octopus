@@ -3,6 +3,8 @@ package gemini
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -168,7 +170,7 @@ func (o *MessagesOutbound) TransformStreamEvent(ctx context.Context, eventData [
 					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
 					toolCall := model.ToolCall{
 						Index: idx,
-						ID:    fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, idx),
+						ID:    anthropicSafeToolCallID(part.FunctionCall.Name, idx),
 						Type:  "function",
 						Function: model.FunctionCall{
 							Name: part.FunctionCall.Name,
@@ -212,6 +214,33 @@ func geminiThoughtSignatureProviderExtension(signature string) *model.ProviderEx
 		return nil
 	}
 	return &model.ProviderExtensions{Gemini: &model.GeminiExtension{ThoughtSignature: signature}}
+}
+
+func anthropicSafeToolCallID(functionName string, index int) string {
+	raw := fmt.Sprintf("call_%s_%d", functionName, index)
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	id := b.String()
+	if strings.Trim(id, "_-") == "" {
+		id = fmt.Sprintf("call_%d", index)
+	}
+	if len(id) <= 64 {
+		return id
+	}
+	sum := sha256.Sum256([]byte(raw))
+	suffix := hex.EncodeToString(sum[:6])
+	prefixLen := 64 - 1 - len(suffix)
+	if prefixLen < len("call") {
+		return "call_" + suffix
+	}
+	return strings.TrimRight(id[:prefixLen], "_-") + "_" + suffix
 }
 
 func (o *MessagesOutbound) TransformStream(ctx context.Context, eventData []byte) (*model.InternalLLMResponse, error) {
@@ -1380,7 +1409,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 				}
 				if part.FunctionCall != nil {
 					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-					toolCallID := fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, idx)
+					toolCallID := anthropicSafeToolCallID(part.FunctionCall.Name, idx)
 					toolCall := model.ToolCall{
 						Index: idx,
 						ID:    toolCallID,

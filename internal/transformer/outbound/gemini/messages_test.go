@@ -119,6 +119,34 @@ func TestConvertGeminiRequestDowngradesUnsignedHistoricalToolUse(t *testing.T) {
 	}
 }
 
+func TestConvertGeminiResponseGeneratesAnthropicSafeToolCallID(t *testing.T) {
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{{
+			Content: &model.GeminiContent{
+				Parts: []*model.GeminiPart{{
+					FunctionCall: &model.GeminiFunctionCall{
+						Name: "default_api:Bash",
+						Args: map[string]interface{}{"command": "pwd"},
+					},
+					ThoughtSignature: "sig-safe-id",
+				}},
+			},
+		}},
+	}
+
+	out := convertGeminiToLLMResponse(resp, false, nil)
+	if len(out.Choices) != 1 || out.Choices[0].Message == nil || len(out.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %+v", out)
+	}
+	id := out.Choices[0].Message.ToolCalls[0].ID
+	if id != "call_default_api_Bash_0" {
+		t.Fatalf("tool call ID = %q, want call_default_api_Bash_0", id)
+	}
+	if strings.ContainsAny(id, ":/+=") || len(id) > 64 {
+		t.Fatalf("tool call ID is not Anthropic-safe: %q", id)
+	}
+}
+
 func TestDecodeGeminiToolResponseAcceptsScalarJSON(t *testing.T) {
 	decoded, ok := decodeGeminiToolResponse(`true`)
 	if !ok {
