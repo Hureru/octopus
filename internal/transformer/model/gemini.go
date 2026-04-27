@@ -117,12 +117,14 @@ type GeminiVideoMetadata struct {
 
 // GeminiFunctionCall represents a function call from the model
 type GeminiFunctionCall struct {
+	ID   string                 `json:"id,omitempty"`
 	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args,omitempty"`
 }
 
 // GeminiFunctionResponse represents a function call result
 type GeminiFunctionResponse struct {
+	ID       string                 `json:"id,omitempty"`
 	Name     string                 `json:"name"`
 	Response map[string]interface{} `json:"response"`
 }
@@ -464,9 +466,9 @@ type GeminiUrlContextMetadata struct {
 
 // GeminiURLMetadata is a single URL fetch status entry.
 type GeminiURLMetadata struct {
-	RetrievedURL        string `json:"retrievedUrl,omitempty"`
-	URLRetrievalStatus  string `json:"urlRetrievalStatus,omitempty"`
-	URL                 string `json:"url,omitempty"` // some variants emit "url" instead
+	RetrievedURL       string `json:"retrievedUrl,omitempty"`
+	URLRetrievalStatus string `json:"urlRetrievalStatus,omitempty"`
+	URL                string `json:"url,omitempty"` // some variants emit "url" instead
 }
 
 // GeminiSafetyRating represents content safety evaluation

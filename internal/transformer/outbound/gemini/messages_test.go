@@ -125,6 +125,7 @@ func TestConvertGeminiResponseGeneratesAnthropicSafeToolCallID(t *testing.T) {
 			Content: &model.GeminiContent{
 				Parts: []*model.GeminiPart{{
 					FunctionCall: &model.GeminiFunctionCall{
+						ID:   "call_S6aV4UR6QSsOeCjHDC86I9hJ",
 						Name: "default_api:Bash",
 						Args: map[string]interface{}{"command": "pwd"},
 					},
@@ -139,11 +140,32 @@ func TestConvertGeminiResponseGeneratesAnthropicSafeToolCallID(t *testing.T) {
 		t.Fatalf("expected one tool call, got %+v", out)
 	}
 	id := out.Choices[0].Message.ToolCalls[0].ID
-	if id != "call_default_api_Bash_0" {
-		t.Fatalf("tool call ID = %q, want call_default_api_Bash_0", id)
+	if id != "call_S6aV4UR6QSsOeCjHDC86I9hJ" {
+		t.Fatalf("tool call ID = %q, want original Gemini ID", id)
 	}
 	if strings.ContainsAny(id, ":/+=") || len(id) > 64 {
 		t.Fatalf("tool call ID is not Anthropic-safe: %q", id)
+	}
+}
+
+func TestConvertGeminiResponseFallsBackToSafeToolCallIDWhenMissing(t *testing.T) {
+	resp := &model.GeminiGenerateContentResponse{
+		Candidates: []*model.GeminiCandidate{{
+			Content: &model.GeminiContent{
+				Parts: []*model.GeminiPart{{
+					FunctionCall: &model.GeminiFunctionCall{
+						Name: "default_api:Bash",
+						Args: map[string]interface{}{"command": "pwd"},
+					},
+				}},
+			},
+		}},
+	}
+
+	out := convertGeminiToLLMResponse(resp, false, nil)
+	id := out.Choices[0].Message.ToolCalls[0].ID
+	if id != "call_default_api_Bash_0" {
+		t.Fatalf("fallback tool call ID = %q, want call_default_api_Bash_0", id)
 	}
 }
 
@@ -204,6 +226,9 @@ func TestConvertGeminiRequestFunctionResponseNameFromAssistantLookup(t *testing.
 	if fr.Name != "Bash" {
 		t.Fatalf("expected functionResponse.name=%q, got %q", "Bash", fr.Name)
 	}
+	if fr.ID != "call_Bash_0" {
+		t.Fatalf("expected functionResponse.id=%q, got %q", "call_Bash_0", fr.ID)
+	}
 }
 
 func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.T) {
@@ -231,6 +256,9 @@ func TestConvertGeminiRequestFunctionResponseNamePrefersToolCallName(t *testing.
 	}
 	if fr.Name != nameOnly {
 		t.Fatalf("expected functionResponse.name=%q, got %q", nameOnly, fr.Name)
+	}
+	if fr.ID != "call_99" {
+		t.Fatalf("expected functionResponse.id=%q, got %q", "call_99", fr.ID)
 	}
 }
 

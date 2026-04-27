@@ -170,7 +170,7 @@ func (o *MessagesOutbound) TransformStreamEvent(ctx context.Context, eventData [
 					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
 					toolCall := model.ToolCall{
 						Index: idx,
-						ID:    anthropicSafeToolCallID(part.FunctionCall.Name, idx),
+						ID:    geminiFunctionCallID(part.FunctionCall, idx),
 						Type:  "function",
 						Function: model.FunctionCall{
 							Name: part.FunctionCall.Name,
@@ -216,7 +216,17 @@ func geminiThoughtSignatureProviderExtension(signature string) *model.ProviderEx
 	return &model.ProviderExtensions{Gemini: &model.GeminiExtension{ThoughtSignature: signature}}
 }
 
-func anthropicSafeToolCallID(functionName string, index int) string {
+func geminiFunctionCallID(functionCall *model.GeminiFunctionCall, index int) string {
+	if functionCall != nil {
+		if id := strings.TrimSpace(functionCall.ID); id != "" {
+			return id
+		}
+		return anthropicSafeFallbackToolCallID(functionCall.Name, index)
+	}
+	return anthropicSafeFallbackToolCallID("", index)
+}
+
+func anthropicSafeFallbackToolCallID(functionName string, index int) string {
 	raw := fmt.Sprintf("call_%s_%d", functionName, index)
 	var b strings.Builder
 	b.Grow(len(raw))
@@ -721,6 +731,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 					}
 					part := &model.GeminiPart{
 						FunctionCall: &model.GeminiFunctionCall{
+							ID:   toolCall.ID,
 							Name: toolCall.Function.Name,
 							Args: args,
 						},
@@ -1111,6 +1122,7 @@ func convertLLMToolResultToGeminiContent(msg *model.Message, functionName string
 	}
 
 	fp := &model.GeminiFunctionResponse{
+		ID:       lo.FromPtr(msg.ToolCallID),
 		Name:     functionName,
 		Response: responseData,
 	}
@@ -1409,7 +1421,7 @@ func convertGeminiToLLMResponse(geminiResp *model.GeminiGenerateContentResponse,
 				}
 				if part.FunctionCall != nil {
 					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
-					toolCallID := anthropicSafeToolCallID(part.FunctionCall.Name, idx)
+					toolCallID := geminiFunctionCallID(part.FunctionCall, idx)
 					toolCall := model.ToolCall{
 						Index: idx,
 						ID:    toolCallID,
