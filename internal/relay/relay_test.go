@@ -138,6 +138,128 @@ func TestHandleStreamResponsePassthroughOpenAIResponsesPreservesRawSSE(t *testin
 	}
 }
 
+func TestHandlerPassthroughsOpenAIResponsesSameProtocolStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	rawSSE := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","model":"gpt-4o","created_at":1,"output":[],"status":"in_progress"}}`,
+		"",
+		`event: response.custom_debug`,
+		`data: {"type":"response.custom_debug","custom":{"keep":true}}`,
+		"",
+		`data: {"type":"response.output_text.delta","delta":"hello"}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-4o","created_at":1,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		"",
+	}, "\n")
+
+	var capturedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream request body failed: %v", err)
+		}
+		capturedBody = append([]byte(nil), body...)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(rawSSE))
+	}))
+	defer server.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-openai-responses-same-protocol-stream",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: server.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "test-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	group := &model.Group{Name: "relay-openai-responses-same-protocol-stream-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	requestBody := `{"model":"relay-openai-responses-same-protocol-stream-group","input":"hello","stream":true}`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("api_key_id", 7)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	Handler(inbound.InboundTypeOpenAIResponse, c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected request to succeed, got status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Body.String(); got != rawSSE {
+		t.Fatalf("expected raw SSE to be preserved exactly, got %q want %q", got, rawSSE)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("unmarshal upstream request failed: %v", err)
+	}
+	if payload["model"] != "gpt-4o" {
+		t.Fatalf("expected model to be rewritten to upstream model, got %#v", payload["model"])
+	}
+	if _, ok := payload["tools"]; ok {
+		t.Fatalf("ordinary same-protocol request should not require native tools to passthrough, got %#v", payload["tools"])
+	}
+}
+
+func TestHandlerPassthroughsOpenAIResponsesSameProtocolNonStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	rawResponse := `{"id":"resp_1","object":"response","created_at":1,"model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[{"type":"custom_annotation","keep":true}]}]}],"status":"completed","custom_top_level":{"keep":true}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(rawResponse))
+	}))
+	defer server.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-openai-responses-same-protocol-non-stream",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: server.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "test-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	group := &model.Group{Name: "relay-openai-responses-same-protocol-non-stream-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("api_key_id", 7)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"relay-openai-responses-same-protocol-non-stream-group","input":"hello"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	Handler(inbound.InboundTypeOpenAIResponse, c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected request to succeed, got status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Body.String(); got != rawResponse {
+		t.Fatalf("expected raw JSON to be preserved exactly, got %q want %q", got, rawResponse)
+	}
+}
+
 func TestHandlerPassthroughsOpenAIResponsesRawTools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)

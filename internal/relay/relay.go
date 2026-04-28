@@ -1018,10 +1018,8 @@ func (ra *relayAttempt) shouldPassthroughAnthropic() bool {
 	return ra.channel.Type == outbound.OutboundTypeAnthropic
 }
 
-// shouldPassthroughOpenAIResponses 判定是否走 OpenAI Responses 原生直通路径。
-// 当前仅在检测到原生高级工具时对 HTTP/SSE 客户端启用，避免 apply_patch / shell /
-// MCP approval 等请求在内部统一模型往返时被裁剪，同时尽量减少对既有 continuation
-// 路径的影响。
+// shouldPassthroughOpenAIResponses 判定是否走 OpenAI Responses→OpenAI Responses 原生直通路径。
+// 同协议 HTTP/SSE 请求默认直通，避免 Responses 原生事件、未知字段或输出项在内部模型往返时被重组。
 func (ra *relayAttempt) shouldPassthroughOpenAIResponses() bool {
 	if ra == nil || ra.internalRequest == nil || ra.channel == nil {
 		return false
@@ -1035,7 +1033,7 @@ func (ra *relayAttempt) shouldPassthroughOpenAIResponses() bool {
 	if ra.internalRequest.RawAPIFormat != model.APIFormatOpenAIResponse {
 		return false
 	}
-	if !ra.internalRequest.HasOpenAIResponsesPassthrough() {
+	if ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
 		return false
 	}
 	return ra.channel.Type == outbound.OutboundTypeOpenAIResponse
