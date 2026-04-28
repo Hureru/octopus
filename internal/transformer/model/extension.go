@@ -316,6 +316,9 @@ func (r *InternalLLMRequest) HasOpenAIResponsesPassthrough() bool {
 	if r.OpenAIResponsesPassthroughRequired {
 		return true
 	}
+	if r.ProviderExtensions != nil && r.ProviderExtensions.OpenAI != nil && r.ProviderExtensions.OpenAI.ResponsesPassthroughRequired {
+		return true
+	}
 	return r.TransformerMetadataBool(TransformerMetadataOpenAIResponsesPassthroughRequired)
 }
 
@@ -325,6 +328,11 @@ func (r *InternalLLMRequest) OpenAIResponsesPassthroughReasonTextValue() string 
 	}
 	if reason := strings.TrimSpace(r.OpenAIResponsesPassthroughReason); reason != "" {
 		return reason
+	}
+	if r.ProviderExtensions != nil && r.ProviderExtensions.OpenAI != nil {
+		if reason := strings.TrimSpace(r.ProviderExtensions.OpenAI.ResponsesPassthroughReason); reason != "" {
+			return reason
+		}
 	}
 	return r.TransformerMetadataValue(TransformerMetadataOpenAIResponsesPassthroughReason)
 }
@@ -429,6 +437,6 @@ func mergeOpenAIExtension(dst *OpenAIExtension, src *OpenAIExtension) {
 		dst.ResponsesPassthroughReason = reason
 	}
 	if len(src.RawResponseItems) > 0 {
-		dst.RawResponseItems = src.RawResponseItems
+		dst.RawResponseItems = cloneRawMessage(src.RawResponseItems)
 	}
 }

@@ -421,6 +421,23 @@ func TestInternalLLMRequestSetOpenAIExtensionsDoesNotOverwriteRawInputItems(t *t
 	}
 }
 
+func TestInternalLLMRequestGetOpenAIExtensionsClonesProviderRawResponseItems(t *testing.T) {
+	req := &InternalLLMRequest{
+		ProviderExtensions: &ProviderExtensions{
+			OpenAI: &OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[{"type":"input_text","text":"provider"}]`),
+			},
+		},
+	}
+
+	openai := req.GetOpenAIExtensions()
+	openai.RawResponseItems[0] = '{'
+
+	if string(req.ProviderExtensions.OpenAI.RawResponseItems) != `[{"type":"input_text","text":"provider"}]` {
+		t.Fatalf("expected provider RawResponseItems to stay isolated, got %s", req.ProviderExtensions.OpenAI.RawResponseItems)
+	}
+}
+
 func TestInternalLLMRequestSetOpenAIRawInputItemsCanClearMirror(t *testing.T) {
 	req := &InternalLLMRequest{}
 	req.SetOpenAIRawInputItems(json.RawMessage(`[{"type":"input_text","text":"hello"}]`))
@@ -704,6 +721,14 @@ func TestOpenAIResponsesPassthroughTypedFieldsAndMetadataFallback(t *testing.T) 
 	}}
 	if !legacy.HasOpenAIResponsesPassthrough() || legacy.OpenAIResponsesPassthroughReasonTextValue() != "legacy" {
 		t.Fatalf("expected metadata fallback on new accessors, got %#v", legacy)
+	}
+
+	providerOnly := &InternalLLMRequest{ProviderExtensions: &ProviderExtensions{OpenAI: &OpenAIExtension{
+		ResponsesPassthroughRequired: true,
+		ResponsesPassthroughReason:   " provider ",
+	}}}
+	if !providerOnly.HasOpenAIResponsesPassthrough() || providerOnly.OpenAIResponsesPassthroughReasonTextValue() != "provider" {
+		t.Fatalf("expected provider extension fallback on passthrough accessors, got %#v", providerOnly)
 	}
 }
 
