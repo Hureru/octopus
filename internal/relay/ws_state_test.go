@@ -286,6 +286,11 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 			{"type":"function_call_output","call_id":"call_123","output":[{"type":"input_text","text":"ok"}]},
 			{"type":"input_text","text":"tail","native_meta":{"keep":true}}
 		]`),
+		ProviderExtensions: &transformerModel.ProviderExtensions{
+			OpenAI: &transformerModel.OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[{"type":"input_text","text":"stale"}]`),
+			},
+		},
 		Messages: []transformerModel.Message{{
 			Role:       "tool",
 			ToolCallID: stringPtr("call_123"),
@@ -311,7 +316,7 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	if replayed.TransformOptions.ArrayInputs == nil || !*replayed.TransformOptions.ArrayInputs {
 		t.Fatalf("expected replay request to force array input semantics")
 	}
-	if replayed.TransformerMetadata["octopus_ws_execution_mode"] != "replay_exact" {
+	if replayed.TransformerMetadata[transformerModel.TransformerMetadataWSExecutionMode] != transformerModel.TransformerMetadataWSExecutionModeReplayExact {
 		t.Fatalf("expected replay request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
 	}
 	if requiresUpstreamWSContinuation(replayed) {
@@ -330,6 +335,15 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	if _, ok := rawItems[2]["native_meta"]; !ok {
 		t.Fatalf("expected original raw input item native fields to be preserved, got %#v", rawItems[2])
 	}
+	if replayed.ProviderExtensions == nil || replayed.ProviderExtensions.OpenAI == nil {
+		t.Fatalf("expected replay request to keep OpenAI mirror in sync")
+	}
+	if string(replayed.ProviderExtensions.OpenAI.RawResponseItems) != string(replayed.RawInputItems) {
+		t.Fatalf("expected replayed OpenAI mirror to match authoritative RawInputItems, got mirror=%s raw=%s", replayed.ProviderExtensions.OpenAI.RawResponseItems, replayed.RawInputItems)
+	}
+	if req.ProviderExtensions != nil && req.ProviderExtensions.OpenAI != nil && string(req.ProviderExtensions.OpenAI.RawResponseItems) == string(replayed.RawInputItems) {
+		t.Fatalf("expected replay build to avoid mutating original request extension mirror")
+	}
 }
 
 func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *testing.T) {
@@ -338,7 +352,7 @@ func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *test
 		ReplayWindowItems: json.RawMessage(`[
 			{"type":"function_call","call_id":"call_123","name":"lookup","arguments":"{}"}
 		]`),
-		ReplayPending:  true,
+		ReplayPending: true,
 		Transcript: []transformerModel.Message{
 			{
 				Role: "assistant",
@@ -384,7 +398,7 @@ func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *test
 	if len(replayed.Messages) != 0 {
 		t.Fatalf("expected replay request to avoid transcript messages once replay window exists, got %d", len(replayed.Messages))
 	}
-	if replayed.TransformerMetadata["octopus_ws_execution_mode"] != "replay_exact" {
+	if replayed.TransformerMetadata[transformerModel.TransformerMetadataWSExecutionMode] != transformerModel.TransformerMetadataWSExecutionModeReplayExact {
 		t.Fatalf("expected replay-pending request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
 	}
 }
@@ -421,6 +435,78 @@ func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 	}
 	if len(state.Transcript) != 2 {
 		t.Fatalf("expected transcript to contain request and response, got %d messages", len(state.Transcript))
+	}
+}
+
+func TestWSConversationStateApplySuccessfulStreamTurnBuildsReplayWindow(t *testing.T) {
+	state := &wsConversationState{}
+	request := &transformerModel.InternalLLMRequest{
+		Model: "gpt-4o",
+		Messages: []transformerModel.Message{{
+			Role:    "user",
+			Content: transformerModel.MessageContent{Content: stringPtr("hello")},
+		}},
+	}
+	events := []transformerModel.StreamEvent{
+		{Kind: transformerModel.StreamEventKindMessageStart, ID: "resp_stream", Model: "gpt-4o", Role: "assistant"},
+		{Kind: transformerModel.StreamEventKindToolCallStart, ID: "resp_stream", Model: "gpt-4o", Index: 0, ToolCall: &transformerModel.ToolCall{
+			ID:    "call_123",
+			Type:  "function",
+			Index: 0,
+			Function: transformerModel.FunctionCall{
+				Name: "lookup",
+			},
+		}},
+		{Kind: transformerModel.StreamEventKindMessageStop, ID: "resp_stream", Model: "gpt-4o", StopReason: transformerModel.FinishReasonToolCalls, ProviderExtensions: &transformerModel.ProviderExtensions{
+			OpenAI: &transformerModel.OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[
+					{"type":"function_call","call_id":"call_123","name":"lookup","arguments":"{}","status":"completed"}
+				]`),
+			},
+		}},
+		{Kind: transformerModel.StreamEventKindUsageDelta, ID: "resp_stream", Model: "gpt-4o", Usage: &transformerModel.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}, ProviderExtensions: &transformerModel.ProviderExtensions{
+			OpenAI: &transformerModel.OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[
+					{"type":"function_call","call_id":"call_123","name":"lookup","arguments":"{}","status":"completed"}
+				]`),
+			},
+		}},
+	}
+	response := transformerModel.InternalResponseFromStreamEvents(events)
+	if response == nil {
+		t.Fatalf("expected streamed events to rebuild response")
+	}
+
+	state.ApplySuccessfulTurn(request, response)
+
+	nextReq := &transformerModel.InternalLLMRequest{
+		Model:              "gpt-4o",
+		PreviousResponseID: stringPtr("resp_stream"),
+		RawInputItems: json.RawMessage(`[
+			{"type":"function_call_output","call_id":"call_123","output":"ok","native_meta":{"keep":true}}
+		]`),
+		Messages: []transformerModel.Message{{
+			Role:       "tool",
+			ToolCallID: stringPtr("call_123"),
+			Content:    transformerModel.MessageContent{Content: stringPtr("ok")},
+		}},
+	}
+	replayed := state.BuildReplayRequest(nextReq)
+	if replayed == nil {
+		t.Fatalf("expected replay request to be built from streamed turn")
+	}
+	var rawItems []map[string]any
+	if err := json.Unmarshal(replayed.RawInputItems, &rawItems); err != nil {
+		t.Fatalf("expected replay raw input items to be valid json, got %v", err)
+	}
+	if len(rawItems) != 3 {
+		t.Fatalf("expected original prompt, streamed replay window, and tool output, got %d items", len(rawItems))
+	}
+	if rawItems[1]["type"] != "function_call" || rawItems[2]["type"] != "function_call_output" {
+		t.Fatalf("expected replay order to preserve streamed output then tool result after original prompt, got %#v", rawItems)
+	}
+	if _, ok := rawItems[2]["native_meta"]; !ok {
+		t.Fatalf("expected tool output native fields to survive replay merge, got %#v", rawItems[2])
 	}
 }
 

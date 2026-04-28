@@ -136,13 +136,13 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 // so we don't emit header keys with blank values. O-M7.
 // Ref: https://platform.openai.com/docs/api-reference/debugging-requests
 func applyOpenAIOrgProjectHeaders(req *http.Request, request *model.InternalLLMRequest) {
-	if req == nil || request == nil || request.TransformerMetadata == nil {
+	if req == nil || request == nil {
 		return
 	}
-	if org := strings.TrimSpace(request.TransformerMetadata["openai_organization"]); org != "" {
+	if org := request.TransformerMetadataValue(model.TransformerMetadataOpenAIOrganization); org != "" {
 		req.Header.Set("OpenAI-Organization", org)
 	}
-	if project := strings.TrimSpace(request.TransformerMetadata["openai_project"]); project != "" {
+	if project := request.TransformerMetadataValue(model.TransformerMetadataOpenAIProject); project != "" {
 		req.Header.Set("OpenAI-Project", project)
 	}
 }

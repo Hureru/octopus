@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/inbound/anthropic"
@@ -210,6 +211,60 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeminiStreamToAnthropicPreservesThoughtSignature(t *testing.T) {
+	geminiChunk := model.GeminiGenerateContentResponse{
+		ResponseId:   "resp_stream",
+		ModelVersion: "gemini-2.0-flash-exp",
+		Candidates: []*model.GeminiCandidate{{
+			Index: 0,
+			Content: &model.GeminiContent{
+				Role: "model",
+				Parts: []*model.GeminiPart{{
+					FunctionCall: &model.GeminiFunctionCall{
+						Name: "search",
+						Args: map[string]interface{}{"query": "octopus"},
+					},
+					ThoughtSignature: "sig-stream-123",
+				}},
+			},
+			FinishReason: ptrGeminiFinishReason("STOP"),
+		}},
+	}
+	chunkBytes, err := json.Marshal(geminiChunk)
+	if err != nil {
+		t.Fatalf("marshal gemini chunk failed: %v", err)
+	}
+
+	outbound := &MessagesOutbound{}
+	events, err := outbound.TransformStreamEvent(context.Background(), chunkBytes)
+	if err != nil {
+		t.Fatalf("TransformStreamEvent failed: %v", err)
+	}
+	internal := model.InternalResponseFromStreamEvents(events)
+	if internal == nil {
+		t.Fatalf("expected internal stream response to be rebuilt")
+	}
+
+	anthInbound := &anthropic.MessagesInbound{}
+	streamBytes, err := anthInbound.TransformStream(context.Background(), internal)
+	if err != nil {
+		t.Fatalf("TransformStream failed: %v", err)
+	}
+	if !strings.Contains(string(streamBytes), `"signature":"sig-stream-123"`) {
+		t.Fatalf("expected anthropic stream to preserve Gemini thought signature, got %s", streamBytes)
+	}
+	if !strings.Contains(string(streamBytes), `"type":"signature_delta"`) {
+		t.Fatalf("expected anthropic stream to emit signature delta for Gemini thought signature, got %s", streamBytes)
+	}
+	if !strings.Contains(string(streamBytes), `"type":"tool_use"`) {
+		t.Fatalf("expected anthropic stream to contain tool_use block, got %s", streamBytes)
+	}
+}
+
 func ptrString(s string) *string {
 	return &s
+}
+
+func ptrGeminiFinishReason(reason string) *string {
+	return &reason
 }

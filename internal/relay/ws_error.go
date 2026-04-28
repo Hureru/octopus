@@ -125,10 +125,10 @@ func requiresUpstreamWSContinuation(req *transformerModel.InternalLLMRequest) bo
 	if req == nil {
 		return false
 	}
-	if req.PreviousResponseID != nil && strings.TrimSpace(*req.PreviousResponseID) != "" {
+	if req.OpenAIPreviousResponseID() != "" {
 		return true
 	}
-	if len(req.Conversation) > 0 {
+	if len(req.GetOpenAIResponsesOptions().Conversation) > 0 {
 		return true
 	}
 	seenToolCalls := make(map[string]struct{})

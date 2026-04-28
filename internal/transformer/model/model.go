@@ -28,11 +28,28 @@ const (
 const (
 	TransformerMetadataOpenAIResponsesPassthroughRequired = "octopus_openai_responses_passthrough_required"
 	TransformerMetadataOpenAIResponsesPassthroughReason   = "octopus_openai_responses_passthrough_reason"
+	TransformerMetadataWSExecutionMode                    = "octopus_ws_execution_mode"
+	TransformerMetadataWSExecutionModeReplayExact         = "replay_exact"
+	TransformerMetadataAnthropicUserID                    = "anthropic_user_id"
+	TransformerMetadataAnthropicSystemArrayFormat         = "anthropic_system_array_format"
+	TransformerMetadataAnthropicContext1M                 = "anthropic_context_1m"
+	TransformerMetadataOpenAIOrganization                 = "openai_organization"
+	TransformerMetadataOpenAIProject                      = "openai_project"
+	TransformerMetadataGeminiFilesAPIURI                  = "gemini_files_api_uri"
+	TransformerMetadataGeminiTopK                         = "gemini_top_k"
+	TransformerMetadataGeminiMediaResolution              = "gemini_media_resolution"
+	TransformerMetadataGeminiCandidateCount               = "gemini_candidate_count"
+	TransformerMetadataGeminiSafetySettings               = "gemini_safety_settings"
 )
 
 // Request is the unified llm request model for AxonHub, to keep compatibility with major app and framework.
 // It choose to base on the OpenAI chat completion request, but add some extra fields to support more features.
 type InternalLLMRequest struct {
+	// Stable cross-provider IR fields.
+	// These carry the normalized request semantics shared by multiple providers.
+	// New provider-specific features should not be added here unless they are
+	// truly cross-provider concepts.
+
 	// Messages is a list of messages to send to the llm model.
 	// For chat completion requests, this field is required.
 	// For embedding requests, this field should be empty and Input should be used instead.
@@ -263,6 +280,10 @@ type InternalLLMRequest struct {
 
 	// Help fields， will not be sent to the llm service.
 
+	// Internal helper fields.
+	// These values help preserve transport details, replay state, and format
+	// fidelity across the relay pipeline. They are runtime-only and are not sent
+	// directly to upstream providers.
 	// ExtraBody is helpful to extend the request for different providers.
 	// It will not be sent to the OpenAI server.
 	ExtraBody json.RawMessage `json:"extra_body,omitempty"`
@@ -287,48 +308,68 @@ type InternalLLMRequest struct {
 	// e.g., "file_search_call.results", "message.input_image.image_url", "reasoning.encrypted_content"
 	Include []string `json:"-"`
 
-	// Responses API pass-through fields (only meaningful for OpenAI Response outbound)
-	OpenAIResponsesPassthroughRequired bool            `json:"-"`
-	OpenAIResponsesPassthroughReason   string          `json:"-"`
-	PreviousResponseID                 *string         `json:"-"`
-	Background                         *bool           `json:"-"`
-	Prompt                             json.RawMessage `json:"-"`
-	ResponsesPromptCacheKey            *string         `json:"-"`
-	PromptCacheRetention               *string         `json:"-"`
-	MaxToolCalls                       *int64          `json:"-"`
-	Conversation                       json.RawMessage `json:"-"`
-	ContextManagement                  json.RawMessage `json:"-"`
-	ResponsesStreamOptions             json.RawMessage `json:"-"`
-	ReasoningSummary                   *string         `json:"-"`
-	ReasoningGenerateSummary           *string         `json:"-"`
-	RawInputItems                      json.RawMessage `json:"-"` // Preserve unmappable input items for OpenAI passthrough
+	// Provider-specific pass-through fields.
+	// These preserve wire-level provider capabilities that do not belong in the
+	// stable IR. Prefer exposing new provider-specific behavior through
+	// ProviderExtensions and provider-specific accessors instead of growing more
+	// top-level passthrough fields.
+	// OpenAIResponsesPassthroughRequired is a compatibility mirror for the
+	// OpenAI Responses passthrough flag. New OpenAI-specific call sites should
+	// prefer request.HasOpenAIResponsesPassthrough() / request.GetOpenAIExtensions()
+	// as the primary read path.
+	OpenAIResponsesPassthroughRequired bool `json:"-"`
+	// OpenAIResponsesPassthroughReason is a compatibility mirror for the
+	// passthrough reason text. New OpenAI-specific call sites should prefer
+	// request.OpenAIResponsesPassthroughReasonTextValue() /
+	// request.GetOpenAIExtensions() as the primary read path.
+	OpenAIResponsesPassthroughReason string          `json:"-"`
+	PreviousResponseID               *string         `json:"-"`
+	Background                       *bool           `json:"-"`
+	Prompt                           json.RawMessage `json:"-"`
+	ResponsesPromptCacheKey          *string         `json:"-"`
+	PromptCacheRetention             *string         `json:"-"`
+	MaxToolCalls                     *int64          `json:"-"`
+	Conversation                     json.RawMessage `json:"-"`
+	ContextManagement                json.RawMessage `json:"-"`
+	ResponsesStreamOptions           json.RawMessage `json:"-"`
+	ReasoningSummary                 *string         `json:"-"`
+	ReasoningGenerateSummary         *string         `json:"-"`
+	// RawInputItems preserves original Responses input items when the request cannot
+	// be losslessly normalized into Messages. Relay replay/exact-replay depends on
+	// this top-level field directly and it remains the authoritative runtime
+	// source even when ProviderExtensions also carries a compatibility mirror.
+	RawInputItems json.RawMessage `json:"-"`
 
 	// Gemini-specific pass-through fields (only meaningful for Gemini outbound).
 	//
-	// GeminiCachedContentRef is the resource name of a Google-managed cached
-	// content entry (e.g. "cachedContents/xxxxxxxx"). When set, the outbound
-	// transformer adds `cachedContent` to the Gemini request so the upstream
-	// can reuse the cached prefix instead of re-reading the bytes.
+	// GeminiCachedContentRef is a compatibility mirror for the Gemini cached
+	// content reference. New Gemini-specific call sites should prefer
+	// ProviderExtensions.Gemini / request.GetGeminiExtensions() as the primary
+	// access path.
 	// Ref: https://ai.google.dev/gemini-api/docs/caching
 	GeminiCachedContentRef *string `json:"-"`
 
-	// GeminiSpeechConfig forwards a raw Gemini speechConfig object into
-	// generationConfig.speechConfig. Used for audio-output models where
-	// callers need voice / language selection. Left as raw JSON because
-	// the schema is deeply nested and shared with the Live API. G-H11.
+	// GeminiSpeechConfig is a compatibility mirror for Gemini's raw
+	// speechConfig passthrough. New Gemini-specific call sites should prefer
+	// ProviderExtensions.Gemini / request.GetGeminiExtensions() as the primary
+	// access path. Left as raw JSON because the schema is deeply nested and
+	// shared with the Live API. G-H11.
 	GeminiSpeechConfig json.RawMessage `json:"-"`
 
 	// Anthropic-specific pass-through fields (only meaningful for
 	// Anthropic outbound).
 	//
-	// AnthropicMCPServers carries the raw `mcp_servers` array from an
-	// incoming Anthropic request so it can be forwarded back to the
-	// upstream without per-field modelling. Triggers the
-	// mcp-client-2025-11-20 beta header automatically. A-H6.
+	// AnthropicMCPServers is a compatibility mirror for Anthropic's raw
+	// `mcp_servers` passthrough. New Anthropic-specific call sites should prefer
+	// ProviderExtensions.Anthropic / request.GetAnthropicExtensions() as the
+	// primary access path. Triggers the mcp-client-2025-11-20 beta header
+	// automatically. A-H6.
 	AnthropicMCPServers json.RawMessage `json:"-"`
 
-	// AnthropicContainer carries the raw `container` object (Claude 4
-	// code-execution sandbox configuration). A-H6.
+	// AnthropicContainer is a compatibility mirror for Anthropic's raw
+	// `container` passthrough. New Anthropic-specific call sites should prefer
+	// ProviderExtensions.Anthropic / request.GetAnthropicExtensions() as the
+	// primary access path. A-H6.
 	AnthropicContainer json.RawMessage `json:"-"`
 
 	// ProviderExtensions stores provider-specific request hints that are not part
@@ -343,6 +384,26 @@ type InternalLLMRequest struct {
 func (r *InternalLLMRequest) Validate() error {
 	if r.Model == "" {
 		return errors.New("model is required")
+	}
+
+	if len(r.RawInputItems) > 0 && r.RawAPIFormat != APIFormatOpenAIResponse {
+		return errors.New("raw_input_items require OpenAI Responses api format")
+	}
+	if len(r.RawInputItems) > 0 && !isRawJSONArray(r.RawInputItems) {
+		return errors.New("raw_input_items must be a valid JSON array")
+	}
+
+	if r.PreviousResponseID != nil && strings.TrimSpace(*r.PreviousResponseID) != "" && r.RawAPIFormat != APIFormatOpenAIResponse {
+		return errors.New("previous_response_id requires OpenAI Responses api format")
+	}
+
+	if r.IsOpenAIExactReplayRequest() {
+		if r.PreviousResponseID != nil && strings.TrimSpace(*r.PreviousResponseID) != "" {
+			return errors.New("replay_exact request must not include previous_response_id")
+		}
+		if len(r.RawInputItems) == 0 {
+			return errors.New("replay_exact request requires raw_input_items")
+		}
 	}
 
 	// 检查是否是 embedding 请求
@@ -375,6 +436,11 @@ func (r *InternalLLMRequest) Validate() error {
 	}
 
 	return nil
+}
+
+func isRawJSONArray(raw json.RawMessage) bool {
+	var items []json.RawMessage
+	return json.Unmarshal(raw, &items) == nil
 }
 
 func (r *InternalLLMRequest) fillMissingToolCallIDs() {
@@ -505,51 +571,57 @@ func (r *InternalLLMRequest) IsChatRequest() bool {
 	return len(r.Messages) > 0 || (r.RawAPIFormat == APIFormatOpenAIResponse && len(r.RawInputItems) > 0)
 }
 
-func (r *InternalLLMRequest) RequiresOpenAIResponsesPassthrough() bool {
-	if r == nil {
-		return false
-	}
-	if r.OpenAIResponsesPassthroughRequired {
-		return true
-	}
-	if r.TransformerMetadata == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired]), "true")
-}
-
-func (r *InternalLLMRequest) OpenAIResponsesPassthroughReasonText() string {
-	if r == nil {
-		return ""
-	}
-	if reason := strings.TrimSpace(r.OpenAIResponsesPassthroughReason); reason != "" {
-		return reason
-	}
-	if r.TransformerMetadata == nil {
-		return ""
-	}
-	return strings.TrimSpace(r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason])
-}
-
 func (r *InternalLLMRequest) MarkOpenAIResponsesPassthroughRequired(reason string) {
 	if r == nil {
 		return
 	}
-	r.OpenAIResponsesPassthroughRequired = true
 	reason = strings.TrimSpace(reason)
-	if reason != "" {
-		if existing := strings.TrimSpace(r.OpenAIResponsesPassthroughReason); existing != "" {
-			reason = existing + "," + reason
-		}
-		r.OpenAIResponsesPassthroughReason = reason
+	existing := r.OpenAIResponsesPassthroughReasonTextValue()
+	if reason != "" && existing != "" {
+		reason = existing + "," + reason
+	} else if reason == "" {
+		reason = existing
+	}
+	r.SetOpenAIExtensions(OpenAIExtension{
+		ResponsesPassthroughRequired: true,
+		ResponsesPassthroughReason:   reason,
+	})
+}
+
+func (r *InternalLLMRequest) IsOpenAIExactReplayRequest() bool {
+	return r.TransformerMetadataValue(TransformerMetadataWSExecutionMode) == TransformerMetadataWSExecutionModeReplayExact
+}
+
+func (r *InternalLLMRequest) MarkOpenAIExactReplayRequest() {
+	if r == nil {
+		return
+	}
+	r.SetTransformerMetadataValue(TransformerMetadataWSExecutionMode, TransformerMetadataWSExecutionModeReplayExact)
+}
+
+func (r *InternalLLMRequest) SetTransformerMetadataValue(key, value string) {
+	if r == nil {
+		return
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
 	}
 	if r.TransformerMetadata == nil {
 		r.TransformerMetadata = map[string]string{}
 	}
-	r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired] = "true"
-	if reason != "" {
-		r.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughReason] = reason
+	r.TransformerMetadata[key] = strings.TrimSpace(value)
+}
+
+func (r *InternalLLMRequest) TransformerMetadataValue(key string) string {
+	if r == nil || r.TransformerMetadata == nil {
+		return ""
 	}
+	return strings.TrimSpace(r.TransformerMetadata[strings.TrimSpace(key)])
+}
+
+func (r *InternalLLMRequest) TransformerMetadataBool(key string) bool {
+	return strings.EqualFold(r.TransformerMetadataValue(key), "true")
 }
 
 func (r *InternalLLMRequest) ClearHelpFields() {

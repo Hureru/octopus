@@ -245,11 +245,9 @@ func TestTransformRequestAttachesOrgAndProjectHeaders(t *testing.T) {
 		Messages: []model.Message{
 			{Role: "user", Content: model.MessageContent{Content: &content}},
 		},
-		TransformerMetadata: map[string]string{
-			"openai_organization": "org-abc",
-			"openai_project":      "proj-xyz",
-		},
 	}
+	req.SetTransformerMetadataValue(model.TransformerMetadataOpenAIOrganization, "org-abc")
+	req.SetTransformerMetadataValue(model.TransformerMetadataOpenAIProject, "proj-xyz")
 	httpReq, err := outbound.TransformRequest(context.Background(), req, "https://api.openai.com", "sk-test")
 	if err != nil {
 		t.Fatalf("TransformRequest: %v", err)
@@ -262,7 +260,7 @@ func TestTransformRequestAttachesOrgAndProjectHeaders(t *testing.T) {
 	}
 
 	// Whitespace-only values are skipped so the header is not sent blank.
-	req.TransformerMetadata["openai_organization"] = "   "
+	req.SetTransformerMetadataValue(model.TransformerMetadataOpenAIOrganization, "   ")
 	httpReq, err = outbound.TransformRequest(context.Background(), req, "https://api.openai.com", "sk-test")
 	if err != nil {
 		t.Fatalf("TransformRequest blank: %v", err)

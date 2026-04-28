@@ -63,7 +63,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 	// 初始化 Metrics
 	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, internalRequest)
-	responsesPassthroughRequired := internalRequest.RequiresOpenAIResponsesPassthrough()
+	responsesPassthroughRequired := internalRequest.HasOpenAIResponsesPassthrough()
 	responsesPassthroughCapableFound := false
 
 	// 请求级上下文
@@ -380,7 +380,7 @@ func (ra *relayAttempt) forward() (int, error) {
 		shouldTryWS := false
 		if ra.shouldPassthroughOpenAIResponses() {
 			shouldTryWS = false
-		} else if ra.internalRequest.TransformerMetadata != nil && strings.TrimSpace(ra.internalRequest.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact" {
+		} else if ra.internalRequest.IsOpenAIExactReplayRequest() {
 			shouldTryWS = false
 		} else {
 			wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
@@ -895,26 +895,16 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 
 // transformStreamData 转换流式数据
 func (ra *relayAttempt) transformStreamData(ctx context.Context, data string) ([]byte, error) {
-	if outEventAdapter, ok := ra.outAdapter.(model.OutboundStreamEventTransformer); ok {
-		if inEventAdapter, ok := ra.inAdapter.(model.InboundStreamEventTransformer); ok {
-			events, err := outEventAdapter.TransformStreamEvent(ctx, []byte(data))
-			if err != nil {
-				log.Warnf("failed to transform stream events: %v", err)
-				return nil, err
-			}
-			if len(events) == 0 {
-				return nil, nil
-			}
-			inStream, err := inEventAdapter.TransformStreamEvents(ctx, events)
-			if err != nil {
-				log.Warnf("failed to transform inbound stream events: %v", err)
-				return nil, err
-			}
-			return inStream, nil
-		}
+	events, ok, err := ra.decodeOutboundStreamEvents(ctx, []byte(data))
+	if err != nil {
+		log.Warnf("failed to transform stream events: %v", err)
+		return nil, err
+	}
+	if ok {
+		return ra.encodeInboundStreamEvents(ctx, events)
 	}
 
-	internalStream, err := ra.outAdapter.TransformStream(ctx, []byte(data))
+	internalStream, err := ra.decodeOutboundStreamResponse(ctx, []byte(data))
 	if err != nil {
 		log.Warnf("failed to transform stream: %v", err)
 		return nil, err
@@ -923,12 +913,50 @@ func (ra *relayAttempt) transformStreamData(ctx context.Context, data string) ([
 		return nil, nil
 	}
 
+	return ra.encodeInboundStreamResponse(ctx, internalStream)
+}
+
+func (ra *relayAttempt) decodeOutboundStreamEvents(ctx context.Context, data []byte) ([]model.StreamEvent, bool, error) {
+	outEventAdapter, ok := ra.outAdapter.(model.OutboundStreamEventTransformer)
+	if !ok {
+		return nil, false, nil
+	}
+	if _, ok := ra.inAdapter.(model.InboundStreamEventTransformer); !ok {
+		return nil, false, nil
+	}
+	events, err := outEventAdapter.TransformStreamEvent(ctx, data)
+	if err != nil {
+		return nil, true, err
+	}
+	return events, true, nil
+}
+
+func (ra *relayAttempt) encodeInboundStreamEvents(ctx context.Context, events []model.StreamEvent) ([]byte, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	inEventAdapter, ok := ra.inAdapter.(model.InboundStreamEventTransformer)
+	if !ok {
+		return nil, nil
+	}
+	inStream, err := inEventAdapter.TransformStreamEvents(ctx, events)
+	if err != nil {
+		log.Warnf("failed to transform inbound stream events: %v", err)
+		return nil, err
+	}
+	return inStream, nil
+}
+
+func (ra *relayAttempt) decodeOutboundStreamResponse(ctx context.Context, data []byte) (*model.InternalLLMResponse, error) {
+	return ra.outAdapter.TransformStream(ctx, data)
+}
+
+func (ra *relayAttempt) encodeInboundStreamResponse(ctx context.Context, internalStream *model.InternalLLMResponse) ([]byte, error) {
 	inStream, err := ra.inAdapter.TransformStream(ctx, internalStream)
 	if err != nil {
 		log.Warnf("failed to transform stream: %v", err)
 		return nil, err
 	}
-
 	return inStream, nil
 }
 
@@ -1007,7 +1035,7 @@ func (ra *relayAttempt) shouldPassthroughOpenAIResponses() bool {
 	if ra.internalRequest.RawAPIFormat != model.APIFormatOpenAIResponse {
 		return false
 	}
-	if !ra.internalRequest.RequiresOpenAIResponsesPassthrough() {
+	if !ra.internalRequest.HasOpenAIResponsesPassthrough() {
 		return false
 	}
 	return ra.channel.Type == outbound.OutboundTypeOpenAIResponse

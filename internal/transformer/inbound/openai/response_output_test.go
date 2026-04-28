@@ -112,3 +112,35 @@ func TestStreamCompletedSynthesizesShellWhenEmpty(t *testing.T) {
 	}
 	_ = lo.ToPtr("ignore")
 }
+
+func TestConvertToResponsesAPIResponsePreservesRefusalContent(t *testing.T) {
+	stop := "refusal"
+	resp := &model.InternalLLMResponse{
+		ID:      "resp_refusal",
+		Model:   "gpt-4o",
+		Created: 123,
+		Choices: []model.Choice{{
+			Message: &model.Message{
+				Role:    "assistant",
+				Refusal: "I cannot help with that.",
+			},
+			FinishReason: &stop,
+		}},
+	}
+
+	out := convertToResponsesAPIResponse(resp)
+	if len(out.Output) != 1 {
+		t.Fatalf("expected 1 output item, got %d", len(out.Output))
+	}
+	msg := out.Output[0]
+	if msg.Type != "message" || msg.Content == nil || len(msg.Content.Items) != 1 {
+		t.Fatalf("unexpected message shape: %+v", msg)
+	}
+	part := msg.Content.Items[0]
+	if part.Type != "refusal" || part.Refusal == nil || *part.Refusal != "I cannot help with that." {
+		t.Fatalf("expected refusal content item, got %+v", part)
+	}
+	if out.Status == nil || *out.Status != "failed" {
+		t.Fatalf("expected failed status for refusal stop, got %v", out.Status)
+	}
+}

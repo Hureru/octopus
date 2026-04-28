@@ -417,15 +417,15 @@ func convertDocumentToGeminiPart(doc *model.DocumentSource, req *model.InternalL
 //  2. TransformerMetadata["gemini_files_api_uri"] — generic fallback for
 //     the common single-document case.
 func lookupGeminiFilesAPIURI(req *model.InternalLLMRequest, mediaType string) string {
-	if req == nil || req.TransformerMetadata == nil {
+	if req == nil {
 		return ""
 	}
 	if mediaType != "" {
-		if uri := strings.TrimSpace(req.TransformerMetadata["gemini_files_api_uri:"+mediaType]); uri != "" {
+		if uri := req.TransformerMetadataValue(model.TransformerMetadataGeminiFilesAPIURI + ":" + mediaType); uri != "" {
 			return uri
 		}
 	}
-	return strings.TrimSpace(req.TransformerMetadata["gemini_files_api_uri"])
+	return req.TransformerMetadataValue(model.TransformerMetadataGeminiFilesAPIURI)
 }
 
 // buildDocumentTextHint joins title / context / body into a single
@@ -811,7 +811,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		topK := int(*request.TopK)
 		config.TopK = &topK
 		hasConfig = true
-	} else if topKStr, ok := request.TransformerMetadata["gemini_top_k"]; ok {
+	} else if topKStr := request.TransformerMetadataValue(model.TransformerMetadataGeminiTopK); topKStr != "" {
 		var topK int
 		fmt.Sscanf(topKStr, "%d", &topK)
 		config.TopK = &topK
@@ -846,11 +846,9 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 		config.Logprobs = &n
 		hasConfig = true
 	}
-	if mr, ok := request.TransformerMetadata["gemini_media_resolution"]; ok {
-		if trimmed := strings.TrimSpace(mr); trimmed != "" {
-			config.MediaResolution = trimmed
-			hasConfig = true
-		}
+	if mediaResolution := request.TransformerMetadataValue(model.TransformerMetadataGeminiMediaResolution); mediaResolution != "" {
+		config.MediaResolution = mediaResolution
+		hasConfig = true
 	}
 
 	// SpeechConfig (G-H11): prefer the explicit raw passthrough, otherwise
@@ -889,12 +887,10 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 	// opt in without breaking the invariant. Ignore non-positive or
 	// unparseable values — they either match the default or would 400
 	// upstream.
-	if raw, ok := request.TransformerMetadata["gemini_candidate_count"]; ok {
-		if trimmed := strings.TrimSpace(raw); trimmed != "" {
-			if n, err := strconv.Atoi(trimmed); err == nil && n > 1 {
-				config.CandidateCount = n
-				hasConfig = true
-			}
+	if raw := request.TransformerMetadataValue(model.TransformerMetadataGeminiCandidateCount); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 1 {
+			config.CandidateCount = n
+			hasConfig = true
 		}
 	}
 
@@ -980,7 +976,7 @@ func convertLLMToGeminiRequest(request *model.InternalLLMRequest) *model.GeminiG
 	}
 
 	// Convert SafetySettings from metadata if present
-	if safetyJSON, ok := request.TransformerMetadata["gemini_safety_settings"]; ok {
+	if safetyJSON := request.TransformerMetadataValue(model.TransformerMetadataGeminiSafetySettings); safetyJSON != "" {
 		var safetySettings []*model.GeminiSafetySetting
 		if err := json.Unmarshal([]byte(safetyJSON), &safetySettings); err == nil {
 			geminiReq.SafetySettings = safetySettings

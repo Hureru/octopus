@@ -132,6 +132,12 @@ func TestStreamReasoningBlocksSingleSignature(t *testing.T) {
 	if item.EncryptedContent == nil || *item.EncryptedContent != "sigA" {
 		t.Fatalf("expected encrypted_content=\"sigA\", got %v", item.EncryptedContent)
 	}
+	if findEvent(events, "response.reasoning.delta") == nil {
+		t.Fatalf("expected response.reasoning.delta, got %v", eventTypes(events))
+	}
+	if done := findEvent(events, "response.reasoning.done"); done == nil || done.Text != "thinking..." {
+		t.Fatalf("expected response.reasoning.done with full text, got %+v", done)
+	}
 }
 
 func TestStreamReasoningBlocksMultipleSignatures(t *testing.T) {
@@ -319,6 +325,118 @@ func TestStreamToolCallArgumentDeltaUsesStoredOutputIndex(t *testing.T) {
 	}
 	if lateDelta.OutputIndex == nil || *lateDelta.OutputIndex != *firstToolOutputIndex {
 		t.Fatalf("late call_a delta output_index=%v, want %d", lateDelta.OutputIndex, *firstToolOutputIndex)
+	}
+}
+
+func TestTransformStreamEventsSignatureOnlyStillOpensReasoningItem(t *testing.T) {
+	i := &ResponseInbound{}
+	ctx := context.Background()
+
+	out, err := i.TransformStreamEvents(ctx, []model.StreamEvent{
+		{
+			Kind:  model.StreamEventKindMessageStart,
+			ID:    "resp_sig_only",
+			Model: "claude",
+			Role:  "assistant",
+		},
+		{
+			Kind:  model.StreamEventKindSignatureDelta,
+			ID:    "resp_sig_only",
+			Model: "claude",
+			Delta: &model.StreamDelta{Signature: "sig_only"},
+		},
+		{
+			Kind:       model.StreamEventKindMessageStop,
+			ID:         "resp_sig_only",
+			Model:      "claude",
+			StopReason: model.FinishReasonStop,
+		},
+		{
+			Kind:  model.StreamEventKindUsageDelta,
+			ID:    "resp_sig_only",
+			Model: "claude",
+			Usage: &model.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+		},
+	})
+	if err != nil {
+		t.Fatalf("TransformStreamEvents failed: %v", err)
+	}
+
+	events := parseSSEEvents(t, out)
+	item := findItemDone(events, "reasoning")
+	if item == nil || item.EncryptedContent == nil || *item.EncryptedContent != "sig_only" {
+		t.Fatalf("expected reasoning output item with encrypted_content, got %+v", item)
+	}
+}
+
+func TestTransformStreamMatchesStreamEventsProjection(t *testing.T) {
+	chunks := []*model.InternalLLMResponse{
+		chunkWithDelta("claude", &model.Message{
+			Role:             "assistant",
+			ReasoningContent: lo.ToPtr("thinking..."),
+		}),
+		chunkWithDelta("claude", &model.Message{
+			ReasoningBlocks: []model.ReasoningBlock{{
+				Kind:      model.ReasoningBlockKindSignature,
+				Signature: "sigA",
+				Provider:  "anthropic",
+			}},
+		}),
+		chunkWithDelta("claude", &model.Message{
+			Content: model.MessageContent{Content: lo.ToPtr("answer")},
+			Refusal: " but not that part",
+		}),
+		chunkWithFinish("claude", "stop"),
+	}
+
+	streamInbound := &ResponseInbound{}
+	eventInbound := &ResponseInbound{}
+	ctx := context.Background()
+
+	var streamBuf bytes.Buffer
+	var eventBuf bytes.Buffer
+	for _, chunk := range chunks {
+		streamOut, err := streamInbound.TransformStream(ctx, chunk)
+		if err != nil {
+			t.Fatalf("TransformStream failed: %v", err)
+		}
+		streamBuf.Write(streamOut)
+
+		eventOut, err := eventInbound.TransformStreamEvents(ctx, model.StreamEventsFromInternalResponse(chunk))
+		if err != nil {
+			t.Fatalf("TransformStreamEvents failed: %v", err)
+		}
+		eventBuf.Write(eventOut)
+	}
+
+	streamEvents := parseSSEEvents(t, streamBuf.Bytes())
+	projectedEvents := parseSSEEvents(t, eventBuf.Bytes())
+	if len(streamEvents) != len(projectedEvents) {
+		t.Fatalf("event count mismatch: stream=%d projected=%d", len(streamEvents), len(projectedEvents))
+	}
+	for idx := range streamEvents {
+		if streamEvents[idx].Type != projectedEvents[idx].Type {
+			t.Fatalf("event[%d] type mismatch: %q vs %q", idx, streamEvents[idx].Type, projectedEvents[idx].Type)
+		}
+	}
+
+	streamDone := findItemDone(streamEvents, "message")
+	projectedDone := findItemDone(projectedEvents, "message")
+	if streamDone == nil || projectedDone == nil {
+		t.Fatalf("expected message output_item.done in both paths")
+	}
+	streamDone.ID = ""
+	projectedDone.ID = ""
+	gotStream, err := json.Marshal(streamDone)
+	if err != nil {
+		t.Fatalf("marshal stream item: %v", err)
+	}
+	gotProjected, err := json.Marshal(projectedDone)
+	if err != nil {
+		t.Fatalf("marshal projected item: %v", err)
+	}
+	if string(gotStream) != string(gotProjected) {
+		t.Fatalf("message item mismatch:\nstream=%s\nprojected=%s", gotStream, gotProjected)
 	}
 }
 

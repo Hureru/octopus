@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,10 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 	resetWSUpstreamPool()
 
 	var accepted atomic.Int32
+	var acceptedOnce sync.Once
+	acceptedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	closedCh := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			http.NotFound(w, r)
@@ -33,10 +38,15 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 			return
 		}
 		accepted.Add(1)
-		defer conn.Close(websocket.StatusNormalClosure, "")
-		<-r.Context().Done()
+		acceptedOnce.Do(func() { close(acceptedCh) })
+		defer func() {
+			conn.CloseNow()
+			close(closedCh)
+		}()
+		<-releaseCh
 	}))
 	defer server.Close()
+	defer resetWSUpstreamPool()
 
 	channel := &model.Channel{
 		Name:     "relay-warmup-ws",
@@ -66,6 +76,7 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 	if err := bestEffortWarmupUpstreamWS(context.Background(), 321, "", reqBody); err != nil {
 		t.Fatalf("bestEffortWarmupUpstreamWS failed: %v", err)
 	}
+	waitForWarmupAccepted(t, acceptedCh)
 	if accepted.Load() != 1 {
 		t.Fatalf("expected one upstream ws connection to be accepted, got %d", accepted.Load())
 	}
@@ -83,5 +94,25 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 		t.Fatalf("expected warmed upstream ws connection to be stored in pool")
 	}
 	wsUpstreamPool.Put(pc)
+	close(releaseCh)
+	waitForWarmupConnectionClosed(t, closedCh)
 	wsUpstreamPool.Remove(pc.poolKey)
+}
+
+func waitForWarmupAccepted(t *testing.T, accepted <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for upstream ws warmup accept")
+	}
+}
+
+func waitForWarmupConnectionClosed(t *testing.T, closed <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for upstream ws warmup close")
+	}
 }

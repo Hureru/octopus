@@ -12,14 +12,14 @@ import (
 
 type wsConversationState struct {
 	DownstreamSessionID string
-	RequestModel   string
-	ChannelID      int
-	ChannelKeyID   int
-	LastResponseID string
-	ReplayWindowItems json.RawMessage
-	Transcript     []transformerModel.Message
-	ReplayAliases  []string
-	ReplayPending  bool
+	RequestModel        string
+	ChannelID           int
+	ChannelKeyID        int
+	LastResponseID      string
+	ReplayWindowItems   json.RawMessage
+	Transcript          []transformerModel.Message
+	ReplayAliases       []string
+	ReplayPending       bool
 }
 
 func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
@@ -37,11 +37,11 @@ func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRe
 		if strings.TrimSpace(s.LastResponseID) == "" {
 			return false
 		}
-		if req.PreviousResponseID == nil {
+		prevID := req.OpenAIPreviousResponseID()
+		if prevID == "" {
 			return true
 		}
-		prevID := strings.TrimSpace(*req.PreviousResponseID)
-		return prevID == "" || s.MatchesPreviousResponseID(prevID)
+		return s.MatchesPreviousResponseID(prevID)
 	}
 	if s.ReplayPending && requestContainsToolOutputs(req) {
 		return false
@@ -52,11 +52,11 @@ func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRe
 	if !requiresUpstreamWSContinuation(req) {
 		return false
 	}
-	if req.PreviousResponseID == nil {
+	prevID := req.OpenAIPreviousResponseID()
+	if prevID == "" {
 		return true
 	}
-	prevID := strings.TrimSpace(*req.PreviousResponseID)
-	return prevID == "" || s.MatchesPreviousResponseID(prevID)
+	return s.MatchesPreviousResponseID(prevID)
 }
 
 func (s *wsConversationState) MatchesPreviousResponseID(responseID string) bool {
@@ -105,11 +105,11 @@ func (s *wsConversationState) ShouldUseLocalReplay(req *transformerModel.Interna
 	if len(s.ReplayWindowItems) == 0 || strings.TrimSpace(s.LastResponseID) == "" {
 		return false
 	}
-	if req.PreviousResponseID == nil {
+	prevID := req.OpenAIPreviousResponseID()
+	if prevID == "" {
 		return true
 	}
-	prevID := strings.TrimSpace(*req.PreviousResponseID)
-	return prevID == "" || s.MatchesPreviousResponseID(prevID)
+	return s.MatchesPreviousResponseID(prevID)
 }
 
 func (s *wsConversationState) MarkReplayRecovered(req *transformerModel.InternalLLMRequest) {
@@ -154,18 +154,21 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 		return nil
 	}
 	replayed := cloneInternalRequest(req)
-	replayed.PreviousResponseID = nil
-	replayed.Conversation = nil
-	replayed.RawInputItems = nil
+	responsesOptions := replayed.GetOpenAIResponsesOptions()
+	responsesOptions.PreviousResponseID = nil
+	responsesOptions.Conversation = nil
+	responsesOptions.RawInputItems = nil
+	replayed.SetOpenAIResponsesOptions(responsesOptions)
+	replayed.SetOpenAIRawInputItems(nil)
 	replayed.Messages = retainInstructionMessages(req.Messages)
-	if mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.RawInputItems, req.Messages); ok {
-		replayed.RawInputItems = mergedRawInputItems
+	if mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.OpenAIRawInputItems(), req.Messages); ok {
+		replayed.SetOpenAIRawInputItems(mergedRawInputItems)
 		replayed.TransformOptions.ArrayInputs = boolPtr(true)
 	}
 	if replayed.TransformerMetadata == nil {
 		replayed.TransformerMetadata = map[string]string{}
 	}
-	replayed.TransformerMetadata["octopus_ws_execution_mode"] = "replay_exact"
+	replayed.MarkOpenAIExactReplayRequest()
 	return replayed
 }
 
@@ -190,14 +193,14 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 	}
 	return &wsConversationState{
 		DownstreamSessionID: strings.TrimSpace(state.DownstreamSessionID),
-		RequestModel:   strings.TrimSpace(state.RequestModel),
-		ChannelID:      state.ChannelID,
-		ChannelKeyID:   state.ChannelKeyID,
-		LastResponseID: strings.TrimSpace(state.LastResponseID),
-		ReplayWindowItems: append(json.RawMessage(nil), state.ReplayWindowItems...),
-		Transcript:     cloneMessages(state.Transcript),
-		ReplayAliases:  append([]string(nil), state.ReplayAliases...),
-		ReplayPending:  state.ReplayPending,
+		RequestModel:        strings.TrimSpace(state.RequestModel),
+		ChannelID:           state.ChannelID,
+		ChannelKeyID:        state.ChannelKeyID,
+		LastResponseID:      strings.TrimSpace(state.LastResponseID),
+		ReplayWindowItems:   append(json.RawMessage(nil), state.ReplayWindowItems...),
+		Transcript:          cloneMessages(state.Transcript),
+		ReplayAliases:       append([]string(nil), state.ReplayAliases...),
+		ReplayPending:       state.ReplayPending,
 	}
 }
 
@@ -227,6 +230,7 @@ func cloneInternalRequest(req *transformerModel.InternalLLMRequest) *transformer
 	cloned.LogitBias = maps.Clone(req.LogitBias)
 	cloned.Metadata = maps.Clone(req.Metadata)
 	cloned.TransformerMetadata = maps.Clone(req.TransformerMetadata)
+	cloned.ProviderExtensions = transformerModel.CloneProviderExtensions(req.ProviderExtensions)
 	cloned.Query = cloneQuery(req.Query)
 	cloned.RawRequest = append([]byte(nil), req.RawRequest...)
 	cloned.ExtraBody = append([]byte(nil), req.ExtraBody...)
@@ -382,6 +386,8 @@ func buildReplayRawInputItems(
 }
 
 func buildRequestInputItems(currentRawInputItems json.RawMessage, currentMessages []transformerModel.Message) (json.RawMessage, bool) {
+	// RawInputItems remains the authoritative runtime source for Responses replay
+	// because it preserves exact upstream items that Messages cannot always rebuild.
 	if len(currentRawInputItems) > 0 {
 		return append(json.RawMessage(nil), currentRawInputItems...), true
 	}
@@ -397,9 +403,9 @@ func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.Inter
 		return nil, false
 	}
 	var base json.RawMessage
-	if isExactReplayRequest(req) && len(req.RawInputItems) > 0 {
-		base = append(json.RawMessage(nil), req.RawInputItems...)
-	} else if currentItems, ok := buildRequestInputItems(req.RawInputItems, req.Messages); ok {
+	if rawInputItems := req.OpenAIRawInputItems(); req.IsOpenAIExactReplayRequest() && len(rawInputItems) > 0 {
+		base = rawInputItems
+	} else if currentItems, ok := buildRequestInputItems(req.OpenAIRawInputItems(), req.Messages); ok {
 		if len(existing) > 0 {
 			merged, ok := mergeRawJSONArray(existing, currentItems)
 			if !ok {
@@ -441,13 +447,6 @@ func mergeRawJSONArray(parts ...json.RawMessage) (json.RawMessage, bool) {
 		return nil, false
 	}
 	return data, true
-}
-
-func isExactReplayRequest(req *transformerModel.InternalLLMRequest) bool {
-	if req == nil || req.TransformerMetadata == nil {
-		return false
-	}
-	return strings.TrimSpace(req.TransformerMetadata["octopus_ws_execution_mode"]) == "replay_exact"
 }
 
 func decodeRawJSONArray(data json.RawMessage) ([]json.RawMessage, error) {

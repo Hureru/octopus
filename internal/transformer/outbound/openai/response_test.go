@@ -47,8 +47,7 @@ func TestConvertToResponsesRequestForwardsVerbosity(t *testing.T) {
 
 func TestConvertToResponsesRequestPreservesRawInputItems(t *testing.T) {
 	req := &model.InternalLLMRequest{
-		Model:         "gpt-4o",
-		RawInputItems: json.RawMessage(`[{"type":"input_text","text":"raw","native_meta":{"keep":true}}]`),
+		Model: "gpt-4o",
 		Messages: []model.Message{{
 			Role: "user",
 			Content: model.MessageContent{
@@ -56,6 +55,7 @@ func TestConvertToResponsesRequestPreservesRawInputItems(t *testing.T) {
 			},
 		}},
 	}
+	req.SetOpenAIRawInputItems(json.RawMessage(`[{"type":"input_text","text":"raw","native_meta":{"keep":true}}]`))
 
 	responsesReq := ConvertToResponsesRequest(req)
 	body, err := json.Marshal(responsesReq)
@@ -83,14 +83,45 @@ func TestConvertToResponsesRequestPreservesRawInputItems(t *testing.T) {
 	}
 }
 
+func TestConvertToResponsesRequestPrefersUpdatedRawInputItemsOverStaleOpenAIExtension(t *testing.T) {
+	req := &model.InternalLLMRequest{
+		Model: "gpt-4o",
+		ProviderExtensions: &model.ProviderExtensions{
+			OpenAI: &model.OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[{"type":"input_text","text":"stale"}]`),
+			},
+		},
+	}
+	req.SetOpenAIRawInputItems(json.RawMessage(`[{"type":"function_call_output","call_id":"call_123","output":"replayed"}]`))
+
+	responsesReq := ConvertToResponsesRequest(req)
+	body, err := json.Marshal(responsesReq)
+	if err != nil {
+		t.Fatalf("marshal responses request failed: %v", err)
+	}
+
+	var payload struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal responses request failed: %v", err)
+	}
+	if len(payload.Input) != 1 {
+		t.Fatalf("expected one replayed raw input item, got %#v", payload.Input)
+	}
+	if payload.Input[0]["type"] != "function_call_output" || payload.Input[0]["output"] != "replayed" {
+		t.Fatalf("expected updated RawInputItems to win over stale extension payload, got %#v", payload.Input[0])
+	}
+}
+
 func TestConvertToResponsesRequestSanitizesRawReasoningInputSummary(t *testing.T) {
 	req := &model.InternalLLMRequest{
 		Model: "gpt-4o",
-		RawInputItems: json.RawMessage(`[
+	}
+	req.SetOpenAIRawInputItems(json.RawMessage(`[
 			{"type":"input_text","text":"hello"},
 			{"type":"reasoning","encrypted_content":"enc","native_meta":{"keep":true}}
-		]`),
-	}
+		]`))
 
 	responsesReq := ConvertToResponsesRequest(req)
 	body, err := json.Marshal(responsesReq)
@@ -294,15 +325,17 @@ func TestConvertToResponsesRequestPreservesExplicitResponsesCacheFields(t *testi
 	key := "client-key"
 	retention := "12h"
 	req := &model.InternalLLMRequest{
-		Model:                   "gpt-5.4",
-		ResponsesPromptCacheKey: &key,
-		PromptCacheRetention:    &retention,
+		Model: "gpt-5.4",
 		Messages: []model.Message{{
 			Role:         "system",
 			Content:      model.MessageContent{Content: stringPtr("ignored")},
 			CacheControl: &model.CacheControl{Type: model.CacheControlTypeEphemeral, TTL: model.CacheTTL1h},
 		}},
 	}
+	req.SetOpenAIResponsesOptions(model.OpenAIResponsesOptions{
+		PromptCacheKey:       &key,
+		PromptCacheRetention: &retention,
+	})
 
 	out := ConvertToResponsesRequest(req)
 	if out.PromptCacheKey == nil || *out.PromptCacheKey != key {

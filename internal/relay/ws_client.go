@@ -434,7 +434,7 @@ func newWSRelayRequest(
 }
 
 func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) wsRelayResult {
-	replayExact := req != nil && req.internalRequest != nil && isExactReplayRequest(req.internalRequest)
+	replayExact := req != nil && req.internalRequest != nil && req.internalRequest.IsOpenAIExactReplayRequest()
 	relayCtx := ctx
 	if replayExact {
 		budget := 15 * time.Second
@@ -650,10 +650,7 @@ func rewriteWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsCo
 }
 
 func currentPreviousResponseID(req *transformerModel.InternalLLMRequest) string {
-	if req == nil || req.PreviousResponseID == nil {
-		return ""
-	}
-	return strings.TrimSpace(*req.PreviousResponseID)
+	return req.OpenAIPreviousResponseID()
 }
 
 func wsRequestExplicitlyRequestsContinuation(reqBody map[string]json.RawMessage) bool {
