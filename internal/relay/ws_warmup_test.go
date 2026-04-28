@@ -27,6 +27,7 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 	var acceptedOnce sync.Once
 	acceptedCh := make(chan struct{})
 	releaseCh := make(chan struct{})
+	var releaseOnce sync.Once
 	closedCh := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
@@ -45,8 +46,11 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 		}()
 		<-releaseCh
 	}))
-	defer server.Close()
-	defer resetWSUpstreamPool()
+	defer func() {
+		releaseOnce.Do(func() { close(releaseCh) })
+		server.Close()
+		resetWSUpstreamPool()
+	}()
 
 	channel := &model.Channel{
 		Name:     "relay-warmup-ws",
@@ -94,7 +98,7 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 		t.Fatalf("expected warmed upstream ws connection to be stored in pool")
 	}
 	wsUpstreamPool.Put(pc)
-	close(releaseCh)
+	releaseOnce.Do(func() { close(releaseCh) })
 	waitForWarmupConnectionClosed(t, closedCh)
 	wsUpstreamPool.Remove(pc.poolKey)
 }

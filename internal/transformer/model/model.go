@@ -389,7 +389,8 @@ func (r *InternalLLMRequest) Validate() error {
 	if len(r.RawInputItems) > 0 && r.RawAPIFormat != APIFormatOpenAIResponse {
 		return errors.New("raw_input_items require OpenAI Responses api format")
 	}
-	if len(r.RawInputItems) > 0 && !isRawJSONArray(r.RawInputItems) {
+	rawInputItems, rawInputItemsOK := parseRawJSONArray(r.RawInputItems)
+	if len(r.RawInputItems) > 0 && !rawInputItemsOK {
 		return errors.New("raw_input_items must be a valid JSON array")
 	}
 
@@ -401,7 +402,7 @@ func (r *InternalLLMRequest) Validate() error {
 		if r.PreviousResponseID != nil && strings.TrimSpace(*r.PreviousResponseID) != "" {
 			return errors.New("replay_exact request must not include previous_response_id")
 		}
-		if len(r.RawInputItems) == 0 {
+		if len(r.RawInputItems) == 0 || rawInputItems == nil || len(rawInputItems) == 0 {
 			return errors.New("replay_exact request requires raw_input_items")
 		}
 	}
@@ -439,8 +440,19 @@ func (r *InternalLLMRequest) Validate() error {
 }
 
 func isRawJSONArray(raw json.RawMessage) bool {
+	_, ok := parseRawJSONArray(raw)
+	return ok
+}
+
+func parseRawJSONArray(raw json.RawMessage) ([]json.RawMessage, bool) {
 	var items []json.RawMessage
-	return json.Unmarshal(raw, &items) == nil
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, false
+	}
+	if items == nil || len(items) == 0 {
+		return nil, false
+	}
+	return items, true
 }
 
 func (r *InternalLLMRequest) fillMissingToolCallIDs() {

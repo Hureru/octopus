@@ -1,9 +1,9 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/inbound/anthropic"
@@ -227,7 +227,7 @@ func TestGeminiStreamToAnthropicPreservesThoughtSignature(t *testing.T) {
 					ThoughtSignature: "sig-stream-123",
 				}},
 			},
-			FinishReason: ptrGeminiFinishReason("STOP"),
+			FinishReason: ptrString("STOP"),
 		}},
 	}
 	chunkBytes, err := json.Marshal(geminiChunk)
@@ -250,14 +250,28 @@ func TestGeminiStreamToAnthropicPreservesThoughtSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformStream failed: %v", err)
 	}
-	if !strings.Contains(string(streamBytes), `"signature":"sig-stream-123"`) {
-		t.Fatalf("expected anthropic stream to preserve Gemini thought signature, got %s", streamBytes)
+	anthropicEvents := parseAnthropicStreamEvents(t, streamBytes)
+	var foundSignatureDelta, foundToolUse bool
+	for _, event := range anthropicEvents {
+		if event.Type == "content_block_delta" &&
+			event.Delta != nil &&
+			event.Delta.Type != nil &&
+			*event.Delta.Type == "signature_delta" &&
+			event.Delta.Signature != nil &&
+			*event.Delta.Signature == "sig-stream-123" {
+			foundSignatureDelta = true
+		}
+		if event.Type == "content_block_start" &&
+			event.ContentBlock != nil &&
+			event.ContentBlock.Type == "tool_use" {
+			foundToolUse = true
+		}
 	}
-	if !strings.Contains(string(streamBytes), `"type":"signature_delta"`) {
-		t.Fatalf("expected anthropic stream to emit signature delta for Gemini thought signature, got %s", streamBytes)
+	if !foundSignatureDelta {
+		t.Fatalf("expected Anthropic stream event signature_delta with Gemini thought signature, got %+v", anthropicEvents)
 	}
-	if !strings.Contains(string(streamBytes), `"type":"tool_use"`) {
-		t.Fatalf("expected anthropic stream to contain tool_use block, got %s", streamBytes)
+	if !foundToolUse {
+		t.Fatalf("expected Anthropic stream event tool_use content block, got %+v", anthropicEvents)
 	}
 }
 
@@ -265,6 +279,24 @@ func ptrString(s string) *string {
 	return &s
 }
 
-func ptrGeminiFinishReason(reason string) *string {
-	return &reason
+func parseAnthropicStreamEvents(t *testing.T, raw []byte) []anthropic.StreamEvent {
+	t.Helper()
+
+	var events []anthropic.StreamEvent
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		payload, ok := bytes.CutPrefix(line, []byte("data:"))
+		if !ok || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+		payload = bytes.TrimPrefix(payload, []byte(" "))
+		var event anthropic.StreamEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("failed to decode Anthropic stream event %q: %v", string(payload), err)
+		}
+		events = append(events, event)
+	}
+	if len(events) == 0 {
+		t.Fatalf("expected Anthropic stream events, got %s", raw)
+	}
+	return events
 }

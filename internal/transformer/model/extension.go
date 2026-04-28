@@ -161,7 +161,12 @@ func (r *InternalLLMRequest) SetGeminiExtensions(ext GeminiExtension) {
 	if providerExtensions.Gemini == nil {
 		providerExtensions.Gemini = &GeminiExtension{}
 	}
-	mergeGeminiExtension(providerExtensions.Gemini, &ext)
+	extCopy := GeminiExtension{
+		ThoughtSignature: ext.ThoughtSignature,
+		CachedContentRef: cloneStringPtr(ext.CachedContentRef),
+		SpeechConfig:     cloneRawMessage(ext.SpeechConfig),
+	}
+	mergeGeminiExtension(providerExtensions.Gemini, &extCopy)
 	r.GeminiCachedContentRef = providerExtensions.Gemini.CachedContentRef
 	r.GeminiSpeechConfig = cloneRawMessage(providerExtensions.Gemini.SpeechConfig)
 }
@@ -174,7 +179,14 @@ func (r *InternalLLMRequest) SetAnthropicExtensions(ext AnthropicExtension) {
 	if providerExtensions.Anthropic == nil {
 		providerExtensions.Anthropic = &AnthropicExtension{}
 	}
-	mergeAnthropicExtension(providerExtensions.Anthropic, &ext)
+	extCopy := AnthropicExtension{
+		Beta:         append([]string(nil), ext.Beta...),
+		CacheControl: cloneCacheControl(ext.CacheControl),
+		MCPServers:   cloneRawMessage(ext.MCPServers),
+		Container:    cloneRawMessage(ext.Container),
+		ServerTool:   cloneRawMessage(ext.ServerTool),
+	}
+	mergeAnthropicExtension(providerExtensions.Anthropic, &extCopy)
 	r.AnthropicMCPServers = cloneRawMessage(providerExtensions.Anthropic.MCPServers)
 	r.AnthropicContainer = cloneRawMessage(providerExtensions.Anthropic.Container)
 }
@@ -187,7 +199,12 @@ func (r *InternalLLMRequest) SetOpenAIExtensions(ext OpenAIExtension) {
 	if providerExtensions.OpenAI == nil {
 		providerExtensions.OpenAI = &OpenAIExtension{}
 	}
-	mergeOpenAIExtension(providerExtensions.OpenAI, &ext)
+	extCopy := OpenAIExtension{
+		ResponsesPassthroughRequired: ext.ResponsesPassthroughRequired,
+		ResponsesPassthroughReason:   ext.ResponsesPassthroughReason,
+		RawResponseItems:             cloneRawMessage(ext.RawResponseItems),
+	}
+	mergeOpenAIExtension(providerExtensions.OpenAI, &extCopy)
 	r.OpenAIResponsesPassthroughRequired = providerExtensions.OpenAI.ResponsesPassthroughRequired
 	r.OpenAIResponsesPassthroughReason = strings.TrimSpace(providerExtensions.OpenAI.ResponsesPassthroughReason)
 	if r.OpenAIResponsesPassthroughRequired {

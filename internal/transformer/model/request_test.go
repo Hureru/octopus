@@ -122,14 +122,36 @@ func TestInternalLLMRequestValidateRejectsRawInputItemsWithoutResponsesFormat(t 
 }
 
 func TestInternalLLMRequestValidateRejectsInvalidRawInputItems(t *testing.T) {
-	req := &InternalLLMRequest{
-		Model:         "gpt-4o",
-		RawAPIFormat:  APIFormatOpenAIResponse,
-		RawInputItems: json.RawMessage(`{"type":"input_text","text":"hello"}`),
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{
+			name: "object",
+			raw:  json.RawMessage(`{"type":"input_text","text":"hello"}`),
+		},
+		{
+			name: "null",
+			raw:  json.RawMessage(`null`),
+		},
+		{
+			name: "empty array",
+			raw:  json.RawMessage(`[]`),
+		},
 	}
 
-	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "raw_input_items must be a valid JSON array") {
-		t.Fatalf("expected raw_input_items json array validation error, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &InternalLLMRequest{
+				Model:         "gpt-4o",
+				RawAPIFormat:  APIFormatOpenAIResponse,
+				RawInputItems: tt.raw,
+			}
+
+			if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "raw_input_items must be a valid JSON array") {
+				t.Fatalf("expected raw_input_items json array validation error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -162,14 +184,28 @@ func TestInternalLLMRequestValidateRejectsReplayExactWithPreviousResponseID(t *t
 }
 
 func TestInternalLLMRequestValidateRejectsReplayExactWithoutRawInputItems(t *testing.T) {
-	req := &InternalLLMRequest{
-		Model:        "gpt-4o",
-		RawAPIFormat: APIFormatOpenAIResponse,
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing"},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "empty array", raw: json.RawMessage(`[]`)},
 	}
-	req.MarkOpenAIExactReplayRequest()
 
-	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "replay_exact request requires raw_input_items") {
-		t.Fatalf("expected replay_exact raw_input_items validation error, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &InternalLLMRequest{
+				Model:         "gpt-4o",
+				RawAPIFormat:  APIFormatOpenAIResponse,
+				RawInputItems: tt.raw,
+			}
+			req.MarkOpenAIExactReplayRequest()
+
+			if err := req.Validate(); err == nil {
+				t.Fatalf("expected replay_exact raw_input_items validation error")
+			}
+		})
 	}
 }
 
@@ -293,6 +329,31 @@ func TestInternalLLMRequestSetProviderExtensionsSynchronizesCompatibilityMirrors
 	}
 	if !req.HasOpenAIResponsesPassthrough() || req.OpenAIResponsesPassthroughReasonTextValue() != "tool:computer_use" {
 		t.Fatalf("expected OpenAI passthrough mirrors to sync, got required=%t reason=%q", req.HasOpenAIResponsesPassthrough(), req.OpenAIResponsesPassthroughReasonTextValue())
+	}
+}
+
+func TestInternalLLMRequestSetProviderExtensionsDefensivelyCopiesRawMessages(t *testing.T) {
+	req := &InternalLLMRequest{}
+	geminiRaw := json.RawMessage(`{"voice":"A"}`)
+	anthropicRaw := json.RawMessage(`[{"url":"https://example.test/a"}]`)
+	openAIRaw := json.RawMessage(`[{"type":"message","id":"msg_1"}]`)
+
+	req.SetGeminiExtensions(GeminiExtension{SpeechConfig: geminiRaw})
+	req.SetAnthropicExtensions(AnthropicExtension{MCPServers: anthropicRaw})
+	req.SetOpenAIExtensions(OpenAIExtension{RawResponseItems: openAIRaw})
+
+	geminiRaw[0] = '['
+	anthropicRaw[0] = '{'
+	openAIRaw[0] = '{'
+
+	if string(req.ProviderExtensions.Gemini.SpeechConfig) != `{"voice":"A"}` {
+		t.Fatalf("expected Gemini speech config to be defensively copied, got %s", req.ProviderExtensions.Gemini.SpeechConfig)
+	}
+	if string(req.ProviderExtensions.Anthropic.MCPServers) != `[{"url":"https://example.test/a"}]` {
+		t.Fatalf("expected Anthropic MCP servers to be defensively copied, got %s", req.ProviderExtensions.Anthropic.MCPServers)
+	}
+	if string(req.ProviderExtensions.OpenAI.RawResponseItems) != `[{"type":"message","id":"msg_1"}]` {
+		t.Fatalf("expected OpenAI raw response items to be defensively copied, got %s", req.ProviderExtensions.OpenAI.RawResponseItems)
 	}
 }
 
