@@ -76,17 +76,17 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 	}
 	if anthropicReq.Metadata != nil {
 		if userID := strings.TrimSpace(anthropicReq.Metadata.UserID); userID != "" {
-			chatReq.TransformerMetadata["anthropic_user_id"] = userID
+			chatReq.SetTransformerMetadataValue(model.TransformerMetadataAnthropicUserID, userID)
 		}
 	}
 	// mcp_servers / container (A-H6): preserve the raw payload for
 	// round-trip on the Anthropic→Anthropic same-protocol path. Triggers
 	// the mcp-client-2025-11-20 beta header downstream (A-H7).
-	if len(anthropicReq.MCPServers) > 0 {
-		chatReq.AnthropicMCPServers = append(chatReq.AnthropicMCPServers[:0], anthropicReq.MCPServers...)
-	}
-	if len(anthropicReq.Container) > 0 {
-		chatReq.AnthropicContainer = append(chatReq.AnthropicContainer[:0], anthropicReq.Container...)
+	if len(anthropicReq.MCPServers) > 0 || len(anthropicReq.Container) > 0 {
+		chatReq.SetAnthropicExtensions(model.AnthropicExtension{
+			MCPServers: anthropicReq.MCPServers,
+			Container:  anthropicReq.Container,
+		})
 	}
 
 	// Convert messages
@@ -105,7 +105,7 @@ func (i *MessagesInbound) TransformRequest(ctx context.Context, body []byte) (*m
 			i.inputToken += int64(tokenizer.CountTokens(*systemContent, chatReq.Model))
 		} else if len(anthropicReq.System.MultiplePrompts) > 0 {
 			// Mark that system was originally in array format
-			chatReq.TransformerMetadata["anthropic_system_array_format"] = "true"
+			chatReq.SetTransformerMetadataValue(model.TransformerMetadataAnthropicSystemArrayFormat, "true")
 
 			for _, prompt := range anthropicReq.System.MultiplePrompts {
 				msg := model.Message{

@@ -242,11 +242,18 @@ func TestTransformRequestCapturesMCPServersAndContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformRequest() error = %v", err)
 	}
+	anthropicExt := req.GetAnthropicExtensions()
+	if !strings.Contains(string(anthropicExt.MCPServers), "example.invalid/mcp") {
+		t.Errorf("expected extension mcp_servers captured, got %s", anthropicExt.MCPServers)
+	}
+	if !strings.Contains(string(anthropicExt.Container), "cntr-1") {
+		t.Errorf("expected extension container captured, got %s", anthropicExt.Container)
+	}
 	if !strings.Contains(string(req.AnthropicMCPServers), "example.invalid/mcp") {
-		t.Errorf("expected mcp_servers captured, got %s", req.AnthropicMCPServers)
+		t.Errorf("expected compatibility mcp_servers captured, got %s", req.AnthropicMCPServers)
 	}
 	if !strings.Contains(string(req.AnthropicContainer), "cntr-1") {
-		t.Errorf("expected container captured, got %s", req.AnthropicContainer)
+		t.Errorf("expected compatibility container captured, got %s", req.AnthropicContainer)
 	}
 }
 
@@ -266,7 +273,7 @@ func TestTransformRequestPreservesAnthropicUserIDInTransformerMetadataOnly(t *te
 	if req.User != nil {
 		t.Fatalf("expected user to remain unset for cross-provider safety, got %+v", req.User)
 	}
-	if got := req.TransformerMetadata["anthropic_user_id"]; got != "user-123" {
+	if got := req.TransformerMetadataValue(model.TransformerMetadataAnthropicUserID); got != "user-123" {
 		t.Fatalf("expected transformer metadata to keep anthropic user id, got %q", got)
 	}
 	if req.Metadata["user_id"] != "" {

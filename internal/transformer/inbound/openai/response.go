@@ -113,10 +113,30 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		return []byte("data: [DONE]\n\n"), nil
 	}
 
-	// Store the chunk for aggregation
+	// Preserve the original chunk for aggregation; the stream-event view is a
+	// normalized projection and intentionally drops some transport-only fields.
 	i.streamAggregator.Add(stream)
+	if i.createdAt == 0 && stream.Created != 0 {
+		i.createdAt = stream.Created
+	}
+	return i.processStreamEvents(ctx, model.StreamEventsFromInternalResponse(stream), false)
+}
 
-	var events [][]byte
+func (i *ResponseInbound) TransformStreamEvents(ctx context.Context, events []model.StreamEvent) ([]byte, error) {
+	return i.processStreamEvents(ctx, events, true)
+}
+
+func (i *ResponseInbound) processStreamEvents(ctx context.Context, events []model.StreamEvent, aggregate bool) ([]byte, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	if aggregate {
+		if stream := model.InternalResponseFromStreamEvents(events); stream != nil && stream.Object != "[DONE]" {
+			i.streamAggregator.Add(stream)
+		}
+	}
+
+	var out [][]byte
 
 	// Initialize tool call tracking maps if needed
 	if i.toolCalls == nil {
@@ -125,164 +145,6 @@ func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.Int
 		i.toolCallOutputIndex = make(map[int]int)
 	}
 
-	// Update metadata from chunk
-	if i.responseID == "" && stream.ID != "" {
-		i.responseID = stream.ID
-	}
-	if i.model == "" && stream.Model != "" {
-		i.model = stream.Model
-	}
-	if i.createdAt == 0 && stream.Created != 0 {
-		i.createdAt = stream.Created
-	}
-	if stream.Usage != nil {
-		i.usage = stream.Usage
-	}
-
-	// Generate response.created event if first chunk
-	if !i.hasResponseCreated {
-		i.hasResponseCreated = true
-
-		response := &ResponsesResponse{
-			Object:     "response",
-			ID:         i.responseID,
-			Model:      i.model,
-			CreatedAt:  i.createdAt,
-			Status:     lo.ToPtr("in_progress"),
-			Truncation: i.truncation,
-			Output:     []ResponsesItem{},
-		}
-
-		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:     "response.created",
-			Response: response,
-		}))
-
-		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:     "response.in_progress",
-			Response: response,
-		}))
-	}
-
-	// Process choices
-	if len(stream.Choices) > 0 {
-		choice := stream.Choices[0]
-
-		// Handle reasoning content delta (thinking text still arrives via legacy
-		// ReasoningContent from all providers; ReasoningBlocks only carries
-		// signature / redacted in the stream path).
-		if choice.Delta != nil && choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
-			events = append(events, i.handleReasoningContent(choice.Delta.ReasoningContent)...)
-		}
-
-		// Handle per-block reasoning signatures + redacted blocks. Prefer the
-		// structured ReasoningBlocks representation introduced in P0.1; fall
-		// back to the flat legacy fields for providers still on the pre-P0.1
-		// wire (OpenRouter, Ollama compat, etc.).
-		if choice.Delta != nil && len(choice.Delta.ReasoningBlocks) > 0 {
-			for _, b := range choice.Delta.ReasoningBlocks {
-				switch b.Kind {
-				case model.ReasoningBlockKindSignature:
-					if b.Signature != "" {
-						i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, b.Signature)
-					}
-				case model.ReasoningBlockKindRedacted:
-					if !i.hasReasoningItemStarted {
-						events = append(events, i.handleReasoningContent(lo.ToPtr(""))...)
-					}
-				case model.ReasoningBlockKindThinking:
-					if b.Text != "" {
-						text := b.Text
-						events = append(events, i.handleReasoningContent(&text)...)
-					}
-					if b.Signature != "" {
-						i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, b.Signature)
-					}
-				}
-			}
-		} else if choice.Delta != nil {
-			if choice.Delta.ReasoningSignature != nil && *choice.Delta.ReasoningSignature != "" {
-				i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, *choice.Delta.ReasoningSignature)
-			}
-			if len(choice.Delta.RedactedThinkingBlocks) > 0 && !i.hasReasoningItemStarted {
-				events = append(events, i.handleReasoningContent(lo.ToPtr(""))...)
-			}
-		}
-
-		// Handle text content delta
-		if choice.Delta != nil && choice.Delta.Content.Content != nil && *choice.Delta.Content.Content != "" {
-			events = append(events, i.handleTextContent(choice.Delta.Content.Content)...)
-		}
-
-		// Handle refusal delta
-		if choice.Delta != nil && choice.Delta.Refusal != "" {
-			events = append(events, i.handleRefusalContent(choice.Delta.Refusal)...)
-		}
-
-		// Handle tool calls
-		if choice.Delta != nil && len(choice.Delta.ToolCalls) > 0 {
-			events = append(events, i.handleToolCalls(choice.Delta.ToolCalls)...)
-		}
-
-		// Handle finish reason
-		if choice.FinishReason != nil && !i.hasFinished {
-			i.hasFinished = true
-			i.finalFinishReason = *choice.FinishReason
-
-			// Close any open content parts and output items
-			events = append(events, i.closeCurrentContentPart()...)
-			events = append(events, i.closeCurrentOutputItem()...)
-		}
-	}
-
-	// Handle final usage chunk and complete response
-	if stream.Usage != nil && i.hasFinished && !i.responseCompleted {
-		i.responseCompleted = true
-		i.usage = stream.Usage
-
-		eventType, status := responsesTerminalEvent(i.finalFinishReason)
-		output := i.finalOutputItems()
-		response := &ResponsesResponse{
-			Object:     "response",
-			ID:         i.responseID,
-			Model:      i.model,
-			CreatedAt:  i.createdAt,
-			Status:     &status,
-			Truncation: i.truncation,
-			Output:     output,
-			Usage:      convertUsageToResponses(i.usage),
-		}
-
-		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:     eventType,
-			Response: response,
-		}))
-	}
-
-	if len(events) == 0 {
-		return nil, nil
-	}
-
-	// Join events
-	result := make([]byte, 0)
-	for _, event := range events {
-		if event != nil {
-			result = append(result, event...)
-		}
-	}
-
-	return result, nil
-}
-
-func (i *ResponseInbound) TransformStreamEvents(ctx context.Context, events []model.StreamEvent) ([]byte, error) {
-	if len(events) == 0 {
-		return nil, nil
-	}
-	if stream := model.InternalResponseFromStreamEvents(events); stream != nil && stream.Object != "[DONE]" {
-		i.streamAggregator.Add(stream)
-	}
-
-	var out [][]byte
 	for _, event := range events {
 		if event.ID != "" {
 			i.responseID = event.ID
@@ -319,8 +181,26 @@ func (i *ResponseInbound) TransformStreamEvents(ctx context.Context, events []mo
 			}
 
 		case model.StreamEventKindThinkingDelta:
-			if event.Delta != nil && event.Delta.Thinking != "" {
-				out = append(out, i.handleReasoningContent(&event.Delta.Thinking)...)
+			if event.Delta != nil && (event.Delta.Thinking != "" || event.Delta.Signature != "") {
+				if event.Delta.Signature != "" {
+					i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, event.Delta.Signature)
+				}
+				if event.Delta.Thinking != "" {
+					out = append(out, i.handleReasoningContent(&event.Delta.Thinking)...)
+				} else {
+					out = append(out, i.ensureReasoningItemStarted()...)
+				}
+			}
+
+		case model.StreamEventKindSignatureDelta:
+			if event.Delta != nil && event.Delta.Signature != "" {
+				i.reasoningBlockSignatures = append(i.reasoningBlockSignatures, event.Delta.Signature)
+				out = append(out, i.ensureReasoningItemStarted()...)
+			}
+
+		case model.StreamEventKindContentBlockStart:
+			if event.ContentBlock != nil && event.ContentBlock.Type == string(model.ReasoningBlockKindRedacted) {
+				out = append(out, i.ensureReasoningItemStarted()...)
 			}
 
 		case model.StreamEventKindToolCallStart:
@@ -404,7 +284,6 @@ func (i *ResponseInbound) TransformStreamEvents(ctx context.Context, events []mo
 	return result, nil
 }
 
-
 func (i *ResponseInbound) enqueueEvent(ev *ResponsesStreamEvent) []byte {
 	ev.SequenceNumber = i.sequenceNumber
 	i.sequenceNumber++
@@ -420,39 +299,17 @@ func (i *ResponseInbound) enqueueEvent(ev *ResponsesStreamEvent) []byte {
 func (i *ResponseInbound) handleReasoningContent(content *string) [][]byte {
 	var events [][]byte
 
-	// Start reasoning output item if not started
-	if !i.hasReasoningItemStarted {
-		// Close any previous output item
-		events = append(events, i.closeCurrentOutputItem()...)
-
-		i.hasReasoningItemStarted = true
-		i.currentItemID = generateItemID()
-
-		item := &ResponsesItem{
-			ID:      i.currentItemID,
-			Type:    "reasoning",
-			Status:  lo.ToPtr("in_progress"),
-			Summary: []ResponsesReasoningSummary{},
-		}
-
-		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:        "response.output_item.added",
-			OutputIndex: lo.ToPtr(i.outputIndex),
-			Item:        item,
-		}))
-
-		// Emit reasoning_summary_part.added
-		events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
-			Type:         "response.reasoning_summary_part.added",
-			ItemID:       &i.currentItemID,
-			OutputIndex:  lo.ToPtr(i.outputIndex),
-			SummaryIndex: lo.ToPtr(0),
-			Part:         &ResponsesContentPart{Type: "summary_text"},
-		}))
-	}
+	events = append(events, i.ensureReasoningItemStarted()...)
 
 	// Accumulate reasoning content
 	i.accumulatedReasoning.WriteString(*content)
+
+	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+		Type:        "response.reasoning.delta",
+		ItemID:      &i.currentItemID,
+		OutputIndex: lo.ToPtr(i.outputIndex),
+		Delta:       *content,
+	}))
 
 	// Emit reasoning_summary_text.delta
 	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
@@ -461,6 +318,42 @@ func (i *ResponseInbound) handleReasoningContent(content *string) [][]byte {
 		OutputIndex:  lo.ToPtr(i.outputIndex),
 		SummaryIndex: lo.ToPtr(0),
 		Delta:        *content,
+	}))
+
+	return events
+}
+
+func (i *ResponseInbound) ensureReasoningItemStarted() [][]byte {
+	if i.hasReasoningItemStarted {
+		return nil
+	}
+
+	var events [][]byte
+
+	events = append(events, i.closeCurrentOutputItem()...)
+
+	i.hasReasoningItemStarted = true
+	i.currentItemID = generateItemID()
+
+	item := &ResponsesItem{
+		ID:      i.currentItemID,
+		Type:    "reasoning",
+		Status:  lo.ToPtr("in_progress"),
+		Summary: []ResponsesReasoningSummary{},
+	}
+
+	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+		Type:        "response.output_item.added",
+		OutputIndex: lo.ToPtr(i.outputIndex),
+		Item:        item,
+	}))
+
+	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+		Type:         "response.reasoning_summary_part.added",
+		ItemID:       &i.currentItemID,
+		OutputIndex:  lo.ToPtr(i.outputIndex),
+		SummaryIndex: lo.ToPtr(0),
+		Part:         &ResponsesContentPart{Type: "summary_text"},
 	}))
 
 	return events
@@ -701,6 +594,13 @@ func (i *ResponseInbound) closeReasoningItem() [][]byte {
 		OutputIndex:  lo.ToPtr(i.outputIndex),
 		SummaryIndex: lo.ToPtr(0),
 		Part:         &ResponsesContentPart{Type: "summary_text", Text: &fullReasoning},
+	}))
+
+	events = append(events, i.enqueueEvent(&ResponsesStreamEvent{
+		Type:        "response.reasoning.done",
+		ItemID:      &i.currentItemID,
+		OutputIndex: lo.ToPtr(i.outputIndex),
+		Text:        fullReasoning,
 	}))
 
 	// Emit output_item.done with encrypted_content if signatures were accumulated.
@@ -1268,10 +1168,13 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 	if req.Input.Text == nil && len(req.Input.Items) > 0 {
 		chatReq.TransformOptions.ArrayInputs = lo.ToPtr(true)
 		if rawItems, marshalErr := json.Marshal(req.Input.Items); marshalErr == nil {
-			chatReq.RawInputItems = rawItems
+			chatReq.SetOpenAIRawInputItems(rawItems)
 		}
 	}
 	markOpenAIResponsesPassthroughIfNeeded(req, chatReq)
+
+	var reasoningSummary *string
+	var reasoningGenerateSummary *string
 
 	// Convert reasoning
 	if req.Reasoning != nil {
@@ -1283,23 +1186,27 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 		}
 		if req.Reasoning.Summary != nil {
 			if summary := validateReasoningSummary(*req.Reasoning.Summary); summary != "" {
-				chatReq.ReasoningSummary = &summary
+				reasoningSummary = &summary
 			}
 		}
-		chatReq.ReasoningGenerateSummary = req.Reasoning.GenerateSummary
+		reasoningGenerateSummary = req.Reasoning.GenerateSummary
 	}
 
-	// Pass-through fields for OpenAI Responses API
-	chatReq.PreviousResponseID = req.PreviousResponseID
-	chatReq.Background = req.Background
-	chatReq.Prompt = req.Prompt
-	chatReq.ResponsesPromptCacheKey = req.PromptCacheKey
-	chatReq.PromptCacheRetention = req.PromptCacheRetention
-	chatReq.SafetyIdentifier = req.SafetyIdentifier
-	chatReq.MaxToolCalls = req.MaxToolCalls
-	chatReq.Conversation = req.Conversation
-	chatReq.ContextManagement = req.ContextManagement
-	chatReq.ResponsesStreamOptions = req.StreamOptions
+	chatReq.SetOpenAIResponsesOptions(model.OpenAIResponsesOptions{
+		PreviousResponseID:       req.PreviousResponseID,
+		Background:               req.Background,
+		Prompt:                   req.Prompt,
+		PromptCacheKey:           req.PromptCacheKey,
+		PromptCacheRetention:     req.PromptCacheRetention,
+		SafetyIdentifier:         req.SafetyIdentifier,
+		MaxToolCalls:             req.MaxToolCalls,
+		Conversation:             req.Conversation,
+		ContextManagement:        req.ContextManagement,
+		StreamOptions:            req.StreamOptions,
+		ReasoningSummary:         reasoningSummary,
+		ReasoningGenerateSummary: reasoningGenerateSummary,
+		RawInputItems:            chatReq.OpenAIRawInputItems(),
+	})
 
 	// Convert tool choice
 	if req.ToolChoice != nil {
@@ -1396,7 +1303,7 @@ func firstUnsupportedResponsesTopLevelItemType(item *ResponsesItem) string {
 		return ""
 	}
 	switch item.Type {
-	case "", "message", "input_text", "input_image", "function_call", "function_call_output", "reasoning":
+	case "", "message", "input_text", "input_image", "input_file", "input_audio", "function_call", "function_call_output", "reasoning":
 	default:
 		return item.Type
 	}
@@ -1415,7 +1322,7 @@ func firstUnsupportedResponsesContentItemType(input *ResponsesInput) string {
 	}
 	for _, item := range input.Items {
 		switch item.Type {
-		case "input_text", "text", "output_text", "input_image":
+		case "input_text", "text", "output_text", "input_image", "input_file", "input_audio":
 			continue
 		case "":
 			return "<empty>"
@@ -1500,24 +1407,21 @@ func convertItemToMessage(item *ResponsesItem) (*model.Message, error) {
 
 		return msg, nil
 
-	case "input_image":
-		if item.ImageURL != nil {
-			return &model.Message{
-				Role: lo.Ternary(item.Role != "", item.Role, "user"),
-				Content: model.MessageContent{
-					MultipleContent: []model.MessageContentPart{
-						{
-							Type: "image_url",
-							ImageURL: &model.ImageURL{
-								URL:    *item.ImageURL,
-								Detail: item.Detail,
-							},
-						},
-					},
-				},
-			}, nil
+	case "input_image", "input_file", "input_audio":
+		role := item.Role
+		if role == "" {
+			role = "user"
 		}
-		return nil, nil
+		content := convertInputToMessageContent(ResponsesInput{
+			Items: []ResponsesItem{*item},
+		})
+		if content.Content == nil && len(content.MultipleContent) == 0 {
+			return nil, nil
+		}
+		return &model.Message{
+			Role:    role,
+			Content: content,
+		}, nil
 
 	case "function_call":
 		return &model.Message{
@@ -1750,26 +1654,16 @@ func convertToResponsesAPIResponse(resp *model.InternalLLMResponse) *ResponsesRe
 			}
 		}
 
-		// Handle text content
+		// Handle message content
+		contentItems := make([]ResponsesItem, 0, 2)
 		if message.Content.Content != nil && *message.Content.Content != "" {
 			text := *message.Content.Content
-			result.Output = append(result.Output, ResponsesItem{
-				ID:   generateItemID(),
-				Type: "message",
-				Role: "assistant",
-				Content: &ResponsesInput{
-					Items: []ResponsesItem{
-						{
-							Type:        "output_text",
-							Text:        &text,
-							Annotations: &[]ResponsesAnnotation{},
-						},
-					},
-				},
-				Status: lo.ToPtr("completed"),
+			contentItems = append(contentItems, ResponsesItem{
+				Type:        "output_text",
+				Text:        &text,
+				Annotations: &[]ResponsesAnnotation{},
 			})
 		} else if len(message.Content.MultipleContent) > 0 {
-			contentItems := make([]ResponsesItem, 0)
 
 			for _, part := range message.Content.MultipleContent {
 				switch part.Type {
@@ -1794,16 +1688,24 @@ func convertToResponsesAPIResponse(resp *model.InternalLLMResponse) *ResponsesRe
 					}
 				}
 			}
+		}
 
-			if len(contentItems) > 0 {
-				result.Output = append(result.Output, ResponsesItem{
-					ID:      generateItemID(),
-					Type:    "message",
-					Role:    "assistant",
-					Content: &ResponsesInput{Items: contentItems},
-					Status:  lo.ToPtr("completed"),
-				})
-			}
+		if message.Refusal != "" {
+			refusal := message.Refusal
+			contentItems = append(contentItems, ResponsesItem{
+				Type:    "refusal",
+				Refusal: &refusal,
+			})
+		}
+
+		if len(contentItems) > 0 {
+			result.Output = append(result.Output, ResponsesItem{
+				ID:      generateItemID(),
+				Type:    "message",
+				Role:    "assistant",
+				Content: &ResponsesInput{Items: contentItems},
+				Status:  lo.ToPtr("completed"),
+			})
 		}
 
 		// Set status based on finish reason

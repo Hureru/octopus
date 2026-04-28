@@ -634,8 +634,10 @@ func TestConvertDocumentToGeminiPartInlineLimitFallback(t *testing.T) {
 	}
 
 	// Per-media-type URI takes precedence over the generic one.
-	req.TransformerMetadata["gemini_files_api_uri:application/pdf"] =
-		"https://generativelanguage.googleapis.com/v1beta/files/pdf-specific"
+	req.SetTransformerMetadataValue(
+		model.TransformerMetadataGeminiFilesAPIURI+":application/pdf",
+		"https://generativelanguage.googleapis.com/v1beta/files/pdf-specific",
+	)
 	p = convertDocumentToGeminiPart(doc, req)
 	if p == nil || p.FileData == nil ||
 		p.FileData.FileURI != "https://generativelanguage.googleapis.com/v1beta/files/pdf-specific" {
@@ -656,37 +658,41 @@ func TestConvertDocumentToGeminiPartInlineLimitFallback(t *testing.T) {
 // the field at its zero default (which Gemini treats as 1).
 func TestConvertGeminiRequestCandidateCount(t *testing.T) {
 	mk := func(meta map[string]string) *model.InternalLLMRequest {
-		return &model.InternalLLMRequest{
+		req := &model.InternalLLMRequest{
 			Model: "gemini-2.5-flash",
 			Messages: []model.Message{
 				{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
 			},
-			TransformerMetadata: meta,
 		}
+		for key, value := range meta {
+			req.SetTransformerMetadataValue(key, value)
+		}
+		return req
 	}
 
-	out := convertLLMToGeminiRequest(mk(map[string]string{"gemini_candidate_count": "3"}))
+	out := convertLLMToGeminiRequest(mk(map[string]string{model.TransformerMetadataGeminiCandidateCount: "3"}))
 	if out.GenerationConfig == nil || out.GenerationConfig.CandidateCount != 3 {
 		t.Fatalf("expected candidateCount=3, got %+v", out.GenerationConfig)
 	}
 
 	// n=1 is the default — we deliberately skip writing it to avoid a
 	// redundant field on the wire.
-	out = convertLLMToGeminiRequest(mk(map[string]string{"gemini_candidate_count": "1"}))
+	out = convertLLMToGeminiRequest(mk(map[string]string{model.TransformerMetadataGeminiCandidateCount: "1"}))
 	if out.GenerationConfig != nil && out.GenerationConfig.CandidateCount != 0 {
 		t.Errorf("expected candidateCount unset for n=1, got %d", out.GenerationConfig.CandidateCount)
 	}
 
 	// Invalid value → field stays unset.
-	out = convertLLMToGeminiRequest(mk(map[string]string{"gemini_candidate_count": "abc"}))
+	out = convertLLMToGeminiRequest(mk(map[string]string{model.TransformerMetadataGeminiCandidateCount: "abc"}))
 	if out.GenerationConfig != nil && out.GenerationConfig.CandidateCount != 0 {
 		t.Errorf("expected candidateCount unset for unparseable value")
 	}
 }
 
 // TestConvertGeminiRequestSpeechConfigRawPassthrough verifies G-H11 when
-// the caller supplies a fully-formed speechConfig JSON blob: the outbound
-// transformer forwards the bytes verbatim into generationConfig.
+// the caller supplies a fully-formed speechConfig JSON blob via Gemini
+// provider extensions: the outbound transformer forwards the bytes verbatim
+// into generationConfig.
 func TestConvertGeminiRequestSpeechConfigRawPassthrough(t *testing.T) {
 	raw := json.RawMessage(`{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Kore"}},"languageCode":"en-US"}`)
 	req := &model.InternalLLMRequest{
@@ -694,7 +700,7 @@ func TestConvertGeminiRequestSpeechConfigRawPassthrough(t *testing.T) {
 		Messages: []model.Message{
 			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
 		},
-		GeminiSpeechConfig: raw,
+		ProviderExtensions: &model.ProviderExtensions{Gemini: &model.GeminiExtension{SpeechConfig: raw}},
 	}
 	out := convertLLMToGeminiRequest(req)
 	if out.GenerationConfig == nil || len(out.GenerationConfig.SpeechConfig) == 0 {
@@ -753,7 +759,7 @@ func stringPtr(v string) *string {
 }
 
 // TestConvertGeminiRequestCachedContentAndLabels verifies G-H8:
-//   - InternalLLMRequest.GeminiCachedContentRef populates the top-level
+//   - ProviderExtensions.Gemini.CachedContentRef populates the top-level
 //     `cachedContent` field on the Gemini wire body.
 //   - InternalLLMRequest.Metadata is forwarded as `labels` (same k/v
 //     semantics on both sides).
@@ -766,7 +772,7 @@ func TestConvertGeminiRequestCachedContentAndLabels(t *testing.T) {
 		Messages: []model.Message{
 			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
 		},
-		GeminiCachedContentRef: &ref,
+		ProviderExtensions: &model.ProviderExtensions{Gemini: &model.GeminiExtension{CachedContentRef: &ref}},
 		Metadata: map[string]string{
 			"project": "demo",
 			"team":    "eng",
@@ -782,14 +788,14 @@ func TestConvertGeminiRequestCachedContentAndLabels(t *testing.T) {
 
 	// Whitespace-only ref should drop the field.
 	blank := "   "
-	req.GeminiCachedContentRef = &blank
+	req.ProviderExtensions.Gemini.CachedContentRef = &blank
 	out = convertLLMToGeminiRequest(req)
 	if out.CachedContent != "" {
 		t.Errorf("expected blank cachedContent to be dropped, got %q", out.CachedContent)
 	}
 
 	// Nil ref + nil metadata -> wire body omits both keys.
-	req.GeminiCachedContentRef = nil
+	req.ProviderExtensions.Gemini.CachedContentRef = nil
 	req.Metadata = nil
 	out = convertLLMToGeminiRequest(req)
 	b, err := json.Marshal(out)

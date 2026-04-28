@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -210,6 +211,92 @@ func TestGeminiThoughtSignatureRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeminiStreamToAnthropicPreservesThoughtSignature(t *testing.T) {
+	geminiChunk := model.GeminiGenerateContentResponse{
+		ResponseId:   "resp_stream",
+		ModelVersion: "gemini-2.0-flash-exp",
+		Candidates: []*model.GeminiCandidate{{
+			Index: 0,
+			Content: &model.GeminiContent{
+				Role: "model",
+				Parts: []*model.GeminiPart{{
+					FunctionCall: &model.GeminiFunctionCall{
+						Name: "search",
+						Args: map[string]interface{}{"query": "octopus"},
+					},
+					ThoughtSignature: "sig-stream-123",
+				}},
+			},
+			FinishReason: ptrString("STOP"),
+		}},
+	}
+	chunkBytes, err := json.Marshal(geminiChunk)
+	if err != nil {
+		t.Fatalf("marshal gemini chunk failed: %v", err)
+	}
+
+	outbound := &MessagesOutbound{}
+	events, err := outbound.TransformStreamEvent(context.Background(), chunkBytes)
+	if err != nil {
+		t.Fatalf("TransformStreamEvent failed: %v", err)
+	}
+	internal := model.InternalResponseFromStreamEvents(events)
+	if internal == nil {
+		t.Fatalf("expected internal stream response to be rebuilt")
+	}
+
+	anthInbound := &anthropic.MessagesInbound{}
+	streamBytes, err := anthInbound.TransformStream(context.Background(), internal)
+	if err != nil {
+		t.Fatalf("TransformStream failed: %v", err)
+	}
+	anthropicEvents := parseAnthropicStreamEvents(t, streamBytes)
+	var foundSignatureDelta, foundToolUse bool
+	for _, event := range anthropicEvents {
+		if event.Type == "content_block_delta" &&
+			event.Delta != nil &&
+			event.Delta.Type != nil &&
+			*event.Delta.Type == "signature_delta" &&
+			event.Delta.Signature != nil &&
+			*event.Delta.Signature == "sig-stream-123" {
+			foundSignatureDelta = true
+		}
+		if event.Type == "content_block_start" &&
+			event.ContentBlock != nil &&
+			event.ContentBlock.Type == "tool_use" {
+			foundToolUse = true
+		}
+	}
+	if !foundSignatureDelta {
+		t.Fatalf("expected Anthropic stream event signature_delta with Gemini thought signature, got %+v", anthropicEvents)
+	}
+	if !foundToolUse {
+		t.Fatalf("expected Anthropic stream event tool_use content block, got %+v", anthropicEvents)
+	}
+}
+
 func ptrString(s string) *string {
 	return &s
+}
+
+func parseAnthropicStreamEvents(t *testing.T, raw []byte) []anthropic.StreamEvent {
+	t.Helper()
+
+	var events []anthropic.StreamEvent
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		payload, ok := bytes.CutPrefix(line, []byte("data:"))
+		if !ok || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+		payload = bytes.TrimPrefix(payload, []byte(" "))
+		var event anthropic.StreamEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("failed to decode Anthropic stream event %q: %v", string(payload), err)
+		}
+		events = append(events, event)
+	}
+	if len(events) == 0 {
+		t.Fatalf("expected Anthropic stream events, got %s", raw)
+	}
+	return events
 }

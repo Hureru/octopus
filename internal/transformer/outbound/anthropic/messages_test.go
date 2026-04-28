@@ -316,8 +316,10 @@ func TestConvertToAnthropicRequestForwardsMCPServersAndContainer(t *testing.T) {
 		Messages: []model.Message{
 			{Role: "user", Content: model.MessageContent{Content: stringPtr("hi")}},
 		},
-		AnthropicMCPServers: mcp,
-		AnthropicContainer:  container,
+		ProviderExtensions: &model.ProviderExtensions{Anthropic: &model.AnthropicExtension{
+			MCPServers: mcp,
+			Container:  container,
+		}},
 	}
 	out := convertToAnthropicRequest(req)
 	if string(out.MCPServers) != string(mcp) {

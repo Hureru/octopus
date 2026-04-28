@@ -208,8 +208,8 @@ type GeminiGenerationConfig struct {
 	// selection, language code, multi-speaker setup). The schema is
 	// deeply nested and shared with the Live API, so we treat it as an
 	// opaque passthrough — callers either supply the raw JSON via
-	// InternalLLMRequest.GeminiSpeechConfig or synthesize it from the
-	// generic request.Audio {format, voice} pair. G-H11.
+	// ProviderExtensions.Gemini.SpeechConfig / request.GetGeminiExtensions()
+	// or synthesize it from the generic request.Audio {format, voice} pair. G-H11.
 	// Ref: https://ai.google.dev/api/generate-content#SpeechConfig
 	SpeechConfig json.RawMessage `json:"speechConfig,omitempty"`
 

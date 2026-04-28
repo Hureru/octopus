@@ -212,7 +212,6 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 				},
 			}
 			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall})
-			toolCall.Function.Arguments = streamEvent.Delta
 			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallDelta, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall, Delta: &model.StreamDelta{Arguments: streamEvent.Delta}})
 		}
 
@@ -296,9 +295,8 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 		}
 		if respErr != nil {
 			events = append(events, model.StreamEvent{Kind: model.StreamEventKindError, ID: base.ID, Model: base.Model, Error: respErr})
-		} else {
-			events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(lo.FromPtr(reason))})
 		}
+		events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(lo.FromPtr(reason))})
 
 	default:
 		return nil, nil
@@ -308,228 +306,11 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 }
 
 func (o *ResponseOutbound) TransformStream(ctx context.Context, eventData []byte) (*model.InternalLLMResponse, error) {
-	if len(eventData) == 0 {
-		return nil, nil
+	events, err := o.TransformStreamEvent(ctx, eventData)
+	if err != nil {
+		return nil, err
 	}
-
-	// Handle [DONE] marker
-	if bytes.HasPrefix(eventData, []byte("[DONE]")) {
-		return &model.InternalLLMResponse{
-			Object: "[DONE]",
-		}, nil
-	}
-
-	// Initialize state if needed
-	if !o.initialized {
-		o.initialized = true
-		o.outputItems = make(map[int]ResponsesItem)
-	}
-
-	// Parse the streaming event
-	var streamEvent ResponsesStreamEvent
-	if err := json.Unmarshal(eventData, &streamEvent); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal stream event: %w", err)
-	}
-
-	resp := &model.InternalLLMResponse{
-		ID:      o.streamID,
-		Model:   o.streamModel,
-		Object:  "chat.completion.chunk",
-		Created: 0,
-	}
-
-	switch streamEvent.Type {
-	case "response.created", "response.in_progress":
-		if streamEvent.Response != nil {
-			o.streamID = streamEvent.Response.ID
-			o.streamModel = streamEvent.Response.Model
-			resp.ID = o.streamID
-			resp.Model = o.streamModel
-		}
-		resp.Choices = []model.Choice{
-			{
-				Index: 0,
-				Delta: &model.Message{
-					Role: "assistant",
-				},
-			},
-		}
-
-	case "response.output_text.delta":
-		o.mergeOutputTextDelta(streamEvent)
-		resp.Choices = []model.Choice{
-			{
-				Index: 0,
-				Delta: &model.Message{
-					Role: "assistant",
-					Content: model.MessageContent{
-						Content: lo.ToPtr(streamEvent.Delta),
-					},
-				},
-			},
-		}
-
-	case "response.function_call_arguments.delta":
-		o.mergeFunctionCallDelta(streamEvent)
-		resp.Choices = []model.Choice{
-			{
-				Index: 0,
-				Delta: &model.Message{
-					Role: "assistant",
-					ToolCalls: []model.ToolCall{
-						{
-							Index: streamEvent.OutputIndex,
-							ID:    streamEvent.CallID,
-							Type:  "function",
-							Function: model.FunctionCall{
-								Name:      streamEvent.Name,
-								Arguments: streamEvent.Delta,
-							},
-						},
-					},
-				},
-			},
-		}
-
-	case "response.output_item.added":
-		o.mergeOutputItemAdded(streamEvent)
-		if streamEvent.Item != nil && streamEvent.Item.Type == "function_call" {
-			resp.Choices = []model.Choice{
-				{
-					Index: 0,
-					Delta: &model.Message{
-						Role: "assistant",
-						ToolCalls: []model.ToolCall{
-							{
-								Index: streamEvent.OutputIndex,
-								ID:    streamEvent.Item.CallID,
-								Type:  "function",
-								Function: model.FunctionCall{
-									Name: streamEvent.Item.Name,
-								},
-							},
-						},
-					},
-				},
-			}
-		} else {
-			return nil, nil
-		}
-
-	case "response.reasoning_summary_text.delta":
-		o.mergeReasoningDelta(streamEvent)
-		resp.Choices = []model.Choice{
-			{
-				Index: 0,
-				Delta: &model.Message{
-					Role:             "assistant",
-					ReasoningContent: lo.ToPtr(streamEvent.Delta),
-				},
-			},
-		}
-
-	case "response.refusal.delta":
-		// Responses surfaces safety refusals as a distinct content-part stream
-		// (response.refusal.delta / response.refusal.done). Forward the delta
-		// on Choice.Delta.Refusal so downstream Chat Completions / Responses
-		// inbounds can emit the matching refusal events — the inbound already
-		// knows how to open a refusal content part when it sees this field.
-		resp.Choices = []model.Choice{
-			{
-				Index: 0,
-				Delta: &model.Message{
-					Role:    "assistant",
-					Refusal: streamEvent.Delta,
-				},
-			},
-		}
-
-	case "response.refusal.done":
-		// `done` carries the full refusal text which has already been streamed
-		// through `delta` events. Re-emitting it would double-count on the
-		// inbound accumulator, so drop it here — the inbound closes the
-		// refusal content part via its own terminal flow (closeMessageItem /
-		// finish_reason).
-		return nil, nil
-
-	case "response.completed":
-		if streamEvent.Response != nil {
-			if len(streamEvent.Response.Output) > 0 {
-				if rawOutput, marshalErr := json.Marshal(sanitizeResponsesItems(streamEvent.Response.Output)); marshalErr == nil {
-					resp.RawResponsesOutputItems = rawOutput
-				}
-			} else if rawOutput, ok := o.marshalTrackedOutputItems(); ok {
-				resp.RawResponsesOutputItems = rawOutput
-			}
-			finishReason, respErr := normalizeResponsesFinishReason(streamEvent.Response.Status, streamEvent.Response.Error)
-			if respErr != nil {
-				resp.Error = respErr
-			}
-			// A response may "complete" while still carrying function_call
-			// items in its output. The non-streaming path already applies
-			// this same override (see convertToLLMResponseFromResponses);
-			// mirror it here so the streaming Chat Completions finish_reason
-			// correctly signals "tool_calls" — Agent SDKs rely on the value
-			// to decide whether to run the requested tool.
-			if finishReason != nil && *finishReason == "stop" && o.responseCarriesFunctionCall(streamEvent.Response) {
-				finishReason = lo.ToPtr("tool_calls")
-			}
-			resp.Choices = []model.Choice{
-				{
-					Index:        0,
-					FinishReason: finishReason,
-				},
-			}
-			if streamEvent.Response.Usage != nil {
-				resp.Usage = convertResponsesUsage(streamEvent.Response.Usage)
-			}
-		}
-
-	case "response.failed", "response.incomplete", "error":
-		// Synthesize a terminal chunk with a legal finish_reason. Previously
-		// we emitted FinishReason="error" which is not in the OpenAI Chat
-		// Completions enum (stop | length | tool_calls | content_filter |
-		// function_call); strict downstream SDKs (Pydantic AI, OpenAI Python)
-		// reject the entire response. Pick a legal value and surface the
-		// original cause via ResponseError so the inbound layer can forward
-		// it to the client.
-		var reason *string
-		var respErr *model.ResponseError
-		switch streamEvent.Type {
-		case "response.incomplete":
-			reason = lo.ToPtr("length")
-		default:
-			reason = lo.ToPtr("stop")
-		}
-		if streamEvent.Response != nil && streamEvent.Response.Error != nil {
-			respErr = &model.ResponseError{
-				Detail: model.ErrorDetail{
-					Code:    fmt.Sprintf("%d", streamEvent.Response.Error.Code),
-					Message: streamEvent.Response.Error.Message,
-				},
-			}
-		} else if streamEvent.Code != "" || streamEvent.Message != "" {
-			respErr = &model.ResponseError{
-				Detail: model.ErrorDetail{
-					Code:    streamEvent.Code,
-					Message: streamEvent.Message,
-				},
-			}
-		}
-		resp.Error = respErr
-		resp.Choices = []model.Choice{
-			{
-				Index:        0,
-				FinishReason: reason,
-			},
-		}
-
-	default:
-		// Skip unhandled events
-		return nil, nil
-	}
-
-	return resp, nil
+	return model.InternalResponseFromStreamEvents(events), nil
 }
 
 // ResponsesRequest represents the OpenAI Responses API request format.
@@ -1068,6 +849,7 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 	// OpenAI-compatible upstreams, so keep the modern identifiers
 	// (`prompt_cache_key` / `safety_identifier`) and omit the legacy field.
 	promptCacheKey, promptCacheRetention := anthropicCacheMetadataForResponses(req)
+	responsesOptions := req.GetOpenAIResponsesOptions()
 	result := &ResponsesRequest{
 		Model:                req.Model,
 		Temperature:          req.Temperature,
@@ -1133,30 +915,30 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 	}
 
 	// Convert reasoning
-	if req.ReasoningEffort != "" || req.ReasoningBudget != nil || req.ReasoningSummary != nil || req.ReasoningGenerateSummary != nil {
+	if req.ReasoningEffort != "" || req.ReasoningBudget != nil || responsesOptions.ReasoningSummary != nil || responsesOptions.ReasoningGenerateSummary != nil {
 		result.Reasoning = &ResponsesReasoning{
 			Effort:          req.ReasoningEffort,
 			MaxTokens:       req.ReasoningBudget,
-			Summary:         req.ReasoningSummary,
-			GenerateSummary: req.ReasoningGenerateSummary,
+			Summary:         responsesOptions.ReasoningSummary,
+			GenerateSummary: responsesOptions.ReasoningGenerateSummary,
 		}
 	}
 
 	// Pass-through fields
-	result.PreviousResponseID = req.PreviousResponseID
-	result.Background = req.Background
-	result.Prompt = req.Prompt
+	result.PreviousResponseID = responsesOptions.PreviousResponseID
+	result.Background = responsesOptions.Background
+	result.Prompt = responsesOptions.Prompt
 	if result.PromptCacheKey == nil {
-		result.PromptCacheKey = req.ResponsesPromptCacheKey
+		result.PromptCacheKey = responsesOptions.PromptCacheKey
 	}
 	if result.PromptCacheRetention == nil {
-		result.PromptCacheRetention = req.PromptCacheRetention
+		result.PromptCacheRetention = responsesOptions.PromptCacheRetention
 	}
-	result.SafetyIdentifier = req.SafetyIdentifier
-	result.MaxToolCalls = req.MaxToolCalls
-	result.Conversation = req.Conversation
-	result.ContextManagement = req.ContextManagement
-	result.StreamOptions = req.ResponsesStreamOptions
+	result.SafetyIdentifier = responsesOptions.SafetyIdentifier
+	result.MaxToolCalls = responsesOptions.MaxToolCalls
+	result.Conversation = responsesOptions.Conversation
+	result.ContextManagement = responsesOptions.ContextManagement
+	result.StreamOptions = responsesOptions.StreamOptions
 	result.Include = req.Include
 	result.TopLogprobs = req.TopLogprobs
 
@@ -1166,6 +948,11 @@ func ConvertToResponsesRequest(req *model.InternalLLMRequest) *ResponsesRequest 
 func buildResponsesInput(req *model.InternalLLMRequest) ResponsesInput {
 	if req == nil {
 		return ResponsesInput{}
+	}
+	// RawInputItems is the authoritative runtime source for Responses requests,
+	// especially after websocket replay mutates it in-place for exact replay.
+	if rawInputItems := req.OpenAIRawInputItems(); len(rawInputItems) > 0 {
+		return ResponsesInput{Raw: sanitizeResponsesRawItems(rawInputItems)}
 	}
 	openaiExt := req.GetOpenAIExtensions()
 	if len(openaiExt.RawResponseItems) > 0 {

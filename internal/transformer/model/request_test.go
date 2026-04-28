@@ -108,22 +108,131 @@ func TestInternalLLMRequestValidateAllowsResponsesRawInputItems(t *testing.T) {
 	}
 }
 
-func TestInternalLLMRequestProviderExtensionViews(t *testing.T) {
-	cachedContent := "cachedContents/abc123"
+func TestInternalLLMRequestValidateRejectsRawInputItemsWithoutResponsesFormat(t *testing.T) {
+	req := &InternalLLMRequest{
+		Model: "gpt-4o",
+		RawInputItems: json.RawMessage(`[
+			{"type":"input_text","text":"hello"}
+		]`),
+	}
+
+	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "raw_input_items require OpenAI Responses api format") {
+		t.Fatalf("expected raw_input_items format validation error, got %v", err)
+	}
+}
+
+func TestInternalLLMRequestValidateRejectsInvalidRawInputItems(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{
+			name: "object",
+			raw:  json.RawMessage(`{"type":"input_text","text":"hello"}`),
+		},
+		{
+			name: "null",
+			raw:  json.RawMessage(`null`),
+		},
+		{
+			name: "empty array",
+			raw:  json.RawMessage(`[]`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &InternalLLMRequest{
+				Model:         "gpt-4o",
+				RawAPIFormat:  APIFormatOpenAIResponse,
+				RawInputItems: tt.raw,
+			}
+
+			if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "raw_input_items must be a valid JSON array") {
+				t.Fatalf("expected raw_input_items json array validation error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestInternalLLMRequestValidateRejectsPreviousResponseIDWithoutResponsesFormat(t *testing.T) {
+	previousResponseID := "resp_prev"
+	req := &InternalLLMRequest{
+		Model:              "gpt-4o",
+		PreviousResponseID: &previousResponseID,
+		Messages:           []Message{{Role: "user", Content: MessageContent{Content: requestTestStringPtr("hello")}}},
+	}
+
+	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "previous_response_id requires OpenAI Responses api format") {
+		t.Fatalf("expected previous_response_id format validation error, got %v", err)
+	}
+}
+
+func TestInternalLLMRequestValidateRejectsReplayExactWithPreviousResponseID(t *testing.T) {
+	previousResponseID := "resp_prev"
+	req := &InternalLLMRequest{
+		Model:              "gpt-4o",
+		RawAPIFormat:       APIFormatOpenAIResponse,
+		PreviousResponseID: &previousResponseID,
+		RawInputItems:      json.RawMessage(`[{"type":"input_text","text":"hello"}]`),
+	}
+	req.MarkOpenAIExactReplayRequest()
+
+	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "replay_exact request must not include previous_response_id") {
+		t.Fatalf("expected replay_exact previous_response_id validation error, got %v", err)
+	}
+}
+
+func TestInternalLLMRequestValidateRejectsReplayExactWithoutRawInputItems(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing"},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "empty array", raw: json.RawMessage(`[]`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &InternalLLMRequest{
+				Model:         "gpt-4o",
+				RawAPIFormat:  APIFormatOpenAIResponse,
+				RawInputItems: tt.raw,
+			}
+			req.MarkOpenAIExactReplayRequest()
+
+			if err := req.Validate(); err == nil {
+				t.Fatalf("expected replay_exact raw_input_items validation error")
+			}
+		})
+	}
+}
+
+func TestInternalLLMRequestMarkOpenAIExactReplayRequest(t *testing.T) {
+	req := &InternalLLMRequest{}
+	req.MarkOpenAIExactReplayRequest()
+
+	if !req.IsOpenAIExactReplayRequest() {
+		t.Fatalf("expected marked request to be detected as exact replay")
+	}
+	if req.TransformerMetadata[TransformerMetadataWSExecutionMode] != TransformerMetadataWSExecutionModeReplayExact {
+		t.Fatalf("unexpected ws execution mode metadata: %#v", req.TransformerMetadata)
+	}
+}
+
+func TestInternalLLMRequestProviderExtensionViewsUseProviderExtensionsWithoutOverridingOpenAIRawInputTruth(t *testing.T) {
 	extCachedContent := "cachedContents/ext456"
 	req := &InternalLLMRequest{
-		GeminiCachedContentRef: &cachedContent,
-		GeminiSpeechConfig:     json.RawMessage(`{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Zephyr"}}}`),
-		AnthropicMCPServers:    json.RawMessage(`[{"type":"url","url":"https://example.test/mcp"}]`),
-		AnthropicContainer:     json.RawMessage(`{"type":"auto"}`),
-		RawInputItems:          json.RawMessage(`[{"type":"message","role":"user"}]`),
+		RawInputItems: json.RawMessage(`[{"type":"message","role":"user"}]`),
 		ProviderExtensions: &ProviderExtensions{
 			Gemini: &GeminiExtension{
 				CachedContentRef: &extCachedContent,
 				SpeechConfig:     json.RawMessage(`{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Puck"}}}`),
 			},
 			Anthropic: &AnthropicExtension{
-				Container: json.RawMessage(`{"type":"custom"}`),
+				MCPServers: json.RawMessage(`[{"type":"url","url":"https://example.test/mcp"}]`),
+				Container:  json.RawMessage(`{"type":"custom"}`),
 			},
 			OpenAI: &OpenAIExtension{
 				RawResponseItems: json.RawMessage(`[{"type":"computer_call","id":"call_1"}]`),
@@ -141,8 +250,8 @@ func TestInternalLLMRequestProviderExtensionViews(t *testing.T) {
 	}
 
 	anthropic := req.GetAnthropicExtensions()
-	if string(anthropic.MCPServers) == "" {
-		t.Fatalf("expected Anthropic MCP servers extension")
+	if !strings.Contains(string(anthropic.MCPServers), "example.test/mcp") {
+		t.Fatalf("expected Anthropic MCP servers extension, got %s", anthropic.MCPServers)
 	}
 	if !strings.Contains(string(anthropic.Container), "custom") {
 		t.Fatalf("expected Anthropic extension container, got %s", anthropic.Container)
@@ -155,12 +264,246 @@ func TestInternalLLMRequestProviderExtensionViews(t *testing.T) {
 	if openai.ResponsesPassthroughReason != "computer_use item" {
 		t.Fatalf("unexpected OpenAI Responses passthrough reason: %q", openai.ResponsesPassthroughReason)
 	}
-	if !strings.Contains(string(openai.RawResponseItems), "computer_call") {
-		t.Fatalf("expected extension raw response items, got %s", openai.RawResponseItems)
+	if !strings.Contains(string(openai.RawResponseItems), "\"role\":\"user\"") {
+		t.Fatalf("expected RawInputItems to remain authoritative for OpenAI raw response items, got %s", openai.RawResponseItems)
+	}
+	if strings.Contains(string(openai.RawResponseItems), "computer_call") {
+		t.Fatalf("expected stale OpenAI extension payload to stay out of the view, got %s", openai.RawResponseItems)
 	}
 }
 
-func TestInternalLLMRequestIRViews(t *testing.T) {
+func TestInternalLLMRequestProviderExtensionViewsFallbackToCompatibilityMirrors(t *testing.T) {
+	cachedContent := "cachedContents/abc123"
+	req := &InternalLLMRequest{
+		GeminiCachedContentRef: &cachedContent,
+		GeminiSpeechConfig:     json.RawMessage(`{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Zephyr"}}}`),
+		AnthropicMCPServers:    json.RawMessage(`[{"type":"url","url":"https://example.test/mcp"}]`),
+		AnthropicContainer:     json.RawMessage(`{"type":"auto"}`),
+	}
+
+	gemini := req.GetGeminiExtensions()
+	if gemini.CachedContentRef == nil || *gemini.CachedContentRef != cachedContent {
+		t.Fatalf("expected top-level Gemini cached content compatibility field, got %#v", gemini.CachedContentRef)
+	}
+	if !strings.Contains(string(gemini.SpeechConfig), "Zephyr") {
+		t.Fatalf("expected top-level Gemini speech config compatibility field, got %s", gemini.SpeechConfig)
+	}
+
+	anthropic := req.GetAnthropicExtensions()
+	if !strings.Contains(string(anthropic.MCPServers), "example.test/mcp") {
+		t.Fatalf("expected top-level Anthropic mcp_servers compatibility field, got %s", anthropic.MCPServers)
+	}
+	if !strings.Contains(string(anthropic.Container), "auto") {
+		t.Fatalf("expected top-level Anthropic container compatibility field, got %s", anthropic.Container)
+	}
+}
+
+func TestInternalLLMRequestSetProviderExtensionsSynchronizesCompatibilityMirrors(t *testing.T) {
+	cachedContent := "cachedContents/sync"
+	req := &InternalLLMRequest{}
+	req.SetGeminiExtensions(GeminiExtension{
+		CachedContentRef: &cachedContent,
+		SpeechConfig:     json.RawMessage(`{"voiceConfig":{"prebuiltVoiceConfig":{"voiceName":"Nova"}}}`),
+	})
+	req.SetAnthropicExtensions(AnthropicExtension{
+		MCPServers: json.RawMessage(`[{"type":"url","url":"https://example.test/mcp"}]`),
+		Container:  json.RawMessage(`{"type":"auto"}`),
+	})
+	req.SetOpenAIRawInputItems(json.RawMessage(`[{"type":"computer_call","call_id":"call_1"}]`))
+	req.MarkOpenAIResponsesPassthroughRequired("tool:computer_use")
+
+	if req.ProviderExtensions == nil || req.ProviderExtensions.OpenAI == nil || req.ProviderExtensions.Gemini == nil || req.ProviderExtensions.Anthropic == nil {
+		t.Fatalf("expected provider extensions to be fully populated, got %#v", req.ProviderExtensions)
+	}
+	if req.GeminiCachedContentRef == nil || *req.GeminiCachedContentRef != cachedContent {
+		t.Fatalf("expected Gemini compatibility mirror to sync, got %#v", req.GeminiCachedContentRef)
+	}
+	if !strings.Contains(string(req.GeminiSpeechConfig), "Nova") {
+		t.Fatalf("expected Gemini speech config mirror to sync, got %s", req.GeminiSpeechConfig)
+	}
+	if !strings.Contains(string(req.AnthropicMCPServers), "example.test/mcp") || !strings.Contains(string(req.AnthropicContainer), "auto") {
+		t.Fatalf("expected Anthropic mirrors to sync, got mcp=%s container=%s", req.AnthropicMCPServers, req.AnthropicContainer)
+	}
+	if !strings.Contains(string(req.RawInputItems), "computer_call") {
+		t.Fatalf("expected OpenAI raw input items mirror to sync, got %s", req.RawInputItems)
+	}
+	if !req.HasOpenAIResponsesPassthrough() || req.OpenAIResponsesPassthroughReasonTextValue() != "tool:computer_use" {
+		t.Fatalf("expected OpenAI passthrough mirrors to sync, got required=%t reason=%q", req.HasOpenAIResponsesPassthrough(), req.OpenAIResponsesPassthroughReasonTextValue())
+	}
+}
+
+func TestInternalLLMRequestSetProviderExtensionsDefensivelyCopiesRawMessages(t *testing.T) {
+	req := &InternalLLMRequest{}
+	geminiRaw := json.RawMessage(`{"voice":"A"}`)
+	anthropicRaw := json.RawMessage(`[{"url":"https://example.test/a"}]`)
+	openAIRaw := json.RawMessage(`[{"type":"message","id":"msg_1"}]`)
+
+	req.SetGeminiExtensions(GeminiExtension{SpeechConfig: geminiRaw})
+	req.SetAnthropicExtensions(AnthropicExtension{MCPServers: anthropicRaw})
+	req.SetOpenAIExtensions(OpenAIExtension{RawResponseItems: openAIRaw})
+
+	geminiRaw[0] = '['
+	anthropicRaw[0] = '{'
+	openAIRaw[0] = '{'
+
+	if string(req.ProviderExtensions.Gemini.SpeechConfig) != `{"voice":"A"}` {
+		t.Fatalf("expected Gemini speech config to be defensively copied, got %s", req.ProviderExtensions.Gemini.SpeechConfig)
+	}
+	if string(req.ProviderExtensions.Anthropic.MCPServers) != `[{"url":"https://example.test/a"}]` {
+		t.Fatalf("expected Anthropic MCP servers to be defensively copied, got %s", req.ProviderExtensions.Anthropic.MCPServers)
+	}
+	if string(req.ProviderExtensions.OpenAI.RawResponseItems) != `[{"type":"message","id":"msg_1"}]` {
+		t.Fatalf("expected OpenAI raw response items to be defensively copied, got %s", req.ProviderExtensions.OpenAI.RawResponseItems)
+	}
+}
+
+func TestCloneProviderExtensionsDeepCopiesPointerFields(t *testing.T) {
+	cachedContent := "cachedContents/original"
+	ext := &ProviderExtensions{
+		Anthropic: &AnthropicExtension{
+			CacheControl: &CacheControl{Type: CacheControlTypeEphemeral, TTL: CacheTTL5m},
+		},
+		Gemini: &GeminiExtension{
+			CachedContentRef: &cachedContent,
+		},
+	}
+
+	cloned := CloneProviderExtensions(ext)
+	if cloned == nil || cloned.Anthropic == nil || cloned.Gemini == nil {
+		t.Fatalf("expected provider extensions to clone, got %#v", cloned)
+	}
+
+	ext.Anthropic.CacheControl.TTL = CacheTTL1h
+	cachedContent = "cachedContents/mutated"
+
+	if cloned.Anthropic.CacheControl == ext.Anthropic.CacheControl || cloned.Anthropic.CacheControl.TTL != CacheTTL5m {
+		t.Fatalf("expected cache control to be deep-copied, got %#v", cloned.Anthropic.CacheControl)
+	}
+	if cloned.Gemini.CachedContentRef == ext.Gemini.CachedContentRef || *cloned.Gemini.CachedContentRef != "cachedContents/original" {
+		t.Fatalf("expected cached content ref to be deep-copied, got %#v", cloned.Gemini.CachedContentRef)
+	}
+}
+
+func TestInternalLLMRequestGetOpenAIExtensionsPrefersRawInputItems(t *testing.T) {
+	req := &InternalLLMRequest{
+		RawInputItems: json.RawMessage(`[{"type":"function_call_output","output":"fresh"}]`),
+		ProviderExtensions: &ProviderExtensions{
+			OpenAI: &OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[{"type":"input_text","text":"stale"}]`),
+			},
+		},
+	}
+
+	openai := req.GetOpenAIExtensions()
+	if !strings.Contains(string(openai.RawResponseItems), "fresh") {
+		t.Fatalf("expected RawInputItems to remain authoritative, got %s", openai.RawResponseItems)
+	}
+	if strings.Contains(string(openai.RawResponseItems), "stale") {
+		t.Fatalf("expected stale extension payload to be ignored when RawInputItems exist, got %s", openai.RawResponseItems)
+	}
+}
+
+func TestInternalLLMRequestSetOpenAIExtensionsDoesNotOverwriteRawInputItems(t *testing.T) {
+	req := &InternalLLMRequest{
+		RawInputItems: json.RawMessage(`[{"type":"function_call_output","output":"fresh"}]`),
+	}
+
+	req.SetOpenAIExtensions(OpenAIExtension{
+		RawResponseItems:           json.RawMessage(`[{"type":"input_text","text":"stale"}]`),
+		ResponsesPassthroughReason: "tool:test",
+	})
+
+	if !strings.Contains(string(req.RawInputItems), "fresh") {
+		t.Fatalf("expected RawInputItems to keep authoritative payload, got %s", req.RawInputItems)
+	}
+	if strings.Contains(string(req.RawInputItems), "stale") {
+		t.Fatalf("expected SetOpenAIExtensions to avoid overwriting RawInputItems, got %s", req.RawInputItems)
+	}
+}
+
+func TestInternalLLMRequestGetOpenAIExtensionsClonesProviderRawResponseItems(t *testing.T) {
+	req := &InternalLLMRequest{
+		ProviderExtensions: &ProviderExtensions{
+			OpenAI: &OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[{"type":"input_text","text":"provider"}]`),
+			},
+		},
+	}
+
+	openai := req.GetOpenAIExtensions()
+	openai.RawResponseItems[0] = '{'
+
+	if string(req.ProviderExtensions.OpenAI.RawResponseItems) != `[{"type":"input_text","text":"provider"}]` {
+		t.Fatalf("expected provider RawResponseItems to stay isolated, got %s", req.ProviderExtensions.OpenAI.RawResponseItems)
+	}
+}
+
+func TestInternalLLMRequestSetOpenAIRawInputItemsCanClearMirror(t *testing.T) {
+	req := &InternalLLMRequest{}
+	req.SetOpenAIRawInputItems(json.RawMessage(`[{"type":"input_text","text":"hello"}]`))
+	req.SetOpenAIRawInputItems(nil)
+
+	if len(req.RawInputItems) != 0 {
+		t.Fatalf("expected RawInputItems to clear, got %s", req.RawInputItems)
+	}
+	if req.ProviderExtensions == nil || req.ProviderExtensions.OpenAI == nil {
+		t.Fatalf("expected OpenAI provider extension mirror to exist")
+	}
+	if len(req.ProviderExtensions.OpenAI.RawResponseItems) != 0 {
+		t.Fatalf("expected OpenAI provider extension mirror to clear, got %s", req.ProviderExtensions.OpenAI.RawResponseItems)
+	}
+}
+
+func TestInternalLLMRequestOpenAIResponsesOptionsRoundTripAndClone(t *testing.T) {
+	previousID := "resp_prev"
+	background := true
+	cacheKey := "cache-key"
+	retention := "24h"
+	safetyID := "safe-user"
+	maxToolCalls := int64(8)
+	summary := "auto"
+	generateSummary := "concise"
+	req := &InternalLLMRequest{}
+
+	req.SetOpenAIResponsesOptions(OpenAIResponsesOptions{
+		PreviousResponseID:       &previousID,
+		Background:               &background,
+		Prompt:                   json.RawMessage(`{"id":"prompt_1"}`),
+		PromptCacheKey:           &cacheKey,
+		PromptCacheRetention:     &retention,
+		SafetyIdentifier:         &safetyID,
+		MaxToolCalls:             &maxToolCalls,
+		Conversation:             json.RawMessage(`{"id":"conv_1"}`),
+		ContextManagement:        json.RawMessage(`{"strategy":"auto"}`),
+		StreamOptions:            json.RawMessage(`{"include_usage":true}`),
+		ReasoningSummary:         &summary,
+		ReasoningGenerateSummary: &generateSummary,
+		RawInputItems:            json.RawMessage(`[{"type":"input_text","text":"hello"}]`),
+	})
+
+	options := req.GetOpenAIResponsesOptions()
+	if options.PreviousResponseID == nil || *options.PreviousResponseID != previousID {
+		t.Fatalf("expected previous response id to round-trip, got %#v", options.PreviousResponseID)
+	}
+	if !strings.Contains(string(options.Prompt), "prompt_1") || !strings.Contains(string(options.RawInputItems), "hello") {
+		t.Fatalf("expected raw responses options to round-trip, got prompt=%s raw=%s", options.Prompt, options.RawInputItems)
+	}
+	if req.ProviderExtensions == nil || req.ProviderExtensions.OpenAI == nil ||
+		string(req.ProviderExtensions.OpenAI.RawResponseItems) != string(req.RawInputItems) {
+		t.Fatalf("expected raw input mirror to stay synchronized")
+	}
+
+	*options.PreviousResponseID = "mutated"
+	options.RawInputItems[0] = 'x'
+	if req.OpenAIPreviousResponseID() != previousID {
+		t.Fatalf("expected previous response id getter to be clone-safe, got %q", req.OpenAIPreviousResponseID())
+	}
+	if !strings.Contains(string(req.RawInputItems), "hello") {
+		t.Fatalf("expected raw input items to be clone-safe, got %s", req.RawInputItems)
+	}
+}
+
+func TestInternalLLMRequestProviderFields(t *testing.T) {
 	content := "hello"
 	temperature := 0.7
 	topK := int64(40)
@@ -204,49 +547,56 @@ func TestInternalLLMRequestIRViews(t *testing.T) {
 		RawAPIFormat:     APIFormatOpenAIResponse,
 		ExtraBody:        json.RawMessage(`{"provider":"extra"}`),
 		Query:            url.Values{"timeout": []string{"30"}},
-		ProviderExtensions: &ProviderExtensions{OpenAI: &OpenAIExtension{
-			RawResponseItems: json.RawMessage(`[{
-				"type":"message"
-			}]`),
-		}},
+		ProviderExtensions: &ProviderExtensions{
+			OpenAI: &OpenAIExtension{
+				RawResponseItems: json.RawMessage(`[{
+					"type":"message"
+				}]`),
+			},
+			Gemini: &GeminiExtension{
+				CachedContentRef: &cachedContent,
+				SpeechConfig:     json.RawMessage(`{"voiceConfig":{"voiceName":"Puck"}}`),
+			},
+			Anthropic: &AnthropicExtension{
+				MCPServers: json.RawMessage(`[{"type":"url"}]`),
+				Container:  json.RawMessage(`{"type":"auto"}`),
+			},
+		},
 		PreviousResponseID: &previousResponseID,
 		RawInputItems: json.RawMessage(`[{
 			"type":"message"
 		}]`),
-		GeminiCachedContentRef: &cachedContent,
-		GeminiSpeechConfig:     json.RawMessage(`{"voiceConfig":{"voiceName":"Puck"}}`),
-		AnthropicMCPServers:    json.RawMessage(`[{"type":"url"}]`),
-		AnthropicContainer:     json.RawMessage(`{"type":"auto"}`),
 	}
 	req.MarkOpenAIResponsesPassthroughRequired("raw item")
 
-	view := req.IRView()
-	if view.Core.Model != req.Model || len(view.Core.Messages) != 1 || len(view.Core.Tools) != 1 {
-		t.Fatalf("unexpected core view: %#v", view.Core)
+	if req.Model != "gpt-4o" || len(req.Messages) != 1 || len(req.Tools) != 1 {
+		t.Fatalf("unexpected core request fields: %#v", req)
 	}
-	if view.Core.Stream == nil || !*view.Core.Stream || view.Core.StreamOptions == nil || !view.Core.StreamOptions.IncludeUsage {
-		t.Fatalf("unexpected stream core view: %#v", view.Core)
+	if req.Stream == nil || !*req.Stream || req.StreamOptions == nil || !req.StreamOptions.IncludeUsage {
+		t.Fatalf("unexpected stream request fields: %#v", req.StreamOptions)
 	}
-	if view.Sampling.Temperature != &temperature || view.Sampling.TopK != &topK {
-		t.Fatalf("unexpected sampling view: %#v", view.Sampling)
+	if req.Temperature != &temperature || req.TopK != &topK {
+		t.Fatalf("unexpected sampling fields: temperature=%v topK=%v", req.Temperature, req.TopK)
 	}
-	if view.Capabilities.ReasoningBudget != &reasoningBudget || !view.Capabilities.AdaptiveThinking || view.Capabilities.EnableThinking != &enableThinking {
-		t.Fatalf("unexpected capability reasoning view: %#v", view.Capabilities)
+	if req.ReasoningBudget != &reasoningBudget || !req.AdaptiveThinking || req.EnableThinking != &enableThinking {
+		t.Fatalf("unexpected reasoning capability fields: %#v", req)
 	}
-	if view.Capabilities.Verbosity != &verbosity || view.Capabilities.ServiceTier != &serviceTier || view.Capabilities.Truncation != &truncation {
-		t.Fatalf("unexpected capability passthrough view: %#v", view.Capabilities)
+	if req.Verbosity != &verbosity || req.ServiceTier != &serviceTier || req.Truncation != &truncation {
+		t.Fatalf("unexpected passthrough capability fields: verbosity=%v serviceTier=%v truncation=%v", req.Verbosity, req.ServiceTier, req.Truncation)
 	}
-	if view.Provider.RawAPIFormat != APIFormatOpenAIResponse || view.Provider.Extensions != req.ProviderExtensions {
-		t.Fatalf("unexpected provider view: %#v", view.Provider)
+	if req.RawAPIFormat != APIFormatOpenAIResponse || req.ProviderExtensions == nil || req.ProviderExtensions.OpenAI == nil {
+		t.Fatalf("unexpected provider fields: %#v", req.ProviderExtensions)
 	}
-	if view.Provider.OpenAIResponses.PreviousResponseID != &previousResponseID || len(view.Provider.OpenAIResponses.RawInputItems) == 0 {
-		t.Fatalf("unexpected OpenAI Responses provider view: %#v", view.Provider.OpenAIResponses)
+	if req.PreviousResponseID != &previousResponseID || len(req.RawInputItems) == 0 {
+		t.Fatalf("unexpected OpenAI Responses fields: previous=%v raw=%s", req.PreviousResponseID, req.RawInputItems)
 	}
-	if view.Provider.Gemini.CachedContentRef != &cachedContent || !strings.Contains(string(view.Provider.Gemini.SpeechConfig), "Puck") {
-		t.Fatalf("unexpected Gemini provider view: %#v", view.Provider.Gemini)
+	geminiExt := req.GetGeminiExtensions()
+	if geminiExt.CachedContentRef == nil || *geminiExt.CachedContentRef != cachedContent || !strings.Contains(string(geminiExt.SpeechConfig), "Puck") {
+		t.Fatalf("unexpected Gemini fields: cached=%v speech=%s", geminiExt.CachedContentRef, geminiExt.SpeechConfig)
 	}
-	if len(view.Provider.Anthropic.MCPServers) == 0 || len(view.Provider.Anthropic.Container) == 0 {
-		t.Fatalf("unexpected Anthropic provider view: %#v", view.Provider.Anthropic)
+	anthropicExt := req.GetAnthropicExtensions()
+	if len(anthropicExt.MCPServers) == 0 || len(anthropicExt.Container) == 0 {
+		t.Fatalf("unexpected Anthropic fields: mcp=%s container=%s", anthropicExt.MCPServers, anthropicExt.Container)
 	}
 }
 func TestStreamAggregatorMergesChatChunks(t *testing.T) {
@@ -349,7 +699,7 @@ func TestOpenAIResponsesPassthroughTypedFieldsAndMetadataFallback(t *testing.T) 
 	req := &InternalLLMRequest{}
 	req.MarkOpenAIResponsesPassthroughRequired("tool:web_search")
 	req.MarkOpenAIResponsesPassthroughRequired("input:computer_call")
-	if !req.OpenAIResponsesPassthroughRequired || !req.RequiresOpenAIResponsesPassthrough() {
+	if !req.OpenAIResponsesPassthroughRequired || !req.HasOpenAIResponsesPassthrough() {
 		t.Fatalf("expected typed passthrough flag")
 	}
 	if req.OpenAIResponsesPassthroughReason != "tool:web_search,input:computer_call" {
@@ -357,6 +707,9 @@ func TestOpenAIResponsesPassthroughTypedFieldsAndMetadataFallback(t *testing.T) 
 	}
 	if req.TransformerMetadata[TransformerMetadataOpenAIResponsesPassthroughRequired] != "true" {
 		t.Fatalf("expected metadata compatibility flag")
+	}
+	if req.OpenAIResponsesPassthroughReasonTextValue() != req.OpenAIResponsesPassthroughReason {
+		t.Fatalf("expected new passthrough reason accessor to prefer typed field")
 	}
 	if ext := req.GetOpenAIExtensions(); !ext.ResponsesPassthroughRequired || ext.ResponsesPassthroughReason != req.OpenAIResponsesPassthroughReason {
 		t.Fatalf("unexpected OpenAI extension view: %#v", ext)
@@ -366,8 +719,16 @@ func TestOpenAIResponsesPassthroughTypedFieldsAndMetadataFallback(t *testing.T) 
 		TransformerMetadataOpenAIResponsesPassthroughRequired: "true",
 		TransformerMetadataOpenAIResponsesPassthroughReason:   "legacy",
 	}}
-	if !legacy.RequiresOpenAIResponsesPassthrough() || legacy.OpenAIResponsesPassthroughReasonText() != "legacy" {
-		t.Fatalf("expected metadata fallback, got %#v", legacy)
+	if !legacy.HasOpenAIResponsesPassthrough() || legacy.OpenAIResponsesPassthroughReasonTextValue() != "legacy" {
+		t.Fatalf("expected metadata fallback on new accessors, got %#v", legacy)
+	}
+
+	providerOnly := &InternalLLMRequest{ProviderExtensions: &ProviderExtensions{OpenAI: &OpenAIExtension{
+		ResponsesPassthroughRequired: true,
+		ResponsesPassthroughReason:   " provider ",
+	}}}
+	if !providerOnly.HasOpenAIResponsesPassthrough() || providerOnly.OpenAIResponsesPassthroughReasonTextValue() != "provider" {
+		t.Fatalf("expected provider extension fallback on passthrough accessors, got %#v", providerOnly)
 	}
 }
 

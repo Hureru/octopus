@@ -812,10 +812,8 @@ func resolveAnthropicUserID(req *model.InternalLLMRequest) string {
 			return userID
 		}
 	}
-	if req.TransformerMetadata != nil {
-		if userID := strings.TrimSpace(req.TransformerMetadata["anthropic_user_id"]); userID != "" {
-			return userID
-		}
+	if userID := req.TransformerMetadataValue(model.TransformerMetadataAnthropicUserID); userID != "" {
+		return userID
 	}
 	if req.User != nil {
 		return strings.TrimSpace(*req.User)
@@ -1650,8 +1648,7 @@ func collectAnthropicBetaHeaders(req *anthropicModel.MessageRequest, internal *m
 	// opt-in metadata flag because enabling it changes per-token pricing.
 	// Opus 4.6 and Sonnet 4.6 support 1M natively without the beta header.
 	if internal != nil && isContext1MEligibleModel(req.Model) {
-		if internal.TransformerMetadata != nil &&
-			strings.EqualFold(strings.TrimSpace(internal.TransformerMetadata["anthropic_context_1m"]), "true") {
+		if internal.TransformerMetadataBool(model.TransformerMetadataAnthropicContext1M) {
 			add("context-1m-2025-08-07")
 		}
 	}
