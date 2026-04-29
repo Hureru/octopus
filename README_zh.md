@@ -407,3 +407,7 @@ base_url = "http://127.0.0.1:8080/v1"
 
 - 🙏 [looplj/axonhub](https://github.com/looplj/axonhub) - 本项目的 LLM API 适配模块直接源自该仓库的实现
 - 📊 [sst/models.dev](https://github.com/sst/models.dev) - AI 模型数据库，提供模型价格数据
+
+## 🔗 友链
+
+- 🐧 [LinuxDO](https://linux.do) - 真正的技术社区

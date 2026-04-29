@@ -406,3 +406,7 @@ Compatible with [bestruirui/octopus](https://github.com/bestruirui/octopus), ~18
 - 🙏 [looplj/axonhub](https://github.com/looplj/axonhub) - The LLM API adaptation module in this project is directly derived from this repository
 - 📊 [sst/models.dev](https://github.com/sst/models.dev) - AI model database providing model pricing data
 
+## 🔗 Friend Links
+
+- 🐧 [LinuxDO](https://linux.do) - A community for tech enthusiasts
+
