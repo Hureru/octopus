@@ -75,6 +75,7 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 		return nil, fmt.Errorf("group not found")
 	}
 	oldName := oldGroup.Name
+	affectedChannelIDs := groupUpdateAffectedChannelIDs(oldGroup, req)
 
 	tx := db.GetDB().WithContext(ctx).Begin()
 	defer func() {
@@ -189,7 +190,37 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 	if oldName != "" && oldName != group.Name {
 		groupMap.Del(oldName)
 	}
+	resetBalancerStateForChannels(affectedChannelIDs...)
 	return &group, nil
+}
+
+func groupUpdateAffectedChannelIDs(oldGroup model.Group, req *model.GroupUpdateRequest) []int {
+	itemChannels := make(map[int]int, len(oldGroup.Items))
+	for _, item := range oldGroup.Items {
+		itemChannels[item.ID] = item.ChannelID
+	}
+
+	ids := make([]int, 0, len(oldGroup.Items)+len(req.ItemsToAdd))
+	if req.Mode != nil || req.SessionKeepTime != nil {
+		for _, item := range oldGroup.Items {
+			ids = append(ids, item.ChannelID)
+		}
+	}
+	if req.RetryEnabled != nil || req.MaxRetries != nil {
+		for _, item := range oldGroup.Items {
+			ids = append(ids, item.ChannelID)
+		}
+	}
+	for _, itemID := range req.ItemsToDelete {
+		ids = append(ids, itemChannels[itemID])
+	}
+	for _, item := range req.ItemsToUpdate {
+		ids = append(ids, itemChannels[item.ID])
+	}
+	for _, item := range req.ItemsToAdd {
+		ids = append(ids, item.ChannelID)
+	}
+	return ids
 }
 
 func GroupDel(id int, ctx context.Context) error {
@@ -221,6 +252,9 @@ func GroupDel(id int, ctx context.Context) error {
 
 	groupCache.Del(id)
 	groupMap.Del(group.Name)
+	for _, item := range group.Items {
+		resetBalancerStateForChannel(item.ChannelID)
+	}
 	return nil
 }
 
@@ -233,7 +267,11 @@ func GroupItemAdd(item *model.GroupItem, ctx context.Context) error {
 		return err
 	}
 
-	return groupRefreshCacheByID(item.GroupID, ctx)
+	if err := groupRefreshCacheByID(item.GroupID, ctx); err != nil {
+		return err
+	}
+	resetBalancerStateForChannel(item.ChannelID)
+	return nil
 }
 
 func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context.Context) error {
@@ -291,7 +329,15 @@ func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context
 		return fmt.Errorf("failed to create group items: %w", err)
 	}
 
-	return groupRefreshCacheByID(groupID, ctx)
+	if err := groupRefreshCacheByID(groupID, ctx); err != nil {
+		return err
+	}
+	channelIDs := make([]int, 0, len(uniq))
+	for _, item := range uniq {
+		channelIDs = append(channelIDs, item.ChannelID)
+	}
+	resetBalancerStateForChannels(channelIDs...)
+	return nil
 }
 
 func GroupItemUpdate(item *model.GroupItem, ctx context.Context) error {
@@ -301,7 +347,11 @@ func GroupItemUpdate(item *model.GroupItem, ctx context.Context) error {
 		return err
 	}
 
-	return groupRefreshCacheByID(item.GroupID, ctx)
+	if err := groupRefreshCacheByID(item.GroupID, ctx); err != nil {
+		return err
+	}
+	resetBalancerStateForChannel(item.ChannelID)
+	return nil
 }
 
 func GroupItemDel(id int, ctx context.Context) error {
@@ -314,7 +364,11 @@ func GroupItemDel(id int, ctx context.Context) error {
 		return err
 	}
 
-	return groupRefreshCacheByID(item.GroupID, ctx)
+	if err := groupRefreshCacheByID(item.GroupID, ctx); err != nil {
+		return err
+	}
+	resetBalancerStateForChannel(item.ChannelID)
+	return nil
 }
 
 // GroupItemBatchDelByChannelAndModels 根据渠道ID和模型名称批量删除分组项
@@ -351,6 +405,11 @@ func GroupItemBatchDelByChannelAndModels(keys []model.GroupIDAndLLMName, ctx con
 		return fmt.Errorf("failed to refresh group cache: %w", err)
 	}
 
+	channelIDs := make([]int, 0, len(keys))
+	for _, key := range keys {
+		channelIDs = append(channelIDs, key.ChannelID)
+	}
+	resetBalancerStateForChannels(channelIDs...)
 	return nil
 }
 

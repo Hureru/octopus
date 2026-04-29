@@ -53,3 +53,13 @@ func SetSticky(apiKeyID int, requestModel string, channelID, keyID int) {
 func DeleteSticky(apiKeyID int, requestModel string) {
 	globalSession.Delete(sessionKey(apiKeyID, requestModel))
 }
+
+func resetStickyByChannel(channelID int) {
+	globalSession.Range(func(key, value any) bool {
+		entry, ok := value.(*SessionEntry)
+		if ok && entry.ChannelID == channelID {
+			globalSession.Delete(key)
+		}
+		return true
+	})
+}

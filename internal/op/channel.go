@@ -257,6 +257,7 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	}
 
 	channel, _ := channelCache.Get(req.ID)
+	resetBalancerStateForChannel(req.ID)
 	return &channel, nil
 }
 
@@ -275,6 +276,7 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 	}
 	oldChannel.Enabled = enabled
 	channelCache.Set(id, oldChannel)
+	resetBalancerStateForChannel(id)
 	return nil
 }
 
@@ -288,6 +290,7 @@ func ChannelEnabledManaged(id int, enabled bool, ctx context.Context) error {
 	}
 	oldChannel.Enabled = enabled
 	channelCache.Set(id, oldChannel)
+	resetBalancerStateForChannel(id)
 	return nil
 }
 
@@ -370,6 +373,7 @@ func channelDel(id int, ctx context.Context, bypassManagedCheck bool) error {
 		}
 	}
 	StatsChannelDel(id)
+	resetBalancerStateForChannel(id)
 
 	// 刷新受影响的分组缓存
 	for _, groupID := range affectedGroupIDs {

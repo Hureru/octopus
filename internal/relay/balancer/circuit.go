@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type circuitEntry struct {
 	ConsecutiveFailures int64
 	LastFailureTime     time.Time
 	TripCount           int // 累计熔断触发次数（用于指数退避）
+	HalfOpenSince       time.Time
 	mu                  sync.Mutex
 }
 
@@ -39,6 +41,16 @@ var globalBreaker sync.Map // key: string -> value: *circuitEntry
 // circuitKey 生成熔断器键：channelID:channelKeyID:modelName
 func circuitKey(channelID, keyID int, modelName string) string {
 	return fmt.Sprintf("%d:%d:%s", channelID, keyID, modelName)
+}
+
+func resetCircuitBreakerByChannel(channelID int) {
+	prefix := fmt.Sprintf("%d:", channelID)
+	globalBreaker.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && strings.HasPrefix(k, prefix) {
+			globalBreaker.Delete(k)
+		}
+		return true
+	})
 }
 
 // getOrCreateEntry 获取或创建熔断器条目
@@ -108,7 +120,9 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 		cooldown := GetCooldown(entry.TripCount)
 		elapsed := time.Since(entry.LastFailureTime)
 		if elapsed >= cooldown {
+			now := time.Now()
 			entry.State = StateHalfOpen
+			entry.HalfOpenSince = now
 			log.Infof("circuit breaker [%s] Open -> HalfOpen (cooldown %v elapsed)", key, cooldown)
 			return false, 0
 		}
@@ -116,6 +130,17 @@ func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining 
 		return true, cooldown - elapsed
 
 	case StateHalfOpen:
+		cooldown := GetCooldown(entry.TripCount)
+		if entry.HalfOpenSince.IsZero() {
+			entry.HalfOpenSince = time.Now()
+		}
+		if time.Since(entry.HalfOpenSince) >= cooldown {
+			entry.State = StateOpen
+			entry.LastFailureTime = time.Now()
+			entry.HalfOpenSince = time.Time{}
+			log.Warnf("circuit breaker [%s] HalfOpen -> Open (probe timed out, cooldown=%v)", key, cooldown)
+			return true, cooldown
+		}
 		// 已有试探请求在进行中，拒绝其他请求
 		return true, 0
 
@@ -144,6 +169,7 @@ func RecordSuccess(channelID, keyID int, modelName string) {
 	entry.State = StateClosed
 	entry.ConsecutiveFailures = 0
 	entry.TripCount = 0
+	entry.HalfOpenSince = time.Time{}
 }
 
 // RecordFailure 记录失败，可能触发熔断。
@@ -157,6 +183,7 @@ func RecordFailure(channelID, keyID int, modelName string, kind FailureKind) {
 	defer entry.mu.Unlock()
 
 	entry.LastFailureTime = time.Now()
+	entry.HalfOpenSince = time.Time{}
 
 	switch entry.State {
 	case StateClosed:
