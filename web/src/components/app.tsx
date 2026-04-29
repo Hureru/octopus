@@ -11,6 +11,7 @@ import { NavBar, useNavStore } from '@/components/modules/navbar';
 import { useTranslations } from 'next-intl'
 import Logo, { LOGO_DRAW_END_MS } from '@/components/modules/logo';
 import { Toolbar } from '@/components/modules/toolbar';
+import { ChannelTabSwitcher, ChannelHeaderActions } from '@/components/modules/channel/TabSwitcher';
 import { ENTRANCE_VARIANTS } from '@/lib/animations/fluid-transitions';
 import { useQueryClient } from '@tanstack/react-query';
 import { CONTENT_MAP } from '@/route';
@@ -232,13 +233,15 @@ export function AppContainer() {
                                 animate="animate"
                                 exit="exit"
                                 transition={{ duration: 0.3 }}
-                                className="flex items-center"
+                                className="flex items-baseline gap-6"
                             >
                                 <span className="text-3xl font-bold mt-1">{t(activeItem)}</span>
+                                {activeItem === 'channel' && <ChannelTabSwitcher />}
                             </motion.div>
                         </AnimatePresence>
                     </div>
-                    <div className="ml-auto">
+                    <div className="ml-auto flex items-center gap-3">
+                        {activeItem === 'channel' && <ChannelHeaderActions />}
                         <Toolbar />
                     </div>
                 </header>
