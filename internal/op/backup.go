@@ -84,6 +84,9 @@ func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DB
 		if err := conn.Find(&d.StatsAPIKey).Error; err != nil {
 			return nil, fmt.Errorf("export stats_api_key: %w", err)
 		}
+		if err := conn.Find(&d.StatsSiteModelHourly).Error; err != nil {
+			return nil, fmt.Errorf("export stats_site_model_hourly: %w", err)
+		}
 	}
 
 	if includeLogs {
@@ -437,6 +440,24 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 				return fmt.Errorf("import stats_api_key: %w", err)
 			} else {
 				res.RowsAffected["stats_api_key"] = n
+			}
+
+			// StatsSiteModelHourly: remap SiteAccountID (composite PK)
+			filteredSiteModelHourly := make([]model.StatsSiteModelHourly, 0, len(dump.StatsSiteModelHourly))
+			for _, row := range dump.StatsSiteModelHourly {
+				newID, ok := accountIDMap[row.SiteAccountID]
+				if !ok {
+					continue
+				}
+				row.SiteAccountID = newID
+				filteredSiteModelHourly = append(filteredSiteModelHourly, row)
+			}
+			if n, err := createUpsertAll(tx, filteredSiteModelHourly, []clause.Column{
+				{Name: "hour"}, {Name: "site_account_id"}, {Name: "group_key"}, {Name: "model_name"},
+			}); err != nil {
+				return fmt.Errorf("import stats_site_model_hourly: %w", err)
+			} else {
+				res.RowsAffected["stats_site_model_hourly"] = n
 			}
 		}
 

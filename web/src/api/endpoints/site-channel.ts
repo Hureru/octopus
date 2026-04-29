@@ -23,22 +23,18 @@ export type SiteRouteSummary = {
     count: number;
 };
 
-export type SiteModelHistoryEntry = {
+export type SiteModelHistoryBucket = {
     time: number;
-    success: boolean;
-    route_type: SiteModelRouteType;
-    channel_id: number;
-    channel_name: string;
-    request_model: string;
-    actual_model: string;
-    error?: string;
+    success: number;
+    failure: number;
 };
 
 export type SiteModelHistorySummary = {
     success_count: number;
     failure_count: number;
     last_request_at?: number | null;
-    recent: SiteModelHistoryEntry[];
+    bucket_span?: number;
+    buckets?: SiteModelHistoryBucket[];
 };
 
 export type SiteModelRouteMetadata = {
@@ -133,15 +129,11 @@ type SiteChannelModelServer = Omit<SiteChannelModel, 'route_type' | 'route_metad
         success_count?: number | null;
         failure_count?: number | null;
         last_request_at?: number | null;
-        recent?: Array<{
+        bucket_span?: number | null;
+        buckets?: Array<{
             time?: number | null;
-            success?: boolean | null;
-            route_type?: string | null;
-            channel_id?: number | null;
-            channel_name?: string | null;
-            request_model?: string | null;
-            actual_model?: string | null;
-            error?: string | null;
+            success?: number | null;
+            failure?: number | null;
         }> | null;
     } | null;
 };
@@ -220,15 +212,14 @@ function normalizeSiteModel(model: SiteChannelModelServer): SiteChannelModel {
                     typeof model.history.last_request_at === 'number'
                         ? model.history.last_request_at
                         : null,
-                recent: (model.history.recent ?? []).map((entry) => ({
-                    time: typeof entry.time === 'number' ? entry.time : 0,
-                    success: Boolean(entry.success),
-                    route_type: normalizeSiteModelRouteType(entry.route_type),
-                    channel_id: typeof entry.channel_id === 'number' ? entry.channel_id : 0,
-                    channel_name: typeof entry.channel_name === 'string' ? entry.channel_name : '',
-                    request_model: typeof entry.request_model === 'string' ? entry.request_model : '',
-                    actual_model: typeof entry.actual_model === 'string' ? entry.actual_model : '',
-                    error: typeof entry.error === 'string' ? entry.error : undefined,
+                bucket_span:
+                    typeof model.history.bucket_span === 'number'
+                        ? model.history.bucket_span
+                        : 0,
+                buckets: (model.history.buckets ?? []).map((b) => ({
+                    time: typeof b.time === 'number' ? b.time : 0,
+                    success: typeof b.success === 'number' ? b.success : 0,
+                    failure: typeof b.failure === 'number' ? b.failure : 0,
                 })),
             }
             : null,

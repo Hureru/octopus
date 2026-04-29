@@ -574,102 +574,48 @@ func TestUpdateSiteSourceKeysNormalizesPrefix(t *testing.T) {
 	}
 }
 
-func TestSiteChannelModelHistoryForAccountCountsRetryAttempts(t *testing.T) {
-	site := model.Site{Platform: model.SitePlatformNewAPI}
-	account := model.SiteAccount{
-		ID: 1,
-		ChannelBindings: []model.SiteChannelBinding{
-			{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ChannelID: 11},
-			{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ChannelID: 22},
-		},
-		Models: []model.SiteModel{
-			{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", RouteType: model.SiteModelRouteTypeOpenAIChat},
-			{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ModelName: "claude-3-5-sonnet", RouteType: model.SiteModelRouteTypeAnthropic},
-		},
+func TestSiteChannelHistoryBucketingChoosesAdaptiveSpan(t *testing.T) {
+	hour := int64(3600)
+	day := 24 * hour
+	cases := []struct {
+		spanSeconds int64
+		want        int
+	}{
+		{spanSeconds: hour, want: int(hour)},
+		{spanSeconds: 24 * hour, want: int(hour)},
+		{spanSeconds: 7 * day, want: int(6 * hour)},
+		{spanSeconds: 30 * day, want: int(day)},
+		{spanSeconds: 90 * day, want: int(7 * day)},
 	}
-
-	history, err := siteChannelModelHistoryForAccount(site, account, []model.RelayLog{{
-		Time:             200,
-		RequestModelName: "gpt-4o",
-		ActualModelName:  "claude-3-5-sonnet",
-		Attempts: []model.ChannelAttempt{
-			{ChannelID: 11, ChannelName: "channel-a", ModelName: "gpt-4o-mini", Status: model.AttemptSkipped, Msg: "no key"},
-			{ChannelID: 11, ChannelName: "channel-a", ModelName: "gpt-4o-mini", Status: model.AttemptFailed, Msg: "429 upstream"},
-			{ChannelID: 11, ChannelName: "channel-a", ModelName: "gpt-4o-mini", Status: model.AttemptFailed, Msg: "500 upstream"},
-			{ChannelID: 22, ChannelName: "channel-b", ModelName: "claude-3-5-sonnet", Status: model.AttemptSuccess},
-			{ChannelID: 22, ChannelName: "channel-b", ModelName: "claude-3-5-sonnet", Status: model.AttemptCircuitBreak, Msg: "breaker"},
-		},
-	}})
-	if err != nil {
-		t.Fatalf("siteChannelModelHistoryForAccount failed: %v", err)
-	}
-
-	chatKey := model.SiteDefaultGroupKey + "\x00gpt-4o-mini"
-	chatSummary := history[chatKey]
-	if chatSummary == nil {
-		t.Fatalf("expected retry history for %q", chatKey)
-	}
-	if chatSummary.SuccessCount != 0 || chatSummary.FailureCount != 2 {
-		t.Fatalf("expected chat retry counts 0/2, got success=%d failure=%d", chatSummary.SuccessCount, chatSummary.FailureCount)
-	}
-	if len(chatSummary.Recent) != 2 {
-		t.Fatalf("expected 2 recent retry entries, got %d", len(chatSummary.Recent))
-	}
-	if chatSummary.Recent[0].Error != "500 upstream" || chatSummary.Recent[1].Error != "429 upstream" {
-		t.Fatalf("expected retry entries in reverse attempt order, got %+v", chatSummary.Recent)
-	}
-	if chatSummary.Recent[0].RouteType != model.SiteModelRouteTypeOpenAIChat {
-		t.Fatalf("expected retry route type %q, got %q", model.SiteModelRouteTypeOpenAIChat, chatSummary.Recent[0].RouteType)
-	}
-
-	anthropicKey := model.SiteDefaultGroupKey + "\x00claude-3-5-sonnet"
-	anthropicSummary := history[anthropicKey]
-	if anthropicSummary == nil {
-		t.Fatalf("expected success history for %q", anthropicKey)
-	}
-	if anthropicSummary.SuccessCount != 1 || anthropicSummary.FailureCount != 0 {
-		t.Fatalf("expected anthropic counts 1/0, got success=%d failure=%d", anthropicSummary.SuccessCount, anthropicSummary.FailureCount)
-	}
-	if len(anthropicSummary.Recent) != 1 {
-		t.Fatalf("expected only one real success entry, got %d", len(anthropicSummary.Recent))
-	}
-	if anthropicSummary.Recent[0].ActualModel != "claude-3-5-sonnet" {
-		t.Fatalf("expected success actual model to use attempt model, got %+v", anthropicSummary.Recent[0])
+	for _, c := range cases {
+		got := chooseBucketSpan(c.spanSeconds)
+		if got != c.want {
+			t.Errorf("chooseBucketSpan(%d) = %d, want %d", c.spanSeconds, got, c.want)
+		}
 	}
 }
 
-func TestSiteChannelModelHistoryForAccountFallsBackForLegacyLogs(t *testing.T) {
-	site := model.Site{Platform: model.SitePlatformNewAPI}
-	account := model.SiteAccount{
-		ID:              1,
-		ChannelBindings: []model.SiteChannelBinding{{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ChannelID: 11}},
-		Models:          []model.SiteModel{{SiteAccountID: 1, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", RouteType: model.SiteModelRouteTypeOpenAIChat}},
+func TestBuildSiteModelSummaryAggregatesAndBuckets(t *testing.T) {
+	hourBase := 1_000_000
+	hours := []model.StatsSiteModelHourly{
+		{Hour: hourBase, GroupKey: "g", ModelName: "m", StatsMetrics: model.StatsMetrics{RequestSuccess: 3, RequestFailed: 1}},
+		{Hour: hourBase + 1, GroupKey: "g", ModelName: "m", StatsMetrics: model.StatsMetrics{RequestSuccess: 2, RequestFailed: 0}},
+		{Hour: hourBase + 5, GroupKey: "g", ModelName: "m", StatsMetrics: model.StatsMetrics{RequestSuccess: 0, RequestFailed: 4}},
 	}
-
-	history, err := siteChannelModelHistoryForAccount(site, account, []model.RelayLog{{
-		Time:             300,
-		RequestModelName: "gpt-4o",
-		ChannelId:        11,
-		ChannelName:      "channel-a",
-		ActualModelName:  "gpt-4o-mini",
-		Error:            "legacy failure",
-	}})
-	if err != nil {
-		t.Fatalf("siteChannelModelHistoryForAccount failed: %v", err)
+	summary := buildSiteModelSummary(hours)
+	if summary.SuccessCount != 5 || summary.FailureCount != 5 {
+		t.Fatalf("expected counts 5/5, got %d/%d", summary.SuccessCount, summary.FailureCount)
 	}
-
-	key := model.SiteDefaultGroupKey + "\x00gpt-4o-mini"
-	summary := history[key]
-	if summary == nil {
-		t.Fatalf("expected legacy history for %q", key)
+	if summary.BucketSpan != 3600 {
+		t.Fatalf("expected 1h bucket for short span, got %d", summary.BucketSpan)
 	}
-	if summary.SuccessCount != 0 || summary.FailureCount != 1 {
-		t.Fatalf("expected legacy counts 0/1, got success=%d failure=%d", summary.SuccessCount, summary.FailureCount)
+	if len(summary.Buckets) != 3 {
+		t.Fatalf("expected 3 hourly buckets, got %d", len(summary.Buckets))
 	}
-	if len(summary.Recent) != 1 {
-		t.Fatalf("expected one legacy recent entry, got %d", len(summary.Recent))
+	if summary.Buckets[0].Success != 3 || summary.Buckets[0].Failure != 1 {
+		t.Fatalf("first bucket mismatch: %+v", summary.Buckets[0])
 	}
-	if summary.Recent[0].Error != "legacy failure" || summary.Recent[0].ChannelID != 11 {
-		t.Fatalf("unexpected legacy recent entry: %+v", summary.Recent[0])
+	if summary.LastRequestAt == nil || *summary.LastRequestAt < int64(hourBase+5)*3600 {
+		t.Fatalf("expected LastRequestAt to reflect latest hour, got %v", summary.LastRequestAt)
 	}
 }

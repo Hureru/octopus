@@ -41,6 +41,8 @@ import {
 
 dayjs.extend(relativeTime);
 
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts';
+
 const DAYJS_LOCALE_MAP: Record<'zh_hans' | 'zh_hant' | 'en', string> = {
     zh_hans: 'zh-cn',
     zh_hant: 'zh-tw',
@@ -696,9 +698,31 @@ const SITE_GROUP_FILTER_ALL_VALUE = '__site-group-all__';
 
 function HistorySummary({ model }: { model: SiteModelView }) {
     const summary = summarizeHistory(model.history);
+    const buckets = model.history?.buckets ?? [];
+    const bucketSpan = model.history?.bucket_span ?? 0;
+
+    const chartData = buckets.map((b) => {
+        const total = b.success + b.failure;
+        const successRate = total === 0 ? null : Math.round((b.success / total) * 100);
+        return {
+            time: b.time,
+            success: b.success,
+            failure: b.failure,
+            total,
+            successRate,
+        };
+    });
+
+    const formatBucketTime = (time: number) => {
+        const d = dayjs(time * 1000);
+        if (bucketSpan >= 7 * 86400) return d.format('YY-MM-DD');
+        if (bucketSpan >= 86400) return d.format('MM-DD');
+        if (bucketSpan >= 3600) return d.format('MM-DD HH:mm');
+        return d.format('HH:mm');
+    };
 
     return (
-        <div className="w-[22rem] space-y-3 p-4 text-left">
+        <div className="w-[24rem] space-y-3 p-4 text-left">
             <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2">
                     <div className="truncate text-sm font-semibold text-foreground">{model.model_name}</div>
@@ -726,38 +750,78 @@ function HistorySummary({ model }: { model: SiteModelView }) {
                 </div>
             </div>
 
-            {model.history?.recent?.length ? (
-                <div className="space-y-2">
-                    {model.history.recent.map((item, index) => (
-                        <div
-                            key={`${item.time}-${item.channel_id}-${item.request_model}-${item.actual_model}-${index}`}
-                            className="rounded-xl border border-border/60 bg-background/80 px-3 py-2"
-                        >
-                            <div className="flex items-center justify-between gap-2 text-[11px]">
-                                <span className={cn('font-medium', item.success ? 'text-emerald-600 dark:text-emerald-300' : 'text-destructive')}>
-                                    {item.success ? '成功' : '失败'}
-                                </span>
-                                <span className="text-muted-foreground">{formatHistoryTime(item.time)}</span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-                                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                    {routeTypeLabel(item.route_type)}
-                                </Badge>
-                                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                                    #{item.channel_id}
-                                </Badge>
-                                <span className="truncate">{item.channel_name}</span>
-                            </div>
-                            <div className="mt-2 text-[11px] text-foreground">
-                                <span className="font-medium">{item.request_model || '-'}</span>
-                                <span className="mx-1 text-muted-foreground">→</span>
-                                <span>{item.actual_model || item.request_model || '-'}</span>
-                            </div>
-                            {item.error ? (
-                                <div className="mt-1 line-clamp-2 text-[10px] text-destructive">{item.error}</div>
-                            ) : null}
-                        </div>
-                    ))}
+            {chartData.length > 0 ? (
+                <div className="rounded-xl border border-border/60 bg-background/70 p-2">
+                    <div className="h-32 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 4, left: 4 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/50" />
+                                <XAxis
+                                    dataKey="time"
+                                    tickFormatter={formatBucketTime}
+                                    tick={{ fontSize: 10 }}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    minTickGap={24}
+                                />
+                                <YAxis
+                                    yAxisId="rate"
+                                    domain={[0, 100]}
+                                    tick={{ fontSize: 10 }}
+                                    tickFormatter={(v) => `${v}%`}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    width={32}
+                                />
+                                <YAxis
+                                    yAxisId="count"
+                                    orientation="right"
+                                    tick={{ fontSize: 10 }}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    width={24}
+                                    allowDecimals={false}
+                                />
+                                <RechartsTooltip
+                                    cursor={{ fill: 'oklch(var(--muted) / 0.4)' }}
+                                    content={({ active, payload }) => {
+                                        if (!active || !payload || payload.length === 0) return null;
+                                        const point = payload[0].payload as typeof chartData[number];
+                                        return (
+                                            <div className="rounded-lg border border-border/70 bg-popover/95 px-3 py-2 text-[11px] shadow-md backdrop-blur">
+                                                <div className="font-medium text-foreground">{formatBucketTime(point.time)}</div>
+                                                <div className="mt-1 flex items-center gap-3 text-muted-foreground">
+                                                    <span className="text-emerald-600 dark:text-emerald-300">成功 {point.success}</span>
+                                                    <span className="text-destructive">失败 {point.failure}</span>
+                                                </div>
+                                                <div className="text-muted-foreground">
+                                                    成功率 {point.successRate === null ? '—' : `${point.successRate}%`}
+                                                </div>
+                                            </div>
+                                        );
+                                    }}
+                                />
+                                <Bar
+                                    yAxisId="count"
+                                    dataKey="total"
+                                    fill="oklch(var(--muted-foreground) / 0.18)"
+                                    radius={[2, 2, 0, 0]}
+                                    isAnimationActive={false}
+                                />
+                                <Line
+                                    yAxisId="rate"
+                                    type="monotone"
+                                    dataKey="successRate"
+                                    stroke="oklch(var(--primary))"
+                                    strokeWidth={2}
+                                    dot={{ r: 2 }}
+                                    activeDot={{ r: 3 }}
+                                    connectNulls
+                                    isAnimationActive={false}
+                                />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
                 </div>
             ) : (
                 <div className="rounded-xl border border-dashed border-border/70 bg-background/50 px-3 py-4 text-center text-xs text-muted-foreground">

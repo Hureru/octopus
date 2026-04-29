@@ -24,12 +24,13 @@ type DBDump struct {
 	APIKeys             []APIKey             `json:"api_keys,omitempty"`
 	Settings            []Setting            `json:"settings,omitempty"`
 
-	StatsTotal   []StatsTotal   `json:"stats_total,omitempty"`
-	StatsDaily   []StatsDaily   `json:"stats_daily,omitempty"`
-	StatsHourly  []StatsHourly  `json:"stats_hourly,omitempty"`
-	StatsModel   []StatsModel   `json:"stats_model,omitempty"`
-	StatsChannel []StatsChannel `json:"stats_channel,omitempty"`
-	StatsAPIKey  []StatsAPIKey  `json:"stats_api_key,omitempty"`
+	StatsTotal           []StatsTotal           `json:"stats_total,omitempty"`
+	StatsDaily           []StatsDaily           `json:"stats_daily,omitempty"`
+	StatsHourly          []StatsHourly          `json:"stats_hourly,omitempty"`
+	StatsModel           []StatsModel           `json:"stats_model,omitempty"`
+	StatsChannel         []StatsChannel         `json:"stats_channel,omitempty"`
+	StatsAPIKey          []StatsAPIKey          `json:"stats_api_key,omitempty"`
+	StatsSiteModelHourly []StatsSiteModelHourly `json:"stats_site_model_hourly,omitempty"`
 
 	RelayLogs []RelayLog `json:"relay_logs,omitempty"`
 }

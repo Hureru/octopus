@@ -43,6 +43,17 @@ type StatsAPIKey struct {
 	StatsMetrics
 }
 
+// StatsSiteModelHourly 站点渠道按小时聚合的请求统计，
+// 用于站点渠道页折线图，覆盖任意时间跨度的可用性趋势。
+type StatsSiteModelHourly struct {
+	Hour          int    `json:"hour" gorm:"primaryKey;autoIncrement:false"`
+	SiteAccountID int    `json:"site_account_id" gorm:"primaryKey;index:idx_stats_site_model_lookup"`
+	GroupKey      string `json:"group_key" gorm:"primaryKey;type:varchar(128);index:idx_stats_site_model_lookup"`
+	ModelName     string `json:"model_name" gorm:"primaryKey;type:varchar(128);index:idx_stats_site_model_lookup"`
+	Date          string `json:"date" gorm:"not null;type:varchar(8)"`
+	StatsMetrics
+}
+
 // Add aggregates another StatsMetrics into the current one.
 func (s *StatsMetrics) Add(delta StatsMetrics) {
 	s.InputToken += delta.InputToken

@@ -78,21 +78,17 @@ type SiteChannelModel struct {
 }
 
 type SiteModelHistorySummary struct {
-	SuccessCount  int                     `json:"success_count"`
-	FailureCount  int                     `json:"failure_count"`
-	LastRequestAt *int64                  `json:"last_request_at,omitempty"`
-	Recent        []SiteModelHistoryEntry `json:"recent"`
+	SuccessCount  int                      `json:"success_count"`
+	FailureCount  int                      `json:"failure_count"`
+	LastRequestAt *int64                   `json:"last_request_at,omitempty"`
+	BucketSpan    int                      `json:"bucket_span,omitempty"` // 桶宽（秒），0 表示无数据
+	Buckets       []SiteModelHistoryBucket `json:"buckets,omitempty"`
 }
 
-type SiteModelHistoryEntry struct {
-	Time         int64              `json:"time"`
-	Success      bool               `json:"success"`
-	RouteType    SiteModelRouteType `json:"route_type"`
-	ChannelID    int                `json:"channel_id"`
-	ChannelName  string             `json:"channel_name"`
-	RequestModel string             `json:"request_model"`
-	ActualModel  string             `json:"actual_model"`
-	Error        string             `json:"error,omitempty"`
+type SiteModelHistoryBucket struct {
+	Time    int64 `json:"time"`
+	Success int   `json:"success"`
+	Failure int   `json:"failure"`
 }
 
 type SiteModelRouteUpdateRequest struct {

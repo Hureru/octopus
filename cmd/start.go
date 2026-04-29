@@ -55,6 +55,9 @@ var startCmd = &cobra.Command{
 
 		task.Init()
 		safe.Go("task-runner", task.RUN)
+		safe.Go("stats-site-model-backfill", func() {
+			op.StatsSiteModelBackfill(cmd.Context())
+		})
 	},
 }
 

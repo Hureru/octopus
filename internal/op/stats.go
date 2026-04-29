@@ -103,7 +103,6 @@ func persistStatsSnapshots(
 	apiKeyIDs []int,
 ) error {
 	dbConn := db.GetDB().WithContext(ctx)
-
 	if result := dbConn.Save(&totalSnap); result.Error != nil {
 		return result.Error
 	}
@@ -155,6 +154,10 @@ func persistStatsSnapshots(
 		if result := dbConn.Save(&ak); result.Error != nil {
 			return result.Error
 		}
+	}
+
+	if err := StatsSiteModelHourlySaveDB(ctx); err != nil {
+		return err
 	}
 
 	return nil
