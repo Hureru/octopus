@@ -144,7 +144,10 @@ function ModelPickerSection({
                                             const isSelected = selectedKeys.has(memberKey(m));
                                             const { Avatar } = getModelIcon(m.name);
                                             const sourceLabel = modelSourceLabel(m);
-                                            const suffix = [sourceLabel, m.endpoint_type?.trim()].filter(Boolean).join(' · ');
+                                            const isSiteChannel = m.site_id != null;
+                                            const suffix = [sourceLabel, isSiteChannel ? null : m.endpoint_type?.trim()]
+                                                .filter(Boolean)
+                                                .join(' · ');
                                             return (
                                                 <button
                                                     key={memberKey(m)}

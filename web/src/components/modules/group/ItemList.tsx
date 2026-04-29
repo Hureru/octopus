@@ -60,7 +60,10 @@ function MemberItem({
     const { Avatar: ModelAvatar } = getModelIcon(member.name);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const isDisabled = member.enabled === false;
-    const sourceLabel = [member.channel_name, member.endpoint_type?.trim()].filter(Boolean).join(' · ');
+    const isSiteChannel = member.site_id != null;
+    const sourceLabel = [member.channel_name, isSiteChannel ? null : member.endpoint_type?.trim()]
+        .filter(Boolean)
+        .join(' · ');
 
     return (
         <div
