@@ -80,7 +80,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui
 import { toast } from '@/components/common/Toast';
 import { cn, formatCount, formatMoney } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
-import { useMasonryColumns } from '@/lib/use-masonry-columns';
 import { useSettingStore } from '@/stores/setting';
 import {
     type SiteChannelAccount,
@@ -2755,11 +2754,11 @@ function SiteCard({
             <div
                 ref={(node) => registerCardRef(card.site_id, node)}
                 className={cn(
-                    'rounded-[1.75rem] transition-all',
+                    'h-full rounded-[1.75rem] transition-all',
                     highlighted && 'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
                 )}
             >
-                <MorphingDialogTrigger className="w-full">
+                <MorphingDialogTrigger className="h-full w-full">
                     <article
                         className="flex h-full w-full flex-col gap-4 rounded-3xl border border-border/70 bg-card p-4 text-left transition hover:border-primary/20 hover:bg-card/90"
                         style={{
@@ -2855,7 +2854,7 @@ function SiteCard({
                         </dl>
 
                         {summary.routeCounts.size > 0 ? (
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-1 flex-wrap content-center gap-2">
                                 {SITE_ROUTE_DISPLAY_ORDER.filter((routeType) => (summary.routeCounts.get(routeType) ?? 0) > 0).map((routeType) => (
                                     <Badge key={routeType} variant="outline" className={cn('h-6 shrink-0 px-2 text-[11px]', getRouteTypeTone(routeType))}>
                                         {SHORT_ROUTE_LABEL[routeType] ?? routeTypeLabel(routeType)}
@@ -2864,7 +2863,7 @@ function SiteCard({
                                 ))}
                             </div>
                         ) : (
-                            <div className="text-xs text-muted-foreground">{tCard('noRouteDistribution')}</div>
+                            <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">{tCard('noRouteDistribution')}</div>
                         )}
                     </article>
                 </MorphingDialogTrigger>
@@ -3079,28 +3078,32 @@ function SiteChannelGrid({
     clearPending: (requestId?: number) => void;
     requestJump: (target: JumpTarget) => void;
 }) {
-    const columnCompute = useCallback((width: number) => {
+    const [containerEl, setContainerEl] = useState<HTMLElement | null>(null);
+    const [width, setWidth] = useState<number>(() =>
+        typeof window === 'undefined' ? 1024 : window.innerWidth,
+    );
+
+    useEffect(() => {
+        if (!containerEl) return;
+        const update = () => setWidth(containerEl.clientWidth);
+        update();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(update);
+        observer.observe(containerEl);
+        return () => observer.disconnect();
+    }, [containerEl]);
+
+    const columnCount = useMemo(() => {
         if (layout === 'list') return 1;
         const MIN_CARD_WIDTH = 320;
         const GUTTER = 16;
         const cols = Math.floor((width + GUTTER) / (MIN_CARD_WIDTH + GUTTER));
         return Math.max(1, Math.min(6, cols));
-    }, [layout]);
-
-    const {
-        setContainerNode,
-        measureItem,
-        columns,
-        columnCount,
-    } = useMasonryColumns({
-        items: cards,
-        getId: (card) => card.site_id,
-        fallbackHeight: 260,
-        computeColumnCount: columnCompute,
-    });
+    }, [layout, width]);
 
     const renderCard = (card: SiteChannelCard) => (
         <SiteCard
+            key={card.site_id}
             card={card}
             layout={layout}
             jumpRequest={pendingSiteChannelJump?.target.siteId === card.site_id ? pendingSiteChannelJump : null}
@@ -3119,31 +3122,19 @@ function SiteChannelGrid({
 
     if (columnCount === 1) {
         return (
-            <section ref={setContainerNode} className="space-y-4">
-                {cards.map((card) => (
-                    <div key={card.site_id} ref={(node) => measureItem(card.site_id, node)}>
-                        {renderCard(card)}
-                    </div>
-                ))}
+            <section ref={setContainerEl} className="space-y-4">
+                {cards.map(renderCard)}
             </section>
         );
     }
 
     return (
         <section
-            ref={setContainerNode}
-            className="grid items-start gap-4"
+            ref={setContainerEl}
+            className="grid gap-4"
             style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
         >
-            {columns.map((col, index) => (
-                <div key={index} className="space-y-4">
-                    {col.map((card) => (
-                        <div key={card.site_id} ref={(node) => measureItem(card.site_id, node)}>
-                            {renderCard(card)}
-                        </div>
-                    ))}
-                </div>
-            ))}
+            {cards.map(renderCard)}
         </section>
     );
 }
