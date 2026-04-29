@@ -287,7 +287,8 @@ func buildResponsesCompactRequest(ctx context.Context, channel *dbmodel.Channel,
 
 func copyProxyHeaders(src http.Header, channel *dbmodel.Channel, dst http.Header) {
 	for key, values := range src {
-		if hopByHopHeaders[strings.ToLower(key)] {
+		lowerKey := strings.ToLower(key)
+		if hopByHopHeaders[lowerKey] || lowerKey == "content-type" {
 			continue
 		}
 		for _, value := range values {
@@ -295,6 +296,9 @@ func copyProxyHeaders(src http.Header, channel *dbmodel.Channel, dst http.Header
 		}
 	}
 	for _, header := range channel.CustomHeader {
+		if strings.EqualFold(header.HeaderKey, "Content-Type") {
+			continue
+		}
 		dst.Set(header.HeaderKey, header.HeaderValue)
 	}
 }

@@ -1197,6 +1197,10 @@ func TestHandleResponsesCompactProxiesSuccessfulResponse(t *testing.T) {
 			http.Error(w, fmt.Sprintf(`{"error":"unexpected auth %q"}`, got), http.StatusUnauthorized)
 			return
 		}
+		if got := r.Header.Values("Content-Type"); len(got) != 1 || got[0] != "application/json" {
+			http.Error(w, fmt.Sprintf(`{"error":"unexpected content-type values %#v"}`, got), http.StatusBadRequest)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		if !strings.Contains(string(body), `"previous_response_id":"resp_123"`) {
 			http.Error(w, `{"error":"missing previous_response_id"}`, http.StatusBadRequest)
@@ -1208,12 +1212,13 @@ func TestHandleResponsesCompactProxiesSuccessfulResponse(t *testing.T) {
 	defer server.Close()
 
 	channel := &model.Channel{
-		Name:     "relay-compact-openai",
-		Type:     outbound.OutboundTypeOpenAIResponse,
-		Enabled:  true,
-		BaseUrls: []model.BaseUrl{{URL: server.URL + "/v1"}},
-		Model:    "compact-model",
-		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "compact-key"}},
+		Name:         "relay-compact-openai",
+		Type:         outbound.OutboundTypeOpenAIResponse,
+		Enabled:      true,
+		BaseUrls:     []model.BaseUrl{{URL: server.URL + "/v1"}},
+		Model:        "compact-model",
+		CustomHeader: []model.CustomHeader{{HeaderKey: "Content-Type", HeaderValue: "text/plain"}},
+		Keys:         []model.ChannelKey{{Enabled: true, ChannelKey: "compact-key"}},
 	}
 	if err := op.ChannelCreate(channel, ctx); err != nil {
 		t.Fatalf("ChannelCreate failed: %v", err)
@@ -1231,7 +1236,7 @@ func TestHandleResponsesCompactProxiesSuccessfulResponse(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Set("api_key_id", 42)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"relay-compact-group","previous_response_id":"resp_123"}`))
-	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Content-Type", "application/json; charset=utf-8")
 
 	HandleResponsesCompact(c)
 

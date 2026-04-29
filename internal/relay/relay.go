@@ -658,6 +658,9 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 
 	// 复制请求头
 	ra.copyHeaders(outboundRequest)
+	if ra.channel.Type == outbound.OutboundTypeOpenAIResponse {
+		outboundRequest.Header.Set("Content-Type", "application/json")
+	}
 
 	// 发送请求
 	response, err := ra.sendRequest(outboundRequest)
@@ -1064,6 +1067,7 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughOpenAIResponses(ctx context.Con
 		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
 	}
 	ra.copyHeaders(outboundRequest)
+	outboundRequest.Header.Set("Content-Type", "application/json")
 
 	response, err := ra.sendRequest(outboundRequest)
 	if err != nil {
