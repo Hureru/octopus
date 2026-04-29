@@ -10,6 +10,8 @@
 
 </div>
 
+> Forked from [bestruirui/octopus](https://github.com/bestruirui/octopus) — see [Differences from Upstream](#-differences-from-upstream) for what this fork changes.
+
 
 ## ✨ Features
 
@@ -370,6 +372,32 @@ Edit `~/.codex/auth.json`
   "OPENAI_API_KEY": "sk-octopus-P48ROljwJmWBYVARjwQM8Nkiezlg7WOrXXOWDYY8TI5p9Mzg"
 }
 ```
+
+---
+
+## 🔀 Differences from Upstream
+
+Compatible with [bestruirui/octopus](https://github.com/bestruirui/octopus), ~180 commits ahead on `dev`.
+
+### 🏗️ New subsystems
+
+- **🌐 Site Management & Site Sync** — full new resource layer (backend `sitesync/` + dedicated frontend modules). Manages aggregator-site accounts: scheduled sync, check-in, balance / today's income, per-site pricing, archive/restore, AnyRouter, route probing, `sub2api`, and projected site channels.
+- **🔌 WebSocket relay** — upstream WS connection pool with health backoff, client-facing WS, and native Responses passthrough for Codex tools.
+- **🖼️ OpenAI Images API forwarding** with body cache.
+- **🩹 Transformer overhaul** — native StreamEvent pipeline across all adapters, Anthropic patching layer, role-alternation normalization, plus a long tail of cross-format fidelity fixes.
+
+### 🛠️ Reworked
+
+- **Channel module** — tabbed Site/Manual layout; group editor preserves channel metadata.
+- **Relay core** — route learning, retry, cancel propagation, Responses compact proxy, log filtering by channel ID.
+- **Auth** — JWT secret persisted in DB (rotation-safe), no longer derived from credentials.
+- **Backup**, **logs** (`Item.tsx` rewrite), and **home charts** redesigned.
+
+### 🧬 Misc
+
+- Claude Opus 4.7 adaptive thinking; DB migrations 003–008; new Site Automation panel in Settings.
+
+> Full diff: `git log upstream/dev..HEAD` after adding `https://github.com/bestruirui/octopus` as `upstream`.
 
 ---
 
