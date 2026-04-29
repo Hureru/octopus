@@ -2070,6 +2070,7 @@ func (t *geminiSchemaTransformer) transform(schemaNode any) {
 			"additionalProperties", "oneOf", "default",
 			"propertyNames",
 			"$defs",
+			"uniqueItems", "multipleOf",
 		} {
 			delete(node, k)
 		}
