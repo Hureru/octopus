@@ -1084,7 +1084,7 @@ func (i *MessagesInbound) TransformStream(ctx context.Context, stream *model.Int
 				toolCallIndex := deltaToolCall.Index
 
 				// Initialize tool call if it doesn't exist
-				if !i.toolCallIndices[toolCallIndex] {
+				if !i.toolCallIndices[toolCallIndex] || !i.hasToolContentStarted {
 					// 只有当此前确实已经打开过一个 tool_use 块（即将开启第二个或之后的
 					// 工具块）时才发 stop；用 toolCallIndex>0 判断不可靠，因为上游
 					// （尤其是 Responses API）把 OutputIndex 写入该字段，首个工具块
@@ -1311,7 +1311,7 @@ func (i *MessagesInbound) TransformStreamEvents(ctx context.Context, events []mo
 		if i.toolCallIndices == nil {
 			i.toolCallIndices = make(map[int]bool)
 		}
-		if i.toolCallIndices[toolCall.Index] {
+		if i.toolCallIndices[toolCall.Index] && i.hasToolContentStarted {
 			return nil
 		}
 		if err := closeOpenBlock(); err != nil {

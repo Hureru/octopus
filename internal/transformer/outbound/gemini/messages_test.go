@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -117,6 +118,57 @@ func TestConvertGeminiRequestDowngradesUnsignedHistoricalToolUse(t *testing.T) {
 	if out.Contents[1].Parts[0].FunctionResponse == nil {
 		t.Fatalf("expected matching tool result to be sent as functionResponse, got %+v", out.Contents[1].Parts[0])
 	}
+}
+
+func TestTransformStreamEventAssignsMonotonicToolIndexesAcrossChunks(t *testing.T) {
+	outbound := &MessagesOutbound{}
+	eventsFor := func(name string) []model.StreamEvent {
+		t.Helper()
+		chunk, err := json.Marshal(model.GeminiGenerateContentResponse{
+			ResponseId:   "resp_1",
+			ModelVersion: "gemini-test",
+			Candidates: []*model.GeminiCandidate{{
+				Index: 0,
+				Content: &model.GeminiContent{
+					Role: "model",
+					Parts: []*model.GeminiPart{{
+						FunctionCall: &model.GeminiFunctionCall{
+							Name: name,
+							Args: map[string]any{"path": "."},
+						},
+					}},
+				},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("marshal chunk: %v", err)
+		}
+		events, err := outbound.TransformStreamEvent(context.Background(), chunk)
+		if err != nil {
+			t.Fatalf("TransformStreamEvent(%s): %v", name, err)
+		}
+		return events
+	}
+
+	first := firstToolStart(t, eventsFor("Read"))
+	second := firstToolStart(t, eventsFor("Read"))
+	if first.Index != 0 || first.ID != "call_Read_0" {
+		t.Fatalf("unexpected first tool call: %+v", first)
+	}
+	if second.Index != 1 || second.ID != "call_Read_1" {
+		t.Fatalf("expected second chunk to use a fresh tool index/id, got %+v", second)
+	}
+}
+
+func firstToolStart(t *testing.T, events []model.StreamEvent) model.ToolCall {
+	t.Helper()
+	for _, event := range events {
+		if event.Kind == model.StreamEventKindToolCallStart && event.ToolCall != nil {
+			return *event.ToolCall
+		}
+	}
+	t.Fatalf("tool call start not found in %+v", events)
+	return model.ToolCall{}
 }
 
 func TestConvertGeminiResponseGeneratesAnthropicSafeToolCallID(t *testing.T) {

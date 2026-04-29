@@ -28,6 +28,7 @@ type MessagesOutbound struct {
 	// monotonically-increasing Index to bind signatures to the correct
 	// thinking block. See G-C4.
 	streamReasoningIndex map[int]int
+	streamToolCallIndex  int
 }
 
 func (o *MessagesOutbound) nextReasoningIndex(candidateIndex int) int {
@@ -36,6 +37,12 @@ func (o *MessagesOutbound) nextReasoningIndex(candidateIndex int) int {
 	}
 	idx := o.streamReasoningIndex[candidateIndex]
 	o.streamReasoningIndex[candidateIndex] = idx + 1
+	return idx
+}
+
+func (o *MessagesOutbound) nextToolCallIndex() int {
+	idx := o.streamToolCallIndex
+	o.streamToolCallIndex++
 	return idx
 }
 
@@ -148,7 +155,7 @@ func (o *MessagesOutbound) TransformStreamEvent(ctx context.Context, eventData [
 				role = "assistant"
 			}
 			events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStart, ID: base.ID, Model: base.Model, Index: base.Index, Role: role})
-			for idx, part := range candidate.Content.Parts {
+			for _, part := range candidate.Content.Parts {
 				if part == nil {
 					continue
 				}
@@ -167,10 +174,11 @@ func (o *MessagesOutbound) TransformStreamEvent(ctx context.Context, eventData [
 					}
 				}
 				if part.FunctionCall != nil {
+					toolIndex := o.nextToolCallIndex()
 					argsJSON, _ := json.Marshal(part.FunctionCall.Args)
 					toolCall := model.ToolCall{
-						Index: idx,
-						ID:    geminiFunctionCallID(part.FunctionCall, idx),
+						Index: toolIndex,
+						ID:    geminiFunctionCallID(part.FunctionCall, toolIndex),
 						Type:  "function",
 						Function: model.FunctionCall{
 							Name: part.FunctionCall.Name,

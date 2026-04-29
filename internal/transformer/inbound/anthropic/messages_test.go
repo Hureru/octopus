@@ -395,6 +395,44 @@ func TestTransformStreamEventsDirectAnthropicSSE(t *testing.T) {
 	}
 }
 
+func TestTransformStreamEventsStartsRepeatedToolIndexAfterStop(t *testing.T) {
+	inbound := &MessagesInbound{}
+	first := []model.StreamEvent{
+		{Kind: model.StreamEventKindMessageStart, ID: "msg_1", Model: "gemini-test", Role: "assistant"},
+		{Kind: model.StreamEventKindToolCallStart, ID: "msg_1", Model: "gemini-test", Index: 0, ToolCall: &model.ToolCall{Index: 0, ID: "call_search_0", Function: model.FunctionCall{Name: "Search"}}},
+		{Kind: model.StreamEventKindToolCallDelta, ID: "msg_1", Model: "gemini-test", Index: 0, ToolCall: &model.ToolCall{Index: 0, ID: "call_search_0", Function: model.FunctionCall{Name: "Search"}}, Delta: &model.StreamDelta{Arguments: `{"query":"one"}`}},
+		{Kind: model.StreamEventKindToolCallStop, ID: "msg_1", Model: "gemini-test", Index: 0},
+	}
+	firstOut, err := inbound.TransformStreamEvents(context.Background(), first)
+	if err != nil {
+		t.Fatalf("first TransformStreamEvents() error = %v", err)
+	}
+	if !strings.Contains(string(firstOut), `"index":0`) || !strings.Contains(string(firstOut), `"type":"tool_use"`) {
+		t.Fatalf("expected first tool block at index 0, got %s", firstOut)
+	}
+
+	second := []model.StreamEvent{
+		{Kind: model.StreamEventKindToolCallStart, ID: "msg_1", Model: "gemini-test", Index: 0, ToolCall: &model.ToolCall{Index: 0, ID: "call_list_0", Function: model.FunctionCall{Name: "List"}}},
+		{Kind: model.StreamEventKindToolCallDelta, ID: "msg_1", Model: "gemini-test", Index: 0, ToolCall: &model.ToolCall{Index: 0, ID: "call_list_0", Function: model.FunctionCall{Name: "List"}}, Delta: &model.StreamDelta{Arguments: `{"path":"."}`}},
+		{Kind: model.StreamEventKindToolCallStop, ID: "msg_1", Model: "gemini-test", Index: 0},
+	}
+	secondOut, err := inbound.TransformStreamEvents(context.Background(), second)
+	if err != nil {
+		t.Fatalf("second TransformStreamEvents() error = %v", err)
+	}
+	secondText := string(secondOut)
+	start := strings.Index(secondText, `"type":"content_block_start"`)
+	delta := strings.Index(secondText, `"type":"content_block_delta"`)
+	if start < 0 || delta < 0 || start > delta {
+		t.Fatalf("expected second repeated-index tool to start before delta, got %s", secondText)
+	}
+	for _, want := range []string{`"index":1`, `"type":"tool_use"`, `"id":"call_list_0"`, `"partial_json":"{\"path\":\".\"}"`} {
+		if !strings.Contains(secondText, want) {
+			t.Fatalf("expected %q in second tool SSE, got %s", want, secondText)
+		}
+	}
+}
+
 func TestTransformStreamEventsDirectErrorAndDone(t *testing.T) {
 	inbound := &MessagesInbound{}
 	errOut, err := inbound.TransformStreamEvents(context.Background(), []model.StreamEvent{{Kind: model.StreamEventKindError, Error: &model.ResponseError{Detail: model.ErrorDetail{Message: "boom"}}}})
