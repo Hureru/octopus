@@ -43,10 +43,20 @@ func InitDB(dbType, dsn string, debug bool) error {
 		return err
 	}
 
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetConnMaxLifetime(time.Hour)
-	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
+	switch dbType {
+	case "sqlite":
+		// SQLite 单写模型：限制为单连接，避免连接池内自相竞争 SQLITE_BUSY；
+		// WAL 模式下读连接由驱动内部处理，不会被该限制阻塞。
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetConnMaxLifetime(0)
+		sqlDB.SetConnMaxIdleTime(0)
+	default:
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+		sqlDB.SetConnMaxIdleTime(10 * time.Minute)
+	}
 
 	if err := migrate.BeforeAutoMigrate(db); err != nil {
 		return err
@@ -92,15 +102,16 @@ func InitDB(dbType, dsn string, debug bool) error {
 }
 
 func initSQLite(path string, config *gorm.Config) (*gorm.DB, error) {
+	// glebarez/sqlite (modernc.org/sqlite) 只识别 _pragma=NAME(VALUE) 形式参数，
+	// 旧的下划线参数会被静默忽略（导致 WAL/busy_timeout 实际未生效）。
 	params := []string{
-		"_journal_mode=WAL",
-		"_synchronous=NORMAL",
-		"_cache_size=10000",
-		"_busy_timeout=5000",
-		"_foreign_keys=ON",
-		"_auto_vacuum=INCREMENTAL",
-		"_mmap_size=268435456",
-		"_locking_mode=NORMAL",
+		"_pragma=journal_mode(WAL)",
+		"_pragma=synchronous(NORMAL)",
+		"_pragma=busy_timeout(5000)",
+		"_pragma=foreign_keys(ON)",
+		"_pragma=cache_size(-10000)",
+		"_pragma=mmap_size(268435456)",
+		"_pragma=temp_store(MEMORY)",
 	}
 	return gorm.Open(sqlite.Open(path+"?"+strings.Join(params, "&")), config)
 }
