@@ -53,6 +53,7 @@ func StatsSiteModelHourlyUpdate(channelID int, actualModel string, metrics model
 
 	now := time.Now()
 	hour := int(now.Unix() / 3600)
+	nowSec := now.Unix()
 	date := now.Format("20060102")
 
 	key := siteModelHourlyKey{
@@ -76,6 +77,9 @@ func StatsSiteModelHourlyUpdate(channelID int, actualModel string, metrics model
 		siteModelHourlyCache[key] = entry
 	}
 	entry.StatsMetrics.Add(metrics)
+	if nowSec > entry.LastRequestAt {
+		entry.LastRequestAt = nowSec
+	}
 }
 
 // StatsSiteModelHourlyRecordAttempts 把一次 relay 中所有 success/failed attempts
@@ -135,6 +139,7 @@ func StatsSiteModelHourlySaveDB(ctx context.Context) error {
 			"wait_time":       gorm.Expr("stats_site_model_hourlies.wait_time + EXCLUDED.wait_time"),
 			"request_success": gorm.Expr("stats_site_model_hourlies.request_success + EXCLUDED.request_success"),
 			"request_failed":  gorm.Expr("stats_site_model_hourlies.request_failed + EXCLUDED.request_failed"),
+			"last_request_at": gorm.Expr("MAX(stats_site_model_hourlies.last_request_at, EXCLUDED.last_request_at)"),
 		}),
 	}).Create(&rows).Error
 }
@@ -171,6 +176,9 @@ func SiteChannelModelHourlyForAccount(ctx context.Context, siteAccountID int) (m
 		k := compositeKey{Hour: r.Hour, GroupKey: r.GroupKey, ModelName: r.ModelName}
 		if existing, ok := merged[k]; ok {
 			existing.StatsMetrics.Add(r.StatsMetrics)
+			if r.LastRequestAt > existing.LastRequestAt {
+				existing.LastRequestAt = r.LastRequestAt
+			}
 			return
 		}
 		copyRow := r
@@ -218,15 +226,24 @@ func buildSiteModelSummary(hours []model.StatsSiteModelHourly) *model.SiteModelH
 		return summary
 	}
 
+	var maxLast int64
 	for i := range hours {
 		summary.SuccessCount += int(hours[i].RequestSuccess)
 		summary.FailureCount += int(hours[i].RequestFailed)
+		if hours[i].LastRequestAt > maxLast {
+			maxLast = hours[i].LastRequestAt
+		}
 	}
 
 	earliestHour := hours[0].Hour
 	latestHour := hours[len(hours)-1].Hour
-	latestSec := int64(latestHour+1)*3600 - 1
-	summary.LastRequestAt = &latestSec
+	if maxLast > 0 {
+		summary.LastRequestAt = &maxLast
+	} else {
+		// 兼容老数据：fallback 到该 hour 最后一秒
+		latestSec := int64(latestHour+1)*3600 - 1
+		summary.LastRequestAt = &latestSec
+	}
 	spanSeconds := int64((latestHour - earliestHour + 1) * 3600)
 
 	bucketSpan := chooseBucketSpan(spanSeconds)

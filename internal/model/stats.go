@@ -51,6 +51,7 @@ type StatsSiteModelHourly struct {
 	GroupKey      string `json:"group_key" gorm:"primaryKey;type:varchar(128);index:idx_stats_site_model_lookup"`
 	ModelName     string `json:"model_name" gorm:"primaryKey;type:varchar(128);index:idx_stats_site_model_lookup"`
 	Date          string `json:"date" gorm:"not null;type:varchar(8)"`
+	LastRequestAt int64  `json:"last_request_at" gorm:"not null;default:0"`
 	StatsMetrics
 }
 

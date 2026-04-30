@@ -80,6 +80,9 @@ func StatsSiteModelBackfill(ctx context.Context) {
 		} else {
 			entry.RequestFailed++
 		}
+		if ts > entry.LastRequestAt {
+			entry.LastRequestAt = ts
+		}
 	}
 
 	var lastID int64
