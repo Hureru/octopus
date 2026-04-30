@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Monitor, Globe, Clock, Shield, HelpCircle, X, Link } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, HelpCircle, X, Link, Activity } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -20,11 +20,13 @@ export function SettingSystem() {
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
     const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(false);
+    const [sseHeartbeatInterval, setSseHeartbeatInterval] = useState('');
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
     const initialWsUpgradeEnabled = useRef(false);
+    const initialSseHeartbeatInterval = useRef('');
 
     useEffect(() => {
         if (settings) {
@@ -32,6 +34,7 @@ export function SettingSystem() {
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
             const wsUpgrade = settings.find(s => s.key === SettingKey.RelayWSUpgradeEnabled);
+            const sseHeartbeat = settings.find(s => s.key === SettingKey.SSEHeartbeatInterval);
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
@@ -48,6 +51,10 @@ export function SettingSystem() {
                 const isEnabled = wsUpgrade.value === 'true';
                 queueMicrotask(() => setWsUpgradeEnabled(isEnabled));
                 initialWsUpgradeEnabled.current = isEnabled;
+            }
+            if (sseHeartbeat) {
+                queueMicrotask(() => setSseHeartbeatInterval(sseHeartbeat.value));
+                initialSseHeartbeatInterval.current = sseHeartbeat.value;
             }
         }
     }, [settings]);
@@ -66,6 +73,8 @@ export function SettingSystem() {
                     initialCorsAllowOrigins.current = value;
                 } else if (key === SettingKey.RelayWSUpgradeEnabled) {
                     initialWsUpgradeEnabled.current = value === 'true';
+                } else if (key === SettingKey.SSEHeartbeatInterval) {
+                    initialSseHeartbeatInterval.current = value;
                 }
             }
         });
@@ -239,6 +248,33 @@ export function SettingSystem() {
                         </div>
                     </PopoverContent>
                 </Popover>
+            </div>
+
+            {/* SSE 流式心跳 */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <Activity className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('sseHeartbeat.label')}</span>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {t('sseHeartbeat.description')}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+                <Input
+                    type="number"
+                    min="0"
+                    value={sseHeartbeatInterval}
+                    onChange={(e) => setSseHeartbeatInterval(e.target.value)}
+                    onBlur={() => handleSave(SettingKey.SSEHeartbeatInterval, sseHeartbeatInterval, initialSseHeartbeatInterval.current)}
+                    placeholder={t('sseHeartbeat.placeholder')}
+                    className="w-48 rounded-xl"
+                />
             </div>
 
             {/* WebSocket 上游升级 */}

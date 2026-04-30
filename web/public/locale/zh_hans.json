@@ -161,6 +161,11 @@
             "label": "主动 WebSocket 上游升级",
             "description": "启用后无论客户端协议都主动尝试 WS 上游连接，禁用则跟随客户端协议"
         },
+        "sseHeartbeat": {
+            "label": "SSE 流式心跳间隔（秒）",
+            "description": "设置为 0 禁用心跳；Cloudflare 反代场景建议 30-60 秒。部分客户端可能错误处理 SSE 注释，如遇兼容问题可关闭。",
+            "placeholder": "0 = 禁用，建议 30-60"
+        },
         "circuitBreaker": {
             "title": "熔断器配置",
             "threshold": {

@@ -161,6 +161,11 @@
             "label": "Proactive WebSocket Upstream Upgrade",
             "description": "When enabled, always try WS upstream regardless of client protocol; when disabled, follow client protocol"
         },
+        "sseHeartbeat": {
+            "label": "SSE Heartbeat Interval (seconds)",
+            "description": "Set to 0 to disable heartbeat; 30-60 seconds is recommended behind Cloudflare. Some clients may mishandle SSE comments, so disable it if compatibility issues occur.",
+            "placeholder": "0 = disabled, recommend 30-60"
+        },
         "circuitBreaker": {
             "title": "Circuit Breaker",
             "threshold": {

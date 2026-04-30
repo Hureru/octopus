@@ -377,10 +377,10 @@ func buildImagesResponseContentForLog(stream bool, upstreamCT string, usage *ima
 	}
 	// 不记录 b64_json，仅记录 usage
 	type respForLog struct {
-		Stream      bool        `json:"stream"`
-		ContentType string      `json:"content_type,omitempty"`
+		Stream      bool         `json:"stream"`
+		ContentType string       `json:"content_type,omitempty"`
 		Usage       *imagesUsage `json:"usage,omitempty"`
-		Note        string      `json:"note,omitempty"`
+		Note        string       `json:"note,omitempty"`
 	}
 	obj := respForLog{
 		Stream:      stream,
@@ -720,6 +720,11 @@ func proxySSE(ctx context.Context, c *gin.Context, respUp *http.Response, firstT
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 
+	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
+	if heartbeatTicker != nil {
+		defer heartbeatTicker.Stop()
+	}
+
 	type lineResult struct {
 		line []byte
 		err  error
@@ -757,8 +762,8 @@ func proxySSE(ctx context.Context, c *gin.Context, respUp *http.Response, firstT
 	}
 
 	var (
-		firstWrite      = true
-		currentEvent    string
+		firstWrite       = true
+		currentEvent     string
 		completedScanner = newUsageScanner()
 	)
 
@@ -772,6 +777,11 @@ func proxySSE(ctx context.Context, c *gin.Context, respUp *http.Response, firstT
 			log.Warnf("first token timeout (%ds), switching channel", firstTokenTimeOutSec)
 			_ = respUp.Body.Close()
 			return completedScanner.Usage(), c.Writer.Written(), fmt.Errorf("first token timeout (%ds)", firstTokenTimeOutSec)
+
+		case <-heartbeatC:
+			if err := writeSSEHeartbeat(c.Writer); err != nil {
+				return completedScanner.Usage(), true, err
+			}
 
 		case r, ok := <-results:
 			if !ok {

@@ -28,7 +28,36 @@ import (
 	"github.com/tmaxmax/go-sse"
 )
 
-// Handler 处理入站请求并转发到上游服务
+type streamHeartbeatWriter interface {
+	Write([]byte) (int, error)
+	Flush()
+}
+
+func streamHeartbeatInterval() time.Duration {
+	interval, err := op.SettingGetInt(dbmodel.SettingKeySSEHeartbeatInterval)
+	if err != nil || interval <= 0 {
+		return 0
+	}
+	return time.Duration(interval) * time.Second
+}
+
+func newStreamHeartbeatTicker() (*time.Ticker, <-chan time.Time) {
+	interval := streamHeartbeatInterval()
+	if interval <= 0 {
+		return nil, nil
+	}
+	ticker := time.NewTicker(interval)
+	return ticker, ticker.C
+}
+
+func writeSSEHeartbeat(writer streamHeartbeatWriter) error {
+	if _, err := writer.Write([]byte(":\n\n")); err != nil {
+		return err
+	}
+	writer.Flush()
+	return nil
+}
+
 func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	// 解析请求
 	rawBody, internalRequest, inAdapter, err := parseRequest(inboundType, c)
@@ -818,6 +847,11 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 	writer.Header().Set("Connection", "keep-alive")
 	writer.Header().Set("X-Accel-Buffering", "no")
 
+	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
+	if heartbeatTicker != nil {
+		defer heartbeatTicker.Stop()
+	}
+
 	firstToken := true
 
 	type sseReadResult struct {
@@ -861,6 +895,10 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
 			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+		case <-heartbeatC:
+			if err := writeSSEHeartbeat(writer); err != nil {
+				return err
+			}
 		case r, ok := <-results:
 			if !ok {
 				log.Infof("stream end")
@@ -1110,6 +1148,11 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 	writer.Header().Set("Connection", "keep-alive")
 	writer.Header().Set("X-Accel-Buffering", "no")
 
+	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
+	if heartbeatTicker != nil {
+		defer heartbeatTicker.Stop()
+	}
+
 	firstToken := true
 	type rawReadResult struct {
 		chunk []byte
@@ -1157,6 +1200,10 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
 			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+		case <-heartbeatC:
+			if err := writeSSEHeartbeat(writer); err != nil {
+				return err
+			}
 		case r, ok := <-results:
 			if !ok {
 				ra.collectOpenAIResponsesPassthroughMetrics(ctx, rawStream.Bytes())
@@ -1378,6 +1425,11 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 	writer.Header().Set("Connection", "keep-alive")
 	writer.Header().Set("X-Accel-Buffering", "no")
 
+	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
+	if heartbeatTicker != nil {
+		defer heartbeatTicker.Stop()
+	}
+
 	firstToken := true
 	type rawReadResult struct {
 		chunk []byte
@@ -1425,6 +1477,10 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
 			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+		case <-heartbeatC:
+			if err := writeSSEHeartbeat(writer); err != nil {
+				return err
+			}
 		case r, ok := <-results:
 			if !ok {
 				ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
