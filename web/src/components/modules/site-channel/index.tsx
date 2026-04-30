@@ -41,7 +41,7 @@ import {
 
 dayjs.extend(relativeTime);
 
-import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts';
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts';
 
 const DAYJS_LOCALE_MAP: Record<'zh_hans' | 'zh_hant' | 'en', string> = {
     zh_hans: 'zh-cn',
@@ -69,6 +69,7 @@ import {
 } from '@/components/ui/morphing-dialog';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
     Table,
@@ -752,9 +753,15 @@ function HistorySummary({ model }: { model: SiteModelView }) {
 
             {chartData.length > 0 ? (
                 <div className="rounded-xl border border-border/60 bg-background/70 p-2">
-                    <div className="h-32 w-full">
+                    <div className="h-36 w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 4, left: 4 }}>
+                                <defs>
+                                    <linearGradient id="fillSiteChannelBar" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.55} />
+                                        <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0.15} />
+                                    </linearGradient>
+                                </defs>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/50" />
                                 <XAxis
                                     dataKey="time"
@@ -782,8 +789,14 @@ function HistorySummary({ model }: { model: SiteModelView }) {
                                     width={24}
                                     allowDecimals={false}
                                 />
+                                <Legend
+                                    iconType="circle"
+                                    iconSize={7}
+                                    height={14}
+                                    wrapperStyle={{ fontSize: 10, paddingTop: 2, lineHeight: '14px' }}
+                                />
                                 <RechartsTooltip
-                                    cursor={{ fill: 'oklch(var(--muted) / 0.4)' }}
+                                    cursor={{ fill: 'var(--muted)', fillOpacity: 0.4 }}
                                     content={({ active, payload }) => {
                                         if (!active || !payload || payload.length === 0) return null;
                                         const point = payload[0].payload as typeof chartData[number];
@@ -804,7 +817,8 @@ function HistorySummary({ model }: { model: SiteModelView }) {
                                 <Bar
                                     yAxisId="count"
                                     dataKey="total"
-                                    fill="oklch(var(--muted-foreground) / 0.18)"
+                                    name="请求数"
+                                    fill="url(#fillSiteChannelBar)"
                                     radius={[2, 2, 0, 0]}
                                     isAnimationActive={false}
                                 />
@@ -812,9 +826,10 @@ function HistorySummary({ model }: { model: SiteModelView }) {
                                     yAxisId="rate"
                                     type="monotone"
                                     dataKey="successRate"
-                                    stroke="oklch(var(--primary))"
+                                    name="成功率"
+                                    stroke="var(--chart-1)"
                                     strokeWidth={2}
-                                    dot={{ r: 2 }}
+                                    dot={{ r: 2, fill: 'var(--chart-1)', stroke: 'var(--chart-1)' }}
                                     activeDot={{ r: 3 }}
                                     connectNulls
                                     isAnimationActive={false}
@@ -1067,19 +1082,23 @@ function RouteColumn({
                                                                 disabled={isPending || model.disabled}
                                                                 onMove={(nextRouteType) => onMoveModel(model, nextRouteType)}
                                                             />
-                                                            <Tooltip side="top" align="end">
-                                                                <TooltipTrigger asChild>
+                                                            <HoverCard>
+                                                                <HoverCardTrigger asChild>
                                                                     <button
                                                                         type="button"
                                                                         className="rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
                                                                     >
                                                                         <History className="size-4" />
                                                                     </button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent className="max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl">
+                                                                </HoverCardTrigger>
+                                                                <HoverCardContent
+                                                                    side="top"
+                                                                    align="end"
+                                                                    className="w-auto max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl"
+                                                                >
                                                                     <HistorySummary model={model} />
-                                                                </TooltipContent>
-                                                            </Tooltip>
+                                                                </HoverCardContent>
+                                                            </HoverCard>
                                                             <Tooltip side="top" align="end">
                                                                 <TooltipTrigger asChild>
                                                                     <button
@@ -1408,19 +1427,23 @@ function SiteChannelTableView({
                                             disabled={isPending || model.disabled}
                                             onMove={(routeType) => onMoveModel(model, routeType)}
                                         />
-                                        <Tooltip side="top" align="end">
-                                            <TooltipTrigger asChild>
+                                        <HoverCard>
+                                            <HoverCardTrigger asChild>
                                                 <button
                                                     type="button"
                                                     className="rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
                                                 >
                                                     <History className="size-4" />
                                                 </button>
-                                            </TooltipTrigger>
-                                            <TooltipContent className="max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl">
+                                            </HoverCardTrigger>
+                                            <HoverCardContent
+                                                side="top"
+                                                align="end"
+                                                className="w-auto max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl"
+                                            >
                                                 <HistorySummary model={model} />
-                                            </TooltipContent>
-                                        </Tooltip>
+                                            </HoverCardContent>
+                                        </HoverCard>
                                         <button
                                             type="button"
                                             onClick={() => onToggleDisabled(model)}
