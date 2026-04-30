@@ -176,9 +176,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			iter.Index()+1, iter.Len(), iter.IsSticky())
 
 		selectOpts := dbmodel.ChannelKeySelectOptions{
-			IgnoreRecent429Cooldown: group.RetryEnabled,
-			ExcludeKeyIDs:           make(map[int]struct{}),
-			PreferredKeyID:          iter.StickyKeyID(),
+			ExcludeKeyIDs:  make(map[int]struct{}),
+			PreferredKeyID: iter.StickyKeyID(),
 		}
 		var usedKey dbmodel.ChannelKey
 		for {

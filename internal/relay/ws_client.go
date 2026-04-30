@@ -511,9 +511,8 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		req.internalRequest.Model = item.ModelName
 
 		selectOpts := dbmodel.ChannelKeySelectOptions{
-			IgnoreRecent429Cooldown: group.RetryEnabled,
-			ExcludeKeyIDs:           make(map[int]struct{}),
-			PreferredKeyID:          req.iter.StickyKeyID(),
+			ExcludeKeyIDs:  make(map[int]struct{}),
+			PreferredKeyID: req.iter.StickyKeyID(),
 		}
 
 		var usedKey dbmodel.ChannelKey

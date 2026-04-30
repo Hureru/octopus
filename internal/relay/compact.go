@@ -126,9 +126,8 @@ func HandleResponsesCompact(c *gin.Context) {
 		}
 
 		selectOpts := dbmodel.ChannelKeySelectOptions{
-			IgnoreRecent429Cooldown: group.RetryEnabled,
-			ExcludeKeyIDs:           make(map[int]struct{}),
-			PreferredKeyID:          iter.StickyKeyID(),
+			ExcludeKeyIDs:  make(map[int]struct{}),
+			PreferredKeyID: iter.StickyKeyID(),
 		}
 		var usedKey dbmodel.ChannelKey
 		for {

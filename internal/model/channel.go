@@ -1,8 +1,6 @@
 package model
 
 import (
-	"time"
-
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 )
 
@@ -65,9 +63,8 @@ type ChannelKey struct {
 }
 
 type ChannelKeySelectOptions struct {
-	IgnoreRecent429Cooldown bool
-	ExcludeKeyIDs           map[int]struct{}
-	PreferredKeyID          int
+	ExcludeKeyIDs  map[int]struct{}
+	PreferredKeyID int
 }
 
 // ChannelUpdateRequest 渠道更新请求 - 仅包含变更的数据
@@ -148,7 +145,6 @@ func (c *Channel) GetChannelKey(opts ...ChannelKeySelectOptions) ChannelKey {
 		selectOpts = opts[0]
 	}
 
-	nowSec := time.Now().Unix()
 	if selectOpts.PreferredKeyID > 0 {
 		for _, k := range c.Keys {
 			if k.ID != selectOpts.PreferredKeyID || !k.Enabled || k.ChannelKey == "" {
@@ -156,11 +152,6 @@ func (c *Channel) GetChannelKey(opts ...ChannelKeySelectOptions) ChannelKey {
 			}
 			if _, excluded := selectOpts.ExcludeKeyIDs[k.ID]; excluded {
 				break
-			}
-			if !selectOpts.IgnoreRecent429Cooldown && k.StatusCode == 429 && k.LastUseTimeStamp > 0 {
-				if nowSec-k.LastUseTimeStamp < int64(5*time.Minute/time.Second) {
-					break
-				}
 			}
 			return k
 		}
@@ -176,11 +167,6 @@ func (c *Channel) GetChannelKey(opts ...ChannelKeySelectOptions) ChannelKey {
 		}
 		if _, excluded := selectOpts.ExcludeKeyIDs[k.ID]; excluded {
 			continue
-		}
-		if !selectOpts.IgnoreRecent429Cooldown && k.StatusCode == 429 && k.LastUseTimeStamp > 0 {
-			if nowSec-k.LastUseTimeStamp < int64(5*time.Minute/time.Second) {
-				continue
-			}
 		}
 		if !bestSet || k.TotalCost < bestCost {
 			best = k
