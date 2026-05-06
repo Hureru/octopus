@@ -112,8 +112,15 @@ func SyncAll(ctx context.Context) {
 			if !account.Enabled || !account.AutoSync {
 				continue
 			}
+			if !waitSiteBatchInterval(ctx, 500*time.Millisecond) {
+				return
+			}
 			if _, err := SyncAccount(ctx, account.ID); err != nil {
 				log.Warnf("site account sync failed (account=%d): %v", account.ID, err)
+				if IsCloudflareProtectionError(err) {
+					waitSiteCloudflareRetryAfter(ctx, siteRecord.ID, account.ID, err)
+					break
+				}
 			}
 		}
 	}
@@ -145,11 +152,38 @@ func CheckinAll(ctx context.Context) {
 					continue
 				}
 			}
+			if !waitSiteBatchInterval(ctx, 500*time.Millisecond) {
+				return
+			}
 			if _, err := CheckinAccount(ctx, account.ID); err != nil {
 				log.Warnf("site account checkin failed (account=%d): %v", account.ID, err)
+				if IsCloudflareProtectionError(err) {
+					waitSiteCloudflareRetryAfter(ctx, siteRecord.ID, account.ID, err)
+					break
+				}
 			}
 		}
 	}
+}
+
+func waitSiteBatchInterval(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func waitSiteCloudflareRetryAfter(ctx context.Context, siteID int, accountID int, err error) {
+	retryAfter := CloudflareRetryAfter(err)
+	log.Warnf("site Cloudflare protection detected, skip remaining accounts this round (site=%d account=%d retry_after=%s)", siteID, accountID, retryAfter)
+	waitSiteBatchInterval(ctx, retryAfter)
 }
 
 func DeleteSite(ctx context.Context, siteID int) error {

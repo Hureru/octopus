@@ -842,7 +842,7 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 			return nil, cookieHeader, nil
 		}
 
-		return nil, cookieHeader, anyRouterFormatHTTPError(resp.StatusCode, text)
+		return nil, cookieHeader, anyRouterFormatHTTPError(resp.StatusCode, resp.Header, text)
 	}
 
 	return nil, cookieHeader, nil
@@ -859,11 +859,15 @@ func anyRouterParseJSONObject(body []byte) (map[string]any, bool) {
 	return payload, true
 }
 
-func anyRouterFormatHTTPError(statusCode int, body string) error {
+func anyRouterFormatHTTPError(statusCode int, header http.Header, body string) error {
 	if payload, ok := anyRouterParseJSONObject([]byte(body)); ok {
 		if message := anyRouterExtractResponseMessage(payload); message != "" {
 			return fmt.Errorf("http %d: %s", statusCode, message)
 		}
+	}
+	bodyBytes := []byte(body)
+	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+		return newCloudflareProtectionError(statusCode, header)
 	}
 	if summary := anyRouterExtractHTMLErrorSummary(body); summary != "" {
 		return fmt.Errorf("http %d: %s", statusCode, summary)

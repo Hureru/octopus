@@ -682,6 +682,11 @@ function CompactMetric({
   );
 }
 
+function isCloudflareProtectionMessage(message?: string | null) {
+  const lowered = (message ?? "").toLowerCase();
+  return lowered.includes("cloudflare") || message?.includes("Cloudflare 保护") === true;
+}
+
 function ExecutionSummary({
   label,
   status,
@@ -698,6 +703,7 @@ function ExecutionSummary({
     text.push(message);
   }
 
+  const cloudflareProtected = isCloudflareProtectionMessage(message);
   const summary = text.join(" · ");
 
   return (
@@ -707,10 +713,13 @@ function ExecutionSummary({
           <span
             className={cn(
               "mt-1 size-2 shrink-0 rounded-full",
-              statusDotClass(status),
+              cloudflareProtected ? "bg-amber-500" : statusDotClass(status),
             )}
           />
-          <span className="min-w-0 truncate">{summary}</span>
+          <span className="min-w-0 truncate">
+            {cloudflareProtected ? "Cloudflare 保护 · " : ""}
+            {summary}
+          </span>
         </div>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm">{summary}</TooltipContent>

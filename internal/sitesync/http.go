@@ -96,7 +96,7 @@ func requestJSON(ctx context.Context, siteRecord *model.Site, method string, req
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, formatSiteHTTPError(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+		return nil, formatSiteHTTPError(resp.StatusCode, resp.Header, bodyBytes)
 	}
 	if len(bodyBytes) == 0 {
 		return map[string]any{}, nil
@@ -127,16 +127,35 @@ func applyDefaultSiteRequestHeaders(req *http.Request, hasJSONBody bool) {
 	}
 }
 
-func formatSiteHTTPError(statusCode int, contentType string, bodyBytes []byte) error {
+func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) error {
 	if payload, ok := parseSiteJSONMap(bodyBytes); ok {
 		if message := extractSiteResponseMessage(payload); message != "" {
 			return fmt.Errorf("http %d: %s", statusCode, message)
 		}
 	}
-	if summary := extractSiteHTMLResponseSummary(contentType, bodyBytes); summary != "" {
+	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+		return newCloudflareProtectionError(statusCode, header)
+	}
+	if summary := extractSiteHTMLResponseSummary(header.Get("Content-Type"), bodyBytes); summary != "" {
 		return fmt.Errorf("http %d: %s", statusCode, summary)
 	}
 	return fmt.Errorf("http %d: %s", statusCode, strings.TrimSpace(string(bodyBytes)))
+}
+
+func isCloudflareProtectionResponse(statusCode int, header http.Header, bodyBytes []byte) bool {
+	if statusCode != http.StatusForbidden {
+		return false
+	}
+	body := strings.ToLower(string(bodyBytes))
+	if strings.Contains(body, "attention required") ||
+		strings.Contains(body, "just a moment") ||
+		strings.Contains(body, "cf-error-code") ||
+		strings.Contains(body, "cloudflare ray id") ||
+		strings.Contains(body, "cloudflare") {
+		return true
+	}
+	server := strings.ToLower(header.Get("Server"))
+	return header.Get("CF-Ray") != "" || strings.Contains(server, "cloudflare")
 }
 
 func formatSiteDecodeError(contentType string, bodyBytes []byte, err error) error {
