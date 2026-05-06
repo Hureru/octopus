@@ -87,8 +87,8 @@ export type MorphingDialogProps = {
 
 function MorphingDialog({ children, transition }: MorphingDialogProps) {
   return (
-    <MorphingDialogProvider>
-      <MotionConfig transition={transition}>{children}</MotionConfig>
+    <MorphingDialogProvider transition={transition}>
+      {children}
     </MorphingDialogProvider>
   );
 }
@@ -207,14 +207,26 @@ function MorphingDialogContent({
   useEffect(() => {
     if (isOpen) {
       document.body.classList.add('overflow-hidden');
-      const focusableElements = containerRef.current?.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusableElements && focusableElements.length > 0) {
-        firstFocusableElementRef.current = focusableElements[0] as HTMLElement;
-        lastFocusableElementRef.current = focusableElements[focusableElements.length - 1] as HTMLElement;
-        (focusableElements[0] as HTMLElement).focus();
-      }
+      // Defer focusable-elements scan + focus() to next frame so the morph
+      // animation can start on the same frame the dialog opens. The synchronous
+      // querySelectorAll + focus() on a heavy panel triggers forced reflow and
+      // delays the layout-animation FLIP measure, which was the major cause of
+      // the "open click feels stuck" perception.
+      const rafId = window.requestAnimationFrame(() => {
+        const root = containerRef.current;
+        if (!root) return;
+        const focusableElements = root.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusableElements && focusableElements.length > 0) {
+          firstFocusableElementRef.current = focusableElements[0] as HTMLElement;
+          lastFocusableElementRef.current = focusableElements[focusableElements.length - 1] as HTMLElement;
+          (focusableElements[0] as HTMLElement).focus();
+        }
+      });
+      return () => {
+        window.cancelAnimationFrame(rafId);
+      };
     } else {
       document.body.classList.remove('overflow-hidden');
       triggerRef.current?.focus();

@@ -170,15 +170,13 @@ export function Channel() {
                         className="absolute inset-0 flex flex-col min-h-0"
                     >
                         {activeTab === 'site' ? (
-                            <div className="h-full overflow-y-auto overscroll-contain rounded-t-3xl">
-                                <SiteChannelSection
-                                    searchTerm={searchTerm}
-                                    filter={filter}
-                                    sortField={sortField}
-                                    sortOrder={sortOrder}
-                                    layout={layout}
-                                />
-                            </div>
+                            <SiteChannelSection
+                                searchTerm={searchTerm}
+                                filter={filter}
+                                sortField={sortField}
+                                sortOrder={sortOrder}
+                                layout={layout}
+                            />
                         ) : (
                             <VirtualizedGrid
                                 items={visibleManualChannels}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -50,6 +50,7 @@ const DAYJS_LOCALE_MAP: Record<'zh_hans' | 'zh_hant' | 'en', string> = {
 };
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
 import {
     Dialog,
     DialogContent,
@@ -2580,7 +2581,26 @@ function SiteChannelDialog({
     const { setIsOpen } = useMorphingDialog();
     const [activeAccountId, setActiveAccountId] = useState<number | null>(card.accounts[0]?.account_id ?? null);
     const [highlightedAccountId, setHighlightedAccountId] = useState<number | null>(null);
+    // Defer mounting the heavy SiteAccountPanel by one frame so the morph
+    // animation can start immediately. The panel pulls in recharts, dnd, ~16
+    // useStates and ~14 useMemos; rendering it synchronously while the FLIP
+    // animation tries to measure layout is the main cause of the perceived
+    // "click → wait → animate" delay (especially on top/middle cards).
+    const [panelReady, setPanelReady] = useState(false);
     const accountTabRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+
+    useEffect(() => {
+        // Two-frame defer: frame 1 lets the morph animation start + first paint,
+        // frame 2 actually mounts the panel content.
+        let raf2 = 0;
+        const raf1 = window.requestAnimationFrame(() => {
+            raf2 = window.requestAnimationFrame(() => setPanelReady(true));
+        });
+        return () => {
+            window.cancelAnimationFrame(raf1);
+            if (raf2) window.cancelAnimationFrame(raf2);
+        };
+    }, []);
 
     const closeAndNavigate = useCallback((navigate: () => void) => {
         setIsOpen(false);
@@ -2783,14 +2803,18 @@ function SiteChannelDialog({
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
                 {resolvedAccount ? (
                     <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                        <SiteAccountPanel
-                            key={resolvedAccount.account_id}
-                            siteId={card.site_id}
-                            account={resolvedAccount}
-                            jumpRequest={jumpRequest}
-                            onJumpHandled={onJumpHandled}
-                            onNavigateToChannel={(channelId) => closeAndNavigate(() => onNavigateToChannel(channelId))}
-                        />
+                        {panelReady ? (
+                            <SiteAccountPanel
+                                key={resolvedAccount.account_id}
+                                siteId={card.site_id}
+                                account={resolvedAccount}
+                                jumpRequest={jumpRequest}
+                                onJumpHandled={onJumpHandled}
+                                onNavigateToChannel={(channelId) => closeAndNavigate(() => onNavigateToChannel(channelId))}
+                            />
+                        ) : (
+                            <SiteAccountPanelSkeleton />
+                        )}
                     </div>
                 ) : (
                     <div className="flex min-h-[16rem] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 text-sm text-muted-foreground">
@@ -2802,16 +2826,36 @@ function SiteChannelDialog({
     );
 }
 
-function SiteCard({
+function SiteAccountPanelSkeleton() {
+    // Lightweight skeleton shown for one frame while the morph animation starts.
+    // Keeps the dialog body roughly the same height so morph layout doesn't jump
+    // when SiteAccountPanel mounts. Pure CSS, no framer-motion / recharts / dnd.
+    return (
+        <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+                <div className="h-9 w-32 animate-pulse rounded-2xl bg-muted/50" />
+                <div className="h-9 w-24 animate-pulse rounded-2xl bg-muted/50" />
+                <div className="h-9 w-28 animate-pulse rounded-2xl bg-muted/50" />
+                <div className="ml-auto h-9 w-44 animate-pulse rounded-2xl bg-muted/50" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                    <div key={idx} className="h-40 animate-pulse rounded-3xl border border-border/70 bg-muted/40" />
+                ))}
+            </div>
+            <div className="h-72 animate-pulse rounded-3xl border border-border/70 bg-muted/40" />
+        </div>
+    );
+}
+
+function SiteCardImpl({
     card,
     layout,
     jumpRequest,
     highlighted,
     registerCardRef,
     onJumpHandled,
-    onNavigateToSite,
-    onNavigateToSiteAccount,
-    onNavigateToChannel,
+    requestJump,
 }: {
     card: SiteChannelCard;
     layout: 'grid' | 'list';
@@ -2819,9 +2863,7 @@ function SiteCard({
     highlighted: boolean;
     registerCardRef: (siteId: number, node: HTMLDivElement | null) => void;
     onJumpHandled: (requestId: number) => void;
-    onNavigateToSite: () => void;
-    onNavigateToSiteAccount: (accountId: number) => void;
-    onNavigateToChannel: (channelId: number) => void;
+    requestJump: (target: JumpTarget) => void;
 }) {
     const summary = useMemo(() => collectSiteSummary(card), [card]);
     const runtime = useMemo(() => collectSiteRuntimeSummary(card), [card]);
@@ -2835,6 +2877,23 @@ function SiteCard({
     const successFmt = formatCount(runtime.successCount).formatted;
     const failureFmt = formatCount(runtime.failureCount).formatted;
     const costFmt = formatMoney(runtime.totalCost).formatted;
+
+    // Stable navigation callbacks. Building these inside SiteCard (rather than
+    // inside SiteChannelGrid.renderCard) keeps SiteCard's prop identity stable
+    // across grid re-renders, so memo() can actually skip work for cards whose
+    // own data didn't change.
+    const onNavigateToSite = useCallback(
+        () => requestJump({ kind: 'site-card', siteId: card.site_id }),
+        [requestJump, card.site_id],
+    );
+    const onNavigateToSiteAccount = useCallback(
+        (accountId: number) => requestJump({ kind: 'site-account', siteId: card.site_id, accountId }),
+        [requestJump, card.site_id],
+    );
+    const onNavigateToChannel = useCallback(
+        (channelId: number) => requestJump({ kind: 'channel-card', channelId }),
+        [requestJump],
+    );
 
     return (
         <MorphingDialog>
@@ -2974,6 +3033,8 @@ function SiteCard({
     );
 }
 
+const SiteCard = memo(SiteCardImpl);
+
 function SiteCardJumpWatcher({
     jumpRequest,
     siteId,
@@ -3086,6 +3147,15 @@ export function SiteChannelSection({
                 return true;
             })
             .sort((a, b) => {
+                // Pin the jump target to the top so the virtualized list keeps
+                // it mounted in the initial overscan window. Without this, the
+                // jump-to-card useEffect below would no-op when the target is
+                // outside the rendered window (registerCardRef never fires for
+                // off-screen items, so siteCardRefs.get() returns null).
+                if (forcedSiteId !== null) {
+                    if (a.site_id === forcedSiteId) return -1;
+                    if (b.site_id === forcedSiteId) return 1;
+                }
                 const diff = sortField === 'name'
                     ? a.site_name.localeCompare(b.site_name)
                     : a.site_id - b.site_id;
@@ -3165,30 +3235,15 @@ function SiteChannelGrid({
     clearPending: (requestId?: number) => void;
     requestJump: (target: JumpTarget) => void;
 }) {
-    const [containerEl, setContainerEl] = useState<HTMLElement | null>(null);
-    const [width, setWidth] = useState<number>(() =>
-        typeof window === 'undefined' ? 1024 : window.innerWidth,
-    );
-
-    useEffect(() => {
-        if (!containerEl) return;
-        const update = () => setWidth(containerEl.clientWidth);
-        update();
-        if (typeof ResizeObserver === 'undefined') return;
-        const observer = new ResizeObserver(update);
-        observer.observe(containerEl);
-        return () => observer.disconnect();
-    }, [containerEl]);
-
-    const columnCount = useMemo(() => {
+    const columnCompute = useCallback((width: number) => {
         if (layout === 'list') return 1;
         const MIN_CARD_WIDTH = 320;
         const GUTTER = 16;
         const cols = Math.floor((width + GUTTER) / (MIN_CARD_WIDTH + GUTTER));
         return Math.max(1, Math.min(6, cols));
-    }, [layout, width]);
+    }, [layout]);
 
-    const renderCard = (card: SiteChannelCard) => (
+    const renderCard = useCallback((card: SiteChannelCard) => (
         <SiteCard
             key={card.site_id}
             card={card}
@@ -3197,31 +3252,18 @@ function SiteChannelGrid({
             highlighted={highlightedSiteId === card.site_id}
             registerCardRef={registerCardRef}
             onJumpHandled={clearPending}
-            onNavigateToSite={() => requestJump({ kind: 'site-card', siteId: card.site_id })}
-            onNavigateToSiteAccount={(accountId) =>
-                requestJump({ kind: 'site-account', siteId: card.site_id, accountId })
-            }
-            onNavigateToChannel={(channelId) =>
-                requestJump({ kind: 'channel-card', channelId })
-            }
+            requestJump={requestJump}
         />
-    );
-
-    if (columnCount === 1) {
-        return (
-            <section ref={setContainerEl} className="space-y-4">
-                {cards.map(renderCard)}
-            </section>
-        );
-    }
+    ), [layout, pendingSiteChannelJump, highlightedSiteId, registerCardRef, clearPending, requestJump]);
 
     return (
-        <section
-            ref={setContainerEl}
-            className="grid gap-4"
-            style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
-        >
-            {cards.map(renderCard)}
-        </section>
+        <VirtualizedGrid
+            items={cards}
+            layout={layout}
+            columns={columnCompute}
+            estimateItemHeight={240}
+            getItemKey={(card) => `site-channel-${card.site_id}`}
+            renderItem={renderCard}
+        />
     );
 }
