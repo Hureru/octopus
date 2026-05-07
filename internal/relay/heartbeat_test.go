@@ -13,8 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// newTestGinContext 构造一个测试用的 gin.Context，使用 httptest.ResponseRecorder 收集输出。
-// 返回 c, recorder。flush 由 recorder 实现 http.Flusher 协议，可正确处理 writer.Flush()。
 func newTestGinContext(t *testing.T) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -24,16 +22,22 @@ func newTestGinContext(t *testing.T) (*gin.Context, *httptest.ResponseRecorder) 
 	return c, w
 }
 
-// 心跳间隔为 0 时返回的是空壳 heartbeat：协程从未启动，所有方法 no-op。
-func TestStartEarlyHeartbeat_DisabledByZeroInterval(t *testing.T) {
-	setupRelayTestDB(t)
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "0"); err != nil {
+func setHeartbeatSettings(t *testing.T, interval, delay string) {
+	t.Helper()
+	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, interval); err != nil {
 		t.Fatalf("set heartbeat interval failed: %v", err)
 	}
+	if err := op.SettingSetString(dbmodel.SettingKeySSEPreStreamHeartbeatDelay, delay); err != nil {
+		t.Fatalf("set pre-stream heartbeat delay failed: %v", err)
+	}
+}
+
+func TestStartEarlyHeartbeat_DisabledByZeroInterval(t *testing.T) {
+	setupRelayTestDB(t)
+	setHeartbeatSettings(t, "0", "1")
 
 	c, w := newTestGinContext(t)
 	hb := startEarlyHeartbeat(c, true)
-	// Stop 必须不阻塞（done channel 已关闭）
 	done := make(chan struct{})
 	go func() {
 		hb.Stop()
@@ -53,12 +57,25 @@ func TestStartEarlyHeartbeat_DisabledByZeroInterval(t *testing.T) {
 	}
 }
 
-// 非流式请求（isStream=false）也应当返回空壳，不写 SSE 头。
+func TestStartEarlyHeartbeat_DisabledByZeroDelay(t *testing.T) {
+	setupRelayTestDB(t)
+	setHeartbeatSettings(t, "1", "0")
+
+	c, w := newTestGinContext(t)
+	hb := startEarlyHeartbeat(c, true)
+	defer hb.Stop()
+
+	if hb.HeaderWritten() {
+		t.Fatal("zero delay heartbeat must not write SSE header")
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("zero delay heartbeat wrote bytes: %q", w.Body.String())
+	}
+}
+
 func TestStartEarlyHeartbeat_DisabledByNonStream(t *testing.T) {
 	setupRelayTestDB(t)
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "60"); err != nil {
-		t.Fatalf("set heartbeat interval failed: %v", err)
-	}
+	setHeartbeatSettings(t, "1", "1")
 
 	c, w := newTestGinContext(t)
 	hb := startEarlyHeartbeat(c, false)
@@ -72,85 +89,102 @@ func TestStartEarlyHeartbeat_DisabledByNonStream(t *testing.T) {
 	}
 }
 
-// 流式 + interval>0 时立即写 SSE 响应头与首次心跳。
-func TestStartEarlyHeartbeat_ImmediateFirstHeartbeat(t *testing.T) {
+func TestStartEarlyHeartbeat_DoesNotWriteBeforeDelay(t *testing.T) {
 	setupRelayTestDB(t)
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "60"); err != nil {
-		t.Fatalf("set heartbeat interval failed: %v", err)
-	}
+	setHeartbeatSettings(t, "1", "1")
 
 	c, w := newTestGinContext(t)
 	hb := startEarlyHeartbeat(c, true)
 	defer hb.Stop()
 
+	time.Sleep(100 * time.Millisecond)
+	if hb.HeaderWritten() {
+		t.Fatal("heartbeat must not write SSE header before delay")
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("heartbeat wrote before delay: %q", w.Body.String())
+	}
+}
+
+func TestEarlyHeartbeat_DelayedFirstHeartbeat(t *testing.T) {
+	setupRelayTestDB(t)
+	setHeartbeatSettings(t, "1", "1")
+
+	c, w := newTestGinContext(t)
+	hb := startEarlyHeartbeat(c, true)
+	defer hb.Stop()
+
+	time.Sleep(1200 * time.Millisecond)
 	if !hb.HeaderWritten() {
-		t.Fatal("expected SSE header to be written immediately")
+		t.Fatal("expected SSE header after delay")
 	}
 	if got := w.Header().Get("Content-Type"); got != "text/event-stream" {
 		t.Fatalf("expected Content-Type=text/event-stream, got %q", got)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, ":\n\n") {
-		t.Fatalf("expected initial heartbeat ':\\n\\n', got %q", body)
-	}
-	// 必须仅写过一份心跳（ticker 还未触发）
 	if count := strings.Count(body, ":\n\n"); count != 1 {
-		t.Fatalf("expected exactly 1 initial heartbeat, got %d in %q", count, body)
+		t.Fatalf("expected exactly 1 delayed heartbeat, got %d in %q", count, body)
 	}
 }
 
-// Hand 后外层心跳协程退出，不再产生新心跳。
-func TestEarlyHeartbeat_HandStopsTicker(t *testing.T) {
+func TestEarlyHeartbeat_HandBeforeDelayPreventsHeartbeat(t *testing.T) {
 	setupRelayTestDB(t)
-	// 用 1 秒间隔以便快速验证（首心跳立即发出，ticker 1 秒后会再发一次）
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "1"); err != nil {
-		t.Fatalf("set heartbeat interval failed: %v", err)
-	}
+	setHeartbeatSettings(t, "1", "1")
 
 	c, w := newTestGinContext(t)
 	hb := startEarlyHeartbeat(c, true)
-	// Hand 应同步等待协程退出
+	hb.Hand()
+
+	time.Sleep(1200 * time.Millisecond)
+	if hb.HeaderWritten() {
+		t.Fatal("Hand before delay must prevent SSE header")
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("Hand before delay still wrote heartbeat: %q", w.Body.String())
+	}
+	hb.Stop()
+}
+
+func TestEarlyHeartbeat_HandStopsTicker(t *testing.T) {
+	setupRelayTestDB(t)
+	setHeartbeatSettings(t, "1", "1")
+
+	c, w := newTestGinContext(t)
+	hb := startEarlyHeartbeat(c, true)
+	time.Sleep(1200 * time.Millisecond)
 	hb.Hand()
 
 	initialCount := strings.Count(w.Body.String(), ":\n\n")
-	if initialCount < 1 {
-		t.Fatalf("expected at least 1 heartbeat before Hand, got %d", initialCount)
+	if initialCount != 1 {
+		t.Fatalf("expected one heartbeat before Hand, got %d", initialCount)
 	}
-
-	// Hand 后再过 1.5 秒，不应有新心跳（ticker 已 cancel）
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 	finalCount := strings.Count(w.Body.String(), ":\n\n")
 	if finalCount != initialCount {
 		t.Fatalf("expected heartbeat count to remain %d after Hand, got %d", initialCount, finalCount)
 	}
 
-	// 二次 Hand / Stop 都应安全 no-op
 	hb.Hand()
 	hb.Stop()
 }
 
-// Stop 在协程未启动时也安全（CompareAndSwap 路径）。
 func TestEarlyHeartbeat_StopOnDisabledIsSafe(t *testing.T) {
 	setupRelayTestDB(t)
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "0"); err != nil {
-		t.Fatalf("set heartbeat interval failed: %v", err)
-	}
+	setHeartbeatSettings(t, "0", "0")
 	c, _ := newTestGinContext(t)
-	hb := startEarlyHeartbeat(c, true) // 空壳
+	hb := startEarlyHeartbeat(c, true)
 	hb.Stop()
-	hb.Stop() // 二次 Stop 也必须安全
+	hb.Stop()
 }
 
-// 已写过 SSE 头时，FlushOrError 发送 SSE error event；未写时走 JSON resp.Error。
 func TestEarlyHeartbeat_FlushOrError_SSEPath(t *testing.T) {
 	setupRelayTestDB(t)
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "60"); err != nil {
-		t.Fatalf("set heartbeat interval failed: %v", err)
-	}
+	setHeartbeatSettings(t, "1", "1")
 
 	c, w := newTestGinContext(t)
 	hb := startEarlyHeartbeat(c, true)
 	defer hb.Stop()
+	time.Sleep(1200 * time.Millisecond)
 
 	hb.FlushOrError(c, http.StatusBadGateway, "channel failed")
 
@@ -164,20 +198,14 @@ func TestEarlyHeartbeat_FlushOrError_SSEPath(t *testing.T) {
 	if !strings.Contains(body, `"message":"channel failed"`) {
 		t.Fatalf("expected error message in SSE payload, got %q", body)
 	}
-	// 不应该再有 application/json 格式的响应
-	if strings.Contains(body, `"code":502,"message":"channel failed"}`) && !strings.Contains(body, "event: error") {
-		t.Fatalf("FlushOrError fell through to JSON path despite SSE header written: %q", body)
-	}
 }
 
 func TestEarlyHeartbeat_FlushOrError_JSONPath(t *testing.T) {
 	setupRelayTestDB(t)
-	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "0"); err != nil {
-		t.Fatalf("set heartbeat interval failed: %v", err)
-	}
+	setHeartbeatSettings(t, "1", "0")
 
 	c, w := newTestGinContext(t)
-	hb := startEarlyHeartbeat(c, true) // 空壳
+	hb := startEarlyHeartbeat(c, true)
 	defer hb.Stop()
 
 	hb.FlushOrError(c, http.StatusBadGateway, "channel failed")
@@ -194,7 +222,6 @@ func TestEarlyHeartbeat_FlushOrError_JSONPath(t *testing.T) {
 	}
 }
 
-// nil heartbeat 的方法均为 no-op，避免调用方判空。
 func TestEarlyHeartbeat_NilSafe(t *testing.T) {
 	var hb *earlyHeartbeat
 	hb.Hand()
@@ -204,29 +231,42 @@ func TestEarlyHeartbeat_NilSafe(t *testing.T) {
 	}
 	c, w := newTestGinContext(t)
 	hb.FlushOrError(c, http.StatusInternalServerError, "boom")
-	// nil heartbeat fall-through 到 resp.Error，应当写 JSON
 	body := w.Body.String()
 	if !strings.Contains(body, `"message":"boom"`) {
 		t.Fatalf("nil heartbeat FlushOrError fallthrough failed: %q", body)
 	}
 }
 
-// 心跳协程在 ticker 触发时持续发送（验证 select 死锁/竞态）。
 func TestEarlyHeartbeat_TickerProducesAdditional(t *testing.T) {
+	setupRelayTestDB(t)
+	setHeartbeatSettings(t, "1", "1")
+
+	c, w := newTestGinContext(t)
+	hb := startEarlyHeartbeat(c, true)
+	time.Sleep(2500 * time.Millisecond)
+	hb.Stop()
+
+	count := strings.Count(w.Body.String(), ":\n\n")
+	if count < 2 {
+		t.Fatalf("expected >=2 heartbeats over 2.5s with delay=1s interval=1s, got %d", count)
+	}
+}
+
+func TestNewStreamHeartbeatTickerDoesNotFireImmediately(t *testing.T) {
 	setupRelayTestDB(t)
 	if err := op.SettingSetString(dbmodel.SettingKeySSEHeartbeatInterval, "1"); err != nil {
 		t.Fatalf("set heartbeat interval failed: %v", err)
 	}
 
-	c, w := newTestGinContext(t)
-	hb := startEarlyHeartbeat(c, true)
+	ticker, ch := newStreamHeartbeatTicker()
+	if ticker == nil || ch == nil {
+		t.Fatal("expected heartbeat ticker")
+	}
+	defer ticker.Stop()
 
-	// 等待 2.5 秒，期望至少 3 次心跳：初始 1 次 + ticker 2 次
-	time.Sleep(2500 * time.Millisecond)
-	hb.Stop()
-
-	count := strings.Count(w.Body.String(), ":\n\n")
-	if count < 3 {
-		t.Fatalf("expected >=3 heartbeats over 2.5s with interval=1s, got %d", count)
+	select {
+	case <-ch:
+		t.Fatal("stream heartbeat ticker fired immediately")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

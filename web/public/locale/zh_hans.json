@@ -163,8 +163,15 @@
         },
         "sseHeartbeat": {
             "label": "SSE 流式心跳间隔（秒）",
-            "description": "设置为 0 禁用心跳；Cloudflare 反代场景建议 30-60 秒。部分客户端可能错误处理 SSE 注释，如遇兼容问题可关闭。",
+            "description": "设置为 0 禁用心跳；Cloudflare 反代场景建议 30-60 秒。",
+            "compatibility": "部分客户端可能错误处理 SSE 注释，如遇兼容问题可关闭。",
             "placeholder": "0 = 禁用，建议 30-60"
+        },
+        "ssePreStreamHeartbeat": {
+            "label": "SSE 流建立前心跳延迟（秒）",
+            "description": "设置为 0 禁用建立前心跳；开启后会在上游流尚未建立且等待超过该秒数时发送 SSE 注释。",
+            "risk": "可降低 Cloudflare 524 风险，但可能影响部分客户端重试判断。",
+            "placeholder": "0 = 禁用，可选 90-100"
         },
         "circuitBreaker": {
             "title": "熔断器配置",

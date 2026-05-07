@@ -9,22 +9,23 @@ import (
 type SettingKey string
 
 const (
-	SettingKeyProxyURL                  SettingKey = "proxy_url"
-	SettingKeyStatsSaveInterval         SettingKey = "stats_save_interval"          // 将统计信息写入数据库的周期(分钟)
-	SettingKeyModelInfoUpdateInterval   SettingKey = "model_info_update_interval"   // 模型信息更新间隔(小时)
-	SettingKeySyncLLMInterval           SettingKey = "sync_llm_interval"            // LLM 同步间隔(小时)
-	SettingKeySiteSyncInterval          SettingKey = "site_sync_interval"           // 站点账号同步间隔(小时)
-	SettingKeySiteCheckinInterval       SettingKey = "site_checkin_interval"        // 站点自动签到间隔(小时)
-	SettingKeyRelayLogKeepPeriod        SettingKey = "relay_log_keep_period"        // 日志保存时间范围(天)
-	SettingKeyRelayLogKeepEnabled       SettingKey = "relay_log_keep_enabled"       // 是否保留历史日志
-	SettingKeyCORSAllowOrigins          SettingKey = "cors_allow_origins"           // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
-	SettingKeyCircuitBreakerThreshold   SettingKey = "circuit_breaker_threshold"    // 熔断触发阈值（连续失败次数）
-	SettingKeyCircuitBreakerCooldown    SettingKey = "circuit_breaker_cooldown"     // 熔断基础冷却时间（秒）
-	SettingKeyCircuitBreakerMaxCooldown SettingKey = "circuit_breaker_max_cooldown" // 熔断最大冷却时间（秒），指数退避上限
-	SettingKeyRelayWSUpgradeEnabled     SettingKey = "relay_ws_upgrade_enabled"     // 是否主动尝试WS上游连接（双向降级）
-	SettingKeySSEHeartbeatInterval      SettingKey = "sse_heartbeat_interval"       // SSE 流式心跳间隔（秒），0 表示禁用
-	SettingKeyJWTSecret                 SettingKey = "jwt_secret"                   // JWT 签名密钥（自动生成）
-	SettingKeyStatsSiteModelBackfilled  SettingKey = "stats_site_model_backfilled"  // 站点渠道小时聚合是否已回填历史日志
+	SettingKeyProxyURL                   SettingKey = "proxy_url"
+	SettingKeyStatsSaveInterval          SettingKey = "stats_save_interval"            // 将统计信息写入数据库的周期(分钟)
+	SettingKeyModelInfoUpdateInterval    SettingKey = "model_info_update_interval"     // 模型信息更新间隔(小时)
+	SettingKeySyncLLMInterval            SettingKey = "sync_llm_interval"              // LLM 同步间隔(小时)
+	SettingKeySiteSyncInterval           SettingKey = "site_sync_interval"             // 站点账号同步间隔(小时)
+	SettingKeySiteCheckinInterval        SettingKey = "site_checkin_interval"          // 站点自动签到间隔(小时)
+	SettingKeyRelayLogKeepPeriod         SettingKey = "relay_log_keep_period"          // 日志保存时间范围(天)
+	SettingKeyRelayLogKeepEnabled        SettingKey = "relay_log_keep_enabled"         // 是否保留历史日志
+	SettingKeyCORSAllowOrigins           SettingKey = "cors_allow_origins"             // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
+	SettingKeyCircuitBreakerThreshold    SettingKey = "circuit_breaker_threshold"      // 熔断触发阈值（连续失败次数）
+	SettingKeyCircuitBreakerCooldown     SettingKey = "circuit_breaker_cooldown"       // 熔断基础冷却时间（秒）
+	SettingKeyCircuitBreakerMaxCooldown  SettingKey = "circuit_breaker_max_cooldown"   // 熔断最大冷却时间（秒），指数退避上限
+	SettingKeyRelayWSUpgradeEnabled      SettingKey = "relay_ws_upgrade_enabled"       // 是否主动尝试WS上游连接（双向降级）
+	SettingKeySSEHeartbeatInterval       SettingKey = "sse_heartbeat_interval"         // SSE 流式心跳间隔（秒），0 表示禁用
+	SettingKeySSEPreStreamHeartbeatDelay SettingKey = "sse_pre_stream_heartbeat_delay" // SSE 上游流建立前心跳首次延迟（秒），0 表示禁用
+	SettingKeyJWTSecret                  SettingKey = "jwt_secret"                     // JWT 签名密钥（自动生成）
+	SettingKeyStatsSiteModelBackfilled   SettingKey = "stats_site_model_backfilled"    // 站点渠道小时聚合是否已回填历史日志
 )
 
 type Setting struct {
@@ -48,6 +49,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"}, // 默认最大冷却600秒（10分钟）
 		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "false"},   // 默认关闭主动WS上游升级
 		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},        // 默认禁用 SSE 流式心跳
+		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},  // 默认禁用 SSE 上游流建立前心跳
 		{Key: SettingKeyJWTSecret, Value: ""},                    // 为空时自动生成
 		{Key: SettingKeyStatsSiteModelBackfilled, Value: "false"},
 	}
@@ -63,7 +65,7 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be an integer")
 		}
 		return nil
-	case SettingKeySSEHeartbeatInterval:
+	case SettingKeySSEHeartbeatInterval, SettingKeySSEPreStreamHeartbeatDelay:
 		value, err := strconv.Atoi(s.Value)
 		if err != nil {
 			return fmt.Errorf("setting value must be an integer")

@@ -21,12 +21,14 @@ export function SettingSystem() {
     const [corsInputValue, setCorsInputValue] = useState('');
     const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(false);
     const [sseHeartbeatInterval, setSseHeartbeatInterval] = useState('');
+    const [ssePreStreamHeartbeatDelay, setSsePreStreamHeartbeatDelay] = useState('');
 
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
     const initialWsUpgradeEnabled = useRef(false);
     const initialSseHeartbeatInterval = useRef('');
+    const initialSsePreStreamHeartbeatDelay = useRef('');
 
     useEffect(() => {
         if (settings) {
@@ -35,6 +37,7 @@ export function SettingSystem() {
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
             const wsUpgrade = settings.find(s => s.key === SettingKey.RelayWSUpgradeEnabled);
             const sseHeartbeat = settings.find(s => s.key === SettingKey.SSEHeartbeatInterval);
+            const ssePreStreamHeartbeat = settings.find(s => s.key === SettingKey.SSEPreStreamHeartbeatDelay);
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
@@ -56,6 +59,10 @@ export function SettingSystem() {
                 queueMicrotask(() => setSseHeartbeatInterval(sseHeartbeat.value));
                 initialSseHeartbeatInterval.current = sseHeartbeat.value;
             }
+            if (ssePreStreamHeartbeat) {
+                queueMicrotask(() => setSsePreStreamHeartbeatDelay(ssePreStreamHeartbeat.value));
+                initialSsePreStreamHeartbeatDelay.current = ssePreStreamHeartbeat.value;
+            }
         }
     }, [settings]);
 
@@ -75,6 +82,8 @@ export function SettingSystem() {
                     initialWsUpgradeEnabled.current = value === 'true';
                 } else if (key === SettingKey.SSEHeartbeatInterval) {
                     initialSseHeartbeatInterval.current = value;
+                } else if (key === SettingKey.SSEPreStreamHeartbeatDelay) {
+                    initialSsePreStreamHeartbeatDelay.current = value;
                 }
             }
         });
@@ -262,6 +271,8 @@ export function SettingSystem() {
                             </TooltipTrigger>
                             <TooltipContent>
                                 {t('sseHeartbeat.description')}
+                                <br />
+                                {t('sseHeartbeat.compatibility')}
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
@@ -277,7 +288,34 @@ export function SettingSystem() {
                 />
             </div>
 
-            {/* WebSocket 上游升级 */}
+            {/* SSE 流建立前延迟心跳 */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <Activity className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('ssePreStreamHeartbeat.label')}</span>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {t('ssePreStreamHeartbeat.description')}
+                                <br />
+                                {t('ssePreStreamHeartbeat.risk')}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+                <Input
+                    type="number"
+                    min="0"
+                    value={ssePreStreamHeartbeatDelay}
+                    onChange={(e) => setSsePreStreamHeartbeatDelay(e.target.value)}
+                    onBlur={() => handleSave(SettingKey.SSEPreStreamHeartbeatDelay, ssePreStreamHeartbeatDelay, initialSsePreStreamHeartbeatDelay.current)}
+                    placeholder={t('ssePreStreamHeartbeat.placeholder')}
+                    className="w-48 rounded-xl"
+                />
+            </div>
             <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <Link className="h-5 w-5 text-muted-foreground" />

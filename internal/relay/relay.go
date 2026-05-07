@@ -366,7 +366,7 @@ func (ra *relayAttempt) attempt() attemptResult {
 	// 注意：熔断器记录已移至 Handler() 的同通道重试循环外，
 	// 避免重试期间过早触发熔断
 
-	written := ra.getStreamWriter().Written()
+	written := ra.streamPayloadWritten.Load()
 	if written {
 		ra.collectResponse()
 	}
@@ -505,7 +505,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		reader.CloseWithError()
 		log.Debugf("upstream WS stream failed (channel=%s, key=%d, continuation=%t, written=%t, status=%d, err=%v)",
 			ra.channel.Name, ra.usedKey.ID, continuation, ra.getStreamWriter().Written(), reader.StatusCode(), err)
-		if requiresUpstreamWSContinuation(ra.internalRequest) && !ra.getStreamWriter().Written() && shouldReconnectUpstreamWSBeforeReplay(err) {
+		if requiresUpstreamWSContinuation(ra.internalRequest) && !ra.streamPayloadWritten.Load() && shouldReconnectUpstreamWSBeforeReplay(err) {
 			log.Debugf("upstream WS stream failure eligible for reconnect before replay (channel=%s, key=%d, previous_response_id=%s)",
 				ra.channel.Name, ra.usedKey.ID, currentPreviousResponseID(ra.internalRequest))
 			statusCode, redialErr, recovered := ra.retryViaFreshUpstreamWS(ctx, reqBody)
@@ -696,6 +696,7 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 				}
 			}
 
+			ra.streamPayloadWritten.Store(true)
 			writer.Write(data)
 			writer.Flush()
 		}
@@ -974,6 +975,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 				}
 			}
 
+			ra.streamPayloadWritten.Store(true)
 			ra.getStreamWriter().Write(data)
 			ra.getStreamWriter().Flush()
 		}
@@ -1274,6 +1276,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 			if _, werr := writer.Write(r.chunk); werr != nil {
 				return werr
 			}
+			ra.streamPayloadWritten.Store(true)
 			_, _ = rawStream.Write(r.chunk)
 			writer.Flush()
 
@@ -1557,6 +1560,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			if _, werr := writer.Write(r.chunk); werr != nil {
 				return werr
 			}
+			ra.streamPayloadWritten.Store(true)
 			_, _ = rawStream.Write(r.chunk)
 			writer.Flush()
 

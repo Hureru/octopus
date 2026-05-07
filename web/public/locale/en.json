@@ -163,8 +163,15 @@
         },
         "sseHeartbeat": {
             "label": "SSE Heartbeat Interval (seconds)",
-            "description": "Set to 0 to disable heartbeat; 30-60 seconds is recommended behind Cloudflare. Some clients may mishandle SSE comments, so disable it if compatibility issues occur.",
+            "description": "Set to 0 to disable heartbeat; 30-60 seconds is recommended behind Cloudflare.",
+            "compatibility": "Some clients may mishandle SSE comments, so disable it if compatibility issues occur.",
             "placeholder": "0 = disabled, recommend 30-60"
+        },
+        "ssePreStreamHeartbeat": {
+            "label": "SSE Pre-stream Heartbeat Delay (seconds)",
+            "description": "Set to 0 to disable pre-stream heartbeats. When enabled, an SSE comment is sent only if the upstream stream is still not established after this delay.",
+            "risk": "This may reduce Cloudflare 524 risk but can affect retry behavior in some clients.",
+            "placeholder": "0 = disabled, optional 90-100"
         },
         "circuitBreaker": {
             "title": "Circuit Breaker",
