@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { motion } from 'motion/react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
@@ -910,6 +911,8 @@ function MoveRoutePopover({
     );
 }
 
+const STICKY_HEAD_CELL = 'sticky top-0 z-10 bg-card';
+
 function SiteChannelTableView({
     models,
     hasMore,
@@ -978,11 +981,14 @@ function SiteChannelTableView({
     );
 
     return (
-        <div className="overflow-hidden rounded-3xl border border-border/70 bg-card/70">
-            <Table className="min-w-[74rem]">
+        <>
+            <Table
+                containerClassName="overflow-x-auto overflow-y-visible"
+                className="min-w-[74rem]"
+            >
                 <TableHeader>
                     <TableRow>
-                        <TableHead className="w-12">
+                        <TableHead className={cn(STICKY_HEAD_CELL, 'w-12')}>
                             <SelectionCheckbox
                                 checked={allVisibleSelected}
                                 disabled={models.length === 0}
@@ -990,15 +996,15 @@ function SiteChannelTableView({
                                 onCheckedChange={onToggleAllVisible}
                             />
                         </TableHead>
-                        <TableHead>{renderSortHead('model_name', '模型')}</TableHead>
-                        <TableHead>{renderSortHead('group_name', '分组')}</TableHead>
-                        <TableHead>{renderSortHead('route_type', '端点格式')}</TableHead>
-                        <TableHead>来源</TableHead>
-                        <TableHead>Key</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead>{renderSortHead('last_request_at', '最近请求')}</TableHead>
-                        <TableHead>渠道</TableHead>
-                        <TableHead className="text-right">操作</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('model_name', '模型')}</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('group_name', '分组')}</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('route_type', '端点格式')}</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>来源</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>Key</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>状态</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('last_request_at', '最近请求')}</TableHead>
+                        <TableHead className={STICKY_HEAD_CELL}>渠道</TableHead>
+                        <TableHead className={cn(STICKY_HEAD_CELL, 'text-right')}>操作</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1153,19 +1159,29 @@ function SiteChannelTableView({
                 </TableBody>
             </Table>
             {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
-        </div>
+        </>
     );
 }
 
 function SiteAccountPanel({
     siteId,
     account,
+    accounts,
+    activeAccountId,
+    onSelectAccount,
+    highlightedAccountId,
+    registerAccountTabRef,
     jumpRequest,
     onJumpHandled,
     onNavigateToChannel,
 }: {
     siteId: number;
     account: SiteChannelAccount;
+    accounts: SiteChannelAccount[];
+    activeAccountId: number | null;
+    onSelectAccount: (accountId: number) => void;
+    highlightedAccountId: number | null;
+    registerAccountTabRef: (accountId: number, node: HTMLButtonElement | null) => void;
     jumpRequest: SiteChannelPendingJump | null;
     onJumpHandled: (requestId: number) => void;
     onNavigateToChannel: (channelId: number) => void;
@@ -1201,6 +1217,7 @@ function SiteAccountPanel({
     const routeMutation = useUpdateSiteChannelModelRoutes(siteId, account.account_id);
     const disabledMutation = useUpdateSiteChannelModelDisabled();
     const resetMutation = useResetSiteChannelModelRoutes(siteId, account.account_id);
+    const enableSiteAccount = useEnableSiteAccount();
 
     const translateSiteError = useCallback(
         (error: unknown, fallback: string) => translateSiteMessage(locale, getErrorMessage(error, fallback), t),
@@ -1609,8 +1626,72 @@ function SiteAccountPanel({
     }, [panelKey, panelPreferences.quickFilters, setQuickFilters]);
 
     return (
-        <div className="space-y-3">
-            <div className="flex flex-col gap-3 rounded-3xl border border-border/70 bg-card/70 p-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+            <div className="flex flex-none flex-col gap-2 rounded-2xl border border-border/70 bg-card/70 p-2.5">
+                {accounts.length >= 2 ? (
+                    <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-2">
+                        <div className="-mb-px max-w-full overflow-x-auto">
+                            <div className="flex min-w-max items-baseline gap-5 px-0.5 pb-1">
+                                {accounts.map((acc) => {
+                                    const isActive = acc.account_id === activeAccountId;
+                                    return (
+                                        <button
+                                            key={acc.account_id}
+                                            ref={(node) => registerAccountTabRef(acc.account_id, node)}
+                                            type="button"
+                                            onClick={() => onSelectAccount(acc.account_id)}
+                                            className={cn(
+                                                'relative inline-flex items-baseline gap-1.5 pb-1 text-sm font-medium transition-colors',
+                                                isActive
+                                                    ? 'text-foreground'
+                                                    : 'text-muted-foreground hover:text-foreground',
+                                                highlightedAccountId === acc.account_id &&
+                                                    'rounded-md ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
+                                            )}
+                                        >
+                                            <span className="truncate">{acc.account_name}</span>
+                                            <span
+                                                className={cn(
+                                                    'size-1.5 shrink-0 rounded-full',
+                                                    acc.enabled ? 'bg-emerald-500' : 'bg-destructive',
+                                                )}
+                                                aria-hidden
+                                            />
+                                            {isActive && (
+                                                <motion.span
+                                                    layoutId="site-account-tab-underline"
+                                                    className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-primary"
+                                                    transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.8 }}
+                                                />
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() =>
+                                enableSiteAccount.mutate({
+                                    id: account.account_id,
+                                    enabled: !account.enabled,
+                                })
+                            }
+                            disabled={enableSiteAccount.isPending}
+                            className={cn(
+                                'inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition hover:opacity-80',
+                                account.enabled
+                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                    : 'border-destructive/30 bg-destructive/10 text-destructive',
+                            )}
+                        >
+                            <Power className={cn('size-3', enableSiteAccount.isPending && 'animate-spin')} />
+                            {account.enabled ? '账号启用' : '账号停用'}
+                        </button>
+                    </div>
+                ) : null}
+
                 <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
                     <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
                         <Select value={activeGroupValue} onValueChange={handleGroupFilterChange}>
@@ -2062,11 +2143,11 @@ function SiteAccountPanel({
             </Dialog>
 
             {visibleModels.length === 0 ? (
-                <div className="flex min-h-[18rem] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+                <div className="flex min-h-[18rem] flex-1 items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
                     当前筛选和搜索条件下没有匹配模型
                 </div>
             ) : (
-                <div className="overflow-x-auto pb-2">
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden rounded-3xl border border-border/70 bg-card/70">
                     <SiteChannelTableView
                         models={displayedModels}
                         hasMore={displayedModels.length < visibleModels.length}
@@ -2192,160 +2273,118 @@ function SiteChannelDialog({
 
     return (
         <div className="flex max-h-[88vh] flex-col overflow-hidden">
-            <header className="flex flex-col gap-3 border-b border-border/70 px-5 py-3.5 text-left sm:px-6">
+            <header className="flex flex-none items-center gap-2 border-b border-border/70 px-5 py-3 text-left sm:px-6">
                 <MorphingDialogDescription className="sr-only">
                     站点渠道管理面板
                 </MorphingDialogDescription>
 
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0 space-y-2">
-                        <MorphingDialogTitle className="flex flex-wrap items-center gap-2 text-xl font-semibold sm:text-2xl">
-                            <span className="truncate">{card.site_name}</span>
-                            <Badge variant="outline" className="h-6 px-2 text-[11px]">
-                                {platformLabel(card.platform)}
-                            </Badge>
-                            <Badge
-                                variant="outline"
+                <MorphingDialogTitle className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-lg font-semibold sm:text-xl">
+                    <span className="truncate">{card.site_name}</span>
+                    <Badge variant="outline" className="h-6 px-2 text-[11px]">
+                        {platformLabel(card.platform)}
+                    </Badge>
+                    <Badge
+                        variant="outline"
+                        className={cn(
+                            'h-6 px-2 text-[11px]',
+                            card.enabled
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                : 'border-destructive/30 bg-destructive/10 text-destructive',
+                        )}
+                    >
+                        {card.enabled ? '站点启用' : '站点停用'}
+                    </Badge>
+                    {resolvedAccount && card.accounts.length <= 1 ? (
+                        <>
+                            <span className="text-sm font-normal text-muted-foreground">
+                                · {resolvedAccount.account_name}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    enableSiteAccount.mutate({
+                                        id: resolvedAccount.account_id,
+                                        enabled: !resolvedAccount.enabled,
+                                    })
+                                }
+                                disabled={enableSiteAccount.isPending}
                                 className={cn(
-                                    'h-6 px-2 text-[11px]',
-                                    card.enabled
+                                    'inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition hover:opacity-80',
+                                    resolvedAccount.enabled
                                         ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                                         : 'border-destructive/30 bg-destructive/10 text-destructive',
                                 )}
                             >
-                                {card.enabled ? '站点启用' : '站点停用'}
-                            </Badge>
-                            {resolvedAccount ? (
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        enableSiteAccount.mutate({
-                                            id: resolvedAccount.account_id,
-                                            enabled: !resolvedAccount.enabled,
-                                        })
-                                    }
-                                    disabled={enableSiteAccount.isPending}
-                                    className={cn(
-                                        'inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition hover:opacity-80',
-                                        resolvedAccount.enabled
-                                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                                            : 'border-destructive/30 bg-destructive/10 text-destructive',
-                                    )}
-                                >
-                                    <Power className={cn('size-3', enableSiteAccount.isPending && 'animate-spin')} />
-                                    {resolvedAccount.enabled ? '账号启用' : '账号停用'}
-                                </button>
-                            ) : null}
-                        </MorphingDialogTitle>
-                        {resolvedAccount ? (
-                            <div className="text-sm text-muted-foreground">
-                                当前账号：{resolvedAccount.account_name} · {resolvedAccount.model_count} 模型 / {resolvedAccount.group_count} 分组
-                            </div>
-                        ) : null}
-                    </div>
+                                <Power className={cn('size-3', enableSiteAccount.isPending && 'animate-spin')} />
+                                {resolvedAccount.enabled ? '账号启用' : '账号停用'}
+                            </button>
+                        </>
+                    ) : null}
+                </MorphingDialogTitle>
 
-                    <div className="mr-12 max-w-full overflow-x-auto pb-1">
-                        <div className="flex min-w-max gap-2">
-                            {card.accounts.map((account) => (
-                                <button
-                                    key={account.account_id}
-                                    ref={(node) => setAccountTabRef(account.account_id, node)}
-                                    type="button"
-                                    onClick={() => setActiveAccountId(account.account_id)}
-                                    className={cn(
-                                        'min-w-[9.75rem] rounded-2xl border px-3 py-2 text-left transition',
-                                        resolvedAccount?.account_id === account.account_id
-                                            ? 'border-primary/30 bg-primary text-primary-foreground'
-                                            : 'border-border bg-background hover:bg-muted/50',
-                                        highlightedAccountId === account.account_id &&
-                                            'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
-                                    )}
-                                >
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="min-w-0">
-                                            <div className="truncate text-sm font-medium">{account.account_name}</div>
-                                            <div
-                                                className={cn(
-                                                    'truncate text-[11px]',
-                                                    resolvedAccount?.account_id === account.account_id
-                                                        ? 'text-primary-foreground/80'
-                                                        : 'text-muted-foreground',
-                                                )}
-                                            >
-                                                {account.model_count} 模型 / {account.group_count} 分组
-                                            </div>
-                                        </div>
-                                        <span
-                                            className={cn(
-                                                'mt-1 size-2.5 shrink-0 rounded-full',
-                                                account.enabled ? 'bg-emerald-500' : 'bg-destructive',
-                                            )}
-                                            aria-hidden="true"
-                                        />
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="overflow-x-auto pb-1">
-                    <div className="flex min-w-max gap-2">
+                <div className="flex flex-none items-center gap-1">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8 rounded-xl"
+                        onClick={handleOpenSiteBaseUrl}
+                        disabled={!card.base_url}
+                        aria-label="打开站点"
+                        title="打开站点"
+                    >
+                        <ExternalLink className="size-4" />
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8 rounded-xl"
+                        onClick={() => closeAndNavigate(onNavigateToSite)}
+                        aria-label="站点页"
+                        title="站点页"
+                    >
+                        <Globe2 className="size-4" />
+                    </Button>
+                    {resolvedAccount ? (
                         <Button
                             type="button"
                             variant="outline"
-                            size="sm"
-                            className="h-8 rounded-2xl px-3"
-                            onClick={handleOpenSiteBaseUrl}
-                            disabled={!card.base_url}
+                            size="icon"
+                            className="size-8 rounded-xl"
+                            onClick={() => closeAndNavigate(() => onNavigateToSiteAccount(resolvedAccount.account_id))}
+                            aria-label="站点页账号"
+                            title="站点页账号"
                         >
-                            <ExternalLink className="size-4" />
-                            打开站点
+                            <Waypoints className="size-4" />
                         </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 rounded-2xl px-3"
-                            onClick={() => closeAndNavigate(onNavigateToSite)}
-                        >
-                            <Globe2 className="size-4" />
-                            站点页
-                        </Button>
-                        {resolvedAccount ? (
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-8 rounded-2xl px-3"
-                                onClick={() => closeAndNavigate(() => onNavigateToSiteAccount(resolvedAccount.account_id))}
-                            >
-                                <Waypoints className="size-4" />
-                                站点页账号
-                            </Button>
-                        ) : null}
-                    </div>
+                    ) : null}
                 </div>
             </header>
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-3 sm:px-6">
                 {resolvedAccount ? (
-                    <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                        {panelReady ? (
-                            <SiteAccountPanel
-                                key={resolvedAccount.account_id}
-                                siteId={card.site_id}
-                                account={resolvedAccount}
-                                jumpRequest={jumpRequest}
-                                onJumpHandled={onJumpHandled}
-                                onNavigateToChannel={(channelId) => closeAndNavigate(() => onNavigateToChannel(channelId))}
-                            />
-                        ) : (
+                    panelReady ? (
+                        <SiteAccountPanel
+                            key={resolvedAccount.account_id}
+                            siteId={card.site_id}
+                            account={resolvedAccount}
+                            accounts={card.accounts}
+                            activeAccountId={activeAccountId}
+                            onSelectAccount={setActiveAccountId}
+                            highlightedAccountId={highlightedAccountId}
+                            registerAccountTabRef={setAccountTabRef}
+                            jumpRequest={jumpRequest}
+                            onJumpHandled={onJumpHandled}
+                            onNavigateToChannel={(channelId) => closeAndNavigate(() => onNavigateToChannel(channelId))}
+                        />
+                    ) : (
+                        <div className="min-h-0 flex-1 overflow-y-auto">
                             <SiteAccountPanelSkeleton />
-                        )}
-                    </div>
+                        </div>
+                    )
                 ) : (
-                    <div className="flex min-h-[16rem] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 text-sm text-muted-foreground">
+                    <div className="flex min-h-[16rem] flex-1 items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 text-sm text-muted-foreground">
                         当前站点没有可管理的账号
                     </div>
                 )}
