@@ -7,12 +7,6 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import 'dayjs/locale/zh-tw';
 import {
-    DragDropContext,
-    Draggable,
-    Droppable,
-    type DropResult,
-} from '@hello-pangea/dnd';
-import {
     ArrowUpDown,
     Check,
     CheckCircle2,
@@ -24,11 +18,8 @@ import {
     EyeOff,
     ExternalLink,
     Globe2,
-    GripVertical,
     History,
     KeyRound,
-    LayoutGrid,
-    List,
     MessageSquare,
     MoreHorizontal,
     Power,
@@ -80,7 +71,6 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { toast } from '@/components/common/Toast';
 import { cn, formatCount, formatMoney } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
@@ -102,7 +92,6 @@ import {
     useUpdateSiteChannelModelRoutes,
 } from '@/api/endpoints/site-channel';
 import {
-    ROUTE_COLUMN_KEY_PREFIX,
     SITE_ROUTE_DISPLAY_ORDER,
     SITE_ROUTE_COLUMN_ORDER,
     getRouteSourceTone,
@@ -149,6 +138,9 @@ type ToolbarSortOrder = 'asc' | 'desc';
 type SiteChannelPendingJump = PendingJump & { target: SiteChannelJumpTarget };
 type UnifiedCompletionInputState = Record<number, string>;
 type UnifiedCompletionErrorState = Record<string, string>;
+
+const SITE_PANEL_INITIAL_DISPLAY_LIMIT = 15;
+const SITE_PANEL_DISPLAY_PAGE_SIZE = 30;
 
 function makeAccountKey(siteId: number, accountId: number) {
     return `${siteId}:${accountId}`;
@@ -527,18 +519,6 @@ function removePendingKeys(current: Set<string>, keys: string[]) {
     return changed ? next : current;
 }
 
-function findModel(account: SiteChannelAccount, modelKey: string) {
-    for (const group of account.groups) {
-        for (const model of group.models) {
-            if (makeModelKey(group.group_key, model.model_name) === modelKey) {
-                return { group, model };
-            }
-        }
-    }
-
-    return null;
-}
-
 function collectSiteSummary(card: SiteChannelCard) {
     let groupCount = 0;
     let modelCount = 0;
@@ -636,10 +616,6 @@ function hasModelHistory(model: SiteModelView) {
 
 function modelNeedsAttention(model: SiteModelView) {
     return !model.has_keys || !model.projected_channel_id || !isSupportedRouteType(model.route_type);
-}
-
-function canAssignRouteType(routeType: SiteModelRouteType) {
-    return isSupportedRouteType(routeType);
 }
 
 function compareNullableNumber(left: number | null, right: number | null, order: 'asc' | 'desc') {
@@ -934,322 +910,11 @@ function MoveRoutePopover({
     );
 }
 
-function RouteColumn({
-    routeType,
-    models,
-    pendingModelKeys,
-    selectedModelKeys,
-    compactMode,
-    canCollapseEmpty,
-    onToggleModelSelection,
-    onToggleColumnSelection,
-    onMoveModel,
-    onToggleDisabled,
-    onNavigateToChannel,
-    registerModelRef,
-    highlightedModelKey,
-    onCollapseEmpty,
-}: {
-    routeType: SiteModelRouteType;
-    models: SiteModelView[];
-    pendingModelKeys: Set<string>;
-    selectedModelKeys: Set<string>;
-    compactMode: boolean;
-    canCollapseEmpty: boolean;
-    onToggleModelSelection: (modelKey: string, checked: boolean) => void;
-    onToggleColumnSelection: (modelKeys: string[], checked: boolean) => void;
-    onMoveModel: (model: SiteModelView, routeType: SiteModelRouteType) => void;
-    onToggleDisabled: (model: SiteModelView) => void;
-    onNavigateToChannel: (channelId: number) => void;
-    registerModelRef: (modelKey: string, node: HTMLElement | null) => void;
-    highlightedModelKey: string | null;
-    onCollapseEmpty?: () => void;
-}) {
-    const modelKeys = models.map((model) => makeModelKey(model.group_key, model.model_name));
-    const allSelected = modelKeys.length > 0 && modelKeys.every((key) => selectedModelKeys.has(key));
-
-    return (
-        <Droppable droppableId={routeType}>
-            {(provided, snapshot) => (
-                <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={cn(
-                        'flex min-h-[28rem] w-[18rem] flex-col rounded-3xl border border-border/70 bg-card/70 p-3 transition',
-                        snapshot.isDraggingOver && 'border-primary/40 bg-primary/5',
-                    )}
-                >
-                    <div className="mb-3 flex items-start justify-between gap-2">
-                        <div>
-                            <div className="text-sm font-semibold">{routeTypeLabel(routeType)}</div>
-                            <div className="text-xs text-muted-foreground">
-                                {models.length === 0
-                                    ? canAssignRouteType(routeType)
-                                        ? '空列，可拖拽模型到此'
-                                        : '空列，仅展示未识别端点'
-                                    : `${models.length} 个模型`}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {models.length === 0 && canCollapseEmpty && onCollapseEmpty ? (
-                                <button
-                                    type="button"
-                                    className="rounded-lg px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                                    onClick={onCollapseEmpty}
-                                >
-                                    收起
-                                </button>
-                            ) : null}
-                            <SelectionCheckbox
-                                checked={allSelected}
-                                disabled={models.length === 0}
-                                ariaLabel={`选择 ${routeTypeLabel(routeType)} 列全部模型`}
-                                onCheckedChange={(checked) => onToggleColumnSelection(modelKeys, checked)}
-                            />
-                            <Badge variant="outline" className={cn('h-6 px-2 text-[10px]', getRouteTypeTone(routeType))}>
-                                {routeTypeLabel(routeType)}
-                            </Badge>
-                        </div>
-                    </div>
-
-                    <div className="flex min-h-0 flex-1 flex-col gap-2">
-                        {models.map((model, index) => {
-                            const modelKey = makeModelKey(model.group_key, model.model_name);
-                            const { Avatar: ModelAvatar } = getModelIcon(model.model_name);
-                            const isPending = pendingModelKeys.has(modelKey);
-                            const isSelected = selectedModelKeys.has(modelKey);
-                            const unknownRouteReason = getUnknownRouteReason(model);
-
-                            return (
-                                <Draggable
-                                    key={modelKey}
-                                    draggableId={modelKey}
-                                    index={index}
-                                    isDragDisabled={model.disabled || isPending}
-                                >
-                                    {(draggableProvided, draggableSnapshot) => (
-                                        <div
-                                            ref={(node) => {
-                                                draggableProvided.innerRef(node);
-                                                registerModelRef(modelKey, node);
-                                            }}
-                                            {...draggableProvided.draggableProps}
-                                            style={draggableProvided.draggableProps.style}
-                                            data-model-key={modelKey}
-                                            className={cn(
-                                                'rounded-2xl border border-border/70 bg-background/95 shadow-xs transition',
-                                                compactMode ? 'p-2.5' : 'p-3',
-                                                model.disabled && 'opacity-60 grayscale',
-                                                isPending && 'opacity-70',
-                                                isSelected && 'border-primary/30 bg-primary/5',
-                                                draggableSnapshot.isDragging && 'shadow-lg ring-2 ring-primary/30',
-                                                highlightedModelKey === modelKey && 'ring-2 ring-primary/35 ring-offset-2 ring-offset-background',
-                                            )}
-                                        >
-                                            <div className="flex items-start gap-2.5">
-                                                <SelectionCheckbox
-                                                    checked={isSelected}
-                                                    disabled={isPending}
-                                                    ariaLabel={`选择模型 ${model.model_name}`}
-                                                    onCheckedChange={(checked) => onToggleModelSelection(modelKey, checked)}
-                                                    className="mt-1"
-                                                />
-                                                <div
-                                                    {...draggableProvided.dragHandleProps}
-                                                    className={cn(
-                                                        'mt-0.5 rounded-lg p-1 text-muted-foreground transition',
-                                                        model.disabled || isPending
-                                                            ? 'cursor-not-allowed opacity-50'
-                                                            : 'cursor-grab hover:bg-muted hover:text-foreground active:cursor-grabbing',
-                                                    )}
-                                                >
-                                                    <GripVertical className="size-4" />
-                                                </div>
-                                                <span className="mt-0.5 shrink-0">
-                                                    <ModelAvatar size={18} />
-                                                </span>
-                                                <div className="min-w-0 flex-1 space-y-2">
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <div className="min-w-0">
-                                                            <div className="truncate text-sm font-semibold">{model.model_name}</div>
-                                                            <div className="mt-0.5 text-[11px] text-muted-foreground">
-                                                                {model.group_name || model.group_key}
-                                                                {compactMode ? '' : ` · Key ${model.enabled_key_count}/${model.key_count}`}
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <MoveRoutePopover
-                                                                currentRouteType={model.route_type}
-                                                                disabled={isPending || model.disabled}
-                                                                onMove={(nextRouteType) => onMoveModel(model, nextRouteType)}
-                                                            />
-                                                            <HoverCard>
-                                                                <HoverCardTrigger asChild>
-                                                                    <button
-                                                                        type="button"
-                                                                        className="rounded-lg p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                                                                    >
-                                                                        <History className="size-4" />
-                                                                    </button>
-                                                                </HoverCardTrigger>
-                                                                <HoverCardContent
-                                                                    side="top"
-                                                                    align="end"
-                                                                    className="w-auto max-w-none rounded-2xl border border-border/70 bg-card p-0 shadow-xl"
-                                                                >
-                                                                    <HistorySummary model={model} />
-                                                                </HoverCardContent>
-                                                            </HoverCard>
-                                                            <Tooltip side="top" align="end">
-                                                                <TooltipTrigger asChild>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => onToggleDisabled(model)}
-                                                                        disabled={isPending}
-                                                                        className={cn(
-                                                                            'rounded-lg p-1 transition',
-                                                                            model.disabled
-                                                                                ? 'text-destructive hover:bg-destructive/10'
-                                                                                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                                                                        )}
-                                                                    >
-                                                                        <CircleOff className="size-4" />
-                                                                    </button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent>{model.disabled ? '启用模型' : '禁用模型'}</TooltipContent>
-                                                            </Tooltip>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px]', getRouteSourceTone(model.route_source))}>
-                                                            {routeSourceLabel(model.route_source)}
-                                                        </Badge>
-                                                        {!isSupportedRouteType(model.route_type) ? (
-                                                            <Badge
-                                                                variant="outline"
-                                                                className="h-5 px-1.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                                                                title={unknownRouteReason ?? undefined}
-                                                            >
-                                                                待人工指定
-                                                            </Badge>
-                                                        ) : null}
-                                                        {!model.has_keys ? (
-                                                            <Badge
-                                                                variant="outline"
-                                                                className="h-5 px-1.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                                                            >
-                                                                缺少 Key
-                                                            </Badge>
-                                                        ) : null}
-                                                        {!compactMode && model.projected_channel_id ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => onNavigateToChannel(model.projected_channel_id!)}
-                                                                className="inline-flex"
-                                                            >
-                                                                <Badge variant="outline" className="h-5 px-1.5 text-[10px] hover:border-primary/30 hover:bg-primary/5">
-                                                                    渠道 #{model.projected_channel_id}
-                                                                </Badge>
-                                                            </button>
-                                                        ) : null}
-                                                        {compactMode && model.disabled ? (
-                                                            <Badge
-                                                                variant="outline"
-                                                                className="h-5 px-1.5 text-[10px] border-destructive/30 bg-destructive/10 text-destructive"
-                                                            >
-                                                                已禁用
-                                                            </Badge>
-                                                        ) : null}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </Draggable>
-                            );
-                        })}
-
-                        {provided.placeholder}
-
-                        {models.length === 0 ? (
-                            <div className="flex min-h-[16rem] flex-1 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-background/50 px-4 py-8 text-center">
-                                <div className="space-y-2">
-                                    <div className="text-sm font-medium text-foreground">当前列暂无模型</div>
-                                    <div className="text-xs text-muted-foreground">
-                                        {canAssignRouteType(routeType)
-                                            ? '可直接拖拽模型到此，或使用“移动至...”切换端点格式。'
-                                            : '未识别端点仅用于展示自动识别结果，不能直接作为目标端点。'}
-                                    </div>
-                                </div>
-                            </div>
-                        ) : null}
-                    </div>
-                </div>
-            )}
-        </Droppable>
-    );
-}
-
-function EmptyRouteDropCapsule({
-    routeType,
-    onExpand,
-}: {
-    routeType: SiteModelRouteType;
-    onExpand: () => void;
-}) {
-    const droppable = canAssignRouteType(routeType);
-
-    if (!droppable) {
-        return (
-            <div className="flex min-w-[14rem] items-center justify-between gap-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-3 py-2.5">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px]', getRouteTypeTone(routeType))}>
-                            0
-                        </Badge>
-                        <span className="text-sm font-medium">{routeTypeLabel(routeType)}</span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-muted-foreground">当前无模型，仅作为状态汇总</div>
-                </div>
-                <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={onExpand}>
-                    展开
-                </Button>
-            </div>
-        );
-    }
-
-    return (
-        <Droppable droppableId={routeType}>
-            {(provided, snapshot) => (
-                <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={cn(
-                        'flex min-w-[14rem] items-center justify-between gap-3 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-3 py-2.5 transition',
-                        snapshot.isDraggingOver && 'border-primary/40 bg-primary/10 shadow-sm',
-                    )}
-                >
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                            <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px]', getRouteTypeTone(routeType))}>
-                                0
-                            </Badge>
-                            <span className="text-sm font-medium">{routeTypeLabel(routeType)}</span>
-                        </div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">拖拽模型到这里，或先展开空列</div>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={onExpand}>
-                        展开
-                    </Button>
-                    {provided.placeholder}
-                </div>
-            )}
-        </Droppable>
-    );
-}
-
 function SiteChannelTableView({
     models,
+    hasMore,
+    onReachEnd,
+    allVisibleSelected,
     pendingModelKeys,
     selectedModelKeys,
     compactMode,
@@ -1264,6 +929,9 @@ function SiteChannelTableView({
     registerModelRef,
 }: {
     models: SiteModelView[];
+    hasMore: boolean;
+    onReachEnd: () => void;
+    allVisibleSelected: boolean;
     pendingModelKeys: Set<string>;
     selectedModelKeys: Set<string>;
     compactMode: boolean;
@@ -1277,7 +945,26 @@ function SiteChannelTableView({
     onNavigateToChannel: (channelId: number) => void;
     registerModelRef: (modelKey: string, node: HTMLElement | null) => void;
 }) {
-    const allVisibleSelected = models.length > 0 && models.every((model) => selectedModelKeys.has(makeModelKey(model.group_key, model.model_name)));
+    const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        if (!hasMore) return;
+        const node = sentinelRef.current;
+        if (!node) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting) {
+                        onReachEnd();
+                        break;
+                    }
+                }
+            },
+            { rootMargin: '200px', threshold: 0 },
+        );
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [hasMore, onReachEnd]);
 
     const renderSortHead = (field: SiteChannelTableSortField, label: string) => (
         <button
@@ -1465,6 +1152,7 @@ function SiteChannelTableView({
                     })}
                 </TableBody>
             </Table>
+            {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
         </div>
     );
 }
@@ -1497,16 +1185,14 @@ function SiteAccountPanel({
     const [highlightedModelKey, setHighlightedModelKey] = useState<string | null>(null);
     const [modelSearchTerm, setModelSearchTerm] = useState('');
     const [bulkMoveTarget, setBulkMoveTarget] = useState<SiteModelRouteType>('openai_chat');
-    const [expandedEmptyColumns, setExpandedEmptyColumns] = useState<Set<SiteModelRouteType>>(new Set());
+    const [displayLimit, setDisplayLimit] = useState(SITE_PANEL_INITIAL_DISPLAY_LIMIT);
     const modelElementRefs = useRef<Map<string, HTMLElement>>(new Map());
     const panelKey = `${siteId}:${account.account_id}`;
 
     const panelPreferences = useSiteChannelPanelViewStore(
         (state) => state.panels[panelKey] ?? DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES,
     );
-    const setViewMode = useSiteChannelPanelViewStore((state) => state.setViewMode);
     const setCompactMode = useSiteChannelPanelViewStore((state) => state.setCompactMode);
-    const setCollapseEmptyColumns = useSiteChannelPanelViewStore((state) => state.setCollapseEmptyColumns);
     const setQuickFilters = useSiteChannelPanelViewStore((state) => state.setQuickFilters);
     const setTableSort = useSiteChannelPanelViewStore((state) => state.setTableSort);
 
@@ -1588,54 +1274,18 @@ function SiteAccountPanel({
         [visibleModels],
     );
 
-    const groupedModels = useMemo(() => {
-        const next: Record<SiteModelRouteType, SiteModelView[]> = {
-            unknown: [],
-            openai_chat: [],
-            openai_response: [],
-            anthropic: [],
-            gemini: [],
-            volcengine: [],
-            openai_embedding: [],
-        };
-
-        for (const model of visibleModels) {
-            next[model.route_type].push(model);
-        }
-
-        return next;
-    }, [visibleModels]);
-
-    const emptyRouteTypes = useMemo(
-        () => SITE_ROUTE_DISPLAY_ORDER.filter((routeType) => groupedModels[routeType].length === 0),
-        [groupedModels],
+    const displayedModels = useMemo(
+        () => visibleModels.slice(0, displayLimit),
+        [visibleModels, displayLimit],
     );
 
-    const shouldCollapseEmptyColumns = panelPreferences.collapseEmptyColumns && visibleModels.length > 0;
-    const effectiveExpandedEmptyColumns = useMemo(
-        () => new Set(
-            shouldCollapseEmptyColumns
-                ? Array.from(expandedEmptyColumns).filter((routeType) => groupedModels[routeType].length === 0)
-                : [],
-        ),
-        [expandedEmptyColumns, groupedModels, shouldCollapseEmptyColumns],
-    );
+    const displayLimitResetKey = `${account.account_id}|${activeFilter.kind}|${activeFilter.kind === 'group' ? activeFilter.groupKey : ''}|${modelSearchTerm}|${panelPreferences.quickFilters.join(',')}|${panelPreferences.tableSort.field}|${panelPreferences.tableSort.order}`;
+    const [prevDisplayLimitResetKey, setPrevDisplayLimitResetKey] = useState(displayLimitResetKey);
+    if (prevDisplayLimitResetKey !== displayLimitResetKey) {
+        setPrevDisplayLimitResetKey(displayLimitResetKey);
+        setDisplayLimit(SITE_PANEL_INITIAL_DISPLAY_LIMIT);
+    }
 
-    const visibleBoardColumns = useMemo(
-        () => SITE_ROUTE_DISPLAY_ORDER.filter((routeType) => {
-            if (groupedModels[routeType].length > 0) return true;
-            return !panelPreferences.collapseEmptyColumns || effectiveExpandedEmptyColumns.has(routeType);
-        }),
-        [groupedModels, panelPreferences.collapseEmptyColumns, effectiveExpandedEmptyColumns],
-    );
-
-    const collapsedEmptyColumns = useMemo(
-        () => {
-            if (!panelPreferences.collapseEmptyColumns) return [] as SiteModelRouteType[];
-            return emptyRouteTypes.filter((routeType) => !effectiveExpandedEmptyColumns.has(routeType));
-        },
-        [panelPreferences.collapseEmptyColumns, emptyRouteTypes, effectiveExpandedEmptyColumns],
-    );
     const selectedModels = useMemo(
         () => Array.from(selectedModelKeys).map((key) => visibleModelMap.get(key)).filter((model): model is SiteModelView => !!model),
         [selectedModelKeys, visibleModelMap],
@@ -1698,6 +1348,19 @@ function SiteAccountPanel({
             checked,
         );
     }, [visibleModels, setSelectionForKeys]);
+
+    const handleLoadMoreModels = useCallback(() => {
+        setDisplayLimit((prev) => Math.min(prev + SITE_PANEL_DISPLAY_PAGE_SIZE, visibleModels.length));
+    }, [visibleModels.length]);
+
+    const allVisibleSelected = useMemo(
+        () =>
+            visibleModels.length > 0 &&
+            visibleModels.every((model) =>
+                selectedModelKeys.has(makeModelKey(model.group_key, model.model_name)),
+            ),
+        [visibleModels, selectedModelKeys],
+    );
 
     const applyRouteChange = useCallback((models: SiteModelView[], nextRouteType: SiteModelRouteType) => {
         const eligibleModels = models.filter((model) => {
@@ -1874,44 +1537,6 @@ function SiteAccountPanel({
         });
     };
 
-    const handleRouteDrop = (result: DropResult) => {
-        const { destination, draggableId } = result;
-        if (!destination) return;
-
-        const nextRouteType = destination.droppableId as SiteModelRouteType;
-        if (!SITE_ROUTE_COLUMN_ORDER.includes(nextRouteType)) return;
-
-        const target = findModel(account, draggableId);
-        if (!target) return;
-
-        const currentRouteType = pendingRouteOverrides[draggableId] ?? target.model.route_type;
-        const currentDisabled = pendingDisabledOverrides[draggableId] ?? target.model.disabled;
-
-        if (currentDisabled || currentRouteType === nextRouteType) return;
-
-        const visibleTarget = visibleModelMap.get(draggableId);
-        if (visibleTarget) {
-            applyRouteChange([visibleTarget], nextRouteType);
-            return;
-        }
-
-        applyRouteChange(
-            [
-                {
-                    ...target.model,
-                    group_key: target.group.group_key,
-                    group_name: target.group.group_name,
-                    key_count: target.group.key_count,
-                    enabled_key_count: target.group.enabled_key_count,
-                    has_keys: target.group.has_keys,
-                    has_projected_channel: target.group.has_projected_channel,
-                    projected_channel_ids: target.group.projected_channel_ids,
-                },
-            ],
-            nextRouteType,
-        );
-    };
-
     const handleToggleDisabled = (model: SiteModelView) => {
         applyDisabledChange([model], !model.disabled);
     };
@@ -1983,24 +1608,6 @@ function SiteAccountPanel({
         setQuickFilters(panelKey, next);
     }, [panelKey, panelPreferences.quickFilters, setQuickFilters]);
 
-    const expandEmptyColumn = useCallback((routeType: SiteModelRouteType) => {
-        setExpandedEmptyColumns((current) => {
-            if (current.has(routeType)) return current;
-            const next = new Set(current);
-            next.add(routeType);
-            return next;
-        });
-    }, []);
-
-    const collapseEmptyColumn = useCallback((routeType: SiteModelRouteType) => {
-        setExpandedEmptyColumns((current) => {
-            if (!current.has(routeType)) return current;
-            const next = new Set(current);
-            next.delete(routeType);
-            return next;
-        });
-    }, []);
-
     return (
         <div className="space-y-3">
             <div className="flex flex-col gap-3 rounded-3xl border border-border/70 bg-card/70 p-3">
@@ -2058,34 +1665,6 @@ function SiteAccountPanel({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        <div className="inline-flex rounded-2xl border border-border/70 bg-background/80 p-1">
-                            <button
-                                type="button"
-                                onClick={() => setViewMode(panelKey, 'board')}
-                                className={cn(
-                                    'inline-flex h-6 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition',
-                                    panelPreferences.viewMode === 'board'
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:text-foreground',
-                                )}
-                            >
-                                <LayoutGrid className="size-3.5" />
-                                看板
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setViewMode(panelKey, 'table')}
-                                className={cn(
-                                    'inline-flex h-6 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition',
-                                    panelPreferences.viewMode === 'table'
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'text-muted-foreground hover:text-foreground',
-                                )}
-                            >
-                                <List className="size-3.5" />
-                                列表
-                            </button>
-                        </div>
                         <Popover>
                             <PopoverTrigger asChild>
                                 <Button type="button" variant="outline" className="h-8 rounded-2xl px-3">
@@ -2151,17 +1730,6 @@ function SiteAccountPanel({
                                             <div className="text-[11px] text-muted-foreground">压缩模型卡片和表格行高</div>
                                         </div>
                                         {panelPreferences.compactMode ? <Check className="size-4 text-primary" /> : null}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setCollapseEmptyColumns(panelKey, !panelPreferences.collapseEmptyColumns)}
-                                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-muted/60"
-                                    >
-                                        <div>
-                                            <div className="text-sm font-medium text-foreground">收起空列</div>
-                                            <div className="text-[11px] text-muted-foreground">默认只展示有模型的端点列</div>
-                                        </div>
-                                        {panelPreferences.collapseEmptyColumns ? <Check className="size-4 text-primary" /> : null}
                                     </button>
                                 </div>
                                 <Button
@@ -2497,53 +2065,13 @@ function SiteAccountPanel({
                 <div className="flex min-h-[18rem] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
                     当前筛选和搜索条件下没有匹配模型
                 </div>
-            ) : panelPreferences.viewMode === 'board' ? (
-                <div className="overflow-x-auto pb-2">
-                    <DragDropContext onDragEnd={handleRouteDrop}>
-                        <div className="min-w-max space-y-3">
-                            {collapsedEmptyColumns.length > 0 ? (
-                                <div className="flex flex-wrap gap-2 rounded-3xl border border-border/70 bg-background/60 p-3">
-                                    {collapsedEmptyColumns.map((routeType) => (
-                                        <EmptyRouteDropCapsule
-                                            key={`${ROUTE_COLUMN_KEY_PREFIX}-collapsed-${routeType}`}
-                                            routeType={routeType}
-                                            onExpand={() => expandEmptyColumn(routeType)}
-                                        />
-                                    ))}
-                                </div>
-                            ) : null}
-                            <div className="flex min-w-max gap-4">
-                                {visibleBoardColumns.map((routeType) => (
-                                <RouteColumn
-                                    key={`${ROUTE_COLUMN_KEY_PREFIX}-${routeType}`}
-                                    routeType={routeType}
-                                    models={groupedModels[routeType]}
-                                    pendingModelKeys={pendingModelKeys}
-                                    selectedModelKeys={selectedModelKeys}
-                                    compactMode={panelPreferences.compactMode}
-                                    canCollapseEmpty={shouldCollapseEmptyColumns}
-                                    onToggleModelSelection={handleToggleModelSelection}
-                                    onToggleColumnSelection={setSelectionForKeys}
-                                    onMoveModel={(model, nextRouteType) => applyRouteChange([model], nextRouteType)}
-                                    onToggleDisabled={handleToggleDisabled}
-                                    onNavigateToChannel={onNavigateToChannel}
-                                    registerModelRef={registerModelRef}
-                                    highlightedModelKey={highlightedModelKey}
-                                    onCollapseEmpty={
-                                        groupedModels[routeType].length === 0 && shouldCollapseEmptyColumns
-                                            ? () => collapseEmptyColumn(routeType)
-                                            : undefined
-                                    }
-                                />
-                                ))}
-                            </div>
-                        </div>
-                    </DragDropContext>
-                </div>
             ) : (
                 <div className="overflow-x-auto pb-2">
                     <SiteChannelTableView
-                        models={visibleModels}
+                        models={displayedModels}
+                        hasMore={displayedModels.length < visibleModels.length}
+                        onReachEnd={handleLoadMoreModels}
+                        allVisibleSelected={allVisibleSelected}
                         pendingModelKeys={pendingModelKeys}
                         selectedModelKeys={selectedModelKeys}
                         compactMode={panelPreferences.compactMode}
