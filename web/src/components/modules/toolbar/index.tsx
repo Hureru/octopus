@@ -359,7 +359,7 @@ export function Toolbar() {
                                             onClick={requestOpenImportDialog}
                                             className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
                                         >
-                                            导入 All API Hub
+                                            导入站点数据
                                         </button>
                                         <button
                                             type="button"

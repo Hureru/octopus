@@ -248,6 +248,135 @@ func TestSiteImportAllAPIHubImportsAndUpdatesAccounts(t *testing.T) {
 	})
 }
 
+func TestSiteImportMetAPIImportsSiteBasics(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	result, err := SiteImportMetAPI(ctx, mustJSONMarshal(t, buildMetAPIImportPayload("metapi-user")))
+	if err != nil {
+		t.Fatalf("SiteImportMetAPI failed: %v", err)
+	}
+
+	if result.CreatedSites != 2 {
+		t.Fatalf("expected 2 created sites, got %d", result.CreatedSites)
+	}
+	if result.CreatedAccounts != 2 {
+		t.Fatalf("expected 2 created accounts, got %d", result.CreatedAccounts)
+	}
+	if result.UpdatedAccounts != 0 {
+		t.Fatalf("expected 0 updated accounts, got %d", result.UpdatedAccounts)
+	}
+	if result.ImportedTokens != 3 {
+		t.Fatalf("expected 3 imported tokens, got %d", result.ImportedTokens)
+	}
+	if result.ImportedGroups != 3 {
+		t.Fatalf("expected 3 imported groups, got %d", result.ImportedGroups)
+	}
+	if result.ImportedModels != 3 {
+		t.Fatalf("expected 3 imported models, got %d", result.ImportedModels)
+	}
+	if result.DisabledModels != 1 {
+		t.Fatalf("expected 1 disabled model, got %d", result.DisabledModels)
+	}
+	if len(result.Warnings) != 2 {
+		t.Fatalf("expected warnings for skipped routes and downstream keys, got %#v", result.Warnings)
+	}
+
+	var managed model.SiteAccount
+	if err := dbpkg.GetDB().Where("name = ?", "metapi-user").First(&managed).Error; err != nil {
+		t.Fatalf("query managed account failed: %v", err)
+	}
+	if managed.CredentialType != model.SiteCredentialTypeAccessToken {
+		t.Fatalf("expected managed credential type access_token, got %q", managed.CredentialType)
+	}
+	if managed.AccessToken != "metapi-session-token" {
+		t.Fatalf("expected metapi session token, got %q", managed.AccessToken)
+	}
+	if managed.APIKey != "sk-metapi-default" {
+		t.Fatalf("expected metapi api token fallback, got %q", managed.APIKey)
+	}
+	if managed.PlatformUserID == nil || *managed.PlatformUserID != 456 {
+		t.Fatalf("expected platform user id 456, got %#v", managed.PlatformUserID)
+	}
+	if managed.AccountProxy == nil || *managed.AccountProxy != "http://127.0.0.1:7890" {
+		t.Fatalf("expected account proxy to be imported, got %#v", managed.AccountProxy)
+	}
+
+	var tokenCount int64
+	if err := dbpkg.GetDB().Model(&model.SiteToken{}).Where("site_account_id = ?", managed.ID).Count(&tokenCount).Error; err != nil {
+		t.Fatalf("count imported tokens failed: %v", err)
+	}
+	if tokenCount != 2 {
+		t.Fatalf("expected 2 tokens for managed account, got %d", tokenCount)
+	}
+
+	var vipGroup model.SiteUserGroup
+	if err := dbpkg.GetDB().Where("site_account_id = ? AND group_key = ?", managed.ID, "vip").First(&vipGroup).Error; err != nil {
+		t.Fatalf("expected vip group to be imported: %v", err)
+	}
+	if vipGroup.Name != "vip" {
+		t.Fatalf("expected vip group name, got %q", vipGroup.Name)
+	}
+
+	var disabled model.SiteModel
+	if err := dbpkg.GetDB().Where("site_account_id = ? AND model_name = ?", managed.ID, "gpt-hidden").First(&disabled).Error; err != nil {
+		t.Fatalf("expected disabled site model to be imported: %v", err)
+	}
+	if !disabled.Disabled {
+		t.Fatalf("expected disabled model flag to be true")
+	}
+
+	var direct model.SiteAccount
+	if err := dbpkg.GetDB().Where("name = ?", "direct-user").First(&direct).Error; err != nil {
+		t.Fatalf("query direct account failed: %v", err)
+	}
+	if direct.CredentialType != model.SiteCredentialTypeAPIKey {
+		t.Fatalf("expected direct credential type api_key, got %q", direct.CredentialType)
+	}
+	if direct.APIKey != "sk-direct-token" {
+		t.Fatalf("expected direct account API key, got %q", direct.APIKey)
+	}
+	if direct.AutoCheckin {
+		t.Fatalf("expected direct account auto checkin disabled")
+	}
+
+	result, err = SiteImportMetAPI(ctx, mustJSONMarshal(t, buildMetAPIImportPayload("metapi-user-renamed")))
+	if err != nil {
+		t.Fatalf("second SiteImportMetAPI failed: %v", err)
+	}
+	if result.CreatedSites != 0 {
+		t.Fatalf("expected 0 created sites on second import, got %d", result.CreatedSites)
+	}
+	if result.ReusedSites != 2 {
+		t.Fatalf("expected 2 reused sites on second import, got %d", result.ReusedSites)
+	}
+	if result.CreatedAccounts != 0 {
+		t.Fatalf("expected 0 created accounts on second import, got %d", result.CreatedAccounts)
+	}
+	if result.UpdatedAccounts != 2 {
+		t.Fatalf("expected 2 updated accounts on second import, got %d", result.UpdatedAccounts)
+	}
+
+	var accountCount int64
+	if err := dbpkg.GetDB().Model(&model.SiteAccount{}).Count(&accountCount).Error; err != nil {
+		t.Fatalf("count accounts after second import failed: %v", err)
+	}
+	if accountCount != 2 {
+		t.Fatalf("expected 2 accounts after second import, got %d", accountCount)
+	}
+}
+
+func TestSiteImportMetAPIInvalidJSONUsesStableMessage(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	_, err := SiteImportMetAPI(ctx, []byte("{bad json"))
+	if err == nil {
+		t.Fatalf("expected invalid JSON error")
+	}
+	if !strings.Contains(err.Error(), "site import invalid json") {
+		t.Fatalf("expected stable invalid JSON message, got %q", err.Error())
+	}
+}
+
 func TestSiteModelRouteUpdateIfNotManualHonorsManualOverride(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
@@ -461,6 +590,105 @@ func buildAllAPIHubImportPayload(managedUsername string) map[string]any {
 					"baseUrl": "https://compat.example.com/v1",
 					"apiKey":  "sk-compat-profile",
 				},
+			},
+		},
+	}
+}
+
+func buildMetAPIImportPayload(managedUsername string) map[string]any {
+	return map[string]any{
+		"version":   "2.1",
+		"timestamp": 1760000000000,
+		"type":      "accounts",
+		"accounts": map[string]any{
+			"sites": []any{
+				map[string]any{
+					"id":       1,
+					"name":     "metapi-managed",
+					"url":      "https://metapi-newapi.example.com",
+					"platform": "new-api",
+					"status":   "active",
+				},
+				map[string]any{
+					"id":       2,
+					"name":     "metapi-openai",
+					"url":      "https://api.openai.com/v1",
+					"platform": "openai",
+					"status":   "active",
+				},
+			},
+			"accounts": []any{
+				map[string]any{
+					"id":             10,
+					"siteId":         1,
+					"username":       managedUsername,
+					"accessToken":    "metapi-session-token",
+					"apiToken":       "",
+					"status":         "active",
+					"checkinEnabled": true,
+					"balance":        12.5,
+					"balanceUsed":    3.5,
+					"extraConfig":    `{"platformUserId":456,"proxyUrl":"http://127.0.0.1:7890"}`,
+				},
+				map[string]any{
+					"id":             20,
+					"siteId":         2,
+					"username":       "direct-user",
+					"accessToken":    "",
+					"apiToken":       "sk-direct-token",
+					"status":         "active",
+					"checkinEnabled": true,
+					"extraConfig":    `{"credentialMode":"apikey"}`,
+				},
+			},
+			"accountTokens": []any{
+				map[string]any{
+					"id":         100,
+					"accountId":  10,
+					"name":       "default",
+					"token":      "sk-metapi-default",
+					"tokenGroup": "default",
+					"enabled":    true,
+					"isDefault":  true,
+					"source":     "manual",
+				},
+				map[string]any{
+					"id":         101,
+					"accountId":  10,
+					"name":       "vip",
+					"token":      "sk-metapi-vip",
+					"tokenGroup": "vip",
+					"enabled":    true,
+					"isDefault":  false,
+					"source":     "sync",
+				},
+				map[string]any{
+					"id":         200,
+					"accountId":  20,
+					"name":       "default",
+					"token":      "sk-direct-token",
+					"tokenGroup": "default",
+					"enabled":    true,
+					"isDefault":  true,
+					"source":     "manual",
+				},
+			},
+			"manualModels": []any{
+				map[string]any{"accountId": 10, "modelName": "gpt-4o"},
+				map[string]any{"accountId": 10, "modelName": "claude-3-5-sonnet"},
+			},
+			"siteDisabledModels": []any{
+				map[string]any{"siteId": 1, "modelName": "gpt-hidden"},
+			},
+			"tokenRoutes": []any{
+				map[string]any{"id": 1, "modelPattern": "gpt-*"},
+			},
+			"routeChannels": []any{
+				map[string]any{"id": 1, "routeId": 1, "accountId": 10},
+			},
+			"routeGroupSources": []any{},
+			"downstreamApiKeys": []any{
+				map[string]any{"name": "client", "key": "sk-client"},
 			},
 		},
 	}

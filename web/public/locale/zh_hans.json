@@ -594,6 +594,16 @@
             }
         }
     },
+    "siteImport": {
+        "errors": {
+            "invalidJson": "导入内容不是有效的 JSON，请检查文件格式或粘贴内容。",
+            "emptyPayload": "导入内容为空，请选择 JSON 文件或粘贴导出内容。",
+            "unrecognizedAllAPIHub": "未识别到 All API Hub 导出数据，请确认选择了正确的导出 JSON。",
+            "unrecognizedMetapi": "未识别到 Metapi 账号导出数据，请确认选择了正确的导出 JSON。",
+            "noImportableAllAPIHub": "未找到可导入的 All API Hub 站点账号数据。",
+            "noImportableMetapi": "未找到可导入的 Metapi 站点账号数据。"
+        }
+    },
     "siteSync": {
         "errors": {
             "missingGroupKey": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。"

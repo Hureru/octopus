@@ -31,6 +31,7 @@ func init() {
 		AddRoute(router.NewRoute("/list", http.MethodGet).Handle(listSite)).
 		AddRoute(router.NewRoute("/archived", http.MethodGet).Handle(listArchivedSites)).
 		AddRoute(router.NewRoute("/import/all-api-hub", http.MethodPost).Handle(importAllAPIHub)).
+		AddRoute(router.NewRoute("/import/metapi", http.MethodPost).Handle(importMetAPI)).
 		AddRoute(router.NewRoute("/account/sync/:id", http.MethodPost).Handle(syncSiteAccount)).
 		AddRoute(router.NewRoute("/account/checkin/:id", http.MethodPost).Handle(checkinSiteAccount)).
 		AddRoute(router.NewRoute("/sync-all", http.MethodPost).Handle(syncAllSiteAccounts)).
@@ -89,6 +90,22 @@ func importAllAPIHub(c *gin.Context) {
 				log.Warnf("failed to sync imported all api hub account %d: %v", accountID, syncErr)
 			}
 		})
+	}
+
+	resp.Success(c, result)
+}
+
+func importMetAPI(c *gin.Context) {
+	body, err := readImportPayload(c)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := op.SiteImportMetAPI(c.Request.Context(), body)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	resp.Success(c, result)

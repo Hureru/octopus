@@ -594,6 +594,16 @@
             }
         }
     },
+    "siteImport": {
+        "errors": {
+            "invalidJson": "The import content is not valid JSON. Check the file format or pasted content.",
+            "emptyPayload": "The import content is empty. Select a JSON file or paste exported content.",
+            "unrecognizedAllAPIHub": "No All API Hub export data was recognized. Make sure you selected the correct exported JSON.",
+            "unrecognizedMetapi": "No Metapi account export data was recognized. Make sure you selected the correct exported JSON.",
+            "noImportableAllAPIHub": "No importable All API Hub site account data was found.",
+            "noImportableMetapi": "No importable Metapi site account data was found."
+        }
+    },
     "siteSync": {
         "errors": {
             "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."

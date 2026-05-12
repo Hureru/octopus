@@ -594,6 +594,16 @@
             }
         }
     },
+    "siteImport": {
+        "errors": {
+            "invalidJson": "匯入內容不是有效的 JSON，請檢查檔案格式或貼上的內容。",
+            "emptyPayload": "匯入內容為空，請選擇 JSON 檔案或貼上匯出內容。",
+            "unrecognizedAllAPIHub": "未識別到 All API Hub 匯出資料，請確認選擇了正確的匯出 JSON。",
+            "unrecognizedMetapi": "未識別到 Metapi 帳號匯出資料，請確認選擇了正確的匯出 JSON。",
+            "noImportableAllAPIHub": "未找到可匯入的 All API Hub 站點帳號資料。",
+            "noImportableMetapi": "未找到可匯入的 Metapi 站點帳號資料。"
+        }
+    },
     "siteSync": {
         "errors": {
             "missingGroupKey": "分組“{groupKey}”沒有可用的 Key。請先到站點建立這個分組的 Key，再重新同步。"

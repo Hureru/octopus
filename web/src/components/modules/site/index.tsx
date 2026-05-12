@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type DragEvent,
   type FormEvent,
 } from "react";
 import { useTranslations } from "next-intl";
@@ -30,6 +31,7 @@ import {
   useEnableSite,
   useEnableSiteAccount,
   useImportAllAPIHub,
+  useImportMetAPI,
   useRestoreSite,
   useSiteBatchAction,
   useSiteList,
@@ -209,6 +211,20 @@ const MENU_BUTTON_CLASS =
   "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left transition-colors hover:bg-muted/60";
 
 type SitePendingJump = PendingJump & { target: SiteJumpTarget };
+type ImportSource = "all-api-hub" | "metapi";
+type SiteImportResult = {
+  created_sites: number;
+  reused_sites: number;
+  created_accounts: number;
+  updated_accounts: number;
+  skipped_accounts: number;
+  scheduled_sync_accounts?: number;
+  warnings: string[];
+  imported_tokens?: number;
+  imported_groups?: number;
+  imported_models?: number;
+  disabled_models?: number;
+};
 
 function createEmptySiteForm(): SiteFormState {
   return {
@@ -804,6 +820,7 @@ export function Site() {
   const syncAllSites = useSyncAllSites();
   const checkinAllSites = useCheckinAllSites();
   const importAllAPIHub = useImportAllAPIHub();
+  const importMetAPI = useImportMetAPI();
   const detectPlatform = useDetectSitePlatform();
   const batchAction = useSiteBatchAction();
 
@@ -817,8 +834,13 @@ export function Site() {
   } = useArchivedSiteList(archivedDialogOpen);
   const [importPayloadText, setImportPayloadText] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+  const importDragDepthRef = useRef(0);
+  const [isImportDragging, setIsImportDragging] = useState(false);
+  const [importSource, setImportSource] =
+    useState<ImportSource>("all-api-hub");
   const [lastImportResult, setLastImportResult] =
-    useState<AllAPIHubImportResult | null>(null);
+    useState<SiteImportResult | null>(null);
   const [editingSite, setEditingSite] = useState<SiteRecord | null>(null);
   const [siteForm, setSiteForm] = useState<SiteFormState>(
     createEmptySiteForm(),
@@ -1420,19 +1442,23 @@ export function Site() {
     }
   }
 
-  async function handleImportAllAPIHub() {
+  async function handleImportSites() {
     const hasFile = !!importFile;
     const hasText = !!importPayloadText.trim();
     if (!hasFile && !hasText) {
-      toast.error("请选择 JSON 文件或粘贴 All API Hub 导出内容");
+      toast.error("请选择 JSON 文件或粘贴导出内容");
       return;
     }
 
     try {
-      const result = await importAllAPIHub.mutateAsync({
+      const payload = {
         file: importFile,
         text: importPayloadText,
-      });
+      };
+      const result =
+        importSource === "metapi"
+          ? await importMetAPI.mutateAsync(payload)
+          : await importAllAPIHub.mutateAsync(payload);
       setLastImportResult(result);
       setImportFile(null);
       setImportPayloadText("");
@@ -1442,6 +1468,47 @@ export function Site() {
     } catch (importError) {
       toast.error(getSiteErrorMessage(locale, importError, t));
     }
+  }
+
+  function setSelectedImportFile(file: File | null) {
+    setImportFile(file);
+    setLastImportResult(null);
+    setIsImportDragging(false);
+    importDragDepthRef.current = 0;
+    if (!file && importFileInputRef.current) {
+      importFileInputRef.current.value = "";
+    }
+  }
+
+  function isImportFileDrag(event: DragEvent<HTMLDivElement>) {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  function handleImportDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (!isImportFileDrag(event)) return;
+    event.preventDefault();
+    importDragDepthRef.current += 1;
+    setIsImportDragging(true);
+  }
+
+  function handleImportDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (!isImportFileDrag(event)) return;
+    event.preventDefault();
+    importDragDepthRef.current = Math.max(0, importDragDepthRef.current - 1);
+    if (importDragDepthRef.current === 0) {
+      setIsImportDragging(false);
+    }
+  }
+
+  function handleImportDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!isImportFileDrag(event)) return;
+    event.preventDefault();
+  }
+
+  function handleImportDrop(event: DragEvent<HTMLDivElement>) {
+    if (!isImportFileDrag(event)) return;
+    event.preventDefault();
+    setSelectedImportFile(event.dataTransfer.files?.[0] ?? null);
   }
 
   async function confirmDelete() {
@@ -2825,7 +2892,7 @@ export function Site() {
                   />
                   <span className="text-xs text-muted-foreground">
                     部分 New API 站点同步 token、分组和签到时要求额外提供用户
-                    ID。All API Hub 导入会自动填充该值。
+                    ID。导入数据会尽量自动填充该值。
                   </span>
                 </label>
               ) : null}
@@ -3045,43 +3112,88 @@ export function Site() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileJson className="size-5" />
-              导入 All API Hub 账号
+              导入站点数据
             </DialogTitle>
             <DialogDescription>
-              支持直接上传 All API Hub 导出的 JSON
-              文件，或粘贴完整导出内容。导入后会按平台和站点地址自动创建或复用站点，并为可同步账号触发后台同步。
+              支持上传或粘贴 All API Hub / Metapi 导出的 JSON。导入会按平台和站点地址自动创建或复用站点。
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5">
-            <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
-              <div className="text-sm font-medium">上传 JSON 文件</div>
-              <Input
-                type="file"
-                accept=".json,application/json"
-                onChange={(event) => {
-                  setImportFile(event.target.files?.[0] ?? null);
+          <div
+            className="space-y-5"
+            onDragEnter={handleImportDragEnter}
+            onDragLeave={handleImportDragLeave}
+            onDragOver={handleImportDragOver}
+            onDrop={handleImportDrop}
+          >
+            <div className="grid gap-2 text-sm">
+              <span className="font-medium">导入来源</span>
+              <Select
+                value={importSource}
+                onValueChange={(value) => {
+                  setImportSource(value as ImportSource);
                   setLastImportResult(null);
                 }}
-                className="rounded-xl"
-              />
+              >
+                <SelectTrigger className="rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all-api-hub">All API Hub</SelectItem>
+                  <SelectItem value="metapi">Metapi</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2 text-sm">
+              <div className="text-sm font-medium">上传 JSON 文件</div>
+              <div className="flex items-center gap-2">
+                <Input
+                  ref={importFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    setSelectedImportFile(event.target.files?.[0] ?? null);
+                  }}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => importFileInputRef.current?.click()}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center justify-center rounded-xl border border-dashed px-3 text-center text-sm transition-all hover:bg-muted/30",
+                    isImportDragging
+                      ? "min-h-28 border-primary bg-primary/10 text-primary"
+                      : "min-h-10 border-border bg-muted/20",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "min-w-0 truncate",
+                      importFile ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {isImportDragging
+                      ? "松开即可上传 JSON 文件"
+                      : importFile?.name ?? "点击选择或拖拽 JSON 文件到这里"}
+                  </span>
+                </button>
+                <IconActionButton
+                  label="清除文件"
+                  onClick={() => {
+                    setSelectedImportFile(null);
+                  }}
+                  disabled={!importFile}
+                  className={!importFile ? "opacity-50" : undefined}
+                >
+                  <X className="size-4" />
+                </IconActionButton>
+              </div>
               <div className="text-xs text-muted-foreground">
                 {importFile
                   ? `已选择：${importFile.name}`
-                  : "支持 All API Hub 导出的 .json 文件"}
+                  : `支持 ${importSource === "metapi" ? "Metapi" : "All API Hub"} 导出的 .json 文件`}
               </div>
-              {importFile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => setImportFile(null)}
-                >
-                  <X className="size-4" />
-                  清除文件
-                </Button>
-              ) : null}
             </div>
 
             <label className="grid gap-2 text-sm">
@@ -3092,12 +3204,17 @@ export function Site() {
                   setImportPayloadText(event.target.value);
                   setLastImportResult(null);
                 }}
-                placeholder='粘贴类似 {"accounts":{"accounts":[...]}} 的完整导出内容'
+                placeholder={
+                  importSource === "metapi"
+                    ? '粘贴类似 {"version":"2.1","accounts":{"sites":[...],"accounts":[...]}} 的完整导出内容'
+                    : '粘贴类似 {"accounts":{"accounts":[...]}} 的完整导出内容'
+                }
                 className="min-h-40 rounded-2xl border border-input bg-background px-4 py-3 font-mono text-xs outline-none transition focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20"
               />
               <span className="text-xs text-muted-foreground">
-                导入会保留已存在站点的本地配置；同一分组下的多个 key
-                后续仍会聚合到同一个托管 channel。
+                {importSource === "metapi"
+                  ? "Metapi 导入只迁移站点、账号、Key、分组和模型；路由策略与下游 Key 会跳过。"
+                  : "导入会保留已存在站点的本地配置；同一分组下的多个 key 后续仍会聚合到同一个托管 channel。"}
               </span>
             </label>
 
@@ -3124,10 +3241,33 @@ export function Site() {
                     label="跳过账号"
                     value={lastImportResult.skipped_accounts}
                   />
-                  <SiteMetric
-                    label="后台同步"
-                    value={lastImportResult.scheduled_sync_accounts}
-                  />
+                  {typeof lastImportResult.scheduled_sync_accounts ===
+                  "number" ? (
+                    <SiteMetric
+                      label="后台同步"
+                      value={lastImportResult.scheduled_sync_accounts}
+                    />
+                  ) : null}
+                  {typeof lastImportResult.imported_tokens === "number" ? (
+                    <>
+                      <SiteMetric
+                        label="导入 Key"
+                        value={lastImportResult.imported_tokens}
+                      />
+                      <SiteMetric
+                        label="导入分组"
+                        value={lastImportResult.imported_groups ?? 0}
+                      />
+                      <SiteMetric
+                        label="导入模型"
+                        value={lastImportResult.imported_models ?? 0}
+                      />
+                      <SiteMetric
+                        label="禁用模型"
+                        value={lastImportResult.disabled_models ?? 0}
+                      />
+                    </>
+                  ) : null}
                 </div>
 
                 {lastImportResult.warnings.length > 0 ? (
@@ -3161,17 +3301,21 @@ export function Site() {
               关闭
             </Button>
             <Button
-              onClick={handleImportAllAPIHub}
-              disabled={importAllAPIHub.isPending}
+              onClick={handleImportSites}
+              disabled={importAllAPIHub.isPending || importMetAPI.isPending}
               className="rounded-xl"
             >
               <Upload
                 className={cn(
                   "size-4",
-                  importAllAPIHub.isPending ? "animate-pulse" : "",
+                  importAllAPIHub.isPending || importMetAPI.isPending
+                    ? "animate-pulse"
+                    : "",
                 )}
               />
-              {importAllAPIHub.isPending ? "导入中..." : "开始导入"}
+              {importAllAPIHub.isPending || importMetAPI.isPending
+                ? "导入中..."
+                : "开始导入"}
             </Button>
           </DialogFooter>
         </DialogContent>

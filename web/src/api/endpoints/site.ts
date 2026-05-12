@@ -172,6 +172,19 @@ export type AllAPIHubImportResult = {
   warnings: string[];
 };
 
+export type MetAPIImportResult = {
+  created_sites: number;
+  reused_sites: number;
+  created_accounts: number;
+  updated_accounts: number;
+  skipped_accounts: number;
+  imported_tokens: number;
+  imported_groups: number;
+  imported_models: number;
+  disabled_models: number;
+  warnings: string[];
+};
+
 export function useSiteList() {
   return useQuery({
     queryKey: ["sites", "list"],
@@ -497,6 +510,62 @@ export function useImportAllAPIHub() {
     },
     onSuccess: () => invalidateSiteQueries(queryClient),
     onError: (error) => logger.error("导入 All API Hub 账号失败:", error),
+  });
+}
+
+export function useImportMetAPI() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { file?: File | null; text?: string }) => {
+      const hasFile = !!payload.file;
+      const hasText = !!payload.text?.trim();
+      if (!hasFile && !hasText) {
+        throw new Error("请选择 JSON 文件或粘贴导出内容");
+      }
+
+      const headers: HeadersInit = {
+        Authorization: getAuthHeader(),
+      };
+      let body: BodyInit;
+
+      if (payload.file) {
+        const form = new FormData();
+        form.append("file", payload.file);
+        body = form;
+      } else {
+        headers["Content-Type"] = "application/json";
+        body = payload.text!.trim();
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/site/import/metapi`, {
+        method: "POST",
+        headers,
+        body,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+
+      if (!response.ok) {
+        throw new Error(
+          extractResponseMessage(
+            data,
+            typeof data === "string" ? data : response.statusText,
+          ),
+        );
+      }
+
+      const result =
+        extractResponseData<MetAPIImportResult>(data) ??
+        (data as MetAPIImportResult);
+      return {
+        ...result,
+        warnings: result.warnings ?? [],
+      };
+    },
+    onSuccess: () => invalidateSiteQueries(queryClient),
+    onError: (error) => logger.error("导入 metapi 站点失败:", error),
   });
 }
 
