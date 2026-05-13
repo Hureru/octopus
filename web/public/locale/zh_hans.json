@@ -608,5 +608,15 @@
         "errors": {
             "missingGroupKey": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。"
         }
+    },
+    "errors": {
+        "site": {
+            "sub2api": {
+                "api_key_required": "Sub2API 同步需要 API Key。请先在站点创建一个 Key 后再重新同步。",
+                "model_api_key_required": "Sub2API 模型发现需要 API Key。请先在站点创建一个 Key 后再重新同步。",
+                "envelope_failed": "Sub2API 返回错误，请检查 Access Token、权限或站点状态。",
+                "missing_data": "Sub2API 响应缺少必要数据，请检查站点兼容性或稍后重试。"
+            }
+        }
     }
 }

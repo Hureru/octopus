@@ -126,3 +126,23 @@ func TestRequestJSONKeepsJSONForbiddenMessage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParseGroupItemsPreservesScalarMapLabels(t *testing.T) {
+	groups := parseGroupItems(map[string]any{
+		"data": map[string]any{
+			"vip":   "VIP Group",
+			"trial": map[string]any{"name": "Trial Group"},
+		},
+	})
+
+	seen := make(map[string]string)
+	for _, group := range groups {
+		seen[group.GroupKey] = group.Name
+	}
+	if seen["vip"] != "VIP Group" {
+		t.Fatalf("expected scalar group label, got %+v", groups)
+	}
+	if seen["trial"] != "Trial Group" {
+		t.Fatalf("expected nested group label, got %+v", groups)
+	}
+}

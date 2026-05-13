@@ -608,5 +608,15 @@
         "errors": {
             "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."
         }
+    },
+    "errors": {
+        "site": {
+            "sub2api": {
+                "api_key_required": "Sub2API sync requires an API key. Create a key on the site and sync again.",
+                "model_api_key_required": "Sub2API model discovery requires an API key. Create a key on the site and sync again.",
+                "envelope_failed": "Sub2API returned an error. Check the access token, permissions, or site status.",
+                "missing_data": "Sub2API response is missing required data. Check site compatibility or try again later."
+            }
+        }
     }
 }

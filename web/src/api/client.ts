@@ -1,3 +1,4 @@
+import { translateApiErrorCode } from './error-i18n';
 import type { ApiError } from './types';
 import { HttpStatus } from './types';
 
@@ -42,11 +43,17 @@ async function handleResponse<T>(response: Response): Promise<T> {
     }
 
     if (!response.ok) {
+        const rawMessage = (data && typeof data === 'object' && 'message' in data && typeof data.message === 'string')
+            ? data.message
+            : (typeof data === 'string' ? data : response.statusText);
+        const errorCode = (data && typeof data === 'object' && 'error_code' in data && typeof data.error_code === 'string')
+            ? data.error_code
+            : undefined;
         const error: ApiError = {
             code: response.status,
-            message: (data && typeof data === 'object' && 'message' in data && typeof data.message === 'string')
-                ? data.message
-                : (typeof data === 'string' ? data : response.statusText),
+            errorCode,
+            rawMessage,
+            message: translateApiErrorCode(errorCode, rawMessage),
         };
 
         handleError(error);

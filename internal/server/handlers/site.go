@@ -352,7 +352,7 @@ func syncSiteAccount(c *gin.Context) {
 	}
 	result, err := sitesvc.SyncAccount(c.Request.Context(), idNum)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, err)
 		return
 	}
 	resp.Success(c, result)

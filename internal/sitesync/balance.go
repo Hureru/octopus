@@ -308,9 +308,13 @@ func fetchSub2APIBalance(ctx context.Context, siteRecord *model.Site, account *m
 	if err != nil {
 		return 0, 0
 	}
-	data, ok := payload["data"].(map[string]any)
+	unwrapped, err := unwrapSub2APIData(payload, "/api/v1/auth/me")
+	if err != nil {
+		return 0, 0
+	}
+	data, ok := unwrapped.(map[string]any)
 	if !ok {
-		data = payload
+		return 0, 0
 	}
 	return jsonFloat(data["balance"]), 0
 }

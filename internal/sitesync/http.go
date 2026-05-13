@@ -216,7 +216,11 @@ func buildSiteURL(baseURL string, path string) string {
 }
 
 func parseTokenItems(payload map[string]any) []map[string]any {
-	for _, candidate := range []any{payload["data"], nestedValue(payload, "data", "items"), nestedValue(payload, "data", "data"), payload["items"], payload["list"], nestedValue(payload, "data", "list")} {
+	return parseTokenItemsFromAny(payload)
+}
+
+func parseTokenItemsFromAny(value any) []map[string]any {
+	for _, candidate := range itemSliceCandidates(value) {
 		if items := normalizeItemSlice(candidate); len(items) > 0 {
 			return items
 		}
@@ -224,34 +228,33 @@ func parseTokenItems(payload map[string]any) []map[string]any {
 	return nil
 }
 
+func itemSliceCandidates(value any) []any {
+	payload, ok := value.(map[string]any)
+	if !ok {
+		return []any{value}
+	}
+	return []any{
+		nestedValue(payload, "data", "items"),
+		nestedValue(payload, "data", "list"),
+		nestedValue(payload, "data", "records"),
+		nestedValue(payload, "data", "rows"),
+		nestedValue(payload, "data", "data"),
+		payload["items"],
+		payload["list"],
+		payload["records"],
+		payload["rows"],
+		payload["data"],
+	}
+}
+
 func parseGroupItems(payload map[string]any) []model.SiteUserGroup {
+	return parseGroupItemsFromAny(payload)
+}
+
+func parseGroupItemsFromAny(value any) []model.SiteUserGroup {
 	items := make([]model.SiteUserGroup, 0)
-	for _, candidate := range []any{payload["data"], nestedValue(payload, "data", "groups"), payload["groups"], payload} {
-		switch value := candidate.(type) {
-		case map[string]any:
-			for key := range value {
-				lowered := strings.ToLower(strings.TrimSpace(key))
-				if lowered == "" || lowered == "success" || lowered == "message" || lowered == "data" || lowered == "code" || lowered == "error" {
-					continue
-				}
-				items = append(items, model.SiteUserGroup{GroupKey: key, Name: key})
-			}
-		case []any:
-			for _, raw := range value {
-				switch item := raw.(type) {
-				case string:
-					if strings.TrimSpace(item) != "" {
-						items = append(items, model.SiteUserGroup{GroupKey: strings.TrimSpace(item), Name: strings.TrimSpace(item)})
-					}
-				case map[string]any:
-					groupKey := firstNonEmptyString(jsonString(item["group_id"]), jsonString(item["groupId"]), jsonString(item["id"]), jsonString(item["value"]), jsonString(item["name"]), jsonString(item["group_name"]), jsonString(item["groupName"]), jsonString(item["title"]))
-					groupName := firstNonEmptyString(jsonString(item["name"]), jsonString(item["group_name"]), jsonString(item["groupName"]), jsonString(item["title"]), groupKey)
-					if strings.TrimSpace(groupKey) != "" {
-						items = append(items, model.SiteUserGroup{GroupKey: strings.TrimSpace(groupKey), Name: strings.TrimSpace(groupName)})
-					}
-				}
-			}
-		}
+	for _, candidate := range groupItemCandidates(value) {
+		items = parseGroupCandidate(candidate)
 		if len(items) > 0 {
 			break
 		}
@@ -275,18 +278,125 @@ func parseGroupItems(payload map[string]any) []model.SiteUserGroup {
 	return result
 }
 
-func normalizeItemSlice(value any) []map[string]any {
-	rawItems, ok := value.([]any)
+func groupItemCandidates(value any) []any {
+	payload, ok := value.(map[string]any)
 	if !ok {
-		return nil
+		return []any{value}
 	}
-	items := make([]map[string]any, 0, len(rawItems))
-	for _, raw := range rawItems {
-		if item, ok := raw.(map[string]any); ok {
-			items = append(items, item)
+	return []any{
+		nestedValue(payload, "data", "groups"),
+		nestedValue(payload, "data", "items"),
+		nestedValue(payload, "data", "list"),
+		nestedValue(payload, "data", "records"),
+		nestedValue(payload, "data", "rows"),
+		nestedValue(payload, "data", "data"),
+		payload["groups"],
+		payload["items"],
+		payload["list"],
+		payload["records"],
+		payload["rows"],
+		payload["data"],
+		payload,
+	}
+}
+
+func parseGroupCandidate(candidate any) []model.SiteUserGroup {
+	items := make([]model.SiteUserGroup, 0)
+	switch value := candidate.(type) {
+	case []any:
+		for _, raw := range value {
+			switch item := raw.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(item); trimmed != "" {
+					items = append(items, model.SiteUserGroup{GroupKey: trimmed, Name: trimmed})
+				}
+			case float64, int, int64:
+				if groupKey := jsonString(item); groupKey != "" {
+					items = append(items, model.SiteUserGroup{GroupKey: groupKey, Name: groupKey})
+				}
+			case map[string]any:
+				if group, ok := parseGroupObject(item); ok {
+					items = append(items, group)
+				}
+			}
+		}
+	case []string:
+		for _, item := range value {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				items = append(items, model.SiteUserGroup{GroupKey: trimmed, Name: trimmed})
+			}
+		}
+	case map[string]any:
+		if group, ok := parseGroupObject(value); ok {
+			return []model.SiteUserGroup{group}
+		}
+		for key, raw := range value {
+			if isIgnorableGroupMapKey(key) {
+				continue
+			}
+			name := key
+			if value, ok := raw.(string); ok {
+				name = firstNonEmptyString(value, key)
+			} else if item, ok := raw.(map[string]any); ok {
+				name = firstNonEmptyString(jsonString(item["name"]), jsonString(item["group_name"]), jsonString(item["groupName"]), jsonString(item["title"]), jsonString(item["label"]), key)
+			}
+			items = append(items, model.SiteUserGroup{GroupKey: key, Name: name})
 		}
 	}
 	return items
+}
+
+func parseGroupObject(item map[string]any) (model.SiteUserGroup, bool) {
+	groupKey := firstNonEmptyString(
+		jsonString(item["group_id"]),
+		jsonString(item["groupId"]),
+		jsonString(item["id"]),
+		jsonString(item["value"]),
+		jsonString(item["code"]),
+		jsonString(item["name"]),
+		jsonString(item["group_name"]),
+		jsonString(item["groupName"]),
+		jsonString(item["title"]),
+		jsonString(item["label"]),
+	)
+	groupName := firstNonEmptyString(
+		jsonString(item["name"]),
+		jsonString(item["group_name"]),
+		jsonString(item["groupName"]),
+		jsonString(item["title"]),
+		jsonString(item["label"]),
+		groupKey,
+	)
+	if strings.TrimSpace(groupKey) == "" {
+		return model.SiteUserGroup{}, false
+	}
+	return model.SiteUserGroup{GroupKey: strings.TrimSpace(groupKey), Name: strings.TrimSpace(groupName)}, true
+}
+
+func isIgnorableGroupMapKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "", "success", "message", "msg", "data", "code", "error", "errors", "groups", "items", "list", "records", "rows", "total", "page", "page_size", "pageSize":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeItemSlice(value any) []map[string]any {
+	switch rawItems := value.(type) {
+	case []map[string]any:
+		return rawItems
+	case []any:
+		items := make([]map[string]any, 0, len(rawItems))
+		for _, raw := range rawItems {
+			if item, ok := raw.(map[string]any); ok {
+				items = append(items, item)
+			}
+		}
+		return items
+	default:
+		return nil
+	}
 }
 
 func normalizeModelNames(names []string) []string {
@@ -513,6 +623,8 @@ func jsonString(value any) string {
 	case float64:
 		return strings.TrimSpace(fmt.Sprintf("%.0f", typed))
 	case int:
+		return strings.TrimSpace(fmt.Sprintf("%d", typed))
+	case int64:
 		return strings.TrimSpace(fmt.Sprintf("%d", typed))
 	default:
 		return ""

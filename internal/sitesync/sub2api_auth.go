@@ -133,9 +133,11 @@ func parseSub2APIRefreshPayload(payload map[string]any) (sub2APIRefreshedCredent
 		return sub2APIRefreshedCredentials{}, false
 	}
 
-	code := anyToInt64(payload["code"])
-	if code != 0 {
-		return sub2APIRefreshedCredentials{}, false
+	if rawCode, ok := payload["code"]; ok {
+		code := anyToInt64(rawCode)
+		if code != 0 {
+			return sub2APIRefreshedCredentials{}, false
+		}
 	}
 
 	data, ok := payload["data"].(map[string]any)

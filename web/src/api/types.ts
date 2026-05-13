@@ -3,6 +3,7 @@
  */
 export interface ApiResponse<T = unknown> {
     code?: number;
+    error_code?: string;
     message?: string;
     data?: T;
 }
@@ -13,6 +14,8 @@ export interface ApiResponse<T = unknown> {
 export interface ApiError {
     code: number;
     message: string;
+    errorCode?: string;
+    rawMessage?: string;
 }
 
 /**

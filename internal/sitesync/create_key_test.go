@@ -209,3 +209,20 @@ func TestCreateAccountTokenCreatesSub2APIKeyAndSyncsAccount(t *testing.T) {
 		t.Fatalf("unexpected synced groups: %+v", reloaded.UserGroups)
 	}
 }
+
+func TestSiteTokenCreateSucceededFromAnyRequiresExplicitPrimitiveTrue(t *testing.T) {
+	for name, value := range map[string]any{
+		"false":        false,
+		"zero":         0,
+		"empty string": "",
+		"string true":  "true",
+		"non-empty":    "ok",
+	} {
+		if siteTokenCreateSucceededFromAny(value) {
+			t.Fatalf("expected %s primitive to be unsuccessful", name)
+		}
+	}
+	if !siteTokenCreateSucceededFromAny(true) {
+		t.Fatalf("expected boolean true primitive to be successful")
+	}
+}

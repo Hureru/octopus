@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
 )
@@ -208,13 +209,7 @@ func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, acc
 		tokens = append(tokens, model.SiteToken{Name: "default", Token: strings.TrimSpace(account.APIKey), GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "fallback", IsDefault: true})
 	}
 	if len(tokens) == 0 {
-		sessionToken := stripBearerPrefix(accessToken)
-		if sessionToken != "" {
-			tokens = append(tokens, model.SiteToken{Name: "default", Token: sessionToken, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "access_token_fallback", IsDefault: true})
-		}
-	}
-	if len(tokens) == 0 {
-		return nil, fmt.Errorf("site sync requires a key for group %q; create a key for that group on the site and sync again", model.SiteDefaultGroupKey)
+		return nil, apperror.New(apperror.CodeSiteSub2APIAPIKeyRequired, "sub2api sync requires an API key; create a key on the site and sync again")
 	}
 
 	groups, err := fetchSub2APIGroups(ctx, siteRecord, account, accessToken, tokens)
