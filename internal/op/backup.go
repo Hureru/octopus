@@ -13,7 +13,14 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const dbDumpVersion = 1
+const (
+	dbDumpVersion = 1
+
+	// Keep import batches small enough for SQLite builds with low SQL variable limits.
+	// Some exported tables (for example relay_logs) have many columns, so a conservative
+	// row count avoids "too many SQL variables" during bulk insert/upsert.
+	dbImportBatchSize = 20
+)
 
 func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DBDump, error) {
 	conn := db.GetDB().WithContext(ctx)
@@ -405,38 +412,53 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 				res.RowsAffected["stats_hourly"] = n
 			}
 
-			// StatsModel: remap ChannelID, clear ID
-			for i := range dump.StatsModel {
-				dump.StatsModel[i].ID = 0
-				if newID, ok := channelIDMap[dump.StatsModel[i].ChannelID]; ok {
-					dump.StatsModel[i].ChannelID = newID
+			// StatsModel: remap ChannelID, clear ID. Skip orphaned rows whose channel
+			// is not present in the dump, otherwise SQLite foreign keys can fail.
+			filteredStatsModel := make([]model.StatsModel, 0, len(dump.StatsModel))
+			for _, row := range dump.StatsModel {
+				newID, ok := channelIDMap[row.ChannelID]
+				if !ok {
+					continue
 				}
+				row.ID = 0
+				row.ChannelID = newID
+				filteredStatsModel = append(filteredStatsModel, row)
 			}
-			if n, err := createDoNothing(tx, dump.StatsModel); err != nil {
+			if n, err := createDoNothing(tx, filteredStatsModel); err != nil {
 				return fmt.Errorf("import stats_model: %w", err)
 			} else {
 				res.RowsAffected["stats_model"] = n
 			}
 
-			// StatsChannel: remap ChannelID (which is the PK)
-			for i := range dump.StatsChannel {
-				if newID, ok := channelIDMap[dump.StatsChannel[i].ChannelID]; ok {
-					dump.StatsChannel[i].ChannelID = newID
+			// StatsChannel: remap ChannelID (which is the PK). Skip orphaned rows whose
+			// channel is not present in the dump, otherwise SQLite foreign keys can fail.
+			filteredStatsChannel := make([]model.StatsChannel, 0, len(dump.StatsChannel))
+			for _, row := range dump.StatsChannel {
+				newID, ok := channelIDMap[row.ChannelID]
+				if !ok {
+					continue
 				}
+				row.ChannelID = newID
+				filteredStatsChannel = append(filteredStatsChannel, row)
 			}
-			if n, err := createUpsertAll(tx, dump.StatsChannel, []clause.Column{{Name: "channel_id"}}); err != nil {
+			if n, err := createUpsertAll(tx, filteredStatsChannel, []clause.Column{{Name: "channel_id"}}); err != nil {
 				return fmt.Errorf("import stats_channel: %w", err)
 			} else {
 				res.RowsAffected["stats_channel"] = n
 			}
 
-			// StatsAPIKey: remap APIKeyID (which is the PK)
-			for i := range dump.StatsAPIKey {
-				if newID, ok := apiKeyIDMap[dump.StatsAPIKey[i].APIKeyID]; ok {
-					dump.StatsAPIKey[i].APIKeyID = newID
+			// StatsAPIKey: remap APIKeyID (which is the PK). Skip orphaned rows whose
+			// API key is not present in the dump, otherwise SQLite foreign keys can fail.
+			filteredStatsAPIKey := make([]model.StatsAPIKey, 0, len(dump.StatsAPIKey))
+			for _, row := range dump.StatsAPIKey {
+				newID, ok := apiKeyIDMap[row.APIKeyID]
+				if !ok {
+					continue
 				}
+				row.APIKeyID = newID
+				filteredStatsAPIKey = append(filteredStatsAPIKey, row)
 			}
-			if n, err := createUpsertAll(tx, dump.StatsAPIKey, []clause.Column{{Name: "api_key_id"}}); err != nil {
+			if n, err := createUpsertAll(tx, filteredStatsAPIKey, []clause.Column{{Name: "api_key_id"}}); err != nil {
 				return fmt.Errorf("import stats_api_key: %w", err)
 			} else {
 				res.RowsAffected["stats_api_key"] = n
@@ -482,7 +504,7 @@ func createDoNothing[T any](tx *gorm.DB, rows []T) (int64, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows)
+	result := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&rows, dbImportBatchSize)
 	return result.RowsAffected, result.Error
 }
 
@@ -493,7 +515,7 @@ func createUpsertAll[T any](tx *gorm.DB, rows []T, columns []clause.Column) (int
 	result := tx.Clauses(clause.OnConflict{
 		Columns:   columns,
 		UpdateAll: true,
-	}).Create(&rows)
+	}).CreateInBatches(&rows, dbImportBatchSize)
 	return result.RowsAffected, result.Error
 }
 
@@ -504,6 +526,6 @@ func createUpsertSettings(tx *gorm.DB, rows []model.Setting) (int64, error) {
 	result := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&rows)
+	}).CreateInBatches(&rows, dbImportBatchSize)
 	return result.RowsAffected, result.Error
 }

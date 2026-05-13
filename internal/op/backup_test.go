@@ -169,6 +169,38 @@ func TestDBImportDeduplicatesOnSecondImport(t *testing.T) {
 	}
 }
 
+func TestDBImportSkipsOrphanedStats(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+
+	dump := buildTestDump()
+	dump.IncludeStats = true
+	dump.StatsChannel = []model.StatsChannel{
+		{ChannelID: 1, StatsMetrics: model.StatsMetrics{RequestSuccess: 1}},
+		{ChannelID: 999, StatsMetrics: model.StatsMetrics{RequestSuccess: 2}},
+	}
+	dump.StatsModel = []model.StatsModel{
+		{ID: 1, ChannelID: 1, Name: "gpt-4", StatsMetrics: model.StatsMetrics{RequestSuccess: 1}},
+		{ID: 2, ChannelID: 999, Name: "orphan", StatsMetrics: model.StatsMetrics{RequestSuccess: 2}},
+	}
+	dump.StatsAPIKey = []model.StatsAPIKey{
+		{APIKeyID: 999, StatsMetrics: model.StatsMetrics{RequestSuccess: 2}},
+	}
+
+	result, err := DBImportIncremental(ctx, dump)
+	if err != nil {
+		t.Fatalf("DBImportIncremental failed: %v", err)
+	}
+	if result.RowsAffected["stats_channel"] != 1 {
+		t.Fatalf("expected 1 stats_channel imported, got %d", result.RowsAffected["stats_channel"])
+	}
+	if result.RowsAffected["stats_model"] != 1 {
+		t.Fatalf("expected 1 stats_model imported, got %d", result.RowsAffected["stats_model"])
+	}
+	if result.RowsAffected["stats_api_key"] != 0 {
+		t.Fatalf("expected 0 stats_api_key imported, got %d", result.RowsAffected["stats_api_key"])
+	}
+}
+
 func TestDBExportThenImportRoundtrip(t *testing.T) {
 	ctx := setupBackupTestDB(t)
 
@@ -242,8 +274,8 @@ func TestDBExportThenImportRoundtrip(t *testing.T) {
 
 func buildTestDump() *model.DBDump {
 	return &model.DBDump{
-		Version:    1,
-		IncludeLogs: false,
+		Version:      1,
+		IncludeLogs:  false,
 		IncludeStats: false,
 		Channels: []model.Channel{
 			{ID: 1, Name: "test-channel", Enabled: true},
