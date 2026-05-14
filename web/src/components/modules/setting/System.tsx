@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Monitor, Globe, Clock, Shield, HelpCircle, X, Link, Activity } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, HelpCircle, X, Link, Activity, HeartPulse } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -20,6 +20,7 @@ export function SettingSystem() {
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
     const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(false);
+    const [groupHealthEnabled, setGroupHealthEnabled] = useState(false);
     const [sseHeartbeatInterval, setSseHeartbeatInterval] = useState('');
     const [ssePreStreamHeartbeatDelay, setSsePreStreamHeartbeatDelay] = useState('');
 
@@ -27,6 +28,7 @@ export function SettingSystem() {
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
     const initialWsUpgradeEnabled = useRef(false);
+    const initialGroupHealthEnabled = useRef(false);
     const initialSseHeartbeatInterval = useRef('');
     const initialSsePreStreamHeartbeatDelay = useRef('');
 
@@ -36,6 +38,7 @@ export function SettingSystem() {
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
             const wsUpgrade = settings.find(s => s.key === SettingKey.RelayWSUpgradeEnabled);
+            const groupHealth = settings.find(s => s.key === SettingKey.GroupHealthEnabled);
             const sseHeartbeat = settings.find(s => s.key === SettingKey.SSEHeartbeatInterval);
             const ssePreStreamHeartbeat = settings.find(s => s.key === SettingKey.SSEPreStreamHeartbeatDelay);
             if (proxy) {
@@ -54,6 +57,11 @@ export function SettingSystem() {
                 const isEnabled = wsUpgrade.value === 'true';
                 queueMicrotask(() => setWsUpgradeEnabled(isEnabled));
                 initialWsUpgradeEnabled.current = isEnabled;
+            }
+            if (groupHealth) {
+                const isEnabled = groupHealth.value === 'true';
+                queueMicrotask(() => setGroupHealthEnabled(isEnabled));
+                initialGroupHealthEnabled.current = isEnabled;
             }
             if (sseHeartbeat) {
                 queueMicrotask(() => setSseHeartbeatInterval(sseHeartbeat.value));
@@ -80,6 +88,8 @@ export function SettingSystem() {
                     initialCorsAllowOrigins.current = value;
                 } else if (key === SettingKey.RelayWSUpgradeEnabled) {
                     initialWsUpgradeEnabled.current = value === 'true';
+                } else if (key === SettingKey.GroupHealthEnabled) {
+                    initialGroupHealthEnabled.current = value === 'true';
                 } else if (key === SettingKey.SSEHeartbeatInterval) {
                     initialSseHeartbeatInterval.current = value;
                 } else if (key === SettingKey.SSEPreStreamHeartbeatDelay) {
@@ -152,6 +162,20 @@ export function SettingSystem() {
                     toast.success(t('saved'));
                     initialWsUpgradeEnabled.current = checked;
                 }
+            }
+        );
+    };
+
+    const handleGroupHealthChange = (checked: boolean) => {
+        setGroupHealthEnabled(checked);
+        setSetting.mutate(
+            { key: SettingKey.GroupHealthEnabled, value: checked ? 'true' : 'false' },
+            {
+                onSuccess: () => {
+                    toast.success(t('saved'));
+                    initialGroupHealthEnabled.current = checked;
+                },
+                onError: () => setGroupHealthEnabled(initialGroupHealthEnabled.current),
             }
         );
     };
@@ -316,6 +340,27 @@ export function SettingSystem() {
                     className="w-48 rounded-xl"
                 />
             </div>
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <HeartPulse className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('groupHealth.label')}</span>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {t('groupHealth.description')}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+                <Switch
+                    checked={groupHealthEnabled}
+                    onCheckedChange={handleGroupHealthChange}
+                />
+            </div>
+
             <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <Link className="h-5 w-5 text-muted-foreground" />

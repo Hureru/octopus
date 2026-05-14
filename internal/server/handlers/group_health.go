@@ -7,6 +7,8 @@ import (
 	"strconv"
 
 	"github.com/bestruirui/octopus/internal/grouphealth"
+	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
@@ -38,7 +40,23 @@ func init() {
 		)
 }
 
+func ensureGroupHealthEnabled(c *gin.Context) bool {
+	enabled, err := op.SettingGetBool(model.SettingKeyGroupHealthEnabled)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !enabled {
+		resp.Error(c, http.StatusForbidden, "group health checks are disabled")
+		return false
+	}
+	return true
+}
+
 func listGroupHealth(c *gin.Context) {
+	if !ensureGroupHealthEnabled(c) {
+		return
+	}
 	views, err := defaultGroupHealthService.ListGroupHealthViews(c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -48,6 +66,9 @@ func listGroupHealth(c *gin.Context) {
 }
 
 func getGroupHealth(c *gin.Context) {
+	if !ensureGroupHealthEnabled(c) {
+		return
+	}
 	groupID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		resp.InvalidParam(c)
@@ -62,6 +83,9 @@ func getGroupHealth(c *gin.Context) {
 }
 
 func runGroupHealth(c *gin.Context) {
+	if !ensureGroupHealthEnabled(c) {
+		return
+	}
 	groupID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		resp.InvalidParam(c)
@@ -96,6 +120,9 @@ func runGroupHealth(c *gin.Context) {
 }
 
 func runAllGroupHealth(c *gin.Context) {
+	if !ensureGroupHealthEnabled(c) {
+		return
+	}
 	safe.Go("group-health-run-all", func() {
 		runCtx := context.Background()
 		defaultGroupHealthService.RunAllGroupHealth(runCtx, 2)

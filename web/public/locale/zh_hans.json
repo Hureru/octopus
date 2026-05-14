@@ -127,6 +127,16 @@
             "sortByTokens": "Tokens",
             "noData": "暂无排行数据",
             "successRate": "成功率"
+        },
+        "groupHealth": {
+            "title": "分组健康",
+            "total": "{count} 个分组",
+            "running": "{count} 运行中",
+            "success": "{count} 健康",
+            "partial": "{count} 部分可用",
+            "failed": "{count} 失败",
+            "idle": "{count} 未检查",
+            "runAll": "全部检查"
         }
     },
     "setting": {
@@ -172,6 +182,10 @@
             "description": "设置为 0 禁用建立前心跳；开启后会在上游流尚未建立且等待超过该秒数时发送 SSE 注释。",
             "risk": "可降低 Cloudflare 524 风险，但可能影响部分客户端重试判断。",
             "placeholder": "0 = 禁用，可选 90-100"
+        },
+        "groupHealth": {
+            "label": "分组健康检查",
+            "description": "启用后显示首页分组健康摘要、分组卡片健康状态，并允许手动运行健康检查。"
         },
         "circuitBreaker": {
             "title": "熔断器配置",
@@ -396,6 +410,20 @@
             "random": "随机",
             "failover": "故障转移",
             "weighted": "加权分配"
+        },
+        "health": {
+            "title": "健康",
+            "detailTitle": "分组健康详情",
+            "run": "检查",
+            "lastRun": "上次检查 {time}",
+            "never": "从未检查",
+            "status": "状态",
+            "healthy": "健康",
+            "duration": "耗时",
+            "attempts": "尝试",
+            "empty": "暂无健康快照。",
+            "errorDetails": "错误详情",
+            "noHttpStatus": "无 HTTP 状态"
         },
         "empty": "暂无分组，点击左上角按钮创建"
     },

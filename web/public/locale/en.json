@@ -127,6 +127,16 @@
             "sortByTokens": "Tokens",
             "noData": "No ranking data",
             "successRate": "Success Rate"
+        },
+        "groupHealth": {
+            "title": "Group Health",
+            "total": "{count} groups",
+            "running": "{count} running",
+            "success": "{count} healthy",
+            "partial": "{count} partial",
+            "failed": "{count} failed",
+            "idle": "{count} unchecked",
+            "runAll": "Run All"
         }
     },
     "setting": {
@@ -172,6 +182,10 @@
             "description": "Set to 0 to disable pre-stream heartbeats. When enabled, an SSE comment is sent only if the upstream stream is still not established after this delay.",
             "risk": "This may reduce Cloudflare 524 risk but can affect retry behavior in some clients.",
             "placeholder": "0 = disabled, optional 90-100"
+        },
+        "groupHealth": {
+            "label": "Group Health Checks",
+            "description": "When enabled, show the home health summary, group-card health status, and allow manual health checks."
         },
         "circuitBreaker": {
             "title": "Circuit Breaker",
@@ -396,6 +410,20 @@
             "random": "Random",
             "failover": "Failover",
             "weighted": "Weighted"
+        },
+        "health": {
+            "title": "Health",
+            "detailTitle": "Group Health Details",
+            "run": "Run",
+            "lastRun": "Last run {time}",
+            "never": "Never checked",
+            "status": "Status",
+            "healthy": "Healthy",
+            "duration": "Duration",
+            "attempts": "Attempts",
+            "empty": "No health snapshot yet.",
+            "errorDetails": "Error details",
+            "noHttpStatus": "No HTTP status"
         },
         "empty": "No groups yet, click the button above to create one"
     },

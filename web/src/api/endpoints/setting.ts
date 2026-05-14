@@ -27,6 +27,7 @@ export const SettingKey = {
     RelayWSUpgradeEnabled: 'relay_ws_upgrade_enabled',
     SSEHeartbeatInterval: 'sse_heartbeat_interval',
     SSEPreStreamHeartbeatDelay: 'sse_pre_stream_heartbeat_delay',
+    GroupHealthEnabled: 'group_health_enabled',
 } as const;
 
 /**
@@ -48,6 +49,22 @@ export function useSettingList() {
         },
         refetchInterval: 30000,
     });
+}
+
+export function useSettingValue(key: string, defaultValue = '') {
+    const { data: settings, ...query } = useSettingList();
+    return {
+        ...query,
+        value: settings?.find((setting) => setting.key === key)?.value ?? defaultValue,
+    };
+}
+
+export function useGroupHealthEnabled() {
+    const { value, ...query } = useSettingValue(SettingKey.GroupHealthEnabled, 'false');
+    return {
+        ...query,
+        enabled: value === 'true',
+    };
 }
 
 /**
