@@ -25,6 +25,9 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Prepare embedded static directory
+        run: mkdir -p static/out
+
       - name: Test
         run: go test ./...
 
