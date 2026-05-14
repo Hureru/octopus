@@ -135,7 +135,7 @@ type SiteToken struct {
 	Name          string               `json:"name"`
 	Token         string               `json:"token" gorm:"not null"`
 	ValueStatus   SiteTokenValueStatus `json:"value_status" gorm:"type:varchar(32);not null;default:'ready'"`
-	GroupKey      string               `json:"group_key" gorm:"index"`
+	GroupKey      string               `json:"group_key" gorm:"size:128;index"`
 	GroupName     string               `json:"group_name"`
 	Enabled       bool                 `json:"enabled" gorm:"default:true"`
 	Source        string               `json:"source"`
@@ -146,7 +146,7 @@ type SiteToken struct {
 type SiteUserGroup struct {
 	ID            int    `json:"id" gorm:"primaryKey"`
 	SiteAccountID int    `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_group;not null"`
-	GroupKey      string `json:"group_key" gorm:"uniqueIndex:idx_site_account_group;not null"`
+	GroupKey      string `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_account_group;not null"`
 	Name          string `json:"name"`
 	RawPayload    string `json:"raw_payload"`
 }
@@ -154,8 +154,8 @@ type SiteUserGroup struct {
 type SiteModel struct {
 	ID              int                  `json:"id" gorm:"primaryKey"`
 	SiteAccountID   int                  `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_group_model;not null"`
-	GroupKey        string               `json:"group_key" gorm:"uniqueIndex:idx_site_account_group_model;not null;default:'default'"`
-	ModelName       string               `json:"model_name" gorm:"uniqueIndex:idx_site_account_group_model;not null"`
+	GroupKey        string               `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_account_group_model;not null;default:'default'"`
+	ModelName       string               `json:"model_name" gorm:"size:191;uniqueIndex:idx_site_account_group_model;not null"`
 	Source          string               `json:"source"`
 	RouteType       SiteModelRouteType   `json:"route_type" gorm:"type:varchar(32);not null;default:'openai_chat';index"`
 	RouteSource     SiteModelRouteSource `json:"route_source" gorm:"type:varchar(32);not null;default:'sync_inferred'"`
@@ -170,7 +170,7 @@ type SiteChannelBinding struct {
 	SiteID          int    `json:"site_id" gorm:"index;not null"`
 	SiteAccountID   int    `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_channel_group;not null"`
 	SiteUserGroupID *int   `json:"site_user_group_id"`
-	GroupKey        string `json:"group_key" gorm:"uniqueIndex:idx_site_account_channel_group;not null"`
+	GroupKey        string `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_account_channel_group;not null"`
 	ChannelID       int    `json:"channel_id" gorm:"uniqueIndex;not null"`
 }
 
