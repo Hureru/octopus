@@ -26,7 +26,9 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Prepare embedded static directory
-        run: mkdir -p static/out
+        run: |
+          mkdir -p static/out
+          touch static/out/.keep
 
       - name: Test
         run: go test ./...
