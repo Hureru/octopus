@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { logger } from '@/lib/logger';
+import { useGroupHealthEnabled } from './setting';
 import type { GroupMode } from './group';
 
 export type GroupHealthStatus = 'running' | 'success' | 'partial' | 'failed';
@@ -106,10 +107,12 @@ function invalidateGroupHealth(queryClient: ReturnType<typeof useQueryClient>) {
 }
 
 export function useGroupHealthList() {
+    const { enabled } = useGroupHealthEnabled();
     return useQuery({
         queryKey: ['group-health', 'list'],
         queryFn: async () => apiClient.get<GroupHealthGroupView[]>('/api/v1/group/health/list'),
         select: (data) => data.map(normalizeView),
+        enabled,
         refetchInterval: (query) => {
             const data = query.state.data as GroupHealthGroupView[] | undefined;
             return data?.some((item) => item.latest?.status === 'running') ? 5000 : 30000;
@@ -118,11 +121,12 @@ export function useGroupHealthList() {
 }
 
 export function useGroupHealth(groupId: number | null) {
+    const { enabled } = useGroupHealthEnabled();
     return useQuery({
         queryKey: ['group-health', 'detail', groupId],
         queryFn: async () => apiClient.get<GroupHealthGroupView>(`/api/v1/group/health/${groupId}`),
         select: normalizeView,
-        enabled: groupId != null && groupId > 0,
+        enabled: enabled && groupId != null && groupId > 0,
         refetchInterval: (query) => {
             const data = query.state.data as GroupHealthGroupView | undefined;
             return data?.latest?.status === 'running' ? 5000 : 30000;
@@ -132,8 +136,12 @@ export function useGroupHealth(groupId: number | null) {
 
 export function useRunGroupHealth() {
     const queryClient = useQueryClient();
+    const { enabled } = useGroupHealthEnabled();
     return useMutation({
-        mutationFn: async (groupId: number) => apiClient.post<RunGroupHealthAccepted>(`/api/v1/group/health/${groupId}/run`, {}),
+        mutationFn: async (groupId: number) => {
+            if (!enabled) throw new Error('Group health checks are disabled');
+            return apiClient.post<RunGroupHealthAccepted>(`/api/v1/group/health/${groupId}/run`, {});
+        },
         onSuccess: () => invalidateGroupHealth(queryClient),
         onError: (error) => logger.error('group health run failed:', error),
     });
@@ -141,8 +149,12 @@ export function useRunGroupHealth() {
 
 export function useRunAllGroupHealth() {
     const queryClient = useQueryClient();
+    const { enabled } = useGroupHealthEnabled();
     return useMutation({
-        mutationFn: async () => apiClient.post<RunGroupHealthAccepted>('/api/v1/group/health/run-all', {}),
+        mutationFn: async () => {
+            if (!enabled) throw new Error('Group health checks are disabled');
+            return apiClient.post<RunGroupHealthAccepted>('/api/v1/group/health/run-all', {});
+        },
         onSuccess: () => invalidateGroupHealth(queryClient),
         onError: (error) => logger.error('group health run-all failed:', error),
     });

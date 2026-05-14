@@ -24,6 +24,7 @@ const (
 	SettingKeyRelayWSUpgradeEnabled      SettingKey = "relay_ws_upgrade_enabled"       // 是否主动尝试WS上游连接（双向降级）
 	SettingKeySSEHeartbeatInterval       SettingKey = "sse_heartbeat_interval"         // SSE 流式心跳间隔（秒），0 表示禁用
 	SettingKeySSEPreStreamHeartbeatDelay SettingKey = "sse_pre_stream_heartbeat_delay" // SSE 上游流建立前心跳首次延迟（秒），0 表示禁用
+	SettingKeyGroupHealthEnabled         SettingKey = "group_health_enabled"           // 是否启用分组健康检查功能
 	SettingKeyJWTSecret                  SettingKey = "jwt_secret"                     // JWT 签名密钥（自动生成）
 	SettingKeyStatsSiteModelBackfilled   SettingKey = "stats_site_model_backfilled"    // 站点渠道小时聚合是否已回填历史日志
 )
@@ -50,6 +51,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "false"},   // 默认关闭主动WS上游升级
 		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},        // 默认禁用 SSE 流式心跳
 		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},  // 默认禁用 SSE 上游流建立前心跳
+		{Key: SettingKeyGroupHealthEnabled, Value: "false"},      // 默认不显示/运行分组健康检查，避免打扰主界面
 		{Key: SettingKeyJWTSecret, Value: ""},                    // 为空时自动生成
 		{Key: SettingKeyStatsSiteModelBackfilled, Value: "false"},
 	}
@@ -74,9 +76,9 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled, SettingKeyGroupHealthEnabled:
 		if s.Value != "true" && s.Value != "false" {
-			return fmt.Errorf("relay log keep enabled must be true or false")
+			return fmt.Errorf("setting value must be true or false")
 		}
 		return nil
 	case SettingKeyProxyURL:

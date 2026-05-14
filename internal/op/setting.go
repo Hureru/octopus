@@ -61,6 +61,11 @@ func SettingGetInt(key model.SettingKey) (int, error) {
 func SettingGetBool(key model.SettingKey) (bool, error) {
 	setting, ok := settingCache.Get(key)
 	if !ok {
+		for _, defaultSetting := range model.DefaultSettings() {
+			if defaultSetting.Key == key {
+				return strconv.ParseBool(defaultSetting.Value)
+			}
+		}
 		return false, fmt.Errorf("setting not found")
 	}
 	return strconv.ParseBool(setting)

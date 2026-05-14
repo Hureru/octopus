@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui
 import type { SelectedMember } from './ItemList';
 import { MemberList } from './ItemList';
 import { GroupEditor, type GroupEditorValues } from './Editor';
-import { GroupHealthSection } from './health';
+import { GroupHealthBadge } from './health';
 import { modelChannelKey, MODE_LABELS } from './utils';
 import { GroupMode, type GroupUpdateRequest } from '@/api/endpoints/group';
 import {
@@ -381,7 +381,7 @@ export function GroupCard({ group }: { group: Group }) {
                 ))}
             </div>
 
-            <GroupHealthSection groupId={group.id} />
+            <GroupHealthBadge groupId={group.id} />
 
             <section className="rounded-xl border border-border/50 bg-muted/30 overflow-hidden relative h-101">
                 <MemberList
