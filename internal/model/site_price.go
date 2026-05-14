@@ -7,8 +7,8 @@ import "time"
 type SitePrice struct {
 	ID            int    `json:"id" gorm:"primaryKey"`
 	SiteAccountID int    `json:"site_account_id" gorm:"uniqueIndex:idx_site_price_account_group_model;not null"`
-	GroupKey      string `json:"group_key" gorm:"uniqueIndex:idx_site_price_account_group_model;not null;default:'default'"`
-	ModelName     string `json:"model_name" gorm:"uniqueIndex:idx_site_price_account_group_model;not null"`
+	GroupKey      string `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_price_account_group_model;not null;default:'default'"`
+	ModelName     string `json:"model_name" gorm:"size:191;uniqueIndex:idx_site_price_account_group_model;not null"`
 
 	QuotaType int `json:"quota_type" gorm:"default:0"`
 
