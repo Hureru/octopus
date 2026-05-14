@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
@@ -45,7 +46,7 @@ func listSiteChannel(c *gin.Context) {
 func getSiteChannel(c *gin.Context) {
 	siteID, err := strconv.Atoi(c.Param("siteId"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	data, err := op.SiteChannelGet(siteID, c.Request.Context())
@@ -89,11 +90,11 @@ func createSiteChannelKey(c *gin.Context) {
 	}
 	var req model.SiteChannelKeyCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if _, err := sitesvc.CreateAccountToken(c.Request.Context(), accountID, req); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelKeyCreateFailed, "site channel key create failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
@@ -111,15 +112,15 @@ func updateSiteSourceKeys(c *gin.Context) {
 	}
 	var req model.SiteSourceKeyUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.UpdateSiteSourceKeys(siteID, accountID, &req, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelSourceKeyUpdateFailed, "site channel source key update failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
@@ -137,17 +138,17 @@ func updateSiteChannelModelRoutes(c *gin.Context) {
 	}
 	var req []model.SiteModelRouteUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	for _, item := range req {
 		if err := op.SiteModelRouteUpdate(accountID, item.GroupKey, item.ModelName, item.RouteType, model.SiteModelRouteSourceManualOverride, true, item.RouteRawPayload, c.Request.Context()); err != nil {
-			resp.Error(c, http.StatusInternalServerError, err.Error())
+			resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelRouteUpdateFailed, "site channel route update failed", err).WithStatus(http.StatusInternalServerError))
 			return
 		}
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
@@ -165,17 +166,17 @@ func updateSiteChannelModelDisabled(c *gin.Context) {
 	}
 	var req []model.SiteModelDisableUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	for _, item := range req {
 		if err := op.SiteModelDisabledUpdate(accountID, item.GroupKey, item.ModelName, item.Disabled, c.Request.Context()); err != nil {
-			resp.Error(c, http.StatusInternalServerError, err.Error())
+			resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelModelDisableFailed, "site channel model disable failed", err).WithStatus(http.StatusInternalServerError))
 			return
 		}
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
@@ -192,11 +193,11 @@ func resetSiteChannelModelRoutes(c *gin.Context) {
 		return
 	}
 	if err := op.SiteChannelResetAccountRoutes(siteID, accountID, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelRouteUpdateFailed, "site channel route update failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))
 		return
 	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
@@ -210,12 +211,12 @@ func resetSiteChannelModelRoutes(c *gin.Context) {
 func parseSiteChannelIDs(c *gin.Context) (int, int, bool) {
 	siteID, err := strconv.Atoi(c.Param("siteId"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return 0, 0, false
 	}
 	accountID, err := strconv.Atoi(c.Param("accountId"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return 0, 0, false
 	}
 	return siteID, accountID, true

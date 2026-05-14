@@ -72,7 +72,7 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		})
 	}
 	if len(tokens) == 0 {
-		return nil, fmt.Errorf("site sync requires a key for group %q; create a key for that group on the site and sync again", model.SiteDefaultGroupKey)
+		return nil, newMissingGroupKeyError(model.SiteDefaultGroupKey)
 	}
 
 	groups, err := fetchAnyRouterManagementGroups(ctx, siteRecord, account, accessToken, userID)
@@ -167,7 +167,7 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 	if account.CredentialType == model.SiteCredentialTypeAccessToken {
 		token := strings.TrimSpace(account.AccessToken)
 		if token == "" {
-			return "", fmt.Errorf("access token is required")
+			return "", newAccessTokenRequiredError()
 		}
 		return token, nil
 	}
@@ -191,7 +191,7 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 		return "", fmt.Errorf("shield challenge blocked login")
 	}
 	if !jsonBool(payload["success"]) {
-		return "", fmt.Errorf("%s", firstNonEmptyString(anyRouterExtractResponseMessage(payload), "login failed"))
+		return "", newSiteLoginFailedError(firstNonEmptyString(anyRouterExtractResponseMessage(payload), "login failed"))
 	}
 
 	for _, candidate := range []string{
@@ -210,7 +210,7 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 	if anyRouterHasUsableSessionCookie(cookieHeader) {
 		return cookieHeader, nil
 	}
-	return "", fmt.Errorf("login succeeded but no access token was returned")
+	return "", newSiteLoginTokenMissingError()
 }
 
 func fetchAnyRouterManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, userID int) ([]model.SiteToken, error) {
@@ -862,17 +862,17 @@ func anyRouterParseJSONObject(body []byte) (map[string]any, bool) {
 func anyRouterFormatHTTPError(statusCode int, header http.Header, body string) error {
 	if payload, ok := anyRouterParseJSONObject([]byte(body)); ok {
 		if message := anyRouterExtractResponseMessage(payload); message != "" {
-			return fmt.Errorf("http %d: %s", statusCode, message)
+			return newSiteHTTPError(statusCode, message)
 		}
 	}
 	bodyBytes := []byte(body)
 	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
-		return newCloudflareProtectionError(statusCode, header)
+		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
 	}
 	if summary := anyRouterExtractHTMLErrorSummary(body); summary != "" {
-		return fmt.Errorf("http %d: %s", statusCode, summary)
+		return newSiteHTTPError(statusCode, summary)
 	}
-	return fmt.Errorf("http %d: %s", statusCode, strings.TrimSpace(body))
+	return newSiteHTTPError(statusCode, strings.TrimSpace(body))
 }
 
 func anyRouterExtractResponseMessage(payload map[string]any) string {

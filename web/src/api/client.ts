@@ -1,5 +1,5 @@
 import { translateApiErrorCode } from './error-i18n';
-import type { ApiError } from './types';
+import type { ApiError, ApiErrorParams } from './types';
 import { HttpStatus } from './types';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '.';
@@ -28,6 +28,19 @@ const handleError = (error: ApiError) => {
     }
 };
 
+function isApiErrorParams(value: unknown): value is ApiErrorParams {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return false;
+    }
+    return Object.values(value).every((item) => (
+        item === null ||
+        item === undefined ||
+        typeof item === 'string' ||
+        typeof item === 'number' ||
+        typeof item === 'boolean'
+    ));
+}
+
 /**
  * 处理响应
  */
@@ -49,11 +62,15 @@ async function handleResponse<T>(response: Response): Promise<T> {
         const errorCode = (data && typeof data === 'object' && 'error_code' in data && typeof data.error_code === 'string')
             ? data.error_code
             : undefined;
+        const errorParams = (data && typeof data === 'object' && 'params' in data && isApiErrorParams(data.params))
+            ? data.params
+            : undefined;
         const error: ApiError = {
             code: response.status,
             errorCode,
             rawMessage,
-            message: translateApiErrorCode(errorCode, rawMessage),
+            params: errorParams,
+            message: translateApiErrorCode(errorCode, rawMessage, errorParams),
         };
 
         handleError(error);

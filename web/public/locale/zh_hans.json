@@ -610,7 +610,98 @@
         }
     },
     "errors": {
+        "common": {
+            "invalid_json": "请求内容不是有效的 JSON。",
+            "invalid_param": "请求参数无效。",
+            "validation_failed": "输入校验失败，请检查后重试。",
+            "bad_request": "请求参数有误。",
+            "not_found": "请求的资源不存在。",
+            "duplicate_resource": "资源已存在。",
+            "database_error": "数据库操作失败，请稍后重试。",
+            "internal_error": "服务内部错误，请稍后重试。"
+        },
+        "auth": {
+            "unauthorized": "请先登录后再继续操作。",
+            "forbidden": "没有权限执行此操作。",
+            "invalid_token": "登录状态已失效，请重新登录。",
+            "expired_token": "登录状态已过期，请重新登录。",
+            "invalid_credentials": "用户名或密码错误。",
+            "api_key_expired": "API Key 已过期。",
+            "api_key_missing": "缺少 API Key。",
+            "password_incorrect": "原密码不正确。",
+            "api_key_disabled": "API Key 已被禁用。",
+            "api_key_cost_exceeded": "API Key 已达到最大费用限制。"
+        },
+        "site_channel": {
+            "account_not_found": "站点账号不存在。",
+            "site_not_found": "站点不存在。",
+            "model_not_found": "站点模型不存在。",
+            "route_update_failed": "更新模型路由失败，请稍后重试。",
+            "model_disable_failed": "更新模型禁用状态失败，请稍后重试。",
+            "key_create_failed": "创建站点 Key 失败，请检查站点状态或稍后重试。",
+            "source_key_update_failed": "更新源 Key 失败，请检查输入后重试。",
+            "project_failed": "同步站点渠道投影失败，请稍后重试。"
+        },
+        "channel": {
+            "not_found": "通道不存在。",
+            "create_failed": "创建通道失败。",
+            "update_failed": "更新通道失败。",
+            "delete_failed": "删除通道失败。",
+            "fetch_models_failed": "获取通道模型失败。"
+        },
+        "group": {
+            "not_found": "分组不存在。",
+            "create_failed": "创建分组失败。",
+            "update_failed": "更新分组失败。",
+            "delete_failed": "删除分组失败。"
+        },
+        "model": {
+            "price_update_failed": "更新模型价格失败。",
+            "price_delete_failed": "删除模型价格失败。",
+            "create_failed": "创建模型失败。",
+            "update_failed": "更新模型失败。",
+            "delete_failed": "删除模型失败。"
+        },
+        "relay": {
+            "model_not_supported": "当前 API Key 不支持该模型。",
+            "model_not_found": "模型不存在或未配置可用分组。",
+            "no_available_channel": "没有可用通道。",
+            "channel_disabled": "通道已禁用。",
+            "no_available_key": "没有可用 Key。",
+            "upstream_failed": "上游请求失败。",
+            "timeout": "请求超时。",
+            "circuit_breaker_tripped": "通道熔断中，请稍后重试。"
+        },
         "site": {
+            "sync": {
+                "missing_group_key": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。",
+                "group_models_unresolved": "无法确认分组“{groupKey}”的模型，请检查分组模型配置或 Key 权限。",
+                "no_group_result": "站点账号同步失败：没有可用的分组同步结果。",
+                "all_groups_unresolved": "站点账号同步失败：所有分组都未能确认模型，已保留历史模型。",
+                "unsupported_platform": "不支持的站点平台：{platform}。",
+                "snapshot_nil": "同步结果为空，请稍后重试。"
+            },
+            "auth": {
+                "access_token_required": "站点 Access Token 不能为空。",
+                "direct_token_required": "站点 Direct Token 不能为空。",
+                "login_failed": "站点登录失败，请检查账号、密码或站点状态。",
+                "login_token_missing": "站点登录成功但未返回 Access Token，请检查站点兼容性。"
+            },
+            "upstream": {
+                "http_error": "站点上游请求失败（HTTP {statusCode}），请检查站点状态或稍后重试。",
+                "decode_failed": "站点响应解析失败，请检查站点兼容性或稍后重试。",
+                "cloudflare_challenge": "站点触发 Cloudflare 保护，请稍后重试，或手动访问站点完成验证。"
+            },
+            "import": {
+                "invalid_json": "导入内容不是有效的 JSON，请检查文件格式或粘贴内容。",
+                "empty_payload": "导入内容为空，请选择 JSON 文件或粘贴导出内容。",
+                "unrecognized_all_api_hub": "未识别到 All API Hub 导出数据，请确认选择了正确的导出 JSON。",
+                "unrecognized_metapi": "未识别到 Metapi 账号导出数据，请确认选择了正确的导出 JSON。",
+                "no_importable_all_api_hub": "未找到可导入的 All API Hub 站点账号数据。",
+                "no_importable_metapi": "未找到可导入的 Metapi 站点账号数据。",
+                "unsupported_payload": "暂不支持该导入内容，请确认导出格式是否正确。",
+                "persist_failed": "保存导入数据失败，请稍后重试。"
+            },
             "sub2api": {
                 "api_key_required": "Sub2API 同步需要 API Key。请先在站点创建一个 Key 后再重新同步。",
                 "model_api_key_required": "Sub2API 模型发现需要 API Key。请先在站点创建一个 Key 后再重新同步。",

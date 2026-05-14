@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/auth"
@@ -16,12 +17,12 @@ func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
 		if token == "" {
-			resp.Error(c, http.StatusBadRequest, resp.ErrBadRequest)
+			resp.Unauthorized(c)
 			c.Abort()
 			return
 		}
 		if !auth.VerifyJWTToken(strings.TrimPrefix(token, "Bearer ")) {
-			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
+			resp.InvalidToken(c)
 			c.Abort()
 			return
 		}
@@ -43,35 +44,35 @@ func APIKeyAuth() gin.HandlerFunc {
 		}
 
 		if apiKey == "" {
-			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
+			resp.APIKeyMissing(c)
 			c.Abort()
 			return
 		}
 
 		if !strings.HasPrefix(apiKey, "sk-"+conf.APP_NAME+"-") {
-			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
+			resp.InvalidToken(c)
 			c.Abort()
 			return
 		}
 		apiKeyObj, err := op.APIKeyGetByAPIKey(apiKey, c.Request.Context())
 		if err != nil {
-			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
+			resp.InvalidToken(c)
 			c.Abort()
 			return
 		}
 		if !apiKeyObj.Enabled {
-			resp.Error(c, http.StatusUnauthorized, "API key is disabled")
+			resp.ErrorWithAppError(c, http.StatusUnauthorized, apperror.New(apperror.CodeAuthAPIKeyDisabled, "API key is disabled").WithStatus(http.StatusUnauthorized))
 			c.Abort()
 			return
 		}
 		if apiKeyObj.ExpireAt > 0 && apiKeyObj.ExpireAt < time.Now().Unix() {
-			resp.Error(c, http.StatusUnauthorized, "API key has expired")
+			resp.APIKeyExpired(c)
 			c.Abort()
 			return
 		}
 		statsAPIKey := op.StatsAPIKeyGet(apiKeyObj.ID)
 		if apiKeyObj.MaxCost > 0 && apiKeyObj.MaxCost < statsAPIKey.StatsMetrics.OutputCost+statsAPIKey.StatsMetrics.InputCost {
-			resp.Error(c, http.StatusUnauthorized, "API key has reached the max cost")
+			resp.ErrorWithAppError(c, http.StatusUnauthorized, apperror.New(apperror.CodeAuthAPIKeyCostExceeded, "API key has reached the max cost").WithStatus(http.StatusUnauthorized))
 			c.Abort()
 			return
 		}

@@ -52,7 +52,7 @@ func SiteChannelAccountGet(siteID int, accountID int, ctx context.Context) (*mod
 		}
 	}
 	if target == nil {
-		return nil, fmt.Errorf("site account not found")
+		return nil, newSiteChannelAccountNotFoundError()
 	}
 	historyMap, _ := SiteChannelModelHourlyForAccount(ctx, target.ID)
 	view := model.SiteChannelAccount{
@@ -108,7 +108,7 @@ func SiteChannelModelHistory(siteID int, accountID int, ctx context.Context) (ma
 			return SiteChannelModelHourlyForAccount(ctx, account.ID)
 		}
 	}
-	return nil, fmt.Errorf("site account not found")
+	return nil, newSiteChannelAccountNotFoundError()
 }
 
 func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChannelCard, error) {
@@ -316,7 +316,7 @@ func UpdateSiteSourceKeys(siteID int, accountID int, req *model.SiteSourceKeyUpd
 		}
 	}
 	if account == nil {
-		return fmt.Errorf("site account not found")
+		return newSiteChannelAccountNotFoundError()
 	}
 
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {

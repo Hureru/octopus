@@ -39,16 +39,16 @@ func init() {
 func login(c *gin.Context) {
 	var user model.UserLogin
 	if err := c.ShouldBindJSON(&user); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.UserVerify(user.Username, user.Password); err != nil {
-		resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
+		resp.InvalidCredentials(c)
 		return
 	}
 	token, expire, err := auth.GenerateJWTToken(user.Expire)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, resp.ErrInternalServer)
+		resp.InternalError(c)
 		return
 	}
 	resp.Success(c, model.UserLoginResponse{Token: token, ExpireAt: expire})
@@ -57,11 +57,11 @@ func login(c *gin.Context) {
 func changePassword(c *gin.Context) {
 	var user model.UserChangePassword
 	if err := c.ShouldBindJSON(&user); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.UserChangePassword(user.OldPassword, user.NewPassword); err != nil {
-		resp.Error(c, http.StatusInternalServerError, resp.ErrDatabase)
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, err)
 		return
 	}
 	resp.Success(c, "password changed successfully")
@@ -70,7 +70,7 @@ func changePassword(c *gin.Context) {
 func changeUsername(c *gin.Context) {
 	var user model.UserChangeUsername
 	if err := c.ShouldBindJSON(&user); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.UserChangeUsername(user.NewUsername); err != nil {

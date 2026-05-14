@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
@@ -70,13 +71,13 @@ func listSite(c *gin.Context) {
 func importAllAPIHub(c *gin.Context) {
 	body, err := readImportPayload(c)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.ErrorWithAppError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	result, syncAccountIDs, err := op.SiteImportAllAPIHub(c.Request.Context(), body)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.ErrorWithAppError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -98,13 +99,13 @@ func importAllAPIHub(c *gin.Context) {
 func importMetAPI(c *gin.Context) {
 	body, err := readImportPayload(c)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.ErrorWithAppError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	result, err := op.SiteImportMetAPI(c.Request.Context(), body)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.ErrorWithAppError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -116,11 +117,11 @@ func readImportPayload(c *gin.Context) ([]byte, error) {
 	if strings.Contains(contentType, "multipart/form-data") {
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
-			return nil, err
+			return nil, apperror.Wrap(op.CodeSiteImportEmptyPayload, "site import empty payload", err).WithStatus(http.StatusBadRequest)
 		}
 		file, err := fileHeader.Open()
 		if err != nil {
-			return nil, err
+			return nil, apperror.Wrap(op.CodeSiteImportEmptyPayload, "site import empty payload", err).WithStatus(http.StatusBadRequest)
 		}
 		defer file.Close()
 		return io.ReadAll(file)
@@ -131,7 +132,7 @@ func readImportPayload(c *gin.Context) ([]byte, error) {
 func createSite(c *gin.Context) {
 	var site model.Site
 	if err := c.ShouldBindJSON(&site); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := site.Validate(); err != nil {
@@ -148,7 +149,7 @@ func createSite(c *gin.Context) {
 func updateSite(c *gin.Context) {
 	var req model.SiteUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	site, err := op.SiteUpdate(&req, c.Request.Context())
@@ -173,7 +174,7 @@ func enableSite(c *gin.Context) {
 		Enabled bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.SiteEnabled(request.ID, request.Enabled, c.Request.Context()); err != nil {
@@ -194,7 +195,7 @@ func enableSite(c *gin.Context) {
 func deleteSite(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	if err := sitesvc.DeleteSite(c.Request.Context(), idNum); err != nil {
@@ -207,7 +208,7 @@ func deleteSite(c *gin.Context) {
 func archiveSite(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	if err := sitesvc.ArchiveSite(c.Request.Context(), idNum); err != nil {
@@ -220,7 +221,7 @@ func archiveSite(c *gin.Context) {
 func restoreSite(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	if err := sitesvc.RestoreSite(c.Request.Context(), idNum); err != nil {
@@ -242,7 +243,7 @@ func listArchivedSites(c *gin.Context) {
 func createSiteAccount(c *gin.Context) {
 	var account model.SiteAccount
 	if err := c.ShouldBindJSON(&account); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := account.Validate(); err != nil {
@@ -275,7 +276,7 @@ func createSiteAccount(c *gin.Context) {
 func updateSiteAccount(c *gin.Context) {
 	var req model.SiteAccountUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	account, err := op.SiteAccountUpdate(&req, c.Request.Context())
@@ -312,7 +313,7 @@ func enableSiteAccount(c *gin.Context) {
 		Enabled bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.SiteAccountEnabled(request.ID, request.Enabled, c.Request.Context()); err != nil {
@@ -334,7 +335,7 @@ func enableSiteAccount(c *gin.Context) {
 func deleteSiteAccount(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	if err := sitesvc.DeleteSiteAccount(c.Request.Context(), idNum); err != nil {
@@ -347,7 +348,7 @@ func deleteSiteAccount(c *gin.Context) {
 func syncSiteAccount(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	result, err := sitesvc.SyncAccount(c.Request.Context(), idNum)
@@ -361,7 +362,7 @@ func syncSiteAccount(c *gin.Context) {
 func checkinSiteAccount(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	result, err := sitesvc.CheckinAccount(c.Request.Context(), idNum)
@@ -391,7 +392,7 @@ func detectSitePlatform(c *gin.Context) {
 		URL string `json:"url" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -407,7 +408,7 @@ func detectSitePlatform(c *gin.Context) {
 func batchSite(c *gin.Context) {
 	var req model.SiteBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	validActions := map[string]bool{
@@ -470,7 +471,7 @@ func batchSite(c *gin.Context) {
 func getSiteAvailableModels(c *gin.Context) {
 	idNum, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	models, err := op.SiteAvailableModels(idNum, c.Request.Context())

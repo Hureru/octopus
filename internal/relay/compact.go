@@ -65,7 +65,7 @@ func HandleResponsesCompact(c *gin.Context) {
 	if supportedModels != "" {
 		supportedModelsArray := strings.Split(supportedModels, ",")
 		if !slices.Contains(supportedModelsArray, compactReq.Model) {
-			resp.Error(c, http.StatusBadRequest, "model not supported")
+			resp.ErrorWithCode(c, http.StatusBadRequest, CodeRelayModelNotSupported, "model not supported")
 			return
 		}
 	}
@@ -75,13 +75,13 @@ func HandleResponsesCompact(c *gin.Context) {
 
 	group, err := op.GroupGetEnabledMap(requestModel, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, "model not found")
+		resp.ErrorWithCode(c, http.StatusNotFound, CodeRelayModelNotFound, "model not found")
 		return
 	}
 
 	iter := balancer.NewIterator(group, apiKeyID, requestModel)
 	if iter.Len() == 0 {
-		resp.Error(c, http.StatusServiceUnavailable, "no available channel")
+		resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no available channel")
 		return
 	}
 
@@ -194,7 +194,7 @@ func HandleResponsesCompact(c *gin.Context) {
 
 	metrics.Save(c.Request.Context(), false, lastErr, iter.Attempts())
 	if lastErr == nil && lastStatusCode == 0 {
-		resp.Error(c, http.StatusServiceUnavailable, "no available channel")
+		resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no available channel")
 		return
 	}
 	if isPassthroughStatus(lastStatusCode) {

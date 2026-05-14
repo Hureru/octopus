@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
@@ -33,10 +34,6 @@ func init() {
 			router.NewRoute("/delete/:id", http.MethodDelete).
 				Handle(deleteGroup),
 		)
-	// AddRoute(
-	// 	router.NewRoute("/auto-add-item", http.MethodPost).
-	// 		Handle(autoAddGroupItem),
-	// )
 }
 
 func getGroupList(c *gin.Context) {
@@ -51,18 +48,18 @@ func getGroupList(c *gin.Context) {
 func createGroup(c *gin.Context) {
 	var group model.Group
 	if err := c.ShouldBindJSON(&group); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.InvalidJSON(c)
 		return
 	}
 	if group.MatchRegex != "" {
 		_, err := regexp2.Compile(group.MatchRegex, regexp2.ECMAScript)
 		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
+			resp.ErrorWithAppError(c, http.StatusBadRequest, apperror.New(apperror.CodeCommonValidationFailed, err.Error()).WithStatus(http.StatusBadRequest))
 			return
 		}
 	}
 	if err := op.GroupCreate(&group, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupCreateFailed, "group create failed", err))
 		return
 	}
 	resp.Success(c, group)
@@ -71,19 +68,19 @@ func createGroup(c *gin.Context) {
 func updateGroup(c *gin.Context) {
 	var req model.GroupUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.InvalidJSON(c)
 		return
 	}
 	if req.MatchRegex != nil {
 		_, err := regexp2.Compile(*req.MatchRegex, regexp2.ECMAScript)
 		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
+			resp.ErrorWithAppError(c, http.StatusBadRequest, apperror.New(apperror.CodeCommonValidationFailed, err.Error()).WithStatus(http.StatusBadRequest))
 			return
 		}
 	}
 	group, err := op.GroupUpdate(&req, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupUpdateFailed, "group update failed", err))
 		return
 	}
 	resp.Success(c, group)
@@ -93,32 +90,12 @@ func deleteGroup(c *gin.Context) {
 	id := c.Param("id")
 	idNum, err := strconv.Atoi(id)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.InvalidParam(c)
 		return
 	}
 	if err := op.GroupDel(idNum, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupDeleteFailed, "group delete failed", err))
 		return
 	}
 	resp.Success(c, "group deleted successfully")
 }
-
-// func autoAddGroupItem(c *gin.Context) {
-// 	var req struct {
-// 		ID int `json:"id"`
-// 	}
-// 	if err := c.ShouldBindJSON(&req); err != nil {
-// 		resp.Error(c, http.StatusBadRequest, err.Error())
-// 		return
-// 	}
-// 	if req.ID <= 0 {
-// 		resp.Error(c, http.StatusBadRequest, "invalid id")
-// 		return
-// 	}
-// 	err := worker.AutoAddGroupItem(req.ID, c.Request.Context())
-// 	if err != nil {
-// 		resp.Error(c, http.StatusInternalServerError, err.Error())
-// 		return
-// 	}
-// 	resp.Success(c, nil)
-// }

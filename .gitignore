@@ -5,4 +5,7 @@ static/out/
 .claude/
 .codex
 .gocache/
+.serena/
+.workflow/
+.tmp/
 .impeccable.md

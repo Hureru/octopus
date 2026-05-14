@@ -49,7 +49,7 @@ func deleteManagedChannelsByAccount(ctx context.Context, accountID int) error {
 
 func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnapshot) error {
 	if snapshot == nil {
-		return fmt.Errorf("sync snapshot is nil")
+		return newSnapshotNilError()
 	}
 	now := time.Now()
 	persistedPrices := preparePersistedSitePrices(accountID, snapshot.prices, now)

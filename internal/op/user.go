@@ -2,7 +2,9 @@ package op
 
 import (
 	"fmt"
+	"net/http"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -28,7 +30,7 @@ func UserInit() error {
 
 func UserChangePassword(oldPassword, newPassword string) error {
 	if err := userCache.ComparePassword(oldPassword); err != nil {
-		return fmt.Errorf("incorrect old password: %w", err)
+		return apperror.Wrap(apperror.CodeAuthPasswordIncorrect, "incorrect old password", err).WithStatus(http.StatusBadRequest)
 	}
 
 	userCache.Password = newPassword

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -104,6 +105,9 @@ func TestRequestJSONDetectsCloudflareAttentionRequired(t *testing.T) {
 	if cfErr.RetryAfter != 60*time.Second {
 		t.Fatalf("expected retry-after capped to 60s, got %s", cfErr.RetryAfter)
 	}
+	if got := apperror.Code(err); got != CodeSiteUpstreamCloudflareChallenge {
+		t.Fatalf("expected error code %q, got %q", CodeSiteUpstreamCloudflareChallenge, got)
+	}
 }
 
 func TestRequestJSONKeepsJSONForbiddenMessage(t *testing.T) {
@@ -124,6 +128,12 @@ func TestRequestJSONKeepsJSONForbiddenMessage(t *testing.T) {
 	}
 	if err.Error() != "http 403: token forbidden" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := apperror.Code(err); got != CodeSiteUpstreamHTTPError {
+		t.Fatalf("expected error code %q, got %q", CodeSiteUpstreamHTTPError, got)
+	}
+	if got := apperror.Params(err)["statusCode"]; got != http.StatusForbidden {
+		t.Fatalf("expected statusCode param %d, got %#v", http.StatusForbidden, got)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -429,6 +430,12 @@ func TestSyncManagementPlatformReturnsStableMissingGroupKeyError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `site sync requires a key for group "default"; create a key for that group on the site and sync again`) {
 		t.Fatalf("expected stable missing-key error, got %v", err)
+	}
+	if got := apperror.Code(err); got != CodeSiteSyncMissingGroupKey {
+		t.Fatalf("expected error code %q, got %q", CodeSiteSyncMissingGroupKey, got)
+	}
+	if got := apperror.Params(err)["groupKey"]; got != model.SiteDefaultGroupKey {
+		t.Fatalf("expected groupKey param %q, got %#v", model.SiteDefaultGroupKey, got)
 	}
 }
 

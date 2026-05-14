@@ -1,45 +1,15 @@
+import enLocale from '../../public/locale/en.json';
+import zhHansLocale from '../../public/locale/zh_hans.json';
+import zhHantLocale from '../../public/locale/zh_hant.json';
 import { useSettingStore, type Locale } from '@/stores/setting';
 
-const zhHansErrors = {
-    site: {
-        sub2api: {
-            api_key_required: 'Sub2API 同步需要 API Key。请先在站点创建一个 Key 后再重新同步。',
-            model_api_key_required: 'Sub2API 模型发现需要 API Key。请先在站点创建一个 Key 后再重新同步。',
-            envelope_failed: 'Sub2API 返回错误，请检查 Access Token、权限或站点状态。',
-            missing_data: 'Sub2API 响应缺少必要数据，请检查站点兼容性或稍后重试。',
-        },
-    },
-};
-
-const zhHantErrors = {
-    site: {
-        sub2api: {
-            api_key_required: 'Sub2API 同步需要 API Key。請先在站點建立一個 Key 後再重新同步。',
-            model_api_key_required: 'Sub2API 模型發現需要 API Key。請先在站點建立一個 Key 後再重新同步。',
-            envelope_failed: 'Sub2API 返回錯誤，請檢查 Access Token、權限或站點狀態。',
-            missing_data: 'Sub2API 回應缺少必要資料，請檢查站點相容性或稍後重試。',
-        },
-    },
-};
-
-const enErrors = {
-    site: {
-        sub2api: {
-            api_key_required: 'Sub2API sync requires an API key. Create a key on the site and sync again.',
-            model_api_key_required: 'Sub2API model discovery requires an API key. Create a key on the site and sync again.',
-            envelope_failed: 'Sub2API returned an error. Check the access token, permissions, or site status.',
-            missing_data: 'Sub2API response is missing required data. Check site compatibility or try again later.',
-        },
-    },
-};
+export type ErrorValues = Record<string, string | number | boolean | null | undefined>;
 
 const errorMessages: Record<Locale, unknown> = {
-    zh_hans: zhHansErrors,
-    zh_hant: zhHantErrors,
-    en: enErrors,
+    zh_hans: zhHansLocale.errors,
+    zh_hant: zhHantLocale.errors,
+    en: enLocale.errors,
 };
-
-type ErrorValues = Record<string, string | number>;
 
 function getErrorMessageFallbacks(locale: Locale): unknown[] {
     if (locale.startsWith('en')) {
@@ -67,7 +37,10 @@ function lookupMessage(source: unknown, path: string): string | null {
 
 function interpolate(template: string, values?: ErrorValues): string {
     if (!values) return template;
-    return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? `{${key}}`));
+    return template.replace(/\{(\w+)\}/g, (_, key: string) => {
+        const value = values[key];
+        return value === undefined || value === null ? `{${key}}` : String(value);
+    });
 }
 
 export function translateApiErrorCode(

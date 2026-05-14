@@ -84,10 +84,10 @@ var directImportPlatforms = map[model.SitePlatform]struct{}{
 func SiteImportAllAPIHub(ctx context.Context, body []byte) (*model.AllAPIHubImportResult, []int, error) {
 	var payload rawImportObject
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, nil, fmt.Errorf("site import invalid json")
+		return nil, nil, newSiteImportInvalidJSONError()
 	}
 	if len(payload) == 0 {
-		return nil, nil, fmt.Errorf("site import empty payload")
+		return nil, nil, newSiteImportEmptyPayloadError()
 	}
 
 	inputs, warnings, skipped, err := extractAllAPIHubAccounts(payload)
@@ -95,7 +95,7 @@ func SiteImportAllAPIHub(ctx context.Context, body []byte) (*model.AllAPIHubImpo
 		return nil, nil, err
 	}
 	if len(inputs) == 0 {
-		return nil, nil, fmt.Errorf("site import no importable all api hub site account data")
+		return nil, nil, newSiteImportNoImportableAllAPIHubError()
 	}
 
 	result := &model.AllAPIHubImportResult{
@@ -134,7 +134,7 @@ func SiteImportAllAPIHub(ctx context.Context, body []byte) (*model.AllAPIHubImpo
 		}
 		return nil
 	}); err != nil {
-		return nil, nil, err
+		return nil, nil, wrapSiteImportPersistFailedError(err)
 	}
 
 	result.CreatedSites = len(createdSiteIDs)
@@ -153,10 +153,10 @@ func SiteImportAllAPIHub(ctx context.Context, body []byte) (*model.AllAPIHubImpo
 func SiteImportMetAPI(ctx context.Context, body []byte) (*model.MetAPIImportResult, error) {
 	var payload rawImportObject
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("site import invalid json")
+		return nil, newSiteImportInvalidJSONError()
 	}
 	if len(payload) == 0 {
-		return nil, fmt.Errorf("site import empty payload")
+		return nil, newSiteImportEmptyPayloadError()
 	}
 
 	inputs, warnings, skipped, err := extractMetAPIAccounts(payload)
@@ -164,7 +164,7 @@ func SiteImportMetAPI(ctx context.Context, body []byte) (*model.MetAPIImportResu
 		return nil, err
 	}
 	if len(inputs) == 0 {
-		return nil, fmt.Errorf("site import no importable metapi site account data")
+		return nil, newSiteImportNoImportableMetapiError()
 	}
 
 	result := &model.MetAPIImportResult{
@@ -208,7 +208,7 @@ func SiteImportMetAPI(ctx context.Context, body []byte) (*model.MetAPIImportResu
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, wrapSiteImportPersistFailedError(err)
 	}
 
 	result.CreatedSites = len(createdSiteIDs)
@@ -250,7 +250,7 @@ func extractAllAPIHubAccounts(payload rawImportObject) ([]importedAccountInput, 
 	}
 
 	if len(rows) == 0 && len(profiles) == 0 {
-		return nil, warnings, skipped, fmt.Errorf("site import no recognizable all api hub payload sections")
+		return nil, warnings, skipped, newSiteImportUnrecognizedAllAPIHubError()
 	}
 
 	return inputs, warnings, skipped, nil
@@ -259,13 +259,13 @@ func extractAllAPIHubAccounts(payload rawImportObject) ([]importedAccountInput, 
 func extractMetAPIAccounts(payload rawImportObject) ([]metAPIImportAccountData, []string, int, error) {
 	section := detectMetAPIAccountsSection(payload)
 	if section == nil {
-		return nil, nil, 0, fmt.Errorf("site import no recognizable metapi accounts section")
+		return nil, nil, 0, newSiteImportUnrecognizedMetapiError()
 	}
 
 	siteRows := asObjectSlice(section["sites"])
 	accountRows := asObjectSlice(section["accounts"])
 	if len(siteRows) == 0 || len(accountRows) == 0 {
-		return nil, nil, 0, fmt.Errorf("metapi accounts section must include sites and accounts")
+		return nil, nil, 0, newSiteImportUnsupportedPayloadError("metapi accounts section must include sites and accounts")
 	}
 
 	tokenRows := asObjectSlice(section["accountTokens"])

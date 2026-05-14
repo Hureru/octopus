@@ -1,10 +1,13 @@
 /**
  * API 响应基础类型
  */
+export type ApiErrorParams = Record<string, string | number | boolean | null | undefined>;
+
 export interface ApiResponse<T = unknown> {
     code?: number;
     error_code?: string;
     message?: string;
+    params?: ApiErrorParams;
     data?: T;
 }
 
@@ -16,6 +19,7 @@ export interface ApiError {
     message: string;
     errorCode?: string;
     rawMessage?: string;
+    params?: ApiErrorParams;
 }
 
 /**

@@ -25,7 +25,7 @@ func ensureFreshSub2APIAccessToken(ctx context.Context, siteRecord *model.Site, 
 
 	accessToken := stripBearerPrefix(account.AccessToken)
 	if accessToken == "" {
-		return "", fmt.Errorf("access token is required")
+		return "", newAccessTokenRequiredError()
 	}
 	if !forceRefresh && !shouldProactivelyRefreshSub2API(account) {
 		return accessToken, nil

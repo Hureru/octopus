@@ -50,7 +50,7 @@ func listGroupHealth(c *gin.Context) {
 func getGroupHealth(c *gin.Context) {
 	groupID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	view, err := defaultGroupHealthService.GetGroupHealthViewByID(c.Request.Context(), groupID)
@@ -64,7 +64,7 @@ func getGroupHealth(c *gin.Context) {
 func runGroupHealth(c *gin.Context) {
 	groupID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	running, err := defaultGroupHealthService.GetRunningSnapshotByGroupID(c.Request.Context(), groupID)

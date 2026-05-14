@@ -104,7 +104,7 @@ func buildSyncSnapshotMessage(results []siteGroupSyncResult) string {
 
 func buildSyncSnapshotFailure(results []siteGroupSyncResult) error {
 	if len(results) == 0 {
-		return fmt.Errorf("站点账号同步失败：没有可用的分组同步结果")
+		return newNoGroupResultError()
 	}
 
 	parts := make([]string, 0, len(results))
@@ -119,9 +119,9 @@ func buildSyncSnapshotFailure(results []siteGroupSyncResult) error {
 		}
 	}
 	if len(parts) == 0 {
-		return fmt.Errorf("站点账号同步失败：所有分组都未能确认模型，已保留历史模型")
+		return newAllGroupsUnresolvedError("")
 	}
-	return fmt.Errorf("站点账号同步失败：所有分组都未能确认模型，已保留历史模型。%s", strings.Join(parts, "；"))
+	return newAllGroupsUnresolvedError(fmt.Sprintf("站点账号同步失败：所有分组都未能确认模型，已保留历史模型。%s", strings.Join(parts, "；")))
 }
 
 func finalizeSiteGroupSyncResults(

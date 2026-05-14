@@ -9,6 +9,7 @@ type MatchResult = {
 
 const missingGroupKeyNoUsableKeyPattern = /^site sync requires a key for group "([^"]+)"; create a key for that group on the site and sync again$/i;
 const missingGroupKeyFallbackPattern = /^site sync could not resolve models for group "([^"]+)"; create a key for that group on the site and sync again$/i;
+// Legacy compatibility for responses/log messages emitted before coded API errors were introduced.
 const exactSiteMessageKeys: Record<string, string> = {
     'invalid json format': 'siteImport.errors.invalidJson',
     'site import invalid json': 'siteImport.errors.invalidJson',

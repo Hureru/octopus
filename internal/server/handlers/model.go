@@ -133,11 +133,11 @@ func listLLMByChannel(c *gin.Context) {
 func createLLM(c *gin.Context) {
 	var model model.LLMInfo
 	if err := c.ShouldBindJSON(&model); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.LLMCreate(model, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, modelError(codeModelCreateFailed, "model create failed", err))
 		return
 	}
 	resp.Success(c, model)
@@ -146,11 +146,11 @@ func createLLM(c *gin.Context) {
 func updateLLM(c *gin.Context) {
 	var model model.LLMInfo
 	if err := c.ShouldBindJSON(&model); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.LLMUpdate(model, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, modelError(codeModelUpdateFailed, "model update failed", err))
 		return
 	}
 	resp.Success(c, model)
@@ -161,11 +161,11 @@ func deleteLLM(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.LLMDelete(req.Name, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, modelError(codeModelPriceDeleteFailed, "model price delete failed", err))
 		return
 	}
 	resp.Success(c, nil)
@@ -174,7 +174,7 @@ func deleteLLM(c *gin.Context) {
 func updateLLMPrice(c *gin.Context) {
 	err := price.UpdateLLMPrice(c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, modelError(codeModelPriceUpdateFailed, "model price update failed", err))
 		return
 	}
 	resp.Success(c, nil)

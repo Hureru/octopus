@@ -130,16 +130,16 @@ func applyDefaultSiteRequestHeaders(req *http.Request, hasJSONBody bool) {
 func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) error {
 	if payload, ok := parseSiteJSONMap(bodyBytes); ok {
 		if message := extractSiteResponseMessage(payload); message != "" {
-			return fmt.Errorf("http %d: %s", statusCode, message)
+			return newSiteHTTPError(statusCode, message)
 		}
 	}
 	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
-		return newCloudflareProtectionError(statusCode, header)
+		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
 	}
 	if summary := extractSiteHTMLResponseSummary(header.Get("Content-Type"), bodyBytes); summary != "" {
-		return fmt.Errorf("http %d: %s", statusCode, summary)
+		return newSiteHTTPError(statusCode, summary)
 	}
-	return fmt.Errorf("http %d: %s", statusCode, strings.TrimSpace(string(bodyBytes)))
+	return newSiteHTTPError(statusCode, strings.TrimSpace(string(bodyBytes)))
 }
 
 func isCloudflareProtectionResponse(statusCode int, header http.Header, bodyBytes []byte) bool {
@@ -160,9 +160,9 @@ func isCloudflareProtectionResponse(statusCode int, header http.Header, bodyByte
 
 func formatSiteDecodeError(contentType string, bodyBytes []byte, err error) error {
 	if summary := extractSiteHTMLResponseSummary(contentType, bodyBytes); summary != "" {
-		return fmt.Errorf("decode response failed: %s", summary)
+		return wrapSiteDecodeError(fmt.Sprintf("decode response failed: %s", summary), err)
 	}
-	return fmt.Errorf("decode response failed: %w", err)
+	return wrapSiteDecodeError(fmt.Sprintf("decode response failed: %v", err), err)
 }
 
 func parseSiteJSONMap(bodyBytes []byte) (map[string]any, bool) {

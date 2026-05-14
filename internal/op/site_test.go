@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 )
@@ -374,6 +375,9 @@ func TestSiteImportMetAPIInvalidJSONUsesStableMessage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "site import invalid json") {
 		t.Fatalf("expected stable invalid JSON message, got %q", err.Error())
+	}
+	if got := apperror.Code(err); got != CodeSiteImportInvalidJSON {
+		t.Fatalf("expected error code %q, got %q", CodeSiteImportInvalidJSON, got)
 	}
 }
 

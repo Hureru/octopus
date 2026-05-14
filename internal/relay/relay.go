@@ -68,7 +68,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	if supportedModels != "" {
 		supportedModelsArray := strings.Split(supportedModels, ",")
 		if !slices.Contains(supportedModelsArray, internalRequest.Model) {
-			resp.Error(c, http.StatusBadRequest, "model not supported")
+			resp.ErrorWithCode(c, http.StatusBadRequest, CodeRelayModelNotSupported, "model not supported")
 			return
 		}
 	}
@@ -79,14 +79,14 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	// 获取通道分组
 	group, err := op.GroupGetEnabledMap(requestModel, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, "model not found")
+		resp.ErrorWithCode(c, http.StatusNotFound, CodeRelayModelNotFound, "model not found")
 		return
 	}
 
 	// 创建迭代器（策略排序 + 粘性优先）
 	iter := balancer.NewIterator(group, apiKeyID, requestModel)
 	if iter.Len() == 0 {
-		resp.Error(c, http.StatusServiceUnavailable, "no available channel")
+		resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no available channel")
 		return
 	}
 

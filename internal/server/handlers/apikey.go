@@ -50,7 +50,7 @@ func init() {
 func createAPIKey(c *gin.Context) {
 	var req model.APIKey
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	req.APIKey = auth.GenerateAPIKey()
@@ -73,7 +73,7 @@ func listAPIKey(c *gin.Context) {
 func updateAPIKey(c *gin.Context) {
 	var req model.APIKey
 	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
+		resp.InvalidJSON(c)
 		return
 	}
 	if err := op.APIKeyUpdate(&req, c.Request.Context()); err != nil {
@@ -87,7 +87,7 @@ func deleteAPIKey(c *gin.Context) {
 	id := c.Param("id")
 	idNum, err := strconv.Atoi(id)
 	if err != nil {
-		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidParam)
+		resp.InvalidParam(c)
 		return
 	}
 	if err := op.APIKeyDelete(idNum, c.Request.Context()); err != nil {

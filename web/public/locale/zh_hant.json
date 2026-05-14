@@ -610,7 +610,98 @@
         }
     },
     "errors": {
+        "common": {
+            "invalid_json": "請求內容不是有效的 JSON。",
+            "invalid_param": "請求參數無效。",
+            "validation_failed": "輸入校驗失敗，請檢查後重試。",
+            "bad_request": "請求參數有誤。",
+            "not_found": "請求的資源不存在。",
+            "duplicate_resource": "資源已存在。",
+            "database_error": "資料庫操作失敗，請稍後重試。",
+            "internal_error": "服務內部錯誤，請稍後重試。"
+        },
+        "auth": {
+            "unauthorized": "請先登入後再繼續操作。",
+            "forbidden": "沒有權限執行此操作。",
+            "invalid_token": "登入狀態已失效，請重新登入。",
+            "expired_token": "登入狀態已過期，請重新登入。",
+            "invalid_credentials": "使用者名稱或密碼錯誤。",
+            "api_key_expired": "API Key 已過期。",
+            "api_key_missing": "缺少 API Key。",
+            "password_incorrect": "原密碼不正確。",
+            "api_key_disabled": "API Key 已被停用。",
+            "api_key_cost_exceeded": "API Key 已達到最大費用限制。"
+        },
+        "site_channel": {
+            "account_not_found": "站點帳號不存在。",
+            "site_not_found": "站點不存在。",
+            "model_not_found": "站點模型不存在。",
+            "route_update_failed": "更新模型路由失敗，請稍後重試。",
+            "model_disable_failed": "更新模型停用狀態失敗，請稍後重試。",
+            "key_create_failed": "建立站點 Key 失敗，請檢查站點狀態或稍後重試。",
+            "source_key_update_failed": "更新來源 Key 失敗，請檢查輸入後重試。",
+            "project_failed": "同步站點渠道投影失敗，請稍後重試。"
+        },
+        "channel": {
+            "not_found": "通道不存在。",
+            "create_failed": "建立通道失敗。",
+            "update_failed": "更新通道失敗。",
+            "delete_failed": "刪除通道失敗。",
+            "fetch_models_failed": "取得通道模型失敗。"
+        },
+        "group": {
+            "not_found": "分組不存在。",
+            "create_failed": "建立分組失敗。",
+            "update_failed": "更新分組失敗。",
+            "delete_failed": "刪除分組失敗。"
+        },
+        "model": {
+            "price_update_failed": "更新模型價格失敗。",
+            "price_delete_failed": "刪除模型價格失敗。",
+            "create_failed": "建立模型失敗。",
+            "update_failed": "更新模型失敗。",
+            "delete_failed": "刪除模型失敗。"
+        },
+        "relay": {
+            "model_not_supported": "目前 API Key 不支援該模型。",
+            "model_not_found": "模型不存在或未配置可用分組。",
+            "no_available_channel": "沒有可用通道。",
+            "channel_disabled": "通道已停用。",
+            "no_available_key": "沒有可用 Key。",
+            "upstream_failed": "上游請求失敗。",
+            "timeout": "請求逾時。",
+            "circuit_breaker_tripped": "通道熔斷中，請稍後重試。"
+        },
         "site": {
+            "sync": {
+                "missing_group_key": "分組「{groupKey}」沒有可用的 Key。請先到站點建立這個分組的 Key，再重新同步。",
+                "group_models_unresolved": "無法確認分組「{groupKey}」的模型，請檢查分組模型配置或 Key 權限。",
+                "no_group_result": "站點帳號同步失敗：沒有可用的分組同步結果。",
+                "all_groups_unresolved": "站點帳號同步失敗：所有分組都未能確認模型，已保留歷史模型。",
+                "unsupported_platform": "不支援的站點平台：{platform}。",
+                "snapshot_nil": "同步結果為空，請稍後重試。"
+            },
+            "auth": {
+                "access_token_required": "站點 Access Token 不能為空。",
+                "direct_token_required": "站點 Direct Token 不能為空。",
+                "login_failed": "站點登入失敗，請檢查帳號、密碼或站點狀態。",
+                "login_token_missing": "站點登入成功但未返回 Access Token，請檢查站點相容性。"
+            },
+            "upstream": {
+                "http_error": "站點上游請求失敗（HTTP {statusCode}），請檢查站點狀態或稍後重試。",
+                "decode_failed": "站點回應解析失敗，請檢查站點相容性或稍後重試。",
+                "cloudflare_challenge": "站點觸發 Cloudflare 保護，請稍後重試，或手動訪問站點完成驗證。"
+            },
+            "import": {
+                "invalid_json": "匯入內容不是有效的 JSON，請檢查檔案格式或貼上的內容。",
+                "empty_payload": "匯入內容為空，請選擇 JSON 檔案或貼上匯出內容。",
+                "unrecognized_all_api_hub": "未識別到 All API Hub 匯出資料，請確認選擇了正確的匯出 JSON。",
+                "unrecognized_metapi": "未識別到 Metapi 帳號匯出資料，請確認選擇了正確的匯出 JSON。",
+                "no_importable_all_api_hub": "未找到可匯入的 All API Hub 站點帳號資料。",
+                "no_importable_metapi": "未找到可匯入的 Metapi 站點帳號資料。",
+                "unsupported_payload": "暫不支援該匯入內容，請確認匯出格式是否正確。",
+                "persist_failed": "儲存匯入資料失敗，請稍後重試。"
+            },
             "sub2api": {
                 "api_key_required": "Sub2API 同步需要 API Key。請先在站點建立一個 Key 後再重新同步。",
                 "model_api_key_required": "Sub2API 模型發現需要 API Key。請先在站點建立一個 Key 後再重新同步。",

@@ -40,7 +40,7 @@ func syncAccountState(ctx context.Context, siteRecord *model.Site, account *mode
 	case model.SitePlatformOpenAI, model.SitePlatformClaude, model.SitePlatformGemini:
 		return syncOfficialPlatform(ctx, siteRecord, account)
 	default:
-		return nil, fmt.Errorf("unsupported site platform: %s", siteRecord.Platform)
+		return nil, newUnsupportedSitePlatformError(siteRecord.Platform)
 	}
 }
 
@@ -74,7 +74,7 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 		}
 		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusFailed, Message: message}, accessToken, nil
 	default:
-		return nil, "", fmt.Errorf("unsupported site platform: %s", siteRecord.Platform)
+		return nil, "", newUnsupportedSitePlatformError(siteRecord.Platform)
 	}
 }
 
@@ -100,7 +100,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		tokens = append(tokens, model.SiteToken{Name: "default", Token: strings.TrimSpace(account.APIKey), GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "fallback", IsDefault: true})
 	}
 	if len(tokens) == 0 {
-		return nil, fmt.Errorf("site sync requires a key for group %q; create a key for that group on the site and sync again", model.SiteDefaultGroupKey)
+		return nil, newMissingGroupKeyError(model.SiteDefaultGroupKey)
 	}
 
 	groups = mergeSiteGroups(groups, tokens)
@@ -199,7 +199,7 @@ func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.Sit
 func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) (*syncSnapshot, error) {
 	accessToken = stripBearerPrefix(accessToken)
 	if accessToken == "" {
-		return nil, fmt.Errorf("access token is required")
+		return nil, newAccessTokenRequiredError()
 	}
 	tokens, err := fetchSub2APITokens(ctx, siteRecord, account, accessToken)
 	if err != nil {
@@ -251,7 +251,7 @@ func syncOfficialPlatform(ctx context.Context, siteRecord *model.Site, account *
 func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, token string, source string) (*syncSnapshot, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return nil, fmt.Errorf("direct token is required")
+		return nil, newDirectTokenRequiredError()
 	}
 	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, model.SiteToken{Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true})
 	if err != nil {
@@ -306,7 +306,7 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 func resolveManagedAccessToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (string, error) {
 	if account.CredentialType == model.SiteCredentialTypeAccessToken {
 		if strings.TrimSpace(account.AccessToken) == "" {
-			return "", fmt.Errorf("access token is required")
+			return "", newAccessTokenRequiredError()
 		}
 		return strings.TrimSpace(account.AccessToken), nil
 	}
@@ -319,7 +319,7 @@ func resolveManagedAccessToken(ctx context.Context, siteRecord *model.Site, acco
 		return "", err
 	}
 	if !jsonBool(payload["success"]) {
-		return "", fmt.Errorf("%s", firstNonEmptyString(jsonString(payload["message"]), "login failed"))
+		return "", newSiteLoginFailedError(firstNonEmptyString(jsonString(payload["message"]), "login failed"))
 	}
 
 	token := jsonString(payload["data"])
@@ -332,7 +332,7 @@ func resolveManagedAccessToken(ctx context.Context, siteRecord *model.Site, acco
 		token = firstNonEmptyString(jsonString(payload["token"]), jsonString(payload["access_token"]), jsonString(payload["accessToken"]))
 	}
 	if token == "" {
-		return "", fmt.Errorf("login succeeded but no access token was returned")
+		return "", newSiteLoginTokenMissingError()
 	}
 	return token, nil
 }
