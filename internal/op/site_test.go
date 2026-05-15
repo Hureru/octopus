@@ -298,8 +298,11 @@ func TestSiteImportMetAPIImportsSiteBasics(t *testing.T) {
 	if managed.PlatformUserID == nil || *managed.PlatformUserID != 456 {
 		t.Fatalf("expected platform user id 456, got %#v", managed.PlatformUserID)
 	}
-	if managed.AccountProxy == nil || *managed.AccountProxy != "http://127.0.0.1:7890" {
-		t.Fatalf("expected account proxy to be imported, got %#v", managed.AccountProxy)
+	if managed.AccountProxy != nil {
+		t.Fatalf("expected legacy account proxy to stay empty, got %#v", managed.AccountProxy)
+	}
+	if managed.ProxyMode != model.ProxyUsageModePool || managed.ProxyConfigID == nil {
+		t.Fatalf("expected account proxy to be resolved through proxy pool, got mode=%q id=%#v", managed.ProxyMode, managed.ProxyConfigID)
 	}
 
 	var tokenCount int64

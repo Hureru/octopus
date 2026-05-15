@@ -205,15 +205,18 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "proxy_mode")
 		updates.ProxyMode = *req.ProxyMode
 	}
-	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+	if req.ProxyConfigID != nil || req.ProxyMode != nil {
 		proxyTouched = true
-		selectFields = append(selectFields, "proxy_config_id")
-		if req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool {
+		if effectiveProxyMode == model.ProxyUsageModePool {
+			if req.ProxyConfigID != nil {
+				selectFields = append(selectFields, "proxy_config_id")
+				effectiveProxyConfigID = req.ProxyConfigID
+				updates.ProxyConfigID = req.ProxyConfigID
+			}
+		} else {
+			selectFields = append(selectFields, "proxy_config_id")
 			effectiveProxyConfigID = nil
 			updates.ProxyConfigID = nil
-		} else {
-			effectiveProxyConfigID = req.ProxyConfigID
-			updates.ProxyConfigID = req.ProxyConfigID
 		}
 	}
 	if proxyTouched {

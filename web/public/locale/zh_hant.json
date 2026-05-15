@@ -747,6 +747,10 @@
         "selectRequired": "請選擇代理池設定",
         "disabledSelected": "目前選擇的代理設定已停用，執行時會失敗；儲存前請改選可用代理。",
         "disabledSuffix": "（已停用）",
+        "createFailed": "代理設定建立失敗：",
+        "updateFailed": "代理設定更新失敗：",
+        "deleteFailed": "代理設定刪除失敗：",
+        "testFailed": "代理設定測試失敗：",
         "mode": {
             "label": "代理模式",
             "inherit": "繼承站點設定",

@@ -747,6 +747,10 @@
         "selectRequired": "Please select a proxy pool configuration",
         "disabledSelected": "The selected proxy configuration is disabled and will fail at runtime. Choose an enabled proxy before saving.",
         "disabledSuffix": " (disabled)",
+        "createFailed": "Proxy configuration create failed:",
+        "updateFailed": "Proxy configuration update failed:",
+        "deleteFailed": "Proxy configuration delete failed:",
+        "testFailed": "Proxy configuration test failed:",
         "mode": {
             "label": "Proxy mode",
             "inherit": "Inherit site settings",

@@ -837,7 +837,7 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 			PlatformUserID:             input.PlatformUserID,
 			ProxyMode:                  proxyMode,
 			ProxyConfigID:              proxyConfigID,
-			AccountProxy:               input.AccountProxy,
+			AccountProxy:               nil,
 			Enabled:                    input.Enabled,
 			AutoSync:                   input.AutoSync,
 			AutoCheckin:                input.AutoCheckin,
@@ -863,7 +863,7 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 			"platform_user_id":              created.PlatformUserID,
 			"proxy_mode":                    created.ProxyMode,
 			"proxy_config_id":               created.ProxyConfigID,
-			"account_proxy":                 created.AccountProxy,
+			"account_proxy":                 nil,
 			"enabled":                       created.Enabled,
 			"auto_sync":                     created.AutoSync,
 			"auto_checkin":                  created.AutoCheckin,
@@ -899,7 +899,7 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 	merged.PlatformUserID = input.PlatformUserID
 	merged.ProxyMode = proxyMode
 	merged.ProxyConfigID = proxyConfigID
-	merged.AccountProxy = input.AccountProxy
+	merged.AccountProxy = nil
 	merged.AutoCheckin = input.AutoCheckin
 	if err := merged.Validate(); err != nil {
 		return nil, false, false, err
@@ -948,7 +948,7 @@ func importedAccountProxyMode(tx *gorm.DB, rawProxy *string) (model.ProxyUsageMo
 		return model.ProxyUsageModeInherit, nil, fmt.Errorf("invalid imported account proxy: %w", err)
 	}
 	var existing model.ProxyConfiguration
-	if err := tx.Where("url = ?", normalized).First(&existing).Error; err == nil {
+	if err := tx.Where("url = ? AND enabled = ?", normalized, true).First(&existing).Error; err == nil {
 		return model.ProxyUsageModePool, &existing.ID, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ProxyUsageModeInherit, nil, err

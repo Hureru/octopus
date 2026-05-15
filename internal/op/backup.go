@@ -9,6 +9,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -129,7 +130,7 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		groupIDMap := make(map[int]int)
 		apiKeyIDMap := make(map[int]int)
 
-		// 1. ProxyConfigurations (dedup by url, then name)
+		// 1. ProxyConfigurations (dedup by url; disambiguate name conflicts)
 		for i := range dump.ProxyConfigurations {
 			proxyConfig := dump.ProxyConfigurations[i]
 			oldID := proxyConfig.ID
@@ -147,8 +148,16 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 				return fmt.Errorf("import proxy_configurations: %w", err)
 			}
 			if err := tx.Where("name = ?", proxyConfig.Name).First(&existing).Error; err == nil {
-				proxyConfigIDMap[oldID] = existing.ID
-				continue
+				oldName := proxyConfig.Name
+				proxyConfig.Name = uniqueProxyConfigName(proxyConfig.Name, tx)
+				log.Warnw("proxy configuration name conflict during import",
+					"old_id", oldID,
+					"existing_id", existing.ID,
+					"existing_url", existing.URL,
+					"import_url", proxyConfig.URL,
+					"old_name", oldName,
+					"new_name", proxyConfig.Name,
+				)
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("import proxy_configurations: %w", err)
 			}
@@ -537,6 +546,26 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 	return res, nil
 }
 
+func uniqueProxyConfigName(baseName string, tx *gorm.DB) string {
+	baseName = strings.TrimSpace(baseName)
+	if baseName == "" {
+		baseName = "imported-proxy"
+	}
+	candidate := baseName
+	index := 2
+	for {
+		var count int64
+		if err := tx.Model(&model.ProxyConfiguration{}).Where("name = ?", candidate).Count(&count).Error; err != nil {
+			return candidate
+		}
+		if count == 0 {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s (%d)", baseName, index)
+		index++
+	}
+}
+
 func remapProxyConfigID(mode *model.ProxyUsageMode, id **int, idMap map[int]int) {
 	if mode == nil || id == nil || *mode != model.ProxyUsageModePool {
 		if id != nil {
@@ -545,6 +574,17 @@ func remapProxyConfigID(mode *model.ProxyUsageMode, id **int, idMap map[int]int)
 		return
 	}
 	if *id == nil || **id <= 0 {
+		reason := "nil"
+		var rawID any
+		if *id != nil {
+			reason = "invalid"
+			rawID = **id
+		}
+		log.Warnw("remapProxyConfigID downgraded proxy mode",
+			"original_mode", *mode,
+			"proxy_config_id", rawID,
+			"reason", reason,
+		)
 		*mode = model.ProxyUsageModeDirect
 		*id = nil
 		return
@@ -553,6 +593,11 @@ func remapProxyConfigID(mode *model.ProxyUsageMode, id **int, idMap map[int]int)
 		*id = &newID
 		return
 	}
+	log.Warnw("remapProxyConfigID downgraded proxy mode",
+		"original_mode", *mode,
+		"proxy_config_id", **id,
+		"reason", "not found in idMap",
+	)
 	*mode = model.ProxyUsageModeDirect
 	*id = nil
 }

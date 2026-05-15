@@ -36,10 +36,27 @@ func listProxyConfigurations(c *gin.Context) {
 }
 
 func createProxyConfiguration(c *gin.Context) {
-	var item model.ProxyConfiguration
-	if err := c.ShouldBindJSON(&item); err != nil {
+	type proxyConfigurationCreateRequest struct {
+		Name    string `json:"name" binding:"required"`
+		URL     string `json:"url" binding:"required"`
+		Enabled *bool  `json:"enabled,omitempty"`
+		Remark  string `json:"remark,omitempty"`
+	}
+
+	var req proxyConfigurationCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.InvalidJSON(c)
 		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	item := model.ProxyConfiguration{
+		Name:    req.Name,
+		URL:     req.URL,
+		Enabled: enabled,
+		Remark:  req.Remark,
 	}
 	if err := op.ProxyConfigurationCreate(&item, c.Request.Context()); err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())

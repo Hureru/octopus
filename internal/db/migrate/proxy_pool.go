@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -94,6 +95,8 @@ func collectLegacyProxyConfigurations(db *gorm.DB) (map[string]int, error) {
 		if err := db.Where("url = ?", normalized).First(&existing).Error; err == nil {
 			proxyIDs[normalized] = existing.ID
 			continue
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
 		name, err := nextImportedProxyName(db)
 		if err != nil {
