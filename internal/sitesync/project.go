@@ -113,7 +113,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		groupTokens := tokenGroups[groupKey]
 		groupModels := modelsByGroup[groupKey]
 		modelBuckets := partitionSiteModelsByRouteType(groupModels, shouldSplit, siteRecord.Platform)
-		useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
+		proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
 		baseUrls := []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}}
 		enabled := siteRecord.Enabled && account.Enabled && len(groupTokens) > 0
 		groupRatio, hasGroupRatio, err := op.SiteGroupRatioGet(ctx, account.ID, groupKey)
@@ -129,18 +129,19 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			modelNames := extractSiteModelNames(bucketModels)
 			bindingKey := compositeBindingKey(groupKey, obType, shouldSplit)
 			channelPayload := model.Channel{
-				Name:         buildManagedChannelName(siteRecord, account, group, obType, groupRatio, hasGroupRatio),
-				Type:         obType,
-				Enabled:      enabled,
-				BaseUrls:     baseUrls,
-				Keys:         buildChannelKeys(groupTokens),
-				Model:        strings.Join(modelNames, ","),
-				CustomModel:  "",
-				Proxy:        useProxy,
-				AutoSync:     false,
-				AutoGroup:    model.AutoGroupTypeNone,
-				CustomHeader: siteRecord.CustomHeader,
-				ChannelProxy: proxyURL,
+				Name:          buildManagedChannelName(siteRecord, account, group, obType, groupRatio, hasGroupRatio),
+				Type:          obType,
+				Enabled:       enabled,
+				BaseUrls:      baseUrls,
+				Keys:          buildChannelKeys(groupTokens),
+				Model:         strings.Join(modelNames, ","),
+				CustomModel:   "",
+				ProxyMode:     proxyMode,
+				ProxyConfigID: proxyConfigID,
+				Proxy:         proxyMode != model.ProxyUsageModeDirect,
+				AutoSync:      false,
+				AutoGroup:     model.AutoGroupTypeNone,
+				CustomHeader:  siteRecord.CustomHeader,
 			}
 
 			binding, exists := bindingMap[bindingKey]
@@ -194,7 +195,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 				continue
 			}
 
-			updateReq := &model.ChannelUpdateRequest{ID: existingChannel.ID, Name: &channelPayload.Name, Type: &channelPayload.Type, Enabled: &channelPayload.Enabled, BaseUrls: &channelPayload.BaseUrls, Model: &channelPayload.Model, CustomModel: &channelPayload.CustomModel, Proxy: &channelPayload.Proxy, AutoSync: &channelPayload.AutoSync, AutoGroup: &channelPayload.AutoGroup, CustomHeader: &channelPayload.CustomHeader, ChannelProxy: channelPayload.ChannelProxy, BypassManagedCheck: true}
+			updateReq := &model.ChannelUpdateRequest{ID: existingChannel.ID, Name: &channelPayload.Name, Type: &channelPayload.Type, Enabled: &channelPayload.Enabled, BaseUrls: &channelPayload.BaseUrls, Model: &channelPayload.Model, CustomModel: &channelPayload.CustomModel, ProxyMode: &channelPayload.ProxyMode, ProxyConfigID: channelPayload.ProxyConfigID, AutoSync: &channelPayload.AutoSync, AutoGroup: &channelPayload.AutoGroup, CustomHeader: &channelPayload.CustomHeader, BypassManagedCheck: true}
 			updateReq.KeysToAdd, updateReq.KeysToUpdate, updateReq.KeysToDelete = diffManagedChannelKeys(existingChannel.Keys, channelPayload.Keys)
 			if _, err := op.ChannelUpdate(updateReq, ctx); err != nil {
 				return nil, fmt.Errorf("failed to update managed channel: %w", err)

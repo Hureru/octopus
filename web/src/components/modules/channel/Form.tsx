@@ -1,4 +1,5 @@
 import { AutoGroupType, ChannelType, type Channel, useFetchModel } from '@/api/endpoints/channel';
+import { ProxySelector } from '@/components/modules/proxy-pool/ProxySelector';
 import {
     Select,
     SelectContent,
@@ -30,13 +31,13 @@ export interface ChannelFormData {
     type: ChannelType;
     base_urls: Channel['base_urls'];
     custom_header: Channel['custom_header'];
-    channel_proxy: string;
+    proxy_mode: Channel['proxy_mode'];
+    proxy_config_id: number | null;
     param_override: string;
     keys: ChannelKeyFormItem[];
     model: string;
     custom_model: string;
     enabled: boolean;
-    proxy: boolean;
     auto_sync: boolean;
     auto_group: AutoGroupType;
     match_regex: string;
@@ -120,8 +121,8 @@ export function ChannelForm({
                 keys: formData.keys
                     .filter((k) => k.channel_key.trim())
                     .map((k) => ({ enabled: k.enabled, channel_key: k.channel_key.trim() })),
-                proxy: formData.proxy,
-                channel_proxy: formData.channel_proxy?.trim() || null,
+                proxy_mode: formData.proxy_mode,
+                proxy_config_id: formData.proxy_mode === 'pool' ? formData.proxy_config_id : null,
                 match_regex: formData.match_regex.trim() || null,
                 custom_header: formData.custom_header?.filter((h) => h.header_key.trim()) || [],
             },
@@ -457,6 +458,17 @@ export function ChannelForm({
                 </div>
             </div>
 
+            <div className="rounded-xl border bg-card p-4">
+                <ProxySelector
+                    value={{ proxy_mode: formData.proxy_mode, proxy_config_id: formData.proxy_config_id }}
+                    onChange={(next) => onFormDataChange({
+                        ...formData,
+                        proxy_mode: next.proxy_mode as Channel['proxy_mode'],
+                        proxy_config_id: next.proxy_config_id ?? null,
+                    })}
+                />
+            </div>
+
             <Accordion type="single" collapsible className="w-full border rounded-xl bg-card">
                 <AccordionItem value="advanced" className="border-none">
                     <AccordionTrigger className="text-sm font-medium text-card-foreground py-3 px-4 hover:no-underline hover:bg-muted/30 rounded-xl transition-colors">
@@ -484,19 +496,6 @@ export function ChannelForm({
                                 </Select>
                             </div>
 
-                            <div className="space-y-2">
-                                <label htmlFor={`${idPrefix}-channel-proxy`} className="text-sm font-medium text-card-foreground">
-                                    {t('channelProxy')}
-                                </label>
-                                <Input
-                                    id={`${idPrefix}-channel-proxy`}
-                                    type="text"
-                                    value={formData.channel_proxy}
-                                    onChange={(e) => onFormDataChange({ ...formData, channel_proxy: e.target.value })}
-                                    placeholder={t('channelProxyPlaceholder')}
-                                    className="rounded-xl"
-                                />
-                            </div>
                         </div>
 
                         <div className="space-y-2">
@@ -587,13 +586,6 @@ export function ChannelForm({
                     <span className="text-sm font-medium text-card-foreground">{t('enabled')}</span>
                 </label>
                 <div className="flex items-center gap-6">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <Switch
-                            checked={formData.proxy}
-                            onCheckedChange={(checked) => onFormDataChange({ ...formData, proxy: checked })}
-                        />
-                        <span className="text-sm text-card-foreground">{t('proxy')}</span>
-                    </label>
                     <label className="flex items-center gap-2 cursor-pointer">
                         <Switch
                             checked={formData.auto_sync}

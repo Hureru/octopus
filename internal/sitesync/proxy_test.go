@@ -7,50 +7,51 @@ import (
 )
 
 func TestResolveSiteAccountProxyPrefersAccountProxy(t *testing.T) {
-	accountProxy := "socks5://127.0.0.1:7891"
-	siteProxy := "socks5://127.0.0.1:7890"
+	accountProxyID := 2
+	siteProxyID := 1
 
-	useProxy, proxyURL := resolveSiteAccountProxy(&model.Site{
-		Proxy:     false,
-		SiteProxy: &siteProxy,
+	proxyMode, proxyConfigID := resolveSiteAccountProxy(&model.Site{
+		ProxyMode:     model.ProxyUsageModePool,
+		ProxyConfigID: &siteProxyID,
 	}, &model.SiteAccount{
-		AccountProxy: &accountProxy,
+		ProxyMode:     model.ProxyUsageModePool,
+		ProxyConfigID: &accountProxyID,
 	})
 
-	if !useProxy {
-		t.Fatalf("expected proxy to be enabled when account proxy is configured")
+	if proxyMode != model.ProxyUsageModePool {
+		t.Fatalf("expected account proxy mode pool, got %q", proxyMode)
 	}
-	if proxyURL == nil || *proxyURL != accountProxy {
-		t.Fatalf("expected account proxy %q, got %#v", accountProxy, proxyURL)
+	if proxyConfigID == nil || *proxyConfigID != accountProxyID {
+		t.Fatalf("expected account proxy id %d, got %#v", accountProxyID, proxyConfigID)
 	}
 }
 
 func TestResolveSiteAccountProxyFallsBackToSiteSettings(t *testing.T) {
-	siteProxy := "socks5://127.0.0.1:7890"
+	siteProxyID := 1
 
-	useProxy, proxyURL := resolveSiteAccountProxy(&model.Site{
-		Proxy:     true,
-		SiteProxy: &siteProxy,
-	})
+	proxyMode, proxyConfigID := resolveSiteAccountProxy(&model.Site{
+		ProxyMode:     model.ProxyUsageModePool,
+		ProxyConfigID: &siteProxyID,
+	}, &model.SiteAccount{ProxyMode: model.ProxyUsageModeInherit})
 
-	if !useProxy {
-		t.Fatalf("expected site proxy to be enabled")
+	if proxyMode != model.ProxyUsageModePool {
+		t.Fatalf("expected site proxy mode pool, got %q", proxyMode)
 	}
-	if proxyURL == nil || *proxyURL != siteProxy {
-		t.Fatalf("expected site proxy %q, got %#v", siteProxy, proxyURL)
+	if proxyConfigID == nil || *proxyConfigID != siteProxyID {
+		t.Fatalf("expected site proxy id %d, got %#v", siteProxyID, proxyConfigID)
 	}
 }
 
 func TestResolveSiteAccountProxyDisablesProxyWhenNoConfigExists(t *testing.T) {
-	useProxy, proxyURL := resolveSiteAccountProxy(&model.Site{
-		Proxy: false,
+	proxyMode, proxyConfigID := resolveSiteAccountProxy(&model.Site{
+		ProxyMode: model.ProxyUsageModeDirect,
 	})
 
-	if useProxy {
-		t.Fatalf("expected proxy to be disabled when neither account nor site proxy is enabled")
+	if proxyMode != model.ProxyUsageModeDirect {
+		t.Fatalf("expected direct proxy mode, got %q", proxyMode)
 	}
-	if proxyURL != nil {
-		t.Fatalf("expected no proxy URL, got %#v", proxyURL)
+	if proxyConfigID != nil {
+		t.Fatalf("expected no proxy config id, got %#v", proxyConfigID)
 	}
 }
 

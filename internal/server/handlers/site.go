@@ -413,7 +413,6 @@ func batchSite(c *gin.Context) {
 	}
 	validActions := map[string]bool{
 		"enable": true, "disable": true, "delete": true,
-		"enable_system_proxy": true, "disable_system_proxy": true,
 	}
 	if !validActions[req.Action] {
 		resp.Error(c, http.StatusBadRequest, "invalid action")
@@ -439,10 +438,6 @@ func batchSite(c *gin.Context) {
 			batchErr = op.SiteEnabled(id, false, ctx)
 		case "delete":
 			batchErr = sitesvc.DeleteSite(ctx, id)
-		case "enable_system_proxy":
-			batchErr = op.SiteUpdateSystemProxy(id, true, ctx)
-		case "disable_system_proxy":
-			batchErr = op.SiteUpdateSystemProxy(id, false, ctx)
 		}
 		if batchErr != nil {
 			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: batchErr.Error()})

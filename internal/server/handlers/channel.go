@@ -95,6 +95,26 @@ func createChannel(c *gin.Context) {
 		resp.InvalidJSON(c)
 		return
 	}
+	if channel.ProxyMode == "" {
+		channel.ProxyMode = model.ProxyUsageModeDirect
+	}
+	if err := channel.ProxyMode.Validate(false); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if channel.ProxyMode == model.ProxyUsageModePool && (channel.ProxyConfigID == nil || *channel.ProxyConfigID <= 0) {
+		resp.Error(c, http.StatusBadRequest, "proxy config id is required when proxy mode is pool")
+		return
+	}
+	if channel.ProxyMode == model.ProxyUsageModePool {
+		if _, err := op.ProxyURLForConfig(*channel.ProxyConfigID, c.Request.Context()); err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if channel.ProxyMode != model.ProxyUsageModePool {
+		channel.ProxyConfigID = nil
+	}
 	if err := op.ChannelCreate(&channel, c.Request.Context()); err != nil {
 		resp.ErrorWithAppError(c, http.StatusInternalServerError, channelError(codeChannelCreateFailed, "channel create failed", err))
 		return

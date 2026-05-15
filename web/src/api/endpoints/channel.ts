@@ -3,6 +3,7 @@ import { apiClient } from '../client';
 import { logger } from '@/lib/logger';
 import { formatCount, formatMoney, formatTime } from '@/lib/utils';
 import { StatsChannel, type StatsMetricsFormatted } from './stats';
+import type { ProxyMode } from './proxy-pool';
 /**
  * 渠道类型枚举
  */
@@ -65,12 +66,12 @@ export type Channel = {
     keys: ChannelKey[];
     model: string;
     custom_model: string;
-    proxy: boolean;
+    proxy_mode: Exclude<ProxyMode, 'inherit'>;
+    proxy_config_id?: number | null;
     auto_sync: boolean;
     auto_group: AutoGroupType;
     custom_header: CustomHeader[];
     param_override?: string | null;
-    channel_proxy?: string | null;
     match_regex?: string | null;
     managed: boolean;
     managed_source?: ManagedChannelSource | null;
@@ -95,11 +96,11 @@ export type CreateChannelRequest = {
     keys: Array<Pick<ChannelKey, 'enabled' | 'channel_key' | 'remark'>>;
     model: string;
     custom_model?: string;
-    proxy?: boolean;
+    proxy_mode?: Exclude<ProxyMode, 'inherit'>;
+    proxy_config_id?: number | null;
     auto_sync?: boolean;
     auto_group?: AutoGroupType;
     custom_header?: CustomHeader[];
-    channel_proxy?: string | null;
     param_override?: string | null;
     match_regex?: string | null;
 };
@@ -115,11 +116,11 @@ export type UpdateChannelRequest = {
     base_urls?: BaseUrl[];
     model?: string;
     custom_model?: string;
-    proxy?: boolean;
+    proxy_mode?: Exclude<ProxyMode, 'inherit'>;
+    proxy_config_id?: number | null;
     auto_sync?: boolean;
     auto_group?: AutoGroupType;
     custom_header?: CustomHeader[];
-    channel_proxy?: string | null;
     param_override?: string | null;
     match_regex?: string | null;
     // keys diff
@@ -132,8 +133,8 @@ export type FetchModelRequest = {
     type: ChannelType;
     base_urls: BaseUrl[];
     keys: Array<Pick<ChannelKey, 'enabled' | 'channel_key'>>;
-    proxy?: boolean;
-    channel_proxy?: string | null;
+    proxy_mode?: Exclude<ProxyMode, 'inherit'>;
+    proxy_config_id?: number | null;
     match_regex?: string | null;
     custom_header?: CustomHeader[];
 };
@@ -163,6 +164,8 @@ export function useChannelList() {
                 base_urls: item.base_urls ?? [],
                 custom_header: item.custom_header ?? [],
                 keys: item.keys ?? [],
+                proxy_mode: item.proxy_mode ?? 'direct',
+                proxy_config_id: item.proxy_config_id ?? null,
             }) satisfies Channel,
             formatted: {
                 input_token: formatCount(item.stats.input_token),
@@ -207,6 +210,7 @@ export function useCreateChannel() {
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
         },
         onError: (error) => {
             logger.error('渠道创建失败:', error);
@@ -242,6 +246,7 @@ export function useUpdateChannel() {
             logger.log('渠道更新成功:', data);
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
         },
         onError: (error) => {
             logger.error('渠道更新失败:', error);
@@ -268,6 +273,7 @@ export function useDeleteChannel() {
             logger.log('渠道删除成功');
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
         },
         onError: (error) => {
             logger.error('渠道删除失败:', error);

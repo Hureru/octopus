@@ -65,6 +65,7 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.User{},
 		&model.Channel{},
 		&model.ChannelKey{},
+		&model.ProxyConfiguration{},
 		&model.Site{},
 		&model.SiteAccount{},
 		&model.SiteToken{},

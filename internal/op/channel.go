@@ -24,15 +24,50 @@ var channelKeyCacheNeedUpdateLock sync.Mutex
 func ChannelList(ctx context.Context) ([]model.Channel, error) {
 	channels := make([]model.Channel, 0, channelCache.Len())
 	for _, channel := range channelCache.GetAll() {
+		normalizeChannelProxyFields(&channel)
 		channels = append(channels, channel)
 	}
 	return channels, nil
 }
 
+func normalizeChannelProxyFields(channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+	if channel.ProxyMode == "" {
+		channel.ProxyMode = model.ProxyUsageModeDirect
+	}
+	if channel.ProxyMode != model.ProxyUsageModePool {
+		channel.ProxyConfigID = nil
+	}
+	channel.Proxy = channel.ProxyMode != model.ProxyUsageModeDirect
+	channel.ChannelProxy = nil
+}
+
 func ChannelCreate(channel *model.Channel, ctx context.Context) error {
+	if channel == nil {
+		return fmt.Errorf("channel is nil")
+	}
+	if channel.ProxyMode == "" {
+		channel.ProxyMode = model.ProxyUsageModeDirect
+	}
+	if err := channel.ProxyMode.Validate(false); err != nil {
+		return err
+	}
+	if channel.ProxyMode == model.ProxyUsageModePool {
+		if channel.ProxyConfigID == nil || *channel.ProxyConfigID <= 0 {
+			return fmt.Errorf("proxy config id is required when proxy mode is pool")
+		}
+		if _, err := ProxyURLForConfig(*channel.ProxyConfigID, ctx); err != nil {
+			return err
+		}
+	} else {
+		channel.ProxyConfigID = nil
+	}
 	if err := db.GetDB().WithContext(ctx).Create(channel).Error; err != nil {
 		return err
 	}
+	normalizeChannelProxyFields(channel)
 	channelCache.Set(channel.ID, *channel)
 	for _, k := range channel.Keys {
 		if k.ID != 0 {
@@ -114,10 +149,11 @@ func ChannelKeySaveDB(ctx context.Context) error {
 }
 
 func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model.Channel, error) {
-	_, ok := channelCache.Get(req.ID)
+	existingChannel, ok := channelCache.Get(req.ID)
 	if !ok {
 		return nil, fmt.Errorf("channel not found")
 	}
+	normalizeChannelProxyFields(&existingChannel)
 	if !req.BypassManagedCheck {
 		if _, managed, err := ChannelManagedBinding(req.ID, ctx); err != nil {
 			return nil, err
@@ -160,9 +196,44 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "custom_model")
 		updates.CustomModel = *req.CustomModel
 	}
-	if req.Proxy != nil {
-		selectFields = append(selectFields, "proxy")
-		updates.Proxy = *req.Proxy
+	effectiveProxyMode := existingChannel.ProxyMode
+	effectiveProxyConfigID := existingChannel.ProxyConfigID
+	proxyTouched := false
+	if req.ProxyMode != nil {
+		proxyTouched = true
+		effectiveProxyMode = *req.ProxyMode
+		selectFields = append(selectFields, "proxy_mode")
+		updates.ProxyMode = *req.ProxyMode
+	}
+	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+		proxyTouched = true
+		selectFields = append(selectFields, "proxy_config_id")
+		if req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool {
+			effectiveProxyConfigID = nil
+			updates.ProxyConfigID = nil
+		} else {
+			effectiveProxyConfigID = req.ProxyConfigID
+			updates.ProxyConfigID = req.ProxyConfigID
+		}
+	}
+	if proxyTouched {
+		if effectiveProxyMode == "" {
+			effectiveProxyMode = model.ProxyUsageModeDirect
+		}
+		if err := effectiveProxyMode.Validate(false); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		if effectiveProxyMode == model.ProxyUsageModePool {
+			if effectiveProxyConfigID == nil || *effectiveProxyConfigID <= 0 {
+				tx.Rollback()
+				return nil, fmt.Errorf("proxy config id is required when proxy mode is pool")
+			}
+			if _, err := ProxyURLForConfig(*effectiveProxyConfigID, ctx); err != nil {
+				tx.Rollback()
+				return nil, err
+			}
+		}
 	}
 	if req.AutoSync != nil {
 		selectFields = append(selectFields, "auto_sync")
@@ -175,10 +246,6 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	if req.CustomHeader != nil {
 		selectFields = append(selectFields, "custom_header")
 		updates.CustomHeader = *req.CustomHeader
-	}
-	if req.ChannelProxy != nil {
-		selectFields = append(selectFields, "channel_proxy")
-		updates.ChannelProxy = req.ChannelProxy
 	}
 	if req.ParamOverride != nil {
 		selectFields = append(selectFields, "param_override")
@@ -257,6 +324,8 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 	}
 
 	channel, _ := channelCache.Get(req.ID)
+	normalizeChannelProxyFields(&channel)
+	channelCache.Set(req.ID, channel)
 	resetBalancerStateForChannel(req.ID)
 	return &channel, nil
 }
@@ -275,6 +344,7 @@ func ChannelEnabled(id int, enabled bool, ctx context.Context) error {
 		return err
 	}
 	oldChannel.Enabled = enabled
+	normalizeChannelProxyFields(&oldChannel)
 	channelCache.Set(id, oldChannel)
 	resetBalancerStateForChannel(id)
 	return nil
@@ -289,6 +359,7 @@ func ChannelEnabledManaged(id int, enabled bool, ctx context.Context) error {
 		return err
 	}
 	oldChannel.Enabled = enabled
+	normalizeChannelProxyFields(&oldChannel)
 	channelCache.Set(id, oldChannel)
 	resetBalancerStateForChannel(id)
 	return nil
@@ -480,6 +551,7 @@ func ChannelGet(id int, ctx context.Context) (*model.Channel, error) {
 	if !ok {
 		return nil, fmt.Errorf("channel not found")
 	}
+	normalizeChannelProxyFields(&channel)
 	return &channel, nil
 }
 
@@ -511,6 +583,7 @@ func ChannelGetByName(name string, ctx context.Context) (*model.Channel, error) 
 		return nil, err
 	}
 
+	normalizeChannelProxyFields(&channel)
 	channelCache.Set(channel.ID, channel)
 	for _, k := range channel.Keys {
 		if k.ID != 0 {
@@ -535,6 +608,7 @@ func channelRefreshCache(ctx context.Context) error {
 	channelKeyCacheNeedUpdate = make(map[int]struct{})
 	channelKeyCacheNeedUpdateLock.Unlock()
 	for _, channel := range channels {
+		normalizeChannelProxyFields(&channel)
 		channelCache.Set(channel.ID, channel)
 		for _, k := range channel.Keys {
 			if k.ID != 0 {
@@ -560,6 +634,7 @@ func channelRefreshCacheByID(id int, ctx context.Context) error {
 		First(&channel, id).Error; err != nil {
 		return err
 	}
+	normalizeChannelProxyFields(&channel)
 	channelCache.Set(channel.ID, channel)
 	for _, k := range channel.Keys {
 		if k.ID != 0 {

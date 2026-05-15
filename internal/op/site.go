@@ -25,6 +25,9 @@ func SiteList(ctx context.Context) ([]model.Site, error) {
 		Find(&sites).Error; err != nil {
 		return nil, err
 	}
+	for i := range sites {
+		normalizeSiteProxyFields(&sites[i])
+	}
 	return sites, nil
 }
 
@@ -41,6 +44,9 @@ func SiteListArchived(ctx context.Context) ([]model.Site, error) {
 		Find(&sites).Error; err != nil {
 		return nil, err
 	}
+	for i := range sites {
+		normalizeSiteProxyFields(&sites[i])
+	}
 	return sites, nil
 }
 
@@ -55,7 +61,39 @@ func SiteGet(id int, ctx context.Context) (*model.Site, error) {
 		First(&site, id).Error; err != nil {
 		return nil, err
 	}
+	normalizeSiteProxyFields(&site)
 	return &site, nil
+}
+
+func normalizeSiteProxyFields(site *model.Site) {
+	if site == nil {
+		return
+	}
+	if site.ProxyMode == "" {
+		site.ProxyMode = model.ProxyUsageModeDirect
+	}
+	if site.ProxyMode != model.ProxyUsageModePool {
+		site.ProxyConfigID = nil
+	}
+	site.Proxy = site.ProxyMode != model.ProxyUsageModeDirect
+	site.UseSystemProxy = site.ProxyMode == model.ProxyUsageModeSystem
+	site.SiteProxy = nil
+	for i := range site.Accounts {
+		normalizeSiteAccountProxyFields(&site.Accounts[i])
+	}
+}
+
+func normalizeSiteAccountProxyFields(account *model.SiteAccount) {
+	if account == nil {
+		return
+	}
+	if account.ProxyMode == "" {
+		account.ProxyMode = model.ProxyUsageModeInherit
+	}
+	if account.ProxyMode != model.ProxyUsageModePool {
+		account.ProxyConfigID = nil
+	}
+	account.AccountProxy = nil
 }
 
 func SiteCreate(site *model.Site, ctx context.Context) error {
@@ -64,6 +102,11 @@ func SiteCreate(site *model.Site, ctx context.Context) error {
 	}
 	if err := site.Validate(); err != nil {
 		return err
+	}
+	if site.ProxyMode == model.ProxyUsageModePool && site.ProxyConfigID != nil {
+		if _, err := ProxyURLForConfig(*site.ProxyConfigID, ctx); err != nil {
+			return err
+		}
 	}
 	return db.GetDB().WithContext(ctx).Create(site).Error
 }
@@ -97,17 +140,17 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.Enabled = *req.Enabled
 		selectFields = append(selectFields, "enabled")
 	}
-	if req.Proxy != nil {
-		merged.Proxy = *req.Proxy
-		selectFields = append(selectFields, "proxy")
+	if req.ProxyMode != nil {
+		merged.ProxyMode = *req.ProxyMode
+		selectFields = append(selectFields, "proxy_mode")
 	}
-	if req.SiteProxy != nil {
-		merged.SiteProxy = req.SiteProxy
-		selectFields = append(selectFields, "site_proxy")
-	}
-	if req.UseSystemProxy != nil {
-		merged.UseSystemProxy = *req.UseSystemProxy
-		selectFields = append(selectFields, "use_system_proxy")
+	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+		if req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool {
+			merged.ProxyConfigID = nil
+		} else {
+			merged.ProxyConfigID = req.ProxyConfigID
+		}
+		selectFields = append(selectFields, "proxy_config_id")
 	}
 	if req.ExternalCheckinURL != nil {
 		merged.ExternalCheckinURL = req.ExternalCheckinURL
@@ -133,6 +176,11 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		if err := merged.Validate(); err != nil {
 			return nil, err
 		}
+		if merged.ProxyMode == model.ProxyUsageModePool && merged.ProxyConfigID != nil {
+			if _, err := ProxyURLForConfig(*merged.ProxyConfigID, ctx); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if req.Name != nil {
 		updates.Name = merged.Name
@@ -146,14 +194,11 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	if req.Enabled != nil {
 		updates.Enabled = merged.Enabled
 	}
-	if req.Proxy != nil {
-		updates.Proxy = merged.Proxy
+	if req.ProxyMode != nil {
+		updates.ProxyMode = merged.ProxyMode
 	}
-	if req.SiteProxy != nil {
-		updates.SiteProxy = merged.SiteProxy
-	}
-	if req.UseSystemProxy != nil {
-		updates.UseSystemProxy = merged.UseSystemProxy
+	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+		updates.ProxyConfigID = merged.ProxyConfigID
 	}
 	if req.ExternalCheckinURL != nil {
 		updates.ExternalCheckinURL = merged.ExternalCheckinURL
@@ -262,6 +307,7 @@ func SiteAccountGet(id int, ctx context.Context) (*model.SiteAccount, error) {
 		First(&account, id).Error; err != nil {
 		return nil, err
 	}
+	normalizeSiteAccountProxyFields(&account)
 	return &account, nil
 }
 
@@ -271,6 +317,11 @@ func SiteAccountCreate(account *model.SiteAccount, ctx context.Context) error {
 	}
 	if err := account.Validate(); err != nil {
 		return err
+	}
+	if account.ProxyMode == model.ProxyUsageModePool && account.ProxyConfigID != nil {
+		if _, err := ProxyURLForConfig(*account.ProxyConfigID, ctx); err != nil {
+			return err
+		}
 	}
 	return db.GetDB().WithContext(ctx).Create(account).Error
 }
@@ -325,9 +376,17 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		merged.PlatformUserID = req.PlatformUserID
 		selectFields = append(selectFields, "platform_user_id")
 	}
-	if req.AccountProxy != nil {
-		merged.AccountProxy = req.AccountProxy
-		selectFields = append(selectFields, "account_proxy")
+	if req.ProxyMode != nil {
+		merged.ProxyMode = *req.ProxyMode
+		selectFields = append(selectFields, "proxy_mode")
+	}
+	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+		if req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool {
+			merged.ProxyConfigID = nil
+		} else {
+			merged.ProxyConfigID = req.ProxyConfigID
+		}
+		selectFields = append(selectFields, "proxy_config_id")
 	}
 	if req.Enabled != nil {
 		merged.Enabled = *req.Enabled
@@ -358,6 +417,11 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		if err := merged.Validate(); err != nil {
 			return nil, err
 		}
+		if merged.ProxyMode == model.ProxyUsageModePool && merged.ProxyConfigID != nil {
+			if _, err := ProxyURLForConfig(*merged.ProxyConfigID, ctx); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if req.Name != nil {
 		updates.Name = merged.Name
@@ -386,8 +450,11 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 	if req.PlatformUserID != nil {
 		updates.PlatformUserID = merged.PlatformUserID
 	}
-	if req.AccountProxy != nil {
-		updates.AccountProxy = merged.AccountProxy
+	if req.ProxyMode != nil {
+		updates.ProxyMode = merged.ProxyMode
+	}
+	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+		updates.ProxyConfigID = merged.ProxyConfigID
 	}
 	if req.Enabled != nil {
 		updates.Enabled = merged.Enabled
@@ -513,8 +580,4 @@ func SiteModelDisabledUpdate(accountID int, groupKey string, modelName string, d
 		Model(&model.SiteModel{}).
 		Where("site_account_id = ? AND group_key = ? AND model_name = ?", accountID, model.NormalizeSiteGroupKey(groupKey), strings.TrimSpace(modelName)).
 		Update("disabled", disabled).Error
-}
-
-func SiteUpdateSystemProxy(id int, useSystemProxy bool, ctx context.Context) error {
-	return db.GetDB().WithContext(ctx).Model(&model.Site{}).Where("id = ?", id).Update("use_system_proxy", useSystemProxy).Error
 }

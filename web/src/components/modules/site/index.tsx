@@ -39,6 +39,8 @@ import {
   useUpdateSite,
   useUpdateSiteAccount,
 } from "@/api/endpoints/site";
+import type { ProxyMode } from "@/api/endpoints/proxy-pool";
+import { ProxySelector } from "@/components/modules/proxy-pool/ProxySelector";
 import { PageWrapper } from "@/components/common/PageWrapper";
 import { toast } from "@/components/common/Toast";
 import {
@@ -120,9 +122,8 @@ type SiteFormState = {
   platform: SitePlatform | "";
   base_url: string;
   enabled: boolean;
-  proxy: boolean;
-  site_proxy: string;
-  use_system_proxy: boolean;
+  proxy_mode: Exclude<ProxyMode, "inherit">;
+  proxy_config_id: number | null;
   external_checkin_url: string;
   is_pinned: boolean;
   sort_order: number;
@@ -141,7 +142,8 @@ type SiteAccountFormState = {
   refresh_token: string;
   token_expires_at: string;
   platform_user_id: string;
-  account_proxy: string;
+  proxy_mode: ProxyMode;
+  proxy_config_id: number | null;
   enabled: boolean;
   auto_sync: boolean;
   auto_checkin: boolean;
@@ -231,9 +233,8 @@ function createEmptySiteForm(): SiteFormState {
     platform: "",
     base_url: "",
     enabled: true,
-    proxy: false,
-    site_proxy: "",
-    use_system_proxy: false,
+    proxy_mode: "direct",
+    proxy_config_id: null,
     external_checkin_url: "",
     is_pinned: false,
     sort_order: 0,
@@ -248,9 +249,8 @@ function createSiteForm(site: SiteRecord): SiteFormState {
     platform: site.platform,
     base_url: site.base_url,
     enabled: site.enabled,
-    proxy: site.proxy,
-    site_proxy: site.site_proxy ?? "",
-    use_system_proxy: site.use_system_proxy,
+    proxy_mode: site.proxy_mode ?? "direct",
+    proxy_config_id: site.proxy_config_id ?? null,
     external_checkin_url: site.external_checkin_url ?? "",
     is_pinned: site.is_pinned,
     sort_order: site.sort_order,
@@ -263,7 +263,8 @@ function normalizeSiteRecord(site: SiteRecord): SiteRecord {
   return {
     ...site,
     custom_header: site.custom_header ?? [],
-    use_system_proxy: site.use_system_proxy ?? false,
+    proxy_mode: site.proxy_mode ?? "direct",
+    proxy_config_id: site.proxy_config_id ?? null,
     external_checkin_url: site.external_checkin_url ?? null,
     is_pinned: site.is_pinned ?? false,
     sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
@@ -271,7 +272,11 @@ function normalizeSiteRecord(site: SiteRecord): SiteRecord {
       typeof site.global_weight === "number" && site.global_weight > 0
         ? site.global_weight
         : 1,
-    accounts: site.accounts ?? [],
+    accounts: (site.accounts ?? []).map((account) => ({
+      ...account,
+      proxy_mode: account.proxy_mode ?? "inherit",
+      proxy_config_id: account.proxy_config_id ?? null,
+    })),
   };
 }
 
@@ -317,7 +322,8 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
     refresh_token: "",
     token_expires_at: "",
     platform_user_id: "",
-    account_proxy: "",
+    proxy_mode: "inherit",
+    proxy_config_id: null,
     enabled: true,
     auto_sync: true,
     auto_checkin: true,
@@ -342,7 +348,8 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
     platform_user_id: account.platform_user_id
       ? String(account.platform_user_id)
       : "",
-    account_proxy: account.account_proxy ?? "",
+    proxy_mode: account.proxy_mode ?? "inherit",
+    proxy_config_id: account.proxy_config_id ?? null,
     enabled: account.enabled,
     auto_sync: account.auto_sync,
     auto_checkin: account.auto_checkin,
@@ -1200,14 +1207,18 @@ export function Site() {
       return;
     }
 
+    if (siteForm.proxy_mode === "pool" && !siteForm.proxy_config_id) {
+      toast.error("请选择代理池配置");
+      return;
+    }
+
     const payload = {
       name: siteForm.name.trim(),
       platform: platform as SitePlatform,
       base_url: siteForm.base_url.trim(),
       enabled: siteForm.enabled,
-      proxy: siteForm.proxy,
-      site_proxy: siteForm.site_proxy.trim(),
-      use_system_proxy: siteForm.use_system_proxy,
+      proxy_mode: siteForm.proxy_mode,
+      proxy_config_id: siteForm.proxy_mode === "pool" ? siteForm.proxy_config_id : null,
       external_checkin_url: siteForm.external_checkin_url.trim() || null,
       is_pinned: siteForm.is_pinned,
       sort_order: siteForm.sort_order,
@@ -1313,6 +1324,11 @@ export function Site() {
         ? accountForm.api_key.trim()
         : "";
 
+    if (accountForm.proxy_mode === "pool" && !accountForm.proxy_config_id) {
+      toast.error("请选择代理池配置");
+      return;
+    }
+
     const payload = {
       site_id: accountForm.site_id,
       name: accountForm.name.trim(),
@@ -1324,7 +1340,8 @@ export function Site() {
       refresh_token: accountForm.refresh_token.trim(),
       token_expires_at: parsedTokenExpiresAt,
       platform_user_id: parsedPlatformUserID,
-      account_proxy: accountForm.account_proxy.trim(),
+      proxy_mode: accountForm.proxy_mode,
+      proxy_config_id: accountForm.proxy_mode === "pool" ? accountForm.proxy_config_id : null,
       enabled: accountForm.enabled,
       auto_sync: accountForm.auto_sync,
       auto_checkin: accountForm.auto_checkin,
@@ -1814,15 +1831,12 @@ export function Site() {
 
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>
-                    {site.proxy
-                      ? "站点代理"
-                      : site.use_system_proxy
+                    {site.proxy_mode === "pool"
+                      ? "代理池"
+                      : site.proxy_mode === "system"
                         ? "系统代理"
                         : "直连"}
                   </span>
-                  {site.site_proxy ? (
-                    <span className="truncate">代理 {site.site_proxy}</span>
-                  ) : null}
                   {site.custom_header.length > 0 ? (
                     <span>{site.custom_header.length} 个 Header</span>
                   ) : null}
@@ -2050,11 +2064,15 @@ export function Site() {
                                             : "自动签到"
                                           : "手动签到"}
                                       </span>
-                                      {account.account_proxy ? (
-                                        <span className="truncate">
-                                          代理 {account.account_proxy}
-                                        </span>
-                                      ) : null}
+                                      <span>
+                                        {account.proxy_mode === "inherit"
+                                          ? "继承站点代理"
+                                          : account.proxy_mode === "pool"
+                                            ? "代理池"
+                                            : account.proxy_mode === "system"
+                                              ? "系统代理"
+                                              : "直连"}
+                                      </span>
                                     </div>
                                   </div>
 
@@ -2280,24 +2298,6 @@ export function Site() {
                 批量禁用
               </Button>
               <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                onClick={() => handleBatchAction("enable_system_proxy")}
-                disabled={batchAction.isPending}
-              >
-                批量启用系统代理
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                onClick={() => handleBatchAction("disable_system_proxy")}
-                disabled={batchAction.isPending}
-              >
-                批量禁用系统代理
-              </Button>
-              <Button
                 variant="destructive"
                 size="sm"
                 className="rounded-xl"
@@ -2476,7 +2476,7 @@ export function Site() {
               />
             </label>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
                 <div>
                   <div className="text-sm font-medium">启用站点</div>
@@ -2491,55 +2491,15 @@ export function Site() {
                   }
                 />
               </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium">站点代理</div>
-                  <div className="text-xs text-muted-foreground">
-                    请求时走站点级代理
-                  </div>
-                </div>
-                <Switch
-                  checked={siteForm.proxy}
-                  onCheckedChange={(checked) =>
-                    setSiteForm((current) => ({ ...current, proxy: checked }))
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium">系统代理</div>
-                  <div className="text-xs text-muted-foreground">
-                    无专用代理时用全局代理
-                  </div>
-                </div>
-                <Switch
-                  checked={siteForm.use_system_proxy}
-                  onCheckedChange={(checked) =>
-                    setSiteForm((current) => ({
-                      ...current,
-                      use_system_proxy: checked,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <label className="grid gap-2 text-sm">
-              <span className="font-medium">站点级代理</span>
-              <Input
-                value={siteForm.site_proxy}
-                onChange={(event) =>
-                  setSiteForm((current) => ({
-                    ...current,
-                    site_proxy: event.target.value,
-                  }))
-                }
-                placeholder="可选：例如 socks5://127.0.0.1:7890"
-                className="rounded-xl"
+              <ProxySelector
+                value={{ proxy_mode: siteForm.proxy_mode, proxy_config_id: siteForm.proxy_config_id }}
+                onChange={(next) => setSiteForm((current) => ({
+                  ...current,
+                  proxy_mode: next.proxy_mode as Exclude<ProxyMode, "inherit">,
+                  proxy_config_id: next.proxy_config_id ?? null,
+                }))}
               />
-            </label>
+            </div>
 
             <label className="grid gap-2 text-sm">
               <span className="font-medium">手动签到 URL</span>
@@ -2896,25 +2856,20 @@ export function Site() {
                 </label>
               ) : null}
 
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">账号级代理</span>
-                <Input
-                  value={accountForm.account_proxy}
-                  onChange={(event) =>
-                    setAccountForm((current) =>
-                      current
-                        ? { ...current, account_proxy: event.target.value }
-                        : current,
-                    )
-                  }
-                  placeholder="可选：例如 socks5://127.0.0.1:7890"
-                  className="rounded-xl"
+              <div className="grid gap-2 text-sm">
+                <ProxySelector
+                  allowInherit
+                  value={{ proxy_mode: accountForm.proxy_mode, proxy_config_id: accountForm.proxy_config_id }}
+                  onChange={(next) => setAccountForm((current) => current ? ({
+                    ...current,
+                    proxy_mode: next.proxy_mode,
+                    proxy_config_id: next.proxy_config_id ?? null,
+                  }) : current)}
                 />
                 <span className="text-xs text-muted-foreground">
-                  用于该账号的同步、签到和模型拉取；自动投影的 channel
-                  默认也会跟随这里的代理。
+                  用于该账号的同步、签到和模型拉取；自动投影的 channel 会跟随这里解析后的代理。
                 </span>
-              </label>
+              </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">

@@ -16,7 +16,7 @@ import (
 const modelFetchUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
 
 func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
-	client, err := ChannelHttpClient(&request)
+	client, err := ChannelHTTPClientWithContext(ctx, &request)
 	if err != nil {
 		return nil, err
 	}

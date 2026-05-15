@@ -864,7 +864,7 @@ func mergeBetaHeader(existing, incoming string) string {
 
 // sendRequest 发送 HTTP 请求
 func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
-	httpClient, err := helper.ChannelHttpClient(ra.channel)
+	httpClient, err := helper.ChannelHTTPClientWithContext(req.Context(), ra.channel)
 	if err != nil {
 		log.Warnf("failed to get http client: %v", err)
 		return nil, err

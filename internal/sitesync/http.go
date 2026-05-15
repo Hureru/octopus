@@ -12,46 +12,44 @@ import (
 
 	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 )
 
 func siteHTTPClient(siteRecord *model.Site, accounts ...*model.SiteAccount) (*http.Client, error) {
 	if siteRecord == nil {
 		return nil, fmt.Errorf("site is nil")
 	}
-	useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, accounts...)
-	if !useProxy {
+	proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, accounts...)
+	switch proxyMode {
+	case "", model.ProxyUsageModeDirect:
 		return client.GetHTTPClientSystemProxy(false)
-	}
-	if proxyURL == nil || strings.TrimSpace(*proxyURL) == "" {
+	case model.ProxyUsageModeSystem:
 		return client.GetHTTPClientSystemProxy(true)
+	case model.ProxyUsageModePool:
+		if proxyConfigID == nil || *proxyConfigID <= 0 {
+			return nil, fmt.Errorf("proxy config id is required when proxy mode is pool")
+		}
+		proxyURL, err := op.ProxyURLForConfig(*proxyConfigID, context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return client.GetHTTPClientCustomProxy(proxyURL)
+	default:
+		return nil, fmt.Errorf("unsupported proxy mode: %s", proxyMode)
 	}
-	return client.GetHTTPClientCustomProxy(strings.TrimSpace(*proxyURL))
 }
 
-func resolveSiteAccountProxy(siteRecord *model.Site, accounts ...*model.SiteAccount) (bool, *string) {
-	if len(accounts) > 0 && accounts[0] != nil && accounts[0].AccountProxy != nil {
-		trimmed := strings.TrimSpace(*accounts[0].AccountProxy)
-		if trimmed != "" {
-			return true, &trimmed
-		}
+func resolveSiteAccountProxy(siteRecord *model.Site, accounts ...*model.SiteAccount) (model.ProxyUsageMode, *int) {
+	if len(accounts) > 0 && accounts[0] != nil && accounts[0].ProxyMode != "" && accounts[0].ProxyMode != model.ProxyUsageModeInherit {
+		return accounts[0].ProxyMode, accounts[0].ProxyConfigID
 	}
 	if siteRecord == nil {
-		return false, nil
+		return model.ProxyUsageModeDirect, nil
 	}
-	if siteRecord.Proxy {
-		if siteRecord.SiteProxy == nil {
-			return true, nil
-		}
-		trimmed := strings.TrimSpace(*siteRecord.SiteProxy)
-		if trimmed == "" {
-			return true, nil
-		}
-		return true, &trimmed
+	if siteRecord.ProxyMode == "" {
+		return model.ProxyUsageModeDirect, nil
 	}
-	if siteRecord.UseSystemProxy {
-		return true, nil
-	}
-	return false, nil
+	return siteRecord.ProxyMode, siteRecord.ProxyConfigID
 }
 
 func requestJSON(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string, accounts ...*model.SiteAccount) (map[string]any, error) {

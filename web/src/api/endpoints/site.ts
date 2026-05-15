@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, API_BASE_URL } from "../client";
 import { logger } from "@/lib/logger";
 import { useAuthStore } from "./user";
+import type { ProxyMode } from "./proxy-pool";
 
 export enum SitePlatform {
   NewAPI = "new-api",
@@ -75,7 +76,8 @@ export type SiteAccount = {
   refresh_token: string;
   token_expires_at: number;
   platform_user_id?: number | null;
-  account_proxy?: string | null;
+  proxy_mode: ProxyMode;
+  proxy_config_id?: number | null;
   enabled: boolean;
   auto_sync: boolean;
   auto_checkin: boolean;
@@ -104,9 +106,8 @@ export type Site = {
   platform: SitePlatform;
   base_url: string;
   enabled: boolean;
-  proxy: boolean;
-  site_proxy?: string | null;
-  use_system_proxy: boolean;
+  proxy_mode: Exclude<ProxyMode, "inherit">;
+  proxy_config_id?: number | null;
   external_checkin_url?: string | null;
   is_pinned: boolean;
   sort_order: number;
@@ -207,7 +208,8 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
   return data.map((site) => ({
     ...site,
     custom_header: site.custom_header ?? [],
-    use_system_proxy: site.use_system_proxy ?? false,
+    proxy_mode: site.proxy_mode ?? "direct",
+    proxy_config_id: site.proxy_config_id ?? null,
     external_checkin_url: site.external_checkin_url ?? null,
     is_pinned: site.is_pinned ?? false,
     sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
@@ -229,7 +231,8 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
           ? account.token_expires_at
           : 0,
       platform_user_id: account.platform_user_id ?? null,
-      account_proxy: account.account_proxy ?? null,
+      proxy_mode: account.proxy_mode ?? "inherit",
+      proxy_config_id: account.proxy_config_id ?? null,
       random_checkin: account.random_checkin ?? false,
       checkin_interval_hours:
         typeof account.checkin_interval_hours === "number" &&
@@ -260,6 +263,7 @@ function invalidateSiteQueries(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["site-channel", "list"] });
   queryClient.invalidateQueries({ queryKey: ["channels", "list"] });
   queryClient.invalidateQueries({ queryKey: ["models", "channel"] });
+  queryClient.invalidateQueries({ queryKey: ["proxy-pool", "list"] });
 }
 
 function getAuthHeader() {

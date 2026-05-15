@@ -73,9 +73,11 @@ type Site struct {
 	Platform           SitePlatform   `json:"platform" gorm:"type:varchar(32);not null"`
 	BaseURL            string         `json:"base_url" gorm:"not null"`
 	Enabled            bool           `json:"enabled" gorm:"default:true"`
-	Proxy              bool           `json:"proxy" gorm:"default:false"`
-	SiteProxy          *string        `json:"site_proxy"`
-	UseSystemProxy     bool           `json:"use_system_proxy" gorm:"default:false"`
+	ProxyMode          ProxyUsageMode `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'direct'"`
+	ProxyConfigID      *int           `json:"proxy_config_id"`
+	Proxy              bool           `json:"-" gorm:"default:false"`
+	SiteProxy          *string        `json:"-" gorm:"column:site_proxy"`
+	UseSystemProxy     bool           `json:"-" gorm:"default:false"`
 	ExternalCheckinURL *string        `json:"external_checkin_url"`
 	IsPinned           bool           `json:"is_pinned" gorm:"default:false"`
 	SortOrder          int            `json:"sort_order" gorm:"default:0"`
@@ -98,7 +100,9 @@ type SiteAccount struct {
 	RefreshToken               string               `json:"refresh_token"`
 	TokenExpiresAt             int64                `json:"token_expires_at" gorm:"default:0"`
 	PlatformUserID             *int                 `json:"platform_user_id"`
-	AccountProxy               *string              `json:"account_proxy"`
+	ProxyMode                  ProxyUsageMode       `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'inherit'"`
+	ProxyConfigID              *int                 `json:"proxy_config_id"`
+	AccountProxy               *string              `json:"-" gorm:"column:account_proxy"`
 	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
 	AutoSync                   bool                 `json:"auto_sync" gorm:"default:true"`
 	AutoCheckin                bool                 `json:"auto_checkin" gorm:"default:true"`
@@ -180,9 +184,11 @@ type SiteUpdateRequest struct {
 	Platform           *SitePlatform   `json:"platform,omitempty"`
 	BaseURL            *string         `json:"base_url,omitempty"`
 	Enabled            *bool           `json:"enabled,omitempty"`
-	Proxy              *bool           `json:"proxy,omitempty"`
-	SiteProxy          *string         `json:"site_proxy,omitempty"`
-	UseSystemProxy     *bool           `json:"use_system_proxy,omitempty"`
+	ProxyMode          *ProxyUsageMode `json:"proxy_mode,omitempty"`
+	ProxyConfigID      *int            `json:"proxy_config_id,omitempty"`
+	Proxy              *bool           `json:"-"`
+	SiteProxy          *string         `json:"-"`
+	UseSystemProxy     *bool           `json:"-"`
 	ExternalCheckinURL *string         `json:"external_checkin_url,omitempty"`
 	IsPinned           *bool           `json:"is_pinned,omitempty"`
 	SortOrder          *int            `json:"sort_order,omitempty"`
@@ -201,7 +207,9 @@ type SiteAccountUpdateRequest struct {
 	RefreshToken               *string             `json:"refresh_token,omitempty"`
 	TokenExpiresAt             *int64              `json:"token_expires_at,omitempty"`
 	PlatformUserID             *int                `json:"platform_user_id,omitempty"`
-	AccountProxy               *string             `json:"account_proxy,omitempty"`
+	ProxyMode                  *ProxyUsageMode     `json:"proxy_mode,omitempty"`
+	ProxyConfigID              *int                `json:"proxy_config_id,omitempty"`
+	AccountProxy               *string             `json:"-"`
 	Enabled                    *bool               `json:"enabled,omitempty"`
 	AutoSync                   *bool               `json:"auto_sync,omitempty"`
 	AutoCheckin                *bool               `json:"auto_checkin,omitempty"`
@@ -542,6 +550,12 @@ func (s *Site) Normalize() {
 			s.ExternalCheckinURL = &trimmed
 		}
 	}
+	if strings.TrimSpace(string(s.ProxyMode)) == "" {
+		s.ProxyMode = ProxyUsageModeDirect
+	}
+	if s.ProxyMode != ProxyUsageModePool {
+		s.ProxyConfigID = nil
+	}
 	if s.GlobalWeight <= 0 {
 		s.GlobalWeight = 1
 	}
@@ -560,6 +574,12 @@ func (s *Site) Validate() error {
 	}
 	if err := s.Platform.Validate(); err != nil {
 		return err
+	}
+	if err := s.ProxyMode.Validate(false); err != nil {
+		return err
+	}
+	if s.ProxyMode == ProxyUsageModePool && (s.ProxyConfigID == nil || *s.ProxyConfigID <= 0) {
+		return fmt.Errorf("proxy config id is required when proxy mode is pool")
 	}
 	parsed, err := url.Parse(s.BaseURL)
 	if err != nil {
@@ -610,6 +630,12 @@ func (a *SiteAccount) Normalize() {
 			a.AccountProxy = &trimmed
 		}
 	}
+	if strings.TrimSpace(string(a.ProxyMode)) == "" {
+		a.ProxyMode = ProxyUsageModeInherit
+	}
+	if a.ProxyMode != ProxyUsageModePool {
+		a.ProxyConfigID = nil
+	}
 	if a.CheckinIntervalHours <= 0 {
 		a.CheckinIntervalHours = 24
 	}
@@ -631,6 +657,12 @@ func (a *SiteAccount) Validate() error {
 	}
 	if err := a.CredentialType.Validate(); err != nil {
 		return err
+	}
+	if err := a.ProxyMode.Validate(true); err != nil {
+		return err
+	}
+	if a.ProxyMode == ProxyUsageModePool && (a.ProxyConfigID == nil || *a.ProxyConfigID <= 0) {
+		return fmt.Errorf("proxy config id is required when proxy mode is pool")
 	}
 	if a.CheckinIntervalHours <= 0 {
 		return fmt.Errorf("checkin interval hours must be greater than 0")

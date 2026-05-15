@@ -12,6 +12,7 @@ import { useTranslations } from 'next-intl'
 import Logo, { LOGO_DRAW_END_MS } from '@/components/modules/logo';
 import { Toolbar } from '@/components/modules/toolbar';
 import { ChannelTabSwitcher, ChannelHeaderActions } from '@/components/modules/channel/TabSwitcher';
+import { ProxyPoolDialog, ProxyPoolHeaderAction } from '@/components/modules/proxy-pool/ProxyPoolDialog';
 import { ENTRANCE_VARIANTS } from '@/lib/animations/fluid-transitions';
 import { useQueryClient } from '@tanstack/react-query';
 import { CONTENT_MAP } from '@/route';
@@ -241,9 +242,11 @@ export function AppContainer() {
                         </AnimatePresence>
                     </div>
                     <div className="ml-auto flex items-center gap-3">
+                        {activeItem === 'site' && <ProxyPoolHeaderAction />}
                         {activeItem === 'channel' && <ChannelHeaderActions />}
                         <Toolbar />
                     </div>
+                    <ProxyPoolDialog />
                 </header>
                 <AnimatePresence mode="wait" initial={false}>
                     <motion.div

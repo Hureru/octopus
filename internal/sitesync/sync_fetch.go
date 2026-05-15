@@ -242,14 +242,14 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		return fetchSub2APIModelsForSiteToken(ctx, siteRecord, account, token)
 	}
 
-	useProxy, proxyURL := resolveSiteAccountProxy(siteRecord, account)
+	proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
 	var (
 		firstErr error
 		models   []string
 	)
 
 	for _, baseURL := range buildModelFetchBaseURLs(siteRecord) {
-		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, Proxy: useProxy, CustomHeader: siteRecord.CustomHeader, ChannelProxy: proxyURL}
+		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, ProxyMode: proxyMode, ProxyConfigID: proxyConfigID, CustomHeader: siteRecord.CustomHeader}
 		fetched, err := helper.FetchModels(ctx, channel)
 		if err == nil && len(fetched) > 0 {
 			return normalizeModelNames(fetched), nil

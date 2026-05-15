@@ -21,6 +21,7 @@ import {
 import { Tabs, TabsContents, TabsContent } from '@/components/animate-ui/primitives/animate/tabs';
 import { type StatsMetricsFormatted } from '@/api/endpoints/stats';
 import { useTranslations } from 'next-intl';
+import { toast } from '@/components/common/Toast';
 import { Button } from '@/components/ui/button';
 import { ChannelForm, type ChannelFormData } from './Form';
 import { formatMoney } from '@/lib/utils';
@@ -41,7 +42,8 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         enabled: channel.enabled,
         base_urls: channel.base_urls?.length ? channel.base_urls : [{ url: '', delay: 0 }],
         custom_header: channel.custom_header ?? [],
-        channel_proxy: channel.channel_proxy ?? '',
+        proxy_mode: channel.proxy_mode ?? 'direct',
+        proxy_config_id: channel.proxy_config_id ?? null,
         param_override: channel.param_override ?? '',
         keys: channel.keys.length > 0
             ? channel.keys.map((k) => ({
@@ -56,7 +58,6 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
             : [{ enabled: true, channel_key: '', remark: '' }],
         model: channel.model,
         custom_model: channel.custom_model,
-        proxy: channel.proxy,
         auto_sync: channel.auto_sync,
         auto_group: channel.auto_group,
         match_regex: channel.match_regex ?? '',
@@ -86,7 +87,14 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         }
         if (formData.model !== channel.model) req.model = formData.model;
         if (formData.custom_model !== channel.custom_model) req.custom_model = formData.custom_model;
-        if (formData.proxy !== channel.proxy) req.proxy = formData.proxy;
+        if (formData.proxy_mode === 'pool' && !formData.proxy_config_id) {
+            toast.error('请选择代理池配置');
+            return;
+        }
+        if (formData.proxy_mode !== channel.proxy_mode) req.proxy_mode = formData.proxy_mode;
+        if ((formData.proxy_config_id ?? null) !== (channel.proxy_config_id ?? null) || formData.proxy_mode !== channel.proxy_mode) {
+            req.proxy_config_id = formData.proxy_mode === 'pool' ? formData.proxy_config_id : null;
+        }
         if (formData.auto_sync !== channel.auto_sync) req.auto_sync = formData.auto_sync;
         if (formData.auto_group !== channel.auto_group) req.auto_group = formData.auto_group;
 
@@ -96,12 +104,6 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                 .filter((h) => h.header_key && h.header_value !== '');
         }
 
-        const nextChannelProxy = formData.channel_proxy.trim();
-        const curChannelProxy = channel.channel_proxy ?? '';
-        if (nextChannelProxy !== curChannelProxy) {
-            // Empty string means "clear" for patch semantics; backend maps it to NULL.
-            req.channel_proxy = nextChannelProxy;
-        }
 
         const nextParamOverride = formData.param_override.trim();
         const curParamOverride = channel.param_override ?? '';
