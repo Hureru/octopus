@@ -1,6 +1,8 @@
 package model
 
 import (
+	"encoding/json"
+
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 )
 
@@ -34,6 +36,25 @@ type Channel struct {
 	MatchRegex    *string               `json:"match_regex"`
 	Managed       bool                  `json:"managed" gorm:"-"`
 	ManagedSource *ManagedChannelSource `json:"managed_source,omitempty" gorm:"-"`
+}
+
+func (c *Channel) UnmarshalJSON(data []byte) error {
+	type alias Channel
+	aux := struct {
+		*alias
+		Proxy        *bool   `json:"proxy"`
+		ChannelProxy *string `json:"channel_proxy"`
+	}{alias: (*alias)(c)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Proxy != nil {
+		c.Proxy = *aux.Proxy
+	}
+	if aux.ChannelProxy != nil {
+		c.ChannelProxy = aux.ChannelProxy
+	}
+	return nil
 }
 
 type ManagedChannelSource struct {

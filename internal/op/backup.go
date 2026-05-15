@@ -130,6 +130,8 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 		groupIDMap := make(map[int]int)
 		apiKeyIDMap := make(map[int]int)
 
+		migrateLegacyDumpProxyFields(dump)
+
 		// 1. ProxyConfigurations (dedup by url; disambiguate name conflicts)
 		for i := range dump.ProxyConfigurations {
 			proxyConfig := dump.ProxyConfigurations[i]
@@ -142,6 +144,11 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 
 			var existing model.ProxyConfiguration
 			if err := tx.Where("url = ?", proxyConfig.URL).First(&existing).Error; err == nil {
+				if proxyConfig.Enabled && !existing.Enabled {
+					if err := tx.Model(&existing).Update("enabled", true).Error; err != nil {
+						return fmt.Errorf("import proxy_configurations: %w", err)
+					}
+				}
 				proxyConfigIDMap[oldID] = existing.ID
 				continue
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -543,7 +550,91 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 	if err != nil {
 		return nil, err
 	}
+	if err := proxyConfigurationRefreshCache(ctx); err != nil {
+		return nil, fmt.Errorf("refresh proxy configuration cache: %w", err)
+	}
 	return res, nil
+}
+
+func migrateLegacyDumpProxyFields(dump *model.DBDump) {
+	if dump == nil {
+		return
+	}
+	proxyIDByURL := make(map[string]int)
+	for _, proxyConfig := range dump.ProxyConfigurations {
+		if normalized, err := model.NormalizeProxyURL(proxyConfig.URL); err == nil && proxyConfig.ID > 0 {
+			proxyIDByURL[normalized] = proxyConfig.ID
+		}
+	}
+	ensureProxyConfig := func(raw string) *int {
+		normalized, err := model.NormalizeProxyURL(raw)
+		if err != nil {
+			return nil
+		}
+		if id, ok := proxyIDByURL[normalized]; ok {
+			return &id
+		}
+		id := -len(proxyIDByURL) - 1
+		proxyIDByURL[normalized] = id
+		dump.ProxyConfigurations = append(dump.ProxyConfigurations, model.ProxyConfiguration{
+			ID:      id,
+			Name:    fmt.Sprintf("Imported Proxy %d", len(proxyIDByURL)),
+			URL:     normalized,
+			Enabled: true,
+			Remark:  "由历史备份代理配置迁移生成",
+		})
+		return &id
+	}
+	for i := range dump.Channels {
+		ch := &dump.Channels[i]
+		if ch.ProxyMode != "" {
+			continue
+		}
+		if !ch.Proxy {
+			ch.ProxyMode = model.ProxyUsageModeDirect
+			ch.ProxyConfigID = nil
+		} else if ch.ChannelProxy != nil && strings.TrimSpace(*ch.ChannelProxy) != "" {
+			ch.ProxyMode = model.ProxyUsageModePool
+			ch.ProxyConfigID = ensureProxyConfig(*ch.ChannelProxy)
+		} else {
+			ch.ProxyMode = model.ProxyUsageModeSystem
+			ch.ProxyConfigID = nil
+		}
+	}
+	for i := range dump.Sites {
+		site := &dump.Sites[i]
+		if site.ProxyMode != "" {
+			continue
+		}
+		if site.Proxy {
+			if site.SiteProxy != nil && strings.TrimSpace(*site.SiteProxy) != "" {
+				site.ProxyMode = model.ProxyUsageModePool
+				site.ProxyConfigID = ensureProxyConfig(*site.SiteProxy)
+			} else {
+				site.ProxyMode = model.ProxyUsageModeSystem
+				site.ProxyConfigID = nil
+			}
+		} else if site.UseSystemProxy {
+			site.ProxyMode = model.ProxyUsageModeSystem
+			site.ProxyConfigID = nil
+		} else {
+			site.ProxyMode = model.ProxyUsageModeDirect
+			site.ProxyConfigID = nil
+		}
+	}
+	for i := range dump.SiteAccounts {
+		account := &dump.SiteAccounts[i]
+		if account.ProxyMode != "" {
+			continue
+		}
+		if account.AccountProxy != nil && strings.TrimSpace(*account.AccountProxy) != "" {
+			account.ProxyMode = model.ProxyUsageModePool
+			account.ProxyConfigID = ensureProxyConfig(*account.AccountProxy)
+		} else {
+			account.ProxyMode = model.ProxyUsageModeInherit
+			account.ProxyConfigID = nil
+		}
+	}
 }
 
 func uniqueProxyConfigName(baseName string, tx *gorm.DB) string {

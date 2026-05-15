@@ -15,7 +15,7 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 )
 
-func siteHTTPClient(siteRecord *model.Site, accounts ...*model.SiteAccount) (*http.Client, error) {
+func siteHTTPClient(ctx context.Context, siteRecord *model.Site, accounts ...*model.SiteAccount) (*http.Client, error) {
 	if siteRecord == nil {
 		return nil, fmt.Errorf("site is nil")
 	}
@@ -29,7 +29,7 @@ func siteHTTPClient(siteRecord *model.Site, accounts ...*model.SiteAccount) (*ht
 		if proxyConfigID == nil || *proxyConfigID <= 0 {
 			return nil, fmt.Errorf("proxy config id is required when proxy mode is pool")
 		}
-		proxyURL, err := op.ProxyURLForConfig(*proxyConfigID, context.Background())
+		proxyURL, err := op.ProxyURLForConfig(*proxyConfigID, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +53,7 @@ func resolveSiteAccountProxy(siteRecord *model.Site, accounts ...*model.SiteAcco
 }
 
 func requestJSON(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string, accounts ...*model.SiteAccount) (map[string]any, error) {
-	httpClient, err := siteHTTPClient(siteRecord, accounts...)
+	httpClient, err := siteHTTPClient(ctx, siteRecord, accounts...)
 	if err != nil {
 		return nil, err
 	}

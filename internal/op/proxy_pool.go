@@ -12,10 +12,13 @@ import (
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/utils/cache"
 	"golang.org/x/net/proxy"
 )
 
 const defaultProxyTestURL = "https://api.openai.com/v1/models"
+
+var proxyConfigurationCache = cache.New[int, model.ProxyConfiguration](16)
 
 func ProxyConfigurationList(ctx context.Context) ([]model.ProxyConfiguration, error) {
 	var items []model.ProxyConfiguration
@@ -47,7 +50,11 @@ func ProxyConfigurationCreate(item *model.ProxyConfiguration, ctx context.Contex
 	if err := item.Validate(); err != nil {
 		return err
 	}
-	return db.GetDB().WithContext(ctx).Create(item).Error
+	if err := db.GetDB().WithContext(ctx).Create(item).Error; err != nil {
+		return err
+	}
+	proxyConfigurationCache.Set(item.ID, *item)
+	return nil
 }
 
 func ProxyConfigurationUpdate(req *model.ProxyConfigurationUpdateRequest, ctx context.Context) (*model.ProxyConfiguration, error) {
@@ -99,27 +106,29 @@ func ProxyConfigurationUpdate(req *model.ProxyConfigurationUpdateRequest, ctx co
 			return nil, fmt.Errorf("failed to update proxy configuration: %w", err)
 		}
 	}
-	return ProxyConfigurationGet(req.ID, ctx)
+	item, err := ProxyConfigurationGet(req.ID, ctx)
+	if err != nil {
+		return nil, err
+	}
+	proxyConfigurationCache.Set(item.ID, *item)
+	return item, nil
 }
 
 func ProxyConfigurationDelete(id int, ctx context.Context) error {
-	result := db.GetDB().WithContext(ctx).
-		Where(`id = ?
-			AND NOT EXISTS (SELECT 1 FROM channels WHERE proxy_mode = ? AND proxy_config_id = ?)
-			AND NOT EXISTS (SELECT 1 FROM sites WHERE proxy_mode = ? AND proxy_config_id = ?)
-			AND NOT EXISTS (SELECT 1 FROM site_accounts WHERE proxy_mode = ? AND proxy_config_id = ?)`,
-			id,
-			model.ProxyUsageModePool, id,
-			model.ProxyUsageModePool, id,
-			model.ProxyUsageModePool, id,
-		).
-		Delete(&model.ProxyConfiguration{})
-	if result.Error != nil {
-		return result.Error
+	if _, err := ProxyConfigurationGet(id, ctx); err != nil {
+		return fmt.Errorf("proxy configuration not found")
 	}
-	if result.RowsAffected == 0 {
+	count, err := ProxyConfigurationReferenceCount(id, ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
 		return fmt.Errorf("proxy configuration is still referenced")
 	}
+	if err := db.GetDB().WithContext(ctx).Delete(&model.ProxyConfiguration{}, id).Error; err != nil {
+		return err
+	}
+	proxyConfigurationCache.Del(id)
 	return nil
 }
 
@@ -164,14 +173,34 @@ func countProxyReferences(ctx context.Context, table any, counts map[int]int) er
 }
 
 func ProxyURLForConfig(id int, ctx context.Context) (string, error) {
+	if cached, ok := proxyConfigurationCache.Get(id); ok {
+		if !cached.Enabled {
+			return "", fmt.Errorf("proxy configuration is disabled")
+		}
+		return cached.URL, nil
+	}
 	item, err := ProxyConfigurationGet(id, ctx)
 	if err != nil {
+		proxyConfigurationCache.Del(id)
 		return "", fmt.Errorf("proxy configuration not found")
 	}
+	proxyConfigurationCache.Set(item.ID, *item)
 	if !item.Enabled {
 		return "", fmt.Errorf("proxy configuration is disabled")
 	}
 	return item.URL, nil
+}
+
+func proxyConfigurationRefreshCache(ctx context.Context) error {
+	var items []model.ProxyConfiguration
+	if err := db.GetDB().WithContext(ctx).Find(&items).Error; err != nil {
+		return err
+	}
+	proxyConfigurationCache.Clear()
+	for _, item := range items {
+		proxyConfigurationCache.Set(item.ID, item)
+	}
+	return nil
 }
 
 func proxyTestTargetHostSafe(parsedTarget *url.URL) error {

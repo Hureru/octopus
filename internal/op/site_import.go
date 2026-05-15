@@ -948,7 +948,12 @@ func importedAccountProxyMode(tx *gorm.DB, rawProxy *string) (model.ProxyUsageMo
 		return model.ProxyUsageModeInherit, nil, fmt.Errorf("invalid imported account proxy: %w", err)
 	}
 	var existing model.ProxyConfiguration
-	if err := tx.Where("url = ? AND enabled = ?", normalized, true).First(&existing).Error; err == nil {
+	if err := tx.Where("url = ?", normalized).First(&existing).Error; err == nil {
+		if !existing.Enabled {
+			if err := tx.Model(&existing).Update("enabled", true).Error; err != nil {
+				return model.ProxyUsageModeInherit, nil, fmt.Errorf("enable imported proxy configuration failed: %w", err)
+			}
+		}
 		return model.ProxyUsageModePool, &existing.ID, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ProxyUsageModeInherit, nil, err

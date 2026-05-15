@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -88,6 +89,29 @@ type Site struct {
 	Accounts           []SiteAccount  `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
 }
 
+func (s *Site) UnmarshalJSON(data []byte) error {
+	type alias Site
+	aux := struct {
+		*alias
+		Proxy          *bool   `json:"proxy"`
+		SiteProxy      *string `json:"site_proxy"`
+		UseSystemProxy *bool   `json:"use_system_proxy"`
+	}{alias: (*alias)(s)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Proxy != nil {
+		s.Proxy = *aux.Proxy
+	}
+	if aux.SiteProxy != nil {
+		s.SiteProxy = aux.SiteProxy
+	}
+	if aux.UseSystemProxy != nil {
+		s.UseSystemProxy = *aux.UseSystemProxy
+	}
+	return nil
+}
+
 type SiteAccount struct {
 	ID                         int                  `json:"id" gorm:"primaryKey"`
 	SiteID                     int                  `json:"site_id" gorm:"index;not null"`
@@ -124,6 +148,21 @@ type SiteAccount struct {
 	Models                     []SiteModel          `json:"models,omitempty" gorm:"foreignKey:SiteAccountID"`
 	ChannelBindings            []SiteChannelBinding `json:"channel_bindings,omitempty" gorm:"foreignKey:SiteAccountID"`
 	Prices                     []SitePrice          `json:"prices,omitempty" gorm:"foreignKey:SiteAccountID"`
+}
+
+func (a *SiteAccount) UnmarshalJSON(data []byte) error {
+	type alias SiteAccount
+	aux := struct {
+		*alias
+		AccountProxy *string `json:"account_proxy"`
+	}{alias: (*alias)(a)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.AccountProxy != nil {
+		a.AccountProxy = aux.AccountProxy
+	}
+	return nil
 }
 
 type SiteTokenValueStatus string

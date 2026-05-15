@@ -759,7 +759,7 @@ func anyRouterParseInt(value any) int {
 }
 
 func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string, accounts ...*model.SiteAccount) (map[string]any, string, error) {
-	httpClient, err := siteHTTPClient(siteRecord, accounts...)
+	httpClient, err := siteHTTPClient(ctx, siteRecord, accounts...)
 	if err != nil {
 		return nil, "", err
 	}
