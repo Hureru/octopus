@@ -809,6 +809,7 @@ function estimateVisibleSiteCardHeight(item: VisibleSite, expanded: boolean) {
 
 export function Site() {
   const t = useTranslations();
+  const tProxy = useTranslations('proxyPool');
   const locale = useSettingStore((state) => state.locale);
   const { data: sites, isLoading, error } = useSiteList();
   const createSite = useCreateSite();
@@ -1208,7 +1209,7 @@ export function Site() {
     }
 
     if (siteForm.proxy_mode === "pool" && !siteForm.proxy_config_id) {
-      toast.error("请选择代理池配置");
+      toast.error(tProxy('selectRequired'));
       return;
     }
 
@@ -1325,7 +1326,7 @@ export function Site() {
         : "";
 
     if (accountForm.proxy_mode === "pool" && !accountForm.proxy_config_id) {
-      toast.error("请选择代理池配置");
+      toast.error(tProxy('selectRequired'));
       return;
     }
 
@@ -1832,10 +1833,10 @@ export function Site() {
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>
                     {site.proxy_mode === "pool"
-                      ? "代理池"
+                      ? tProxy('mode.pool')
                       : site.proxy_mode === "system"
-                        ? "系统代理"
-                        : "直连"}
+                        ? tProxy('mode.system')
+                        : tProxy('mode.direct')}
                   </span>
                   {site.custom_header.length > 0 ? (
                     <span>{site.custom_header.length} 个 Header</span>
@@ -2066,12 +2067,12 @@ export function Site() {
                                       </span>
                                       <span>
                                         {account.proxy_mode === "inherit"
-                                          ? "继承站点代理"
+                                          ? tProxy('site.inherit')
                                           : account.proxy_mode === "pool"
-                                            ? "代理池"
+                                            ? tProxy('mode.pool')
                                             : account.proxy_mode === "system"
-                                              ? "系统代理"
-                                              : "直连"}
+                                              ? tProxy('mode.system')
+                                              : tProxy('mode.direct')}
                                       </span>
                                     </div>
                                   </div>

@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import type { ProxyMode } from '@/api/endpoints/proxy-pool';
 import { useProxyConfigurationList } from '@/api/endpoints/proxy-pool';
 import { Button } from '@/components/ui/button';
@@ -18,14 +19,8 @@ type ProxySelectorProps = {
     disabled?: boolean;
 };
 
-const MODE_LABELS: Record<ProxyMode, string> = {
-    inherit: '继承站点设置',
-    direct: '直连',
-    system: '系统代理',
-    pool: '代理池',
-};
-
 export function ProxySelector({ value, onChange, allowInherit = false, disabled = false }: ProxySelectorProps) {
+    const t = useTranslations('proxyPool');
     const { data: proxies = [], isLoading } = useProxyConfigurationList();
     const openProxyPool = useProxyPoolDialogStore((state) => state.open);
     const selectedProxy = proxies.find((item) => item.id === value.proxy_config_id) ?? null;
@@ -41,7 +36,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
         <div className="space-y-2">
             <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
-                    <label className="text-sm font-medium text-card-foreground">代理模式</label>
+                    <label className="text-sm font-medium text-card-foreground">{t('mode.label')}</label>
                     <Select
                         value={mode}
                         disabled={disabled}
@@ -59,7 +54,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
                         <SelectContent className="rounded-xl">
                             {modes.map((item) => (
                                 <SelectItem key={item} className="rounded-xl" value={item}>
-                                    {MODE_LABELS[item]}
+                                    {t(`mode.${item}`)}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -68,7 +63,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
 
                 {mode === 'pool' ? (
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-card-foreground">代理配置</label>
+                        <label className="text-sm font-medium text-card-foreground">{t('name')}</label>
                         {enabledProxies.length > 0 ? (
                             <Select
                                 value={value.proxy_config_id ? String(value.proxy_config_id) : ''}
@@ -76,12 +71,12 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
                                 onValueChange={(proxyId) => onChange({ proxy_mode: 'pool', proxy_config_id: Number(proxyId) })}
                             >
                                 <SelectTrigger className="w-full rounded-xl">
-                                    <SelectValue placeholder="选择代理配置" />
+                                    <SelectValue placeholder={t('selectConfig')} />
                                 </SelectTrigger>
                                 <SelectContent className="rounded-xl">
                                     {enabledProxies.map((proxy) => (
                                         <SelectItem key={proxy.id} className="rounded-xl" value={String(proxy.id)} disabled={!proxy.enabled}>
-                                            {proxy.name}{!proxy.enabled ? '（已停用）' : ''}
+                                            {proxy.name}{!proxy.enabled ? t('disabledSuffix') : ''}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -89,21 +84,21 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
                         ) : null}
                         {selectedProxy && !selectedProxy.enabled ? (
                             <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                                当前选择的代理配置已停用，运行时会失败；保存前请改选可用代理。
+                                {t('disabledSelected')}
                             </div>
                         ) : null}
                         {noEnabledProxy ? (
                             <div className="flex items-center justify-between gap-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2 text-sm">
                                 <span className="text-muted-foreground">
-                                    {proxies.length === 0 ? '代理池为空' : '没有可用的代理配置'}
+                                    {proxies.length === 0 ? t('empty') : t('noEnabled')}
                                 </span>
                                 <Button type="button" size="sm" variant="outline" className="rounded-xl" onClick={openProxyPool}>
-                                    打开代理池管理
+                                    {t('manage')}
                                 </Button>
                             </div>
                         ) : (
                             <Button type="button" size="sm" variant="ghost" className="rounded-xl text-xs text-muted-foreground" onClick={openProxyPool}>
-                                打开代理池管理
+                                {t('manage')}
                             </Button>
                         )}
                     </div>

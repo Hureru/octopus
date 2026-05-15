@@ -12,6 +12,7 @@ type DBDump struct {
 
 	Channels            []Channel            `json:"channels,omitempty"`
 	ChannelKeys         []ChannelKey         `json:"channel_keys,omitempty"`
+	ProxyConfigurations []ProxyConfiguration `json:"proxy_configurations,omitempty"`
 	Sites               []Site               `json:"sites,omitempty"`
 	SiteAccounts        []SiteAccount        `json:"site_accounts,omitempty"`
 	SiteTokens          []SiteToken          `json:"site_tokens,omitempty"`

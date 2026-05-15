@@ -737,5 +737,59 @@
                 "missing_data": "Sub2API 响应缺少必要数据，请检查站点兼容性或稍后重试。"
             }
         }
+    },
+    "proxyPool": {
+        "name": "代理池",
+        "manage": "打开代理池管理",
+        "empty": "代理池为空",
+        "noEnabled": "没有可用的代理配置",
+        "selectConfig": "选择代理配置",
+        "selectRequired": "请选择代理池配置",
+        "disabledSelected": "当前选择的代理配置已停用，运行时会失败；保存前请改选可用代理。",
+        "disabledSuffix": "（已停用）",
+        "mode": {
+            "label": "代理模式",
+            "inherit": "继承站点设置",
+            "direct": "直连",
+            "system": "系统代理",
+            "pool": "代理池"
+        },
+        "dialog": {
+            "title": "代理池",
+            "description": "管理可复用代理配置，站点、站点账号和普通渠道可从这里选择代理。",
+            "searchPlaceholder": "搜索名称、URL 或备注",
+            "loading": "加载中...",
+            "loadFailed": "加载失败：{message}",
+            "empty": "暂无代理配置",
+            "enabled": "启用",
+            "disabled": "停用",
+            "references": "引用 {count}",
+            "test": "测试",
+            "edit": "编辑",
+            "delete": "删除",
+            "deleteBlocked": "仍被引用，不能删除",
+            "formTitleCreate": "新增代理配置",
+            "formTitleEdit": "编辑代理配置",
+            "formDescription": "URL 支持 http、https、socks、socks5。",
+            "new": "新增",
+            "name": "名称",
+            "url": "代理 URL",
+            "remark": "备注",
+            "testUrl": "测试目标 URL",
+            "testDraft": "测试当前表单代理",
+            "submitCreate": "创建代理配置",
+            "submitEdit": "保存修改",
+            "created": "代理配置已创建",
+            "updated": "代理配置已更新",
+            "deleted": "代理配置已删除",
+            "deleteReferenced": "该代理配置仍被引用，请先解除引用",
+            "formRequired": "请填写代理名称和 URL",
+            "testSuccess": "代理可连通：HTTP {statusCode} · {durationMs}ms",
+            "testFailed": "代理测试失败",
+            "operationFailed": "操作失败"
+        },
+        "site": {
+            "inherit": "继承站点代理"
+        }
     }
 }

@@ -578,7 +578,7 @@ func imagesAttempt(
 	copyHeadersToUpstream(req, c, channel, channelKey, contentType, stream)
 
 	// 发送请求
-	httpClient, err := helper.ChannelHttpClient(channel)
+	httpClient, err := helper.ChannelHTTPClientWithContext(ctx, channel)
 	if err != nil {
 		return 0, false, nil, "", err
 	}

@@ -30,6 +30,7 @@ export function CreateDialogContent() {
         match_regex: '',
     });
     const t = useTranslations('channel.create');
+    const tProxy = useTranslations('proxyPool');
 
     const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -46,7 +47,7 @@ export function CreateDialogContent() {
 
         const paramOverride = formData.param_override.trim();
         if (formData.proxy_mode === 'pool' && !formData.proxy_config_id) {
-            toast.error('请选择代理池配置');
+            toast.error(tProxy('selectRequired'));
             return;
         }
         createChannel.mutate(

@@ -205,7 +205,7 @@ func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Chann
 	}
 
 	// Get HTTP client for proxy settings
-	httpClient, err := helper.ChannelHttpClient(channel)
+	httpClient, err := helper.ChannelHTTPClientWithContext(ctx, channel)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get http client: %w", err)
 	}

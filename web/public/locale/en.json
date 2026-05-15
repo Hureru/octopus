@@ -737,5 +737,59 @@
                 "missing_data": "Sub2API response is missing required data. Check site compatibility or try again later."
             }
         }
+    },
+    "proxyPool": {
+        "name": "Proxy Pool",
+        "manage": "Open proxy pool manager",
+        "empty": "Proxy pool is empty",
+        "noEnabled": "No enabled proxy configurations",
+        "selectConfig": "Select proxy configuration",
+        "selectRequired": "Please select a proxy pool configuration",
+        "disabledSelected": "The selected proxy configuration is disabled and will fail at runtime. Choose an enabled proxy before saving.",
+        "disabledSuffix": " (disabled)",
+        "mode": {
+            "label": "Proxy mode",
+            "inherit": "Inherit site settings",
+            "direct": "Direct",
+            "system": "System proxy",
+            "pool": "Proxy pool"
+        },
+        "dialog": {
+            "title": "Proxy Pool",
+            "description": "Manage reusable proxy configurations. Sites, site accounts, and manual channels can select proxies here.",
+            "searchPlaceholder": "Search name, URL, or remark",
+            "loading": "Loading...",
+            "loadFailed": "Failed to load: {message}",
+            "empty": "No proxy configurations",
+            "enabled": "Enabled",
+            "disabled": "Disabled",
+            "references": "Refs {count}",
+            "test": "Test",
+            "edit": "Edit",
+            "delete": "Delete",
+            "deleteBlocked": "Still referenced, cannot delete",
+            "formTitleCreate": "New proxy configuration",
+            "formTitleEdit": "Edit proxy configuration",
+            "formDescription": "URL supports http, https, socks, and socks5.",
+            "new": "New",
+            "name": "Name",
+            "url": "Proxy URL",
+            "remark": "Remark",
+            "testUrl": "Test target URL",
+            "testDraft": "Test current form proxy",
+            "submitCreate": "Create proxy configuration",
+            "submitEdit": "Save changes",
+            "created": "Proxy configuration created",
+            "updated": "Proxy configuration updated",
+            "deleted": "Proxy configuration deleted",
+            "deleteReferenced": "This proxy configuration is still referenced. Remove references first.",
+            "formRequired": "Please enter proxy name and URL",
+            "testSuccess": "Proxy reachable: HTTP {statusCode} · {durationMs}ms",
+            "testFailed": "Proxy test failed",
+            "operationFailed": "Operation failed"
+        },
+        "site": {
+            "inherit": "Inherit site proxy"
+        }
     }
 }

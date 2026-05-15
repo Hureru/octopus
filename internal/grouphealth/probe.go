@@ -59,7 +59,7 @@ func (p *Prober) RunCandidate(ctx context.Context, channel model.Channel, usedKe
 		return result
 	}
 
-	httpClient, err := helper.ChannelHttpClient(&channel)
+	httpClient, err := helper.ChannelHTTPClientWithContext(probeCtx, &channel)
 	if err != nil {
 		result.ErrorMessage = err.Error()
 		result.DurationMS = time.Since(startedAt).Milliseconds()
@@ -121,7 +121,7 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 	switch channelType {
 	case outbound.OutboundTypeOpenAIEmbedding:
 		return &transformerModel.InternalLLMRequest{
-			Model:      modelName,
+			Model:        modelName,
 			RawAPIFormat: transformerModel.APIFormatOpenAIEmbedding,
 			EmbeddingInput: &transformerModel.EmbeddingInput{
 				Single: &ping,
@@ -129,10 +129,10 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 		}
 	case outbound.OutboundTypeOpenAIResponse:
 		return &transformerModel.InternalLLMRequest{
-			Model:            modelName,
-			RawAPIFormat:     transformerModel.APIFormatOpenAIResponse,
-			Messages:         []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
-			Stream:           &stream,
+			Model:               modelName,
+			RawAPIFormat:        transformerModel.APIFormatOpenAIResponse,
+			Messages:            []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
+			Stream:              &stream,
 			MaxCompletionTokens: &one,
 		}
 	case outbound.OutboundTypeAnthropic:

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from 'react';
 import { Network, Pencil, Plus, Trash2, FlaskConical } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import {
     useCreateProxyConfiguration,
     useDeleteProxyConfiguration,
@@ -46,13 +47,13 @@ function maskProxyURL(value: string) {
     }
 }
 
-function errorMessage(error: unknown) {
+function errorMessage(error: unknown, fallback: string) {
     if (error instanceof Error) return error.message;
     if (typeof error === 'object' && error !== null && 'message' in error) {
         const message = (error as { message?: unknown }).message;
         if (typeof message === 'string') return message;
     }
-    return '操作失败';
+    return fallback;
 }
 
 function createFormFromProxy(proxy: ProxyConfiguration): FormState {
@@ -66,6 +67,7 @@ function createFormFromProxy(proxy: ProxyConfiguration): FormState {
 }
 
 export function ProxyPoolHeaderAction() {
+    const t = useTranslations('proxyPool');
     const open = useProxyPoolDialogStore((state) => state.open);
     return (
         <Button
@@ -73,8 +75,8 @@ export function ProxyPoolHeaderAction() {
             variant="ghost"
             size="icon"
             className="rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground"
-            aria-label="代理池"
-            title="代理池"
+            aria-label={t('name')}
+            title={t('name')}
             onClick={open}
         >
             <Network className="size-4" />
@@ -83,6 +85,7 @@ export function ProxyPoolHeaderAction() {
 }
 
 export function ProxyPoolDialog() {
+    const t = useTranslations('proxyPool.dialog');
     const isOpen = useProxyPoolDialogStore((state) => state.isOpen);
     const setOpen = useProxyPoolDialogStore((state) => state.setOpen);
     const { data: proxies = [], isLoading, error } = useProxyConfigurationList();
@@ -120,39 +123,39 @@ export function ProxyPoolDialog() {
             remark: form.remark.trim(),
         };
         if (!payload.name || !payload.url) {
-            toast.error('请填写代理名称和 URL');
+            toast.error(t('formRequired'));
             return;
         }
         if (editing && form.id) {
             updateProxy.mutate({ id: form.id, ...payload }, {
                 onSuccess: () => {
-                    toast.success('代理配置已更新');
+                    toast.success(t('updated'));
                     resetForm();
                 },
-                onError: (err) => toast.error(errorMessage(err)),
+                onError: (err) => toast.error(errorMessage(err, t('operationFailed'))),
             });
             return;
         }
         createProxy.mutate(payload, {
             onSuccess: () => {
-                toast.success('代理配置已创建');
+                toast.success(t('created'));
                 resetForm();
             },
-            onError: (err) => toast.error(errorMessage(err)),
+            onError: (err) => toast.error(errorMessage(err, t('operationFailed'))),
         });
     }
 
     function handleDelete(proxy: ProxyConfiguration) {
         if (proxy.reference_count > 0) {
-            toast.error('该代理配置仍被引用，请先解除引用');
+            toast.error(t('deleteReferenced'));
             return;
         }
         deleteProxy.mutate(proxy.id, {
             onSuccess: () => {
-                toast.success('代理配置已删除');
+                toast.success(t('deleted'));
                 if (form.id === proxy.id) resetForm();
             },
-            onError: (err) => toast.error(errorMessage(err)),
+            onError: (err) => toast.error(errorMessage(err, t('operationFailed'))),
         });
     }
 
@@ -166,12 +169,12 @@ export function ProxyPoolDialog() {
             {
                 onSuccess: (result) => {
                     if (result.success) {
-                        toast.success(`代理可连通：HTTP ${result.status_code} · ${result.duration_ms}ms`);
+                        toast.success(t('testSuccess', { statusCode: result.status_code, durationMs: result.duration_ms }));
                     } else {
-                        toast.error('代理测试失败', { description: result.message });
+                        toast.error(t('testFailed'), { description: result.message });
                     }
                 },
-                onError: (err) => toast.error(errorMessage(err)),
+                onError: (err) => toast.error(errorMessage(err, t('operationFailed'))),
                 onSettled: () => setTestingKey(null),
             }
         );
@@ -185,27 +188,25 @@ export function ProxyPoolDialog() {
                         <DialogHeader className="shrink-0 p-6 pb-3">
                             <DialogTitle className="flex items-center gap-2 text-2xl">
                                 <Network className="size-5" />
-                                代理池
+                                {t('title')}
                             </DialogTitle>
-                            <DialogDescription>
-                                管理可复用代理配置，站点、站点账号和普通渠道可从这里选择代理。
-                            </DialogDescription>
+                            <DialogDescription>{t('description')}</DialogDescription>
                         </DialogHeader>
                         <div className="shrink-0 px-6 pb-3">
                             <Input
                                 value={query}
                                 onChange={(event) => setQuery(event.target.value)}
-                                placeholder="搜索名称、URL 或备注"
+                                placeholder={t('searchPlaceholder')}
                                 className="rounded-xl"
                             />
                         </div>
                         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-6 pb-6">
                             {isLoading ? (
-                                <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">加载中...</div>
+                                <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">{t('loading')}</div>
                             ) : error ? (
-                                <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">加载失败：{errorMessage(error)}</div>
+                                <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">{t('loadFailed', { message: errorMessage(error, t('operationFailed')) })}</div>
                             ) : filteredProxies.length === 0 ? (
-                                <div className="rounded-2xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">暂无代理配置</div>
+                                <div className="rounded-2xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">{t('empty')}</div>
                             ) : filteredProxies.map((proxy) => (
                                 <article key={proxy.id} className="rounded-2xl border bg-card p-4">
                                     <div className="flex items-start justify-between gap-3">
@@ -213,9 +214,9 @@ export function ProxyPoolDialog() {
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <h3 className="truncate font-semibold">{proxy.name}</h3>
                                                 <Badge variant={proxy.enabled ? 'default' : 'secondary'}>
-                                                    {proxy.enabled ? '启用' : '停用'}
+                                                    {proxy.enabled ? t('enabled') : t('disabled')}
                                                 </Badge>
-                                                <Badge variant="outline">引用 {proxy.reference_count}</Badge>
+                                                <Badge variant="outline">{t('references', { count: proxy.reference_count })}</Badge>
                                             </div>
                                             <div className="mt-1 truncate font-mono text-xs text-muted-foreground" title={maskProxyURL(proxy.url)}>
                                                 {maskProxyURL(proxy.url)}
@@ -223,13 +224,13 @@ export function ProxyPoolDialog() {
                                             {proxy.remark ? <p className="mt-2 text-xs text-muted-foreground">{proxy.remark}</p> : null}
                                         </div>
                                         <div className="flex shrink-0 items-center gap-1">
-                                            <Button type="button" variant="ghost" size="icon-sm" className="rounded-xl" onClick={() => handleTest(proxy)} disabled={testingKey === `saved-${proxy.id}` || !proxy.enabled} title={proxy.enabled ? '测试' : '已停用，不能测试'}>
+                                            <Button type="button" variant="ghost" size="icon-sm" className="rounded-xl" onClick={() => handleTest(proxy)} disabled={testingKey === `saved-${proxy.id}` || !proxy.enabled} title={proxy.enabled ? t('test') : t('disabled')}>
                                                 <FlaskConical className={cn('size-4', testingKey === `saved-${proxy.id}` && 'animate-pulse')} />
                                             </Button>
-                                            <Button type="button" variant="ghost" size="icon-sm" className="rounded-xl" onClick={() => setForm(createFormFromProxy(proxy))} title="编辑">
+                                            <Button type="button" variant="ghost" size="icon-sm" className="rounded-xl" onClick={() => setForm(createFormFromProxy(proxy))} title={t('edit')}>
                                                 <Pencil className="size-4" />
                                             </Button>
-                                            <Button type="button" variant="ghost" size="icon-sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => handleDelete(proxy)} disabled={deleteProxy.isPending || proxy.reference_count > 0} title={proxy.reference_count > 0 ? '仍被引用，不能删除' : '删除'}>
+                                            <Button type="button" variant="ghost" size="icon-sm" className="rounded-xl text-destructive hover:text-destructive" onClick={() => handleDelete(proxy)} disabled={deleteProxy.isPending || proxy.reference_count > 0} title={proxy.reference_count > 0 ? t('deleteBlocked') : t('delete')}>
                                                 <Trash2 className="size-4" />
                                             </Button>
                                         </div>
@@ -242,44 +243,44 @@ export function ProxyPoolDialog() {
                     <section className="flex min-h-0 flex-col overflow-y-auto p-6">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
-                                <h3 className="text-lg font-semibold">{editing ? '编辑代理配置' : '新增代理配置'}</h3>
-                                <p className="text-sm text-muted-foreground">URL 支持 http、https、socks、socks5。</p>
+                                <h3 className="text-lg font-semibold">{editing ? t('formTitleEdit') : t('formTitleCreate')}</h3>
+                                <p className="text-sm text-muted-foreground">{t('formDescription')}</p>
                             </div>
                             <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={resetForm}>
                                 <Plus className="size-4" />
-                                新增
+                                {t('new')}
                             </Button>
                         </div>
 
                         <form onSubmit={submitForm} className="space-y-4">
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">名称</label>
+                                <label className="text-sm font-medium">{t('name')}</label>
                                 <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="rounded-xl" required />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">代理 URL</label>
+                                <label className="text-sm font-medium">{t('url')}</label>
                                 <Input value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} placeholder="socks5://127.0.0.1:1080" className="rounded-xl" required />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">备注</label>
+                                <label className="text-sm font-medium">{t('remark')}</label>
                                 <Input value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} className="rounded-xl" />
                             </div>
                             <label className="flex items-center justify-between rounded-xl border bg-muted/20 px-4 py-3">
-                                <span className="text-sm font-medium">启用</span>
+                                <span className="text-sm font-medium">{t('enabled')}</span>
                                 <Switch checked={form.enabled} onCheckedChange={(enabled) => setForm({ ...form, enabled })} />
                             </label>
 
                             <div className="space-y-2 rounded-2xl border bg-muted/20 p-4">
-                                <label className="text-sm font-medium">测试目标 URL</label>
+                                <label className="text-sm font-medium">{t('testUrl')}</label>
                                 <Input value={testURL} onChange={(event) => setTestURL(event.target.value)} className="rounded-xl" />
                                 <Button type="button" variant="outline" className="w-full rounded-xl" onClick={() => handleTest()} disabled={!form.url.trim() || testingKey === 'draft'}>
                                     <FlaskConical className={cn('size-4', testingKey === 'draft' && 'animate-pulse')} />
-                                    测试当前表单代理
+                                    {t('testDraft')}
                                 </Button>
                             </div>
 
                             <Button type="submit" className="w-full rounded-2xl h-11" disabled={createProxy.isPending || updateProxy.isPending}>
-                                {editing ? '保存修改' : '创建代理配置'}
+                                {editing ? t('submitEdit') : t('submitCreate')}
                             </Button>
                         </form>
                     </section>

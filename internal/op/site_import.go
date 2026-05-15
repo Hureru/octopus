@@ -818,6 +818,11 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 		return nil, false, false, err
 	}
 
+	proxyMode, proxyConfigID, err := importedAccountProxyMode(tx, input.AccountProxy)
+	if err != nil {
+		return nil, false, false, err
+	}
+
 	if accountRecord == nil {
 		created := model.SiteAccount{
 			SiteID:                     siteRecord.ID,
@@ -830,6 +835,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 			RefreshToken:               strings.TrimSpace(input.RefreshToken),
 			TokenExpiresAt:             input.TokenExpiresAt,
 			PlatformUserID:             input.PlatformUserID,
+			ProxyMode:                  proxyMode,
+			ProxyConfigID:              proxyConfigID,
 			AccountProxy:               input.AccountProxy,
 			Enabled:                    input.Enabled,
 			AutoSync:                   input.AutoSync,
@@ -854,6 +861,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 			"refresh_token":                 created.RefreshToken,
 			"token_expires_at":              created.TokenExpiresAt,
 			"platform_user_id":              created.PlatformUserID,
+			"proxy_mode":                    created.ProxyMode,
+			"proxy_config_id":               created.ProxyConfigID,
 			"account_proxy":                 created.AccountProxy,
 			"enabled":                       created.Enabled,
 			"auto_sync":                     created.AutoSync,
@@ -888,6 +897,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 	merged.RefreshToken = strings.TrimSpace(input.RefreshToken)
 	merged.TokenExpiresAt = input.TokenExpiresAt
 	merged.PlatformUserID = input.PlatformUserID
+	merged.ProxyMode = proxyMode
+	merged.ProxyConfigID = proxyConfigID
 	merged.AccountProxy = input.AccountProxy
 	merged.AutoCheckin = input.AutoCheckin
 	if err := merged.Validate(); err != nil {
@@ -904,6 +915,8 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 		"refresh_token":    merged.RefreshToken,
 		"token_expires_at": merged.TokenExpiresAt,
 		"platform_user_id": merged.PlatformUserID,
+		"proxy_mode":       merged.ProxyMode,
+		"proxy_config_id":  merged.ProxyConfigID,
 		"account_proxy":    merged.AccountProxy,
 		"auto_checkin":     merged.AutoCheckin,
 	}
@@ -919,9 +932,57 @@ func upsertImportedAccount(tx *gorm.DB, siteRecord *model.Site, input importedAc
 	accountRecord.RefreshToken = merged.RefreshToken
 	accountRecord.TokenExpiresAt = merged.TokenExpiresAt
 	accountRecord.PlatformUserID = merged.PlatformUserID
+	accountRecord.ProxyMode = merged.ProxyMode
+	accountRecord.ProxyConfigID = merged.ProxyConfigID
 	accountRecord.AccountProxy = merged.AccountProxy
 	accountRecord.AutoCheckin = merged.AutoCheckin
 	return accountRecord, false, true, nil
+}
+
+func importedAccountProxyMode(tx *gorm.DB, rawProxy *string) (model.ProxyUsageMode, *int, error) {
+	if rawProxy == nil || strings.TrimSpace(*rawProxy) == "" {
+		return model.ProxyUsageModeInherit, nil, nil
+	}
+	normalized, err := model.NormalizeProxyURL(*rawProxy)
+	if err != nil {
+		return model.ProxyUsageModeInherit, nil, fmt.Errorf("invalid imported account proxy: %w", err)
+	}
+	var existing model.ProxyConfiguration
+	if err := tx.Where("url = ?", normalized).First(&existing).Error; err == nil {
+		return model.ProxyUsageModePool, &existing.ID, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.ProxyUsageModeInherit, nil, err
+	}
+	item := model.ProxyConfiguration{
+		Name:    uniqueProxyConfigurationName(tx, "Imported Proxy"),
+		URL:     normalized,
+		Enabled: true,
+		Remark:  "由站点导入代理配置生成",
+	}
+	if err := tx.Create(&item).Error; err != nil {
+		return model.ProxyUsageModeInherit, nil, fmt.Errorf("create imported proxy configuration failed: %w", err)
+	}
+	return model.ProxyUsageModePool, &item.ID, nil
+}
+
+func uniqueProxyConfigurationName(tx *gorm.DB, baseName string) string {
+	baseName = strings.TrimSpace(baseName)
+	if baseName == "" {
+		baseName = "Imported Proxy"
+	}
+	candidate := baseName
+	index := 2
+	for {
+		var count int64
+		if err := tx.Model(&model.ProxyConfiguration{}).Where("name = ?", candidate).Count(&count).Error; err != nil {
+			return candidate
+		}
+		if count == 0 {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s %d", baseName, index)
+		index++
+	}
 }
 
 func findImportedAccount(tx *gorm.DB, siteID int, input importedAccountInput) (*model.SiteAccount, error) {

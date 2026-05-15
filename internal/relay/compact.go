@@ -315,7 +315,7 @@ func copyProxyResponseHeaders(dst http.Header, src http.Header) {
 }
 
 func sendCompactRequest(channel *dbmodel.Channel, req *http.Request) (*http.Response, error) {
-	httpClient, err := helper.ChannelHttpClient(channel)
+	httpClient, err := helper.ChannelHTTPClientWithContext(req.Context(), channel)
 	if err != nil {
 		return nil, err
 	}

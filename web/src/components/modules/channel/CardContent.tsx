@@ -63,6 +63,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         match_regex: channel.match_regex ?? '',
     });
     const t = useTranslations('channel.detail');
+    const tProxy = useTranslations('proxyPool');
 
     const currentView = isEditing ? 'editing' : 'viewing';
 
@@ -88,7 +89,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         if (formData.model !== channel.model) req.model = formData.model;
         if (formData.custom_model !== channel.custom_model) req.custom_model = formData.custom_model;
         if (formData.proxy_mode === 'pool' && !formData.proxy_config_id) {
-            toast.error('请选择代理池配置');
+            toast.error(tProxy('selectRequired'));
             return;
         }
         if (formData.proxy_mode !== channel.proxy_mode) req.proxy_mode = formData.proxy_mode;
