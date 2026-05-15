@@ -550,8 +550,13 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 	if err != nil {
 		return nil, err
 	}
+	// The import transaction has already committed; cache refresh failures are non-fatal
+	// and can be recovered by a later InitCache/refresh cycle.
 	if err := proxyConfigurationRefreshCache(ctx); err != nil {
-		return nil, fmt.Errorf("refresh proxy configuration cache: %w", err)
+		log.Warnw("refresh proxy configuration cache after import failed",
+			"operation", "db_import_incremental",
+			"error", err,
+		)
 	}
 	return res, nil
 }
@@ -664,17 +669,11 @@ func remapProxyConfigID(mode *model.ProxyUsageMode, id **int, idMap map[int]int)
 		}
 		return
 	}
-	if *id == nil || **id <= 0 {
-		reason := "nil"
-		var rawID any
-		if *id != nil {
-			reason = "invalid"
-			rawID = **id
-		}
+	if *id == nil {
 		log.Warnw("remapProxyConfigID downgraded proxy mode",
 			"original_mode", *mode,
-			"proxy_config_id", rawID,
-			"reason", reason,
+			"proxy_config_id", nil,
+			"reason", "nil",
 		)
 		*mode = model.ProxyUsageModeDirect
 		*id = nil
@@ -682,6 +681,16 @@ func remapProxyConfigID(mode *model.ProxyUsageMode, id **int, idMap map[int]int)
 	}
 	if newID, ok := idMap[**id]; ok {
 		*id = &newID
+		return
+	}
+	if **id <= 0 {
+		log.Warnw("remapProxyConfigID downgraded proxy mode",
+			"original_mode", *mode,
+			"proxy_config_id", **id,
+			"reason", "invalid",
+		)
+		*mode = model.ProxyUsageModeDirect
+		*id = nil
 		return
 	}
 	log.Warnw("remapProxyConfigID downgraded proxy mode",
