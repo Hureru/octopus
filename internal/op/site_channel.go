@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -145,7 +146,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 	projectedChannels := make(map[int]*model.Channel)
 	for _, group := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(group.GroupKey)
-		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), ProjectedChannels: make([]model.SiteProjectedChannelSettings, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	}
 	for _, token := range account.Tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
@@ -179,14 +180,32 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 		group := ensureSiteChannelGroup(groups, baseKey, baseKey)
 		group.HasProjectedChannel = true
 		group.ProjectedChannelIDs = append(group.ProjectedChannelIDs, binding.ChannelID)
-		if _, ok := projectedChannels[binding.ChannelID]; ok {
-			continue
-		}
 		channel, err := ChannelGet(binding.ChannelID, ctx)
 		if err != nil {
 			continue
 		}
+		if _, ok := projectedChannels[binding.ChannelID]; ok {
+			continue
+		}
 		projectedChannels[binding.ChannelID] = channel
+		routeType := model.SiteModelRouteTypeOpenAIChat
+		if _, parsed := model.ParseSiteChannelBindingKey(binding.GroupKey); parsed != "" {
+			routeType = parsed
+		}
+		paramOverride := ""
+		if channel.ParamOverride != nil {
+			paramOverride = *channel.ParamOverride
+		}
+		globalAutoGroup := ProjectedChannelGlobalAutoGroupEnabled()
+		group.ProjectedChannels = append(group.ProjectedChannels, model.SiteProjectedChannelSettings{
+			ChannelID:      channel.ID,
+			ChannelName:    channel.Name,
+			RouteType:      routeType,
+			AutoGroup:      channel.AutoGroup,
+			EffectiveGroup: EffectiveProjectedChannelAutoGroup(*channel),
+			ParamOverride:  paramOverride,
+			GlobalOverride: globalAutoGroup,
+		})
 		for _, key := range channel.Keys {
 			group.ProjectedKeys = append(group.ProjectedKeys, model.SiteProjectedKey{
 				ID:               key.ID,
@@ -212,6 +231,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 		channelID, hasChannel := findProjectedChannelID(account.ChannelBindings, key, item.RouteType, split)
 		modelView := model.SiteChannelModel{
 			ModelName:      item.ModelName,
+			Source:         item.Source,
 			RouteType:      model.NormalizeSiteModelRouteType(item.RouteType),
 			RouteSource:    model.NormalizeSiteModelRouteSource(item.RouteSource, item.ManualOverride),
 			ManualOverride: item.ManualOverride,
@@ -229,6 +249,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 	for _, item := range groups {
 		item.HasKeys = item.KeyCount > 0
 		sort.Slice(item.ProjectedChannelIDs, func(i, j int) bool { return item.ProjectedChannelIDs[i] < item.ProjectedChannelIDs[j] })
+		sort.Slice(item.ProjectedChannels, func(i, j int) bool { return item.ProjectedChannels[i].ChannelID < item.ProjectedChannels[j].ChannelID })
 		sort.Slice(item.SourceKeys, func(i, j int) bool {
 			if item.SourceKeys[i].Name == item.SourceKeys[j].Name {
 				return item.SourceKeys[i].ID < item.SourceKeys[j].ID
@@ -281,7 +302,7 @@ func ensureSiteChannelGroup(groups map[string]*model.SiteChannelGroup, groupKey 
 		}
 		return item
 	}
-	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), ProjectedChannels: make([]model.SiteProjectedChannelSettings, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	groups[groupKey] = item
 	return item
 }
@@ -295,6 +316,173 @@ func normalizeEditableSourceTokenValue(value string) (string, error) {
 		return "", fmt.Errorf("必须填写完整 Key，不能保存脱敏值")
 	}
 	return normalized, nil
+}
+
+func UpdateSiteProjectedChannelSettings(siteID int, accountID int, req []model.SiteProjectedChannelSettingsUpdateRequest, ctx context.Context) error {
+	if len(req) == 0 {
+		return nil
+	}
+	channelIDs := make([]int, 0, len(req))
+	seen := make(map[int]struct{}, len(req))
+	for _, item := range req {
+		if item.ChannelID <= 0 {
+			return fmt.Errorf("channel id is required")
+		}
+		if _, ok := seen[item.ChannelID]; ok {
+			return fmt.Errorf("duplicate projected channel: %d", item.ChannelID)
+		}
+		seen[item.ChannelID] = struct{}{}
+		if !isValidAutoGroupType(item.AutoGroup) {
+			return fmt.Errorf("invalid auto group type")
+		}
+		if err := ValidateJSONOverrideObject(item.ParamOverride); err != nil {
+			return err
+		}
+		channelIDs = append(channelIDs, item.ChannelID)
+	}
+
+	var bindings []model.SiteChannelBinding
+	if err := db.GetDB().WithContext(ctx).
+		Where("site_id = ? AND site_account_id = ? AND channel_id IN ?", siteID, accountID, channelIDs).
+		Find(&bindings).Error; err != nil {
+		return err
+	}
+	if len(bindings) != len(channelIDs) {
+		return fmt.Errorf("projected channel not found")
+	}
+	valid := make(map[int]struct{}, len(bindings))
+	for _, binding := range bindings {
+		valid[binding.ChannelID] = struct{}{}
+	}
+
+	for _, item := range req {
+		if _, ok := valid[item.ChannelID]; !ok {
+			return fmt.Errorf("projected channel not found")
+		}
+		paramOverride := strings.TrimSpace(item.ParamOverride)
+		updates := map[string]any{
+			"auto_group": item.AutoGroup,
+		}
+		if paramOverride == "" {
+			updates["param_override"] = nil
+		} else {
+			updates["param_override"] = paramOverride
+		}
+		if err := db.GetDB().WithContext(ctx).Model(&model.Channel{}).Where("id = ?", item.ChannelID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := channelRefreshCacheByID(item.ChannelID, ctx); err != nil {
+			return err
+		}
+		channel, err := ChannelGet(item.ChannelID, ctx)
+		if err != nil {
+			return err
+		}
+		if effective := EffectiveProjectedChannelAutoGroup(*channel); effective != model.AutoGroupTypeNone {
+			ChannelAutoGroupWithMode(channel, effective, ctx)
+		}
+	}
+	return nil
+}
+
+func SiteManualModelsAdd(siteID int, accountID int, req *model.SiteManualModelAddRequest, ctx context.Context) error {
+	if req == nil {
+		return fmt.Errorf("manual model add request is nil")
+	}
+	groupKey := model.NormalizeSiteGroupKey(req.GroupKey)
+	if len(req.Models) == 0 {
+		return fmt.Errorf("models is required")
+	}
+	if _, err := siteChannelAccount(siteID, accountID, ctx); err != nil {
+		return err
+	}
+
+	seen := make(map[string]struct{}, len(req.Models))
+	rows := make([]model.SiteModel, 0, len(req.Models))
+	now := time.Now()
+	for _, item := range req.Models {
+		modelName := strings.TrimSpace(item.ModelName)
+		if modelName == "" {
+			return fmt.Errorf("model name is required")
+		}
+		if _, ok := seen[modelName]; ok {
+			return fmt.Errorf("duplicate model in request: %s", modelName)
+		}
+		seen[modelName] = struct{}{}
+		routeType := model.NormalizeSiteModelRouteType(item.RouteType)
+		if routeType == model.SiteModelRouteTypeUnknown {
+			return fmt.Errorf("unsupported route type for model %s", modelName)
+		}
+		rows = append(rows, model.SiteModel{
+			SiteAccountID:  accountID,
+			GroupKey:       groupKey,
+			ModelName:      modelName,
+			Source:         "manual",
+			RouteType:      routeType,
+			RouteSource:    model.SiteModelRouteSourceManualOverride,
+			ManualOverride: true,
+			RouteUpdatedAt: &now,
+		})
+	}
+
+	var existing []model.SiteModel
+	if err := db.GetDB().WithContext(ctx).
+		Where("site_account_id = ? AND group_key = ?", accountID, groupKey).
+		Find(&existing).Error; err != nil {
+		return err
+	}
+	for _, item := range existing {
+		if _, ok := seen[strings.TrimSpace(item.ModelName)]; ok {
+			return fmt.Errorf("model already exists: %s", item.ModelName)
+		}
+	}
+	return db.GetDB().WithContext(ctx).Create(&rows).Error
+}
+
+func SiteManualModelDelete(siteID int, accountID int, req *model.SiteManualModelDeleteRequest, ctx context.Context) error {
+	if req == nil {
+		return fmt.Errorf("manual model delete request is nil")
+	}
+	if _, err := siteChannelAccount(siteID, accountID, ctx); err != nil {
+		return err
+	}
+	groupKey := model.NormalizeSiteGroupKey(req.GroupKey)
+	modelName := strings.TrimSpace(req.ModelName)
+	if modelName == "" {
+		return fmt.Errorf("model name is required")
+	}
+	result := db.GetDB().WithContext(ctx).
+		Where("site_account_id = ? AND group_key = ? AND model_name = ? AND source = ?", accountID, groupKey, modelName, "manual").
+		Delete(&model.SiteModel{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("manual model not found")
+	}
+	return nil
+}
+
+func siteChannelAccount(siteID int, accountID int, ctx context.Context) (*model.SiteAccount, error) {
+	site, err := SiteGet(siteID, ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range site.Accounts {
+		if site.Accounts[i].ID == accountID {
+			return &site.Accounts[i], nil
+		}
+	}
+	return nil, newSiteChannelAccountNotFoundError()
+}
+
+func isValidAutoGroupType(value model.AutoGroupType) bool {
+	switch value {
+	case model.AutoGroupTypeNone, model.AutoGroupTypeFuzzy, model.AutoGroupTypeExact, model.AutoGroupTypeRegex:
+		return true
+	default:
+		return false
+	}
 }
 
 func UpdateSiteSourceKeys(siteID int, accountID int, req *model.SiteSourceKeyUpdateRequest, ctx context.Context) error {

@@ -31,6 +31,9 @@ func init() {
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/source-keys", http.MethodPut).Handle(updateSiteSourceKeys)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-routes", http.MethodPut).Handle(updateSiteChannelModelRoutes)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-disabled", http.MethodPut).Handle(updateSiteChannelModelDisabled)).
+		AddRoute(router.NewRoute("/:siteId/account/:accountId/projected-channel-settings", http.MethodPut).Handle(updateSiteProjectedChannelSettings)).
+		AddRoute(router.NewRoute("/:siteId/account/:accountId/manual-models", http.MethodPost).Handle(addSiteManualModels)).
+		AddRoute(router.NewRoute("/:siteId/account/:accountId/manual-models/delete", http.MethodPost).Handle(deleteSiteManualModel)).
 		AddRoute(router.NewRoute("/:siteId/account/:accountId/model-routes/reset", http.MethodPost).Handle(resetSiteChannelModelRoutes))
 }
 
@@ -174,6 +177,80 @@ func updateSiteChannelModelDisabled(c *gin.Context) {
 			resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelModelDisableFailed, "site channel model disable failed", err).WithStatus(http.StatusInternalServerError))
 			return
 		}
+	}
+	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))
+		return
+	}
+	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, data)
+}
+
+func updateSiteProjectedChannelSettings(c *gin.Context) {
+	siteID, accountID, ok := parseSiteChannelIDs(c)
+	if !ok {
+		return
+	}
+	var req []model.SiteProjectedChannelSettingsUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	if err := op.UpdateSiteProjectedChannelSettings(siteID, accountID, req, c.Request.Context()); err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectedSettingsFailed, "site projected channel settings update failed", err).WithStatus(http.StatusInternalServerError))
+		return
+	}
+	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, data)
+}
+
+func addSiteManualModels(c *gin.Context) {
+	siteID, accountID, ok := parseSiteChannelIDs(c)
+	if !ok {
+		return
+	}
+	var req model.SiteManualModelAddRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	if err := op.SiteManualModelsAdd(siteID, accountID, &req, c.Request.Context()); err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelManualModelFailed, "site manual model update failed", err).WithStatus(http.StatusInternalServerError))
+		return
+	}
+	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))
+		return
+	}
+	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, data)
+}
+
+func deleteSiteManualModel(c *gin.Context) {
+	siteID, accountID, ok := parseSiteChannelIDs(c)
+	if !ok {
+		return
+	}
+	var req model.SiteManualModelDeleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	if err := op.SiteManualModelDelete(siteID, accountID, &req, c.Request.Context()); err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelManualModelFailed, "site manual model update failed", err).WithStatus(http.StatusInternalServerError))
+		return
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
 		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectFailed, "site channel project failed", err).WithStatus(http.StatusInternalServerError))

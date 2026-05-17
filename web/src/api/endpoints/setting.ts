@@ -28,6 +28,7 @@ export const SettingKey = {
     SSEHeartbeatInterval: 'sse_heartbeat_interval',
     SSEPreStreamHeartbeatDelay: 'sse_pre_stream_heartbeat_delay',
     GroupHealthEnabled: 'group_health_enabled',
+    ProjectedChannelAutoGroupEnabled: 'projected_channel_auto_group_enabled',
 } as const;
 
 /**

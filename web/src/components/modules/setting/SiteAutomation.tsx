@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CalendarCheck2, Clock3, Globe2, RefreshCw } from 'lucide-react';
+import { CalendarCheck2, Clock3, Globe2, RefreshCw, Waypoints } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { useCheckinAllSites, useSyncAllSites } from '@/api/endpoints/site';
 import { toast } from '@/components/common/Toast';
@@ -34,14 +35,17 @@ export function SettingSiteAutomation() {
 
     const [syncInterval, setSyncInterval] = useState('');
     const [checkinInterval, setCheckinInterval] = useState('');
+    const [projectedAutoGroupEnabled, setProjectedAutoGroupEnabled] = useState(false);
     const initialSyncInterval = useRef('');
     const initialCheckinInterval = useRef('');
+    const initialProjectedAutoGroupEnabled = useRef('false');
 
     useEffect(() => {
         if (!settings) return;
 
         const siteSync = settings.find((item) => item.key === SettingKey.SiteSyncInterval);
         const siteCheckin = settings.find((item) => item.key === SettingKey.SiteCheckinInterval);
+        const projectedAutoGroup = settings.find((item) => item.key === SettingKey.ProjectedChannelAutoGroupEnabled);
 
         if (siteSync) {
             queueMicrotask(() => setSyncInterval(siteSync.value));
@@ -51,6 +55,11 @@ export function SettingSiteAutomation() {
             queueMicrotask(() => setCheckinInterval(siteCheckin.value));
             initialCheckinInterval.current = siteCheckin.value;
         }
+        if (projectedAutoGroup) {
+            const next = projectedAutoGroup.value === 'true';
+            queueMicrotask(() => setProjectedAutoGroupEnabled(next));
+            initialProjectedAutoGroupEnabled.current = projectedAutoGroup.value;
+        }
     }, [settings]);
 
     function handleSave(key: string, value: string, initialValue: string, onSaved: (next: string) => void) {
@@ -59,11 +68,22 @@ export function SettingSiteAutomation() {
         setSetting.mutate({ key, value }, {
             onSuccess: () => {
                 onSaved(value);
-                toast.success('已保存');
+                if (key !== SettingKey.ProjectedChannelAutoGroupEnabled) {
+                    toast.success('已保存');
+                }
             },
             onError: (error) => {
                 toast.error(translateSiteMessage(locale, getErrorMessage(error, '保存失败'), t));
             },
+        });
+    }
+
+    function handleProjectedAutoGroupChange(checked: boolean) {
+        const value = checked ? 'true' : 'false';
+        setProjectedAutoGroupEnabled(checked);
+        handleSave(SettingKey.ProjectedChannelAutoGroupEnabled, value, initialProjectedAutoGroupEnabled.current, (next) => {
+            initialProjectedAutoGroupEnabled.current = next;
+            toast.success(checked ? '已开启站点投影渠道自动分组' : '已关闭站点投影渠道自动分组');
         });
     }
 
@@ -127,6 +147,23 @@ export function SettingSiteAutomation() {
                     })}
                     placeholder="请输入间隔（小时）"
                     className="w-48 rounded-xl"
+                />
+            </div>
+
+            <div className="flex items-start justify-between gap-4 rounded-2xl border border-border/70 bg-muted/20 p-4">
+                <div className="flex items-start gap-3">
+                    <Waypoints className="mt-0.5 h-5 w-5 text-muted-foreground" />
+                    <div className="space-y-1">
+                        <div className="text-sm font-medium">全部站点投影渠道自动分组</div>
+                        <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                            开启后，所有站点投影渠道会按模型名与分组名称进行模糊匹配，自动加入匹配的分组。开启时会立即为现有投影渠道执行一次；关闭后不会移除已经加入的分组项，并会恢复使用各投影渠道自己的高级设置。
+                        </p>
+                    </div>
+                </div>
+                <Switch
+                    checked={projectedAutoGroupEnabled}
+                    onCheckedChange={handleProjectedAutoGroupChange}
+                    disabled={setSetting.isPending}
                 />
             </div>
 

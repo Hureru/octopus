@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
 )
 
@@ -85,6 +87,16 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+	case model.SettingKeyProjectedChannelAutoGroupEnabled:
+		if setting.Value == "true" {
+			safe.Go("projected-channel-auto-group-all", func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				if err := op.AutoGroupAllProjectedChannels(ctx); err != nil {
+					log.Warnf("failed to auto group all projected channels: %v", err)
+				}
+			})
+		}
 	}
 	resp.Success(c, setting)
 }
