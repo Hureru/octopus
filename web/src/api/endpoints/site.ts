@@ -263,7 +263,7 @@ function invalidateSiteQueries(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["site-channel", "list"] });
   queryClient.invalidateQueries({ queryKey: ["channels", "list"] });
   queryClient.invalidateQueries({ queryKey: ["models", "channel"] });
-  queryClient.invalidateQueries({ queryKey: ["proxy-pool", "list"] });
+  queryClient.invalidateQueries({ queryKey: ["proxy-pool"] });
 }
 
 function getAuthHeader() {

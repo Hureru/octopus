@@ -210,7 +210,7 @@ export function useCreateChannel() {
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
-            queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
+            queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
         },
         onError: (error) => {
             logger.error('渠道创建失败:', error);
@@ -246,7 +246,7 @@ export function useUpdateChannel() {
             logger.log('渠道更新成功:', data);
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
-            queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
+            queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
         },
         onError: (error) => {
             logger.error('渠道更新失败:', error);
@@ -273,7 +273,7 @@ export function useDeleteChannel() {
             logger.log('渠道删除成功');
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
             queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
-            queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
+            queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
         },
         onError: (error) => {
             logger.error('渠道删除失败:', error);

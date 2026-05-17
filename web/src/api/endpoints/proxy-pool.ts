@@ -44,7 +44,7 @@ export type ProxyTestResult = {
 };
 
 function invalidateProxyPool(queryClient: ReturnType<typeof useQueryClient>) {
-    queryClient.invalidateQueries({ queryKey: ['proxy-pool', 'list'] });
+    queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
     queryClient.invalidateQueries({ queryKey: ['sites', 'list'] });
     queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
 }

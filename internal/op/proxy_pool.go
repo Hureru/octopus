@@ -235,7 +235,7 @@ func ProxyConfigurationReferenceCounts(ctx context.Context) (map[int]int, error)
 	if err := countProxyReferences(ctx, model.SiteAccount{}, counts); err != nil {
 		return nil, err
 	}
-	if err := countProxyReferences(ctx, model.Channel{}, counts); err != nil {
+	if err := countManualChannelProxyReferences(ctx, counts); err != nil {
 		return nil, err
 	}
 	return counts, nil
@@ -251,6 +251,25 @@ func countProxyReferences(ctx context.Context, table any, counts map[int]int) er
 		Select("proxy_config_id, count(*) as count").
 		Where("proxy_mode = ? AND proxy_config_id IS NOT NULL", model.ProxyUsageModePool).
 		Group("proxy_config_id").Scan(&rows).Error; err != nil {
+		return err
+	}
+	for _, r := range rows {
+		counts[r.ProxyConfigID] += r.Count
+	}
+	return nil
+}
+
+func countManualChannelProxyReferences(ctx context.Context, counts map[int]int) error {
+	type row struct {
+		ProxyConfigID int
+		Count         int
+	}
+	var rows []row
+	if err := db.GetDB().WithContext(ctx).Table("channels").
+		Select("channels.proxy_config_id, count(*) as count").
+		Where("channels.proxy_mode = ? AND channels.proxy_config_id IS NOT NULL", model.ProxyUsageModePool).
+		Where("NOT EXISTS (SELECT 1 FROM site_channel_bindings WHERE site_channel_bindings.channel_id = channels.id)").
+		Group("channels.proxy_config_id").Scan(&rows).Error; err != nil {
 		return err
 	}
 	for _, r := range rows {

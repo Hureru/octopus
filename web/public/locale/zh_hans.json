@@ -772,6 +772,10 @@
             "referencesDescription": "{name} 当前被以下位置使用。点击跳转图标可定位到对应位置。",
             "referencesEmpty": "暂无引用",
             "jumpToReference": "跳转到引用位置",
+            "managedChannelTitle": "投影渠道：{channel}",
+            "expandReference": "展开投影渠道",
+            "collapseReference": "收起投影渠道",
+            "derivedReferences": "投影 {count}",
             "referenceTypes": {
                 "site": "站点",
                 "siteAccount": "账号",
@@ -784,7 +788,8 @@
                 "archivedSite": "已归档站点",
                 "siteNamed": "站点：{name}",
                 "siteAccount": "站点账号",
-                "managedChannel": "站点投影渠道",
+                "managedChannel": "站点投影渠道（由站点/账号继承，不计入引用数）",
+                "managedChannelUnderSite": "由站点 {site} / 账号代理投影，不单独计数",
                 "channel": "普通渠道"
             },
             "test": "测试",

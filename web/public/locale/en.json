@@ -772,6 +772,10 @@
             "referencesDescription": "{name} is currently used by these places. Click the jump icon to locate the reference.",
             "referencesEmpty": "No references",
             "jumpToReference": "Jump to reference",
+            "managedChannelTitle": "Projected channel: {channel}",
+            "expandReference": "Expand projected channels",
+            "collapseReference": "Collapse projected channels",
+            "derivedReferences": "Projected {count}",
             "referenceTypes": {
                 "site": "Site",
                 "siteAccount": "Account",
@@ -784,7 +788,8 @@
                 "archivedSite": "Archived site",
                 "siteNamed": "Site: {name}",
                 "siteAccount": "Site account",
-                "managedChannel": "Site projected channel",
+                "managedChannel": "Site projected channel (inherits site/account proxy; not counted)",
+                "managedChannelUnderSite": "Projected from site {site} / account proxy; not counted separately",
                 "channel": "Manual channel"
             },
             "test": "Test",
