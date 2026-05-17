@@ -768,6 +768,25 @@
             "enabled": "Enabled",
             "disabled": "Disabled",
             "references": "Refs {count}",
+            "referencesTitle": "View references",
+            "referencesDescription": "{name} is currently used by these places. Click the jump icon to locate the reference.",
+            "referencesEmpty": "No references",
+            "jumpToReference": "Jump to reference",
+            "referenceTypes": {
+                "site": "Site",
+                "siteAccount": "Account",
+                "managedChannel": "Managed channel",
+                "channel": "Channel",
+                "reference": "Reference"
+            },
+            "referenceLocations": {
+                "site": "Site",
+                "archivedSite": "Archived site",
+                "siteNamed": "Site: {name}",
+                "siteAccount": "Site account",
+                "managedChannel": "Site projected channel",
+                "channel": "Manual channel"
+            },
             "test": "Test",
             "edit": "Edit",
             "delete": "Delete",

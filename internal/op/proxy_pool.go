@@ -140,6 +140,93 @@ func ProxyConfigurationReferenceCount(id int, ctx context.Context) (int, error) 
 	return counts[id], nil
 }
 
+func ProxyConfigurationReferences(id int, ctx context.Context) ([]model.ProxyConfigurationReference, error) {
+	if _, err := ProxyConfigurationGet(id, ctx); err != nil {
+		return nil, fmt.Errorf("proxy configuration not found")
+	}
+
+	refs := make([]model.ProxyConfigurationReference, 0)
+
+	var sites []model.Site
+	if err := db.GetDB().WithContext(ctx).
+		Where("proxy_mode = ? AND proxy_config_id = ?", model.ProxyUsageModePool, id).
+		Order("id ASC").Find(&sites).Error; err != nil {
+		return nil, err
+	}
+	for _, site := range sites {
+		refs = append(refs, model.ProxyConfigurationReference{
+			Type:         model.ProxyConfigurationReferenceTypeSite,
+			SiteID:       site.ID,
+			SiteName:     site.Name,
+			SiteArchived: site.Archived,
+		})
+	}
+
+	type accountRefRow struct {
+		ID       int
+		Name     string
+		SiteID   int
+		SiteName string
+		Archived bool
+	}
+	var accountRows []accountRefRow
+	if err := db.GetDB().WithContext(ctx).
+		Table("site_accounts").
+		Select("site_accounts.id, site_accounts.name, site_accounts.site_id, sites.name as site_name, sites.archived").
+		Joins("LEFT JOIN sites ON sites.id = site_accounts.site_id").
+		Where("site_accounts.proxy_mode = ? AND site_accounts.proxy_config_id = ?", model.ProxyUsageModePool, id).
+		Order("site_accounts.id ASC").Scan(&accountRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range accountRows {
+		refs = append(refs, model.ProxyConfigurationReference{
+			Type:            model.ProxyConfigurationReferenceTypeSiteAccount,
+			SiteID:          row.SiteID,
+			SiteName:        row.SiteName,
+			SiteArchived:    row.Archived,
+			SiteAccountID:   row.ID,
+			SiteAccountName: row.Name,
+		})
+	}
+
+	var channels []model.Channel
+	if err := db.GetDB().WithContext(ctx).
+		Where("proxy_mode = ? AND proxy_config_id = ?", model.ProxyUsageModePool, id).
+		Order("id ASC").Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	channelIDs := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		channelIDs = append(channelIDs, channel.ID)
+	}
+	bindingMap, err := SiteChannelBindingMapByChannelIDs(channelIDs, ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, channel := range channels {
+		ref := model.ProxyConfigurationReference{
+			Type:        model.ProxyConfigurationReferenceTypeChannel,
+			ChannelID:   channel.ID,
+			ChannelName: channel.Name,
+		}
+		if binding, ok := bindingMap[channel.ID]; ok {
+			ref.Type = model.ProxyConfigurationReferenceTypeManagedChannel
+			ref.Managed = true
+			ref.SiteID = binding.SiteID
+			ref.SiteAccountID = binding.SiteAccountID
+			ref.ManagedSource = &model.ManagedChannelSource{
+				SiteID:          binding.SiteID,
+				SiteAccountID:   binding.SiteAccountID,
+				SiteUserGroupID: binding.SiteUserGroupID,
+				GroupKey:        binding.GroupKey,
+			}
+		}
+		refs = append(refs, ref)
+	}
+
+	return refs, nil
+}
+
 func ProxyConfigurationReferenceCounts(ctx context.Context) (map[int]int, error) {
 	counts := make(map[int]int)
 	if err := countProxyReferences(ctx, model.Site{}, counts); err != nil {

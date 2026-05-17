@@ -16,6 +16,20 @@ export type ProxyConfiguration = {
     updated_at: string;
 };
 
+export type ProxyConfigurationReferenceType = 'site' | 'site_account' | 'channel' | 'managed_channel';
+
+export type ProxyConfigurationReference = {
+    type: ProxyConfigurationReferenceType;
+    site_id?: number;
+    site_name?: string;
+    site_archived?: boolean;
+    site_account_id?: number;
+    site_account_name?: string;
+    channel_id?: number;
+    channel_name?: string;
+    managed?: boolean;
+};
+
 export type ProxyTestRequest = {
     proxy_config_id?: number | null;
     proxy_url?: string;
@@ -41,6 +55,15 @@ export function useProxyConfigurationList() {
         queryFn: async () => apiClient.get<ProxyConfiguration[]>('/api/v1/proxy-pool/list'),
         select: (data) => data ?? [],
         refetchInterval: 30000,
+    });
+}
+
+export function useProxyConfigurationReferences(id: number | null, enabled = true) {
+    return useQuery({
+        queryKey: ['proxy-pool', 'references', id],
+        queryFn: async () => apiClient.get<ProxyConfigurationReference[]>(`/api/v1/proxy-pool/references/${id}`),
+        select: (data) => data ?? [],
+        enabled: enabled && typeof id === 'number' && id > 0,
     });
 }
 

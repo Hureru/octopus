@@ -1,15 +1,17 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
-import { Network, Pencil, Plus, Trash2, FlaskConical } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { ExternalLink, FlaskConical, Network, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
     useCreateProxyConfiguration,
     useDeleteProxyConfiguration,
     useProxyConfigurationList,
+    useProxyConfigurationReferences,
     useTestProxyConfiguration,
     useUpdateProxyConfiguration,
     type ProxyConfiguration,
+    type ProxyConfigurationReference,
 } from '@/api/endpoints/proxy-pool';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -18,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/common/Toast';
 import { cn } from '@/lib/utils';
+import { useJumpStore } from '@/stores/jump';
 import { useProxyPoolDialogStore } from './dialog-store';
 
 type FormState = {
@@ -27,6 +30,8 @@ type FormState = {
     enabled: boolean;
     remark: string;
 };
+
+type ProxyPoolDialogTranslator = ReturnType<typeof useTranslations>;
 
 const emptyForm: FormState = {
     name: '',
@@ -66,6 +71,50 @@ function createFormFromProxy(proxy: ProxyConfiguration): FormState {
     };
 }
 
+function referenceTitle(reference: ProxyConfigurationReference) {
+    switch (reference.type) {
+        case 'site':
+            return reference.site_name || `#${reference.site_id}`;
+        case 'site_account':
+            return reference.site_account_name || `#${reference.site_account_id}`;
+        case 'managed_channel':
+        case 'channel':
+            return reference.channel_name || `#${reference.channel_id}`;
+        default:
+            return '';
+    }
+}
+
+function referenceLocation(reference: ProxyConfigurationReference, t: ProxyPoolDialogTranslator) {
+    switch (reference.type) {
+        case 'site':
+            return reference.site_archived ? t('referenceLocations.archivedSite') : t('referenceLocations.site');
+        case 'site_account':
+            return reference.site_name ? t('referenceLocations.siteNamed', { name: reference.site_name }) : t('referenceLocations.siteAccount');
+        case 'managed_channel':
+            return t('referenceLocations.managedChannel');
+        case 'channel':
+            return t('referenceLocations.channel');
+        default:
+            return '';
+    }
+}
+
+function referenceTypeLabel(reference: ProxyConfigurationReference, t: ProxyPoolDialogTranslator) {
+    switch (reference.type) {
+        case 'site':
+            return t('referenceTypes.site');
+        case 'site_account':
+            return t('referenceTypes.siteAccount');
+        case 'managed_channel':
+            return t('referenceTypes.managedChannel');
+        case 'channel':
+            return t('referenceTypes.channel');
+        default:
+            return t('referenceTypes.reference');
+    }
+}
+
 export function ProxyPoolHeaderAction() {
     const t = useTranslations('proxyPool');
     const open = useProxyPoolDialogStore((state) => state.open);
@@ -77,7 +126,7 @@ export function ProxyPoolHeaderAction() {
             className="rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground"
             aria-label={t('name')}
             title={t('name')}
-            onClick={open}
+            onClick={() => open()}
         >
             <Network className="size-4" />
         </Button>
@@ -87,7 +136,10 @@ export function ProxyPoolHeaderAction() {
 export function ProxyPoolDialog() {
     const t = useTranslations('proxyPool.dialog');
     const isOpen = useProxyPoolDialogStore((state) => state.isOpen);
+    const focusedProxyId = useProxyPoolDialogStore((state) => state.focusedProxyId);
     const setOpen = useProxyPoolDialogStore((state) => state.setOpen);
+    const clearFocus = useProxyPoolDialogStore((state) => state.clearFocus);
+    const requestJump = useJumpStore((state) => state.requestJump);
     const { data: proxies = [], isLoading, error } = useProxyConfigurationList();
     const createProxy = useCreateProxyConfiguration();
     const updateProxy = useUpdateProxyConfiguration();
@@ -97,6 +149,12 @@ export function ProxyPoolDialog() {
     const [query, setQuery] = useState('');
     const [testURL, setTestURL] = useState(DEFAULT_TEST_URL);
     const [testingKey, setTestingKey] = useState<string | null>(null);
+    const [referencesProxy, setReferencesProxy] = useState<ProxyConfiguration | null>(null);
+    const focusedProxyRefs = useRef<Map<number, HTMLElement>>(new Map());
+    const { data: references = [], isLoading: referencesLoading, error: referencesError } = useProxyConfigurationReferences(
+        referencesProxy?.id ?? null,
+        isOpen && !!referencesProxy,
+    );
 
     const filteredProxies = useMemo(() => {
         const term = query.trim().toLowerCase();
@@ -112,6 +170,47 @@ export function ProxyPoolDialog() {
 
     function resetForm() {
         setForm(emptyForm);
+    }
+
+    function setProxyArticleRef(proxyId: number, node: HTMLElement | null) {
+        if (node) {
+            focusedProxyRefs.current.set(proxyId, node);
+            return;
+        }
+        focusedProxyRefs.current.delete(proxyId);
+    }
+
+    function openReferences(proxy: ProxyConfiguration) {
+        setReferencesProxy(proxy);
+    }
+
+    function jumpToReference(reference: ProxyConfigurationReference) {
+        setReferencesProxy(null);
+        setOpen(false);
+        switch (reference.type) {
+            case 'site':
+                if (reference.site_id) requestJump({ kind: 'site-card', siteId: reference.site_id });
+                return;
+            case 'site_account':
+                if (reference.site_id && reference.site_account_id) {
+                    requestJump({ kind: 'site-account', siteId: reference.site_id, accountId: reference.site_account_id });
+                }
+                return;
+            case 'managed_channel':
+                if (reference.site_id) {
+                    requestJump(
+                        reference.site_account_id
+                            ? { kind: 'site-channel-account', siteId: reference.site_id, accountId: reference.site_account_id }
+                            : { kind: 'site-channel-card', siteId: reference.site_id },
+                    );
+                }
+                return;
+            case 'channel':
+                if (reference.channel_id) requestJump({ kind: 'channel-card', channelId: reference.channel_id });
+                return;
+            default:
+                return;
+        }
     }
 
     function submitForm(event: FormEvent<HTMLFormElement>) {
@@ -180,6 +279,17 @@ export function ProxyPoolDialog() {
         );
     }
 
+    useEffect(() => {
+        if (!isOpen || !focusedProxyId) return;
+        const node = focusedProxyRefs.current.get(focusedProxyId);
+        if (!node) return;
+        const timer = window.setTimeout(() => {
+            node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            clearFocus();
+        }, 80);
+        return () => window.clearTimeout(timer);
+    }, [isOpen, focusedProxyId, filteredProxies.length, clearFocus]);
+
     return (
         <Dialog open={isOpen} onOpenChange={setOpen}>
             <DialogContent className="max-h-[90vh] overflow-hidden rounded-3xl p-0 sm:max-w-5xl">
@@ -208,7 +318,14 @@ export function ProxyPoolDialog() {
                             ) : filteredProxies.length === 0 ? (
                                 <div className="rounded-2xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">{t('empty')}</div>
                             ) : filteredProxies.map((proxy) => (
-                                <article key={proxy.id} className="rounded-2xl border bg-card p-4">
+                                <article
+                                    key={proxy.id}
+                                    ref={(node) => setProxyArticleRef(proxy.id, node)}
+                                    className={cn(
+                                        "rounded-2xl border bg-card p-4 transition-colors",
+                                        focusedProxyId === proxy.id && "ring-2 ring-primary/35 ring-offset-2 ring-offset-background",
+                                    )}
+                                >
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-2">
@@ -216,7 +333,12 @@ export function ProxyPoolDialog() {
                                                 <Badge variant={proxy.enabled ? 'default' : 'secondary'}>
                                                     {proxy.enabled ? t('enabled') : t('disabled')}
                                                 </Badge>
-                                                <Badge variant="outline">{t('references', { count: proxy.reference_count })}</Badge>
+                                                <button type="button" onClick={() => openReferences(proxy)} className="rounded-full" title={t('referencesTitle')}>
+                                                    <Badge variant="outline" className="cursor-pointer hover:bg-accent hover:text-accent-foreground">
+                                                        <ExternalLink className="size-3" />
+                                                        {t('references', { count: proxy.reference_count })}
+                                                    </Badge>
+                                                </button>
                                             </div>
                                             <div className="mt-1 truncate font-mono text-xs text-muted-foreground" title={maskProxyURL(proxy.url)}>
                                                 {maskProxyURL(proxy.url)}
@@ -286,6 +408,42 @@ export function ProxyPoolDialog() {
                     </section>
                 </div>
             </DialogContent>
+            <Dialog open={!!referencesProxy} onOpenChange={(open) => !open && setReferencesProxy(null)}>
+                <DialogContent className="max-h-[85vh] overflow-hidden rounded-3xl sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>{t('referencesTitle')}</DialogTitle>
+                        <DialogDescription>
+                            {referencesProxy ? t('referencesDescription', { name: referencesProxy.name }) : null}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
+                        {referencesLoading ? (
+                            <div className="rounded-2xl border bg-muted/30 p-4 text-sm text-muted-foreground">{t('loading')}</div>
+                        ) : referencesError ? (
+                            <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                                {t('loadFailed', { message: errorMessage(referencesError, t('operationFailed')) })}
+                            </div>
+                        ) : references.length === 0 ? (
+                            <div className="rounded-2xl border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
+                                {t('referencesEmpty')}
+                            </div>
+                        ) : references.map((reference, index) => (
+                            <div key={`${reference.type}-${reference.site_id ?? 0}-${reference.site_account_id ?? 0}-${reference.channel_id ?? 0}-${index}`} className="flex items-center justify-between gap-3 rounded-2xl border bg-card p-3">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline">{referenceTypeLabel(reference, t)}</Badge>
+                                        <span className="truncate text-sm font-medium">{referenceTitle(reference)}</span>
+                                    </div>
+                                    <div className="mt-1 truncate text-xs text-muted-foreground">{referenceLocation(reference, t)}</div>
+                                </div>
+                                <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 rounded-xl" onClick={() => jumpToReference(reference)} title={t('jumpToReference')}>
+                                    <ExternalLink className="size-4" />
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </Dialog>
     );
 }

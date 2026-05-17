@@ -2188,6 +2188,7 @@ function SiteChannelDialog({
     const { setIsOpen } = useMorphingDialog();
     const [activeAccountId, setActiveAccountId] = useState<number | null>(card.accounts[0]?.account_id ?? null);
     const [highlightedAccountId, setHighlightedAccountId] = useState<number | null>(null);
+    const handledJumpRequestRef = useRef<number | null>(null);
     // Defer mounting the heavy SiteAccountPanel by one frame so the morph
     // animation can start immediately. The panel pulls in recharts, dnd, ~16
     // useStates and ~14 useMemos; rendering it synchronously while the FLIP
@@ -2239,6 +2240,7 @@ function SiteChannelDialog({
     useEffect(() => {
         if (!jumpRequest) return;
         if (jumpRequest.target.siteId !== card.site_id) return;
+        if (handledJumpRequestRef.current === jumpRequest.requestId) return;
         const target = jumpRequest.target;
         if (target.kind === 'site-channel-card') return;
 
@@ -2250,23 +2252,24 @@ function SiteChannelDialog({
         }
 
         const node = accountTabRefs.current.get(target.accountId);
-        if (!node) return;
-
-        const timer = window.setTimeout(() => {
-            node.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-            setHighlightedAccountId(target.accountId);
-            window.setTimeout(() => {
-                setHighlightedAccountId((current) =>
-                    current === target.accountId ? null : current,
-                );
-            }, 1800);
+        const frameId = window.requestAnimationFrame(() => {
+            if (node) {
+                node.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                setHighlightedAccountId(target.accountId);
+                window.setTimeout(() => {
+                    setHighlightedAccountId((current) =>
+                        current === target.accountId ? null : current,
+                    );
+                }, 1800);
+            }
 
             if (target.kind === 'site-channel-account') {
+                handledJumpRequestRef.current = jumpRequest.requestId;
                 onJumpHandled(jumpRequest.requestId);
             }
-        }, 80);
+        });
 
-        return () => window.clearTimeout(timer);
+        return () => window.cancelAnimationFrame(frameId);
     }, [jumpRequest, card.site_id, activeAccountId, onJumpHandled]);
 
     return (
@@ -2581,7 +2584,7 @@ function SiteCardImpl({
                     <SiteChannelDialog
                         card={card}
                         jumpRequest={jumpRequest?.target.siteId === card.site_id ? jumpRequest : null}
-                        onJumpHandled={onJumpHandled}
+                        onJumpHandled={() => {}}
                         onNavigateToSite={onNavigateToSite}
                         onNavigateToSiteAccount={onNavigateToSiteAccount}
                         onNavigateToChannel={onNavigateToChannel}
@@ -2589,7 +2592,7 @@ function SiteCardImpl({
                 </MorphingDialogContent>
             </MorphingDialogContainer>
 
-            <SiteCardJumpWatcher jumpRequest={jumpRequest} siteId={card.site_id} />
+            <SiteCardJumpWatcher jumpRequest={jumpRequest} siteId={card.site_id} onJumpHandled={onJumpHandled} />
         </MorphingDialog>
     );
 }
@@ -2599,19 +2602,62 @@ const SiteCard = memo(SiteCardImpl);
 function SiteCardJumpWatcher({
     jumpRequest,
     siteId,
+    onJumpHandled,
 }: {
     jumpRequest: SiteChannelPendingJump | null;
     siteId: number;
+    onJumpHandled: (requestId: number) => void;
 }) {
     const { isOpen, setIsOpen } = useMorphingDialog();
+    const handledRequestRef = useRef<number | null>(null);
+    const openedRequestRef = useRef<number | null>(null);
+    const onJumpHandledRef = useRef(onJumpHandled);
 
     useEffect(() => {
-        if (!jumpRequest) return;
+        onJumpHandledRef.current = onJumpHandled;
+    }, [onJumpHandled]);
+
+    useEffect(() => {
+        if (!jumpRequest) {
+            handledRequestRef.current = null;
+            return;
+        }
         if (jumpRequest.target.siteId !== siteId) return;
-        if (jumpRequest.target.kind === 'site-channel-card' || isOpen) return;
-        const frameId = window.requestAnimationFrame(() => setIsOpen(true));
+        if (jumpRequest.target.kind === 'site-channel-card') return;
+        if (isOpen) return;
+        if (handledRequestRef.current === jumpRequest.requestId) return;
+
+        const requestId = jumpRequest.requestId;
+        const frameId = window.requestAnimationFrame(() => {
+            handledRequestRef.current = requestId;
+            openedRequestRef.current = requestId;
+            setIsOpen(true);
+        });
         return () => window.cancelAnimationFrame(frameId);
     }, [jumpRequest, siteId, isOpen, setIsOpen]);
+
+    useEffect(() => {
+        if (isOpen) return;
+        const openedRequestId = openedRequestRef.current;
+        if (openedRequestId === null) return;
+
+        const timer = window.setTimeout(() => {
+            if (openedRequestRef.current !== openedRequestId) return;
+            openedRequestRef.current = null;
+            onJumpHandledRef.current(openedRequestId);
+        }, 260);
+
+        return () => window.clearTimeout(timer);
+    }, [isOpen]);
+
+    useEffect(() => {
+        return () => {
+            const openedRequestId = openedRequestRef.current;
+            if (openedRequestId === null) return;
+            openedRequestRef.current = null;
+            onJumpHandledRef.current(openedRequestId);
+        };
+    }, []);
 
     return null;
 }

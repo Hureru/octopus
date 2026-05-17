@@ -2477,30 +2477,29 @@ export function Site() {
               />
             </label>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                <div>
-                  <div className="text-sm font-medium">启用站点</div>
-                  <div className="text-xs text-muted-foreground">
-                    停用后不再投影托管渠道
-                  </div>
+            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
+              <div>
+                <div className="text-sm font-medium">启用站点</div>
+                <div className="text-xs text-muted-foreground">
+                  停用后不再投影托管渠道
                 </div>
-                <Switch
-                  checked={siteForm.enabled}
-                  onCheckedChange={(checked) =>
-                    setSiteForm((current) => ({ ...current, enabled: checked }))
-                  }
-                />
               </div>
-              <ProxySelector
-                value={{ proxy_mode: siteForm.proxy_mode, proxy_config_id: siteForm.proxy_config_id }}
-                onChange={(next) => setSiteForm((current) => ({
-                  ...current,
-                  proxy_mode: next.proxy_mode as Exclude<ProxyMode, "inherit">,
-                  proxy_config_id: next.proxy_config_id ?? null,
-                }))}
+              <Switch
+                checked={siteForm.enabled}
+                onCheckedChange={(checked) =>
+                  setSiteForm((current) => ({ ...current, enabled: checked }))
+                }
               />
             </div>
+
+            <ProxySelector
+              value={{ proxy_mode: siteForm.proxy_mode, proxy_config_id: siteForm.proxy_config_id }}
+              onChange={(next) => setSiteForm((current) => ({
+                ...current,
+                proxy_mode: next.proxy_mode as Exclude<ProxyMode, "inherit">,
+                proxy_config_id: next.proxy_config_id ?? null,
+              }))}
+            />
 
             <label className="grid gap-2 text-sm">
               <span className="font-medium">手动签到 URL</span>

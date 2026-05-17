@@ -48,6 +48,28 @@ type ProxyTestResult struct {
 	Message    string `json:"message"`
 }
 
+type ProxyConfigurationReferenceType string
+
+const (
+	ProxyConfigurationReferenceTypeSite           ProxyConfigurationReferenceType = "site"
+	ProxyConfigurationReferenceTypeSiteAccount    ProxyConfigurationReferenceType = "site_account"
+	ProxyConfigurationReferenceTypeChannel        ProxyConfigurationReferenceType = "channel"
+	ProxyConfigurationReferenceTypeManagedChannel ProxyConfigurationReferenceType = "managed_channel"
+)
+
+type ProxyConfigurationReference struct {
+	Type            ProxyConfigurationReferenceType `json:"type"`
+	SiteID          int                             `json:"site_id,omitempty"`
+	SiteName        string                          `json:"site_name,omitempty"`
+	SiteArchived    bool                            `json:"site_archived,omitempty"`
+	SiteAccountID   int                             `json:"site_account_id,omitempty"`
+	SiteAccountName string                          `json:"site_account_name,omitempty"`
+	ChannelID       int                             `json:"channel_id,omitempty"`
+	ChannelName     string                          `json:"channel_name,omitempty"`
+	Managed         bool                            `json:"managed,omitempty"`
+	ManagedSource   *ManagedChannelSource           `json:"managed_source,omitempty"`
+}
+
 func (m ProxyUsageMode) Validate(allowInherit bool) error {
 	switch m {
 	case ProxyUsageModeDirect, ProxyUsageModeSystem, ProxyUsageModePool:

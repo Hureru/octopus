@@ -16,6 +16,7 @@ func init() {
 	router.NewGroupRouter("/api/v1/proxy-pool").
 		Use(middleware.Auth()).
 		AddRoute(router.NewRoute("/list", http.MethodGet).Handle(listProxyConfigurations)).
+		AddRoute(router.NewRoute("/references/:id", http.MethodGet).Handle(listProxyConfigurationReferences)).
 		AddRoute(router.NewRoute("/delete/:id", http.MethodDelete).Handle(deleteProxyConfiguration))
 
 	router.NewGroupRouter("/api/v1/proxy-pool").
@@ -30,6 +31,20 @@ func listProxyConfigurations(c *gin.Context) {
 	items, err := op.ProxyConfigurationList(c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, items)
+}
+
+func listProxyConfigurationReferences(c *gin.Context) {
+	idNum, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		resp.InvalidParam(c)
+		return
+	}
+	items, err := op.ProxyConfigurationReferences(idNum, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	resp.Success(c, items)

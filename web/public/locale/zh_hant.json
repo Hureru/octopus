@@ -768,6 +768,25 @@
             "enabled": "啟用",
             "disabled": "停用",
             "references": "引用 {count}",
+            "referencesTitle": "查看引用",
+            "referencesDescription": "{name} 目前被以下位置使用。點擊跳轉圖示可定位到對應位置。",
+            "referencesEmpty": "暫無引用",
+            "jumpToReference": "跳轉到引用位置",
+            "referenceTypes": {
+                "site": "站點",
+                "siteAccount": "帳號",
+                "managedChannel": "託管渠道",
+                "channel": "渠道",
+                "reference": "引用"
+            },
+            "referenceLocations": {
+                "site": "站點",
+                "archivedSite": "已封存站點",
+                "siteNamed": "站點：{name}",
+                "siteAccount": "站點帳號",
+                "managedChannel": "站點投影渠道",
+                "channel": "普通渠道"
+            },
             "test": "測試",
             "edit": "編輯",
             "delete": "刪除",
