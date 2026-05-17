@@ -78,7 +78,7 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled, SettingKeyGroupHealthEnabled, SettingKeyProjectedChannelAutoGroupEnabled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled, SettingKeyGroupHealthEnabled, SettingKeyProjectedChannelAutoGroupEnabled, SettingKeyStatsSiteModelBackfilled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")
 		}

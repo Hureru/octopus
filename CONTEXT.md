@@ -33,7 +33,7 @@ A channel setting that adds matching channel models into existing routing groups
 _Avoid_: automatic site grouping
 
 **Global Projected Channel Automatic Assignment**:
-A system setting that makes all projected channels use fuzzy automatic routing group assignment.
+A system setting that makes all projected channels use fuzzy automatic routing group assignment, where fuzzy means a model is assigned when its name contains a routing group name.
 _Avoid_: global site grouping
 
 **Custom Site Model**:
@@ -53,10 +53,10 @@ _Avoid_: generated ordinary channel
 - A **Site** has one or more **Site Accounts**.
 - A **Site Account** has zero or more **Site Model Groups**.
 - A **Site Model Group** may produce one or more **Projected Channels**.
-- A **Site Channel** presents **Projected Channels** for site-account site model groups.
+- A **Site Channel** presents **Projected Channels** generated from its associated **Site Model Group**.
 - A **Routing Group** contains channel-model entries from **Ordinary Channels** or **Projected Channels**.
 - **Automatic Routing Group Assignment** targets **Routing Groups**, not **Site Model Groups**.
-- **Global Projected Channel Automatic Assignment** overrides per-**Projected Channel** automatic assignment while enabled.
+- **Global Projected Channel Automatic Assignment** overrides individual **Projected Channel** automatic assignment while enabled.
 - A **Custom Site Model** belongs to exactly one **Site Account** and **Site Model Group**.
 - A **Custom Site Model** has one **Model Route Type**.
 - A **Projected Channel** exposes site models with the same **Model Route Type** within a **Site Model Group**.

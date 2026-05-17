@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -76,6 +77,7 @@ func ChannelAutoGroupWithMode(channel *model.Channel, autoGroup model.AutoGroupT
 				log.Warnf("compile regex failed (channel=%d group=%d regex=%q): %v", channel.ID, group.ID, group.MatchRegex, err)
 				continue
 			}
+			re.MatchTimeout = 200 * time.Millisecond
 			for _, modelName := range channelModelNames {
 				matched, err := re.MatchString(modelName)
 				if err != nil {

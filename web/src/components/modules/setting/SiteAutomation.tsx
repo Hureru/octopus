@@ -63,7 +63,7 @@ export function SettingSiteAutomation() {
         }
     }, [settings]);
 
-    function handleSave(key: string, value: string, initialValue: string, onSaved: (next: string) => void) {
+    function handleSave(key: string, value: string, initialValue: string, onSaved: (next: string) => void, onError?: () => void) {
         if (value === initialValue) return;
 
         setSetting.mutate({ key, value }, {
@@ -74,7 +74,10 @@ export function SettingSiteAutomation() {
                 }
             },
             onError: (error) => {
-                toast.error(translateSiteMessage(locale, getErrorMessage(error, '保存失败'), t));
+                onError?.();
+                if (key !== SettingKey.ProjectedChannelAutoGroupEnabled) {
+                    toast.error(translateSiteMessage(locale, getErrorMessage(error, '保存失败'), t));
+                }
             },
         });
     }
@@ -85,6 +88,9 @@ export function SettingSiteAutomation() {
         handleSave(SettingKey.ProjectedChannelAutoGroupEnabled, value, initialProjectedAutoGroupEnabled.current, (next) => {
             initialProjectedAutoGroupEnabled.current = next;
             toast.success(checked ? '已开启站点投影渠道自动分组' : '已关闭站点投影渠道自动分组');
+        }, () => {
+            setProjectedAutoGroupEnabled(initialProjectedAutoGroupEnabled.current === 'true');
+            toast.error('保存失败，已回滚');
         });
     }
 

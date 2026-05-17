@@ -106,7 +106,6 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 
 	managedChannelIDs := make([]int, 0, len(desiredKeys))
 	shouldSplit := shouldSplitByOutboundType(siteRecord)
-	globalAutoGroupEnabled := op.ProjectedChannelGlobalAutoGroupEnabled()
 	bindingChannelByKey := make(map[string]int)
 
 	for _, groupKey := range desiredKeys {
@@ -158,9 +157,6 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 				}
 			}
 			if !exists {
-				if globalAutoGroupEnabled {
-					channelPayload.AutoGroup = model.AutoGroupTypeFuzzy
-				}
 				if err := op.ChannelCreate(&channelPayload, ctx); err != nil {
 					return nil, fmt.Errorf("failed to create managed channel: %w", err)
 				}
@@ -184,9 +180,6 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			if err != nil {
 				if err := db.GetDB().WithContext(ctx).Delete(&binding).Error; err != nil {
 					return nil, fmt.Errorf("failed to delete broken site channel binding: %w", err)
-				}
-				if globalAutoGroupEnabled {
-					channelPayload.AutoGroup = model.AutoGroupTypeFuzzy
 				}
 				if err := op.ChannelCreate(&channelPayload, ctx); err != nil {
 					return nil, fmt.Errorf("failed to recreate managed channel: %w", err)

@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/apperror"
@@ -201,7 +203,8 @@ func updateSiteProjectedChannelSettings(c *gin.Context) {
 		return
 	}
 	if err := op.UpdateSiteProjectedChannelSettings(siteID, accountID, req, c.Request.Context()); err != nil {
-		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelProjectedSettingsFailed, "site projected channel settings update failed", err).WithStatus(http.StatusInternalServerError))
+		status := siteChannelMutationErrorStatus(err)
+		resp.ErrorWithAppError(c, status, apperror.Wrap(op.CodeSiteChannelProjectedSettingsFailed, "site projected channel settings update failed", err).WithStatus(status))
 		return
 	}
 	data, err := op.SiteChannelAccountGet(siteID, accountID, c.Request.Context())
@@ -223,7 +226,8 @@ func addSiteManualModels(c *gin.Context) {
 		return
 	}
 	if err := op.SiteManualModelsAdd(siteID, accountID, &req, c.Request.Context()); err != nil {
-		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelManualModelFailed, "site manual model update failed", err).WithStatus(http.StatusInternalServerError))
+		status := siteChannelMutationErrorStatus(err)
+		resp.ErrorWithAppError(c, status, apperror.Wrap(op.CodeSiteChannelManualModelFailed, "site manual model update failed", err).WithStatus(status))
 		return
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
@@ -249,7 +253,8 @@ func deleteSiteManualModel(c *gin.Context) {
 		return
 	}
 	if err := op.SiteManualModelDelete(siteID, accountID, &req, c.Request.Context()); err != nil {
-		resp.ErrorWithAppError(c, http.StatusInternalServerError, apperror.Wrap(op.CodeSiteChannelManualModelFailed, "site manual model update failed", err).WithStatus(http.StatusInternalServerError))
+		status := siteChannelMutationErrorStatus(err)
+		resp.ErrorWithAppError(c, status, apperror.Wrap(op.CodeSiteChannelManualModelFailed, "site manual model update failed", err).WithStatus(status))
 		return
 	}
 	if err := reprojectSiteChannelAccount(c.Request.Context(), accountID); err != nil {
@@ -283,6 +288,30 @@ func resetSiteChannelModelRoutes(c *gin.Context) {
 		return
 	}
 	resp.Success(c, data)
+}
+
+func siteChannelMutationErrorStatus(err error) int {
+	var appErr *apperror.Error
+	if errors.As(err, &appErr) && appErr != nil && appErr.Status > 0 {
+		return appErr.Status
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "not found"):
+		if strings.Contains(message, "manual model") || strings.Contains(message, "projected channel") || strings.Contains(message, "site account") {
+			return http.StatusNotFound
+		}
+		return http.StatusInternalServerError
+	case strings.Contains(message, "required"),
+		strings.Contains(message, "invalid"),
+		strings.Contains(message, "duplicate"),
+		strings.Contains(message, "already exists"),
+		strings.Contains(message, "json object"),
+		strings.Contains(message, "unsupported"):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func parseSiteChannelIDs(c *gin.Context) (int, int, bool) {

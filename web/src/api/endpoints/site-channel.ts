@@ -240,14 +240,30 @@ function normalizeSiteModel(model: SiteChannelModelServer): SiteChannelModel {
     };
 }
 
+function normalizeAutoGroup(value: unknown): AutoGroupType {
+    return typeof value === 'number' && value >= 0 && value <= 3 ? value as AutoGroupType : 0 as AutoGroupType;
+}
+
+function normalizeProjectedChannel(channel: Partial<SiteProjectedChannelSettings> | null | undefined): SiteProjectedChannelSettings {
+    return {
+        channel_id: typeof channel?.channel_id === 'number' ? channel.channel_id : 0,
+        channel_name: typeof channel?.channel_name === 'string' ? channel.channel_name : '',
+        route_type: normalizeSiteModelRouteType(channel?.route_type),
+        auto_group: normalizeAutoGroup(channel?.auto_group),
+        effective_auto_group: normalizeAutoGroup(channel?.effective_auto_group),
+        param_override: typeof channel?.param_override === 'string' ? channel.param_override : '',
+        global_override: channel?.global_override === true,
+    };
+}
+
 function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteChannelAccount {
     return {
         ...account,
         groups: (account.groups ?? []).map((group) => ({
             ...group,
             masked_pending_key_count: typeof group.masked_pending_key_count === 'number' ? group.masked_pending_key_count : 0,
-            projected_channel_ids: group.projected_channel_ids ?? [],
-            projected_channels: group.projected_channels ?? [],
+            projected_channel_ids: (group.projected_channel_ids ?? []).filter((id) => typeof id === 'number' && id > 0),
+            projected_channels: (group.projected_channels ?? []).map(normalizeProjectedChannel).filter((channel) => channel.channel_id > 0),
             source_keys: (group.source_keys ?? []).map((key) => ({
                 ...key,
                 token: typeof key.token === 'string' ? key.token : '',

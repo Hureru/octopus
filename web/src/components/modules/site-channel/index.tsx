@@ -1232,6 +1232,7 @@ function SiteAccountPanel({
     const [highlightedModelKey, setHighlightedModelKey] = useState<string | null>(null);
     const [modelSearchTerm, setModelSearchTerm] = useState('');
     const [bulkMoveTarget, setBulkMoveTarget] = useState<SiteModelRouteType>('openai_chat');
+    const [deletingManualModelKey, setDeletingManualModelKey] = useState<string | null>(null);
     const [displayLimit, setDisplayLimit] = useState(SITE_PANEL_INITIAL_DISPLAY_LIMIT);
     const modelElementRefs = useRef<Map<string, HTMLElement>>(new Map());
     const panelKey = `${siteId}:${account.account_id}`;
@@ -1603,9 +1604,13 @@ function SiteAccountPanel({
 
     const handleDeleteManualModel = (model: SiteModelView) => {
         if (model.source !== 'manual') return;
+        const modelKey = makeModelKey(model.group_key, model.model_name);
+        if (deletingManualModelKey === modelKey) return;
+        setDeletingManualModelKey(modelKey);
         deleteManualModelMutation.mutate({ group_key: model.group_key, model_name: model.model_name }, {
             onSuccess: () => toast.success('自定义模型已删除'),
             onError: (error) => toast.error(translateSiteError(error, '删除自定义模型失败')),
+            onSettled: () => setDeletingManualModelKey((current) => (current === modelKey ? null : current)),
         });
     };
 
