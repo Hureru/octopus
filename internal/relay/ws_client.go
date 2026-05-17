@@ -194,10 +194,14 @@ func processWSResponseCreate(
 		preferredSticky = nil
 	}
 	executionRequest := originalRequest
-	if conversationState != nil && continuationRequested && conversationState.ShouldUseLocalReplay(originalRequest) {
-		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		if replayedRequest != nil {
-			executionRequest = replayedRequest
+	if conversationState != nil && continuationRequested {
+		if conversationState.ShouldUseNativeContinuation(originalRequest) {
+			log.Debugf("ws relay using native continuation (apikey=%d, request_model=%s, previous_response_id=%s)", apiKeyID, requestModel, currentPreviousResponseID(originalRequest))
+		} else if conversationState.ShouldUseLocalReplay(originalRequest) {
+			replayedRequest := conversationState.BuildReplayRequest(originalRequest)
+			if replayedRequest != nil {
+				executionRequest = replayedRequest
+			}
 		}
 	}
 
