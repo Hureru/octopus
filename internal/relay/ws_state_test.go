@@ -9,7 +9,7 @@ import (
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
-func TestBuildWSResponseCreateMessageRemovesWSOnlyFields(t *testing.T) {
+func TestBuildWSResponseCreateMessageNormalizesWSFields(t *testing.T) {
 	message, err := buildWSResponseCreateMessage(json.RawMessage(`{"model":"gpt-4o","stream":true,"background":true}`))
 	if err != nil {
 		t.Fatalf("buildWSResponseCreateMessage failed: %v", err)
@@ -23,8 +23,8 @@ func TestBuildWSResponseCreateMessageRemovesWSOnlyFields(t *testing.T) {
 	if got := string(payload["type"]); got != `"response.create"` {
 		t.Fatalf("expected type response.create, got %s", got)
 	}
-	if _, exists := payload["stream"]; exists {
-		t.Fatalf("expected stream field to be removed, got %#v", payload)
+	if got := string(payload["stream"]); got != `true` {
+		t.Fatalf("expected stream field to be forced true, got %s in %#v", got, payload)
 	}
 	if _, exists := payload["background"]; exists {
 		t.Fatalf("expected background field to be removed, got %#v", payload)
@@ -113,8 +113,8 @@ func TestShouldMarkWSUnsupported(t *testing.T) {
 	if shouldMarkWSUnsupported(&http.Response{StatusCode: http.StatusServiceUnavailable}, fmt.Errorf("temporary upstream unavailable")) {
 		t.Fatalf("expected 503 handshake to remain retryable")
 	}
-	if !shouldMarkWSUnsupported(nil, fmt.Errorf("failed handshake: expected handshake response status code 426 but got 426")) {
-		t.Fatalf("expected upgrade required handshake to mark ws unsupported")
+	if shouldMarkWSUnsupported(nil, fmt.Errorf("failed handshake: expected handshake response status code 426 but got 426")) {
+		t.Fatalf("expected upgrade required handshake to remain retryable")
 	}
 }
 

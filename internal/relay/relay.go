@@ -23,7 +23,6 @@ import (
 	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/safe"
-	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tmaxmax/go-sse"
 )
@@ -112,6 +111,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		metrics:         metrics,
 		apiKeyID:        apiKeyID,
 		requestModel:    requestModel,
+		groupID:         group.ID,
+		groupSessionTTL: group.SessionKeepTime,
 		iter:            iter,
 		rawBody:         rawBody,
 		heartbeat:       hb,
@@ -418,7 +419,7 @@ func parseRequest(inboundType inbound.InboundType, c *gin.Context) ([]byte, *mod
 func (ra *relayAttempt) forward() (int, error) {
 	ctx := ra.requestContext()
 
-	// 尝试上游 WebSocket（仅 OpenAI Response outbound 类型）
+	// 尝试上游 WebSocket（仅 OpenAI Response outbound 类型；必须是客户端 WS 入站且新开关显式启用）
 	if ra.channel.Type == outbound.OutboundTypeOpenAIResponse &&
 		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 
@@ -427,14 +428,19 @@ func (ra *relayAttempt) forward() (int, error) {
 			shouldTryWS = false
 		} else if ra.internalRequest.IsOpenAIExactReplayRequest() {
 			shouldTryWS = false
+		} else if ra.c == nil {
+			wsMode := effectiveResponsesWSMode(ra.channel)
+			shouldTryWS = shouldEnableResponsesWS(ra.channel) && wsMode != responsesWSModeOff
+		} else if requiresUpstreamWSContinuation(ra.internalRequest) {
+			// Safety: HTTP ingress must not proactively use upstream WS for fresh requests,
+			// but an explicit continuation cannot be safely failovered as ordinary HTTP.
+			shouldTryWS = true
 		} else {
-			wsUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
-			if wsUpgradeEnabled {
-				// 设置启用：无论客户端协议都主动尝试 WS 上游
-				shouldTryWS = true
-			} else {
-				// 设置禁用：仅当客户端也是 WS 时才尝试 WS 上游
-				shouldTryWS = (ra.c == nil)
+			// Legacy HTTP-upgrade setting is deprecated. Do not proactively use WS, but
+			// keep a downgrade marker for callers/tests that still enable the old flag.
+			legacyWSUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
+			if legacyWSUpgradeEnabled {
+				ra.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryDowngrade)
 			}
 		}
 
@@ -458,8 +464,15 @@ func (ra *relayAttempt) forward() (int, error) {
 // forwardViaWS attempts to forward via upstream WebSocket.
 // Returns statusCode=-1 if WS is not available (caller should fall through to HTTP).
 func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
+	if ra.c == nil && effectiveResponsesWSMode(ra.channel) == responsesWSModePassthrough && !ra.internalRequest.IsOpenAIExactReplayRequest() {
+		return ra.forwardViaWSPassthrough(ctx)
+	}
 	continuation := requiresUpstreamWSContinuation(ra.internalRequest)
-	pc := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, ra.clientRequestHeaders())
+	preferredConnID := ""
+	if continuation {
+		preferredConnID, _ = getWSResponseConn(currentPreviousResponseID(ra.internalRequest))
+	}
+	pc := TryUpstreamWSWithPreference(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, ra.clientRequestHeaders(), preferredConnID)
 	if pc == nil {
 		log.Debugf("upstream WS unavailable for channel %s (key=%d, continuation=%t)", ra.channel.Name, ra.usedKey.ID, continuation)
 		return -1, nil // WS not available
@@ -483,8 +496,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		log.Warnf("upstream WS send failed for channel %s: %v", ra.channel.Name, err)
 		log.Debugf("upstream WS send failed before stream start (channel=%s, key=%d, continuation=%t, err=%v)",
 			ra.channel.Name, ra.usedKey.ID, continuation, err)
-		pc.conn.Close(websocket.StatusGoingAway, "send failed")
-		wsUpstreamPool.Remove(pc.poolKey)
+		wsUpstreamPool.RemoveConn(pc)
 		if isUpstreamWSConnectionBroken(err) {
 			log.Debugf("upstream WS send failure eligible for redial (channel=%s, key=%d, continuation=%t)",
 				ra.channel.Name, ra.usedKey.ID, continuation)
@@ -503,6 +515,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 
 	// Read events from WS and process through the transform pipeline
 	ra.metrics.UsedWS = true
+	ra.metrics.SetWSExecMode(dbmodel.RelayLogWSExecModeTransform)
 	if ra.metrics.WSMode == nil {
 		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
 	}
@@ -532,6 +545,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 
 	reader.Close()
 	wsUpstreamPool.RecordWSSuccess(ra.channel.ID)
+	ra.recordSuccessfulWSAffinity(pc)
 	return 200, nil
 }
 
@@ -548,8 +562,7 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 	if retryErr != nil {
 		log.Warnf("upstream WS redial send failed for channel %s: %v", ra.channel.Name, retryErr)
 		log.Debugf("fresh upstream WS redial send failed (channel=%s, key=%d, err=%v)", ra.channel.Name, ra.usedKey.ID, retryErr)
-		redialed.conn.Close(websocket.StatusGoingAway, "send failed after redial")
-		wsUpstreamPool.Remove(redialed.poolKey)
+		wsUpstreamPool.RemoveConn(redialed)
 		wsUpstreamPool.RecordWSFailure(ra.channel.ID)
 		if requiresUpstreamWSContinuation(ra.internalRequest) {
 			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
@@ -559,6 +572,7 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 	}
 
 	ra.metrics.UsedWS = true
+	ra.metrics.SetWSExecMode(dbmodel.RelayLogWSExecModeTransform)
 	if ra.metrics.WSMode == nil {
 		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
 	}
@@ -582,6 +596,7 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 		ra.channel.Name, ra.usedKey.ID, currentPreviousResponseID(ra.internalRequest))
 	reader.Close()
 	wsUpstreamPool.RecordWSSuccess(ra.channel.ID)
+	ra.recordSuccessfulWSAffinity(redialed)
 	return http.StatusOK, nil, true
 }
 
@@ -703,8 +718,12 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 				}
 			}
 
-			ra.streamPayloadWritten.Store(true)
-			writer.Write(data)
+			if _, writeErr := writer.Write(data); writeErr != nil {
+				return writeErr
+			}
+			if writer.Written() {
+				ra.streamPayloadWritten.Store(true)
+			}
 			writer.Flush()
 		}
 	}

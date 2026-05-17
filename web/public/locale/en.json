@@ -168,8 +168,21 @@
             "example": "Only allow specific domains: https://example.com,https://example2.com"
         },
         "wsUpgrade": {
-            "label": "Proactive WebSocket Upstream Upgrade",
-            "description": "When enabled, always try WS upstream regardless of client protocol; when disabled, follow client protocol"
+            "label": "Deprecated Proactive WebSocket Upstream Upgrade",
+            "description": "Deprecated. Fresh HTTP requests no longer proactively use upstream WS; use Responses WS settings for client WebSocket ingress."
+        },
+        "responsesWS": {
+            "enabled": {
+                "label": "OpenAI Responses WebSocket",
+                "description": "Opt-in upstream WebSocket support for client WebSocket /v1/responses ingress."
+            },
+            "defaultMode": {
+                "label": "Responses WS Default Mode",
+                "description": "Default upstream WS mode for OpenAI Responses channels unless overridden per channel.",
+                "passthrough": "Passthrough",
+                "transform": "Transform",
+                "off": "Off"
+            }
         },
         "sseHeartbeat": {
             "label": "SSE Heartbeat Interval (seconds)",
@@ -491,12 +504,16 @@
             "ws": "WS",
             "wsContinuation": "Continue",
             "wsReplay": "Replay",
+            "wsPassthrough": "Passthrough",
+            "wsTransform": "Transform",
             "wsReconnect": "Reconnect",
             "wsReplayRecovery": "Replay Recovery",
             "wsDowngrade": "Downgrade",
             "wsFreshHint": "This request used a fresh upstream WebSocket session.",
             "wsContinuationHint": "This request continued the upstream WebSocket session directly.",
             "wsReplayHint": "This request used upstream WebSocket, but replayed history to recover the context.",
+            "wsPassthroughHint": "Upstream WebSocket events were forwarded directly without the internal transformer pipeline.",
+            "wsTransformHint": "Upstream WebSocket events were processed through the internal transformer pipeline.",
             "wsReconnectHint": "The upstream WebSocket continuation broke, and this request recovered after reconnecting the same route.",
             "wsReplayRecoveryHint": "This request first failed to continue, then automatically replayed the transcript to recover the context and establish a new continuation anchor.",
             "wsDowngradeHint": "This request first tried upstream WebSocket, but automatically downgraded to HTTP when WebSocket was unavailable.",
@@ -602,6 +619,11 @@
             "autoGroupFuzzy": "Fuzzy",
             "autoGroupExact": "Exact",
             "autoGroupRegex": "Regex",
+            "wsMode": "Responses WS Mode",
+            "wsModeInherit": "Inherit global",
+            "wsModePassthrough": "Passthrough",
+            "wsModeTransform": "Transform",
+            "wsModeOff": "Off",
             "matchRegex": "Match Regex",
             "matchRegexPlaceholder": "Optional: regex pattern to match request model names",
             "remark": "Remark"

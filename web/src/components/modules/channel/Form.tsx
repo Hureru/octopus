@@ -1,4 +1,4 @@
-import { AutoGroupType, ChannelType, type Channel, useFetchModel } from '@/api/endpoints/channel';
+import { AutoGroupType, ChannelType, type Channel, type ChannelWSMode, useFetchModel } from '@/api/endpoints/channel';
 import { ProxySelector } from '@/components/modules/proxy-pool/ProxySelector';
 import {
     Select,
@@ -31,6 +31,7 @@ export interface ChannelFormData {
     type: ChannelType;
     base_urls: Channel['base_urls'];
     custom_header: Channel['custom_header'];
+    ws_mode: ChannelWSMode;
     proxy_mode: Channel['proxy_mode'];
     proxy_config_id: number | null;
     param_override: string;
@@ -492,6 +493,25 @@ export function ChannelForm({
                                         <SelectItem className='rounded-xl' value={String(AutoGroupType.Fuzzy)}>{t('autoGroupFuzzy')}</SelectItem>
                                         <SelectItem className='rounded-xl' value={String(AutoGroupType.Exact)}>{t('autoGroupExact')}</SelectItem>
                                         <SelectItem className='rounded-xl' value={String(AutoGroupType.Regex)}>{t('autoGroupRegex')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <label htmlFor={`${idPrefix}-ws-mode`} className="text-sm font-medium text-card-foreground">
+                                    {t('wsMode')}
+                                </label>
+                                <Select
+                                    value={formData.ws_mode ?? 'inherit'}
+                                    onValueChange={(value) => onFormDataChange({ ...formData, ws_mode: value as ChannelWSMode })}
+                                >
+                                    <SelectTrigger id={`${idPrefix}-ws-mode`} className="rounded-xl w-full border border-border px-4 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className='rounded-xl'>
+                                        <SelectItem className='rounded-xl' value="inherit">{t('wsModeInherit')}</SelectItem>
+                                        <SelectItem className='rounded-xl' value="passthrough">{t('wsModePassthrough')}</SelectItem>
+                                        <SelectItem className='rounded-xl' value="transform">{t('wsModeTransform')}</SelectItem>
+                                        <SelectItem className='rounded-xl' value="off">{t('wsModeOff')}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

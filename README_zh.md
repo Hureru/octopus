@@ -384,7 +384,7 @@ base_url = "http://127.0.0.1:8080/v1"
 ### 🏗️ 新增子系统
 
 - **🌐 站点管理 & 站点同步** —— 全新资源层（后端 `sitesync/` + 独立前端模块）。管理聚合站点账号：定时同步、自动签到、余额与今日收益、按站点价格、归档/恢复、AnyRouter、路由探测、`sub2api`，以及把账号物化为渠道的 projected site channel。
-- **🔌 WebSocket relay** —— 上游 WS 连接池（带健康退避）、面向客户端的 WS，以及 Codex 工具的原生 Responses 透传。
+- **🔌 WebSocket relay** —— 上游 WS 连接池（带健康退避）、面向客户端的 WS、DB-backed response affinity，以及面向 Codex 工具的可选 OpenAI Responses 直通。
 - **🖼️ OpenAI Images API 转发**（带 body 缓存）。
 - **🩹 Transformer 大重构** —— 三大适配器统一原生 StreamEvent 流水线、Anthropic patching 层、role 交替规范化，及大量跨格式保真修复。
 
@@ -397,7 +397,7 @@ base_url = "http://127.0.0.1:8080/v1"
 
 ### 🧬 杂项
 
-- 支持 Claude Opus 4.7 adaptive thinking；DB 迁移 003–008；设置页新增 Site Automation 面板。
+- 支持 Claude Opus 4.7 adaptive thinking；DB 迁移 003–012；设置页新增 Site Automation 面板。
 
 > 完整 diff：添加上游远端 `https://github.com/bestruirui/octopus` 后执行 `git log upstream/dev..HEAD`。
 

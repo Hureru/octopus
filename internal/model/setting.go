@@ -21,7 +21,9 @@ const (
 	SettingKeyCircuitBreakerThreshold    SettingKey = "circuit_breaker_threshold"      // 熔断触发阈值（连续失败次数）
 	SettingKeyCircuitBreakerCooldown     SettingKey = "circuit_breaker_cooldown"       // 熔断基础冷却时间（秒）
 	SettingKeyCircuitBreakerMaxCooldown  SettingKey = "circuit_breaker_max_cooldown"   // 熔断最大冷却时间（秒），指数退避上限
-	SettingKeyRelayWSUpgradeEnabled      SettingKey = "relay_ws_upgrade_enabled"       // 是否主动尝试WS上游连接（双向降级）
+	SettingKeyRelayWSUpgradeEnabled      SettingKey = "relay_ws_upgrade_enabled"       // Deprecated: 旧的主动尝试 WS 上游连接开关
+	SettingKeyResponsesWSEnabled         SettingKey = "responses_ws_enabled"           // 是否启用 OpenAI Responses WS 上游能力（仅客户端 WS 入站）
+	SettingKeyResponsesWSDefaultMode     SettingKey = "responses_ws_default_mode"      // OpenAI Responses WS 默认模式：off/transform/passthrough
 	SettingKeySSEHeartbeatInterval       SettingKey = "sse_heartbeat_interval"         // SSE 流式心跳间隔（秒），0 表示禁用
 	SettingKeySSEPreStreamHeartbeatDelay SettingKey = "sse_pre_stream_heartbeat_delay" // SSE 上游流建立前心跳首次延迟（秒），0 表示禁用
 	SettingKeyGroupHealthEnabled         SettingKey = "group_health_enabled"           // 是否启用分组健康检查功能
@@ -37,22 +39,24 @@ type Setting struct {
 func DefaultSettings() []Setting {
 	return []Setting{
 		{Key: SettingKeyProxyURL, Value: ""},
-		{Key: SettingKeyStatsSaveInterval, Value: "10"},          // 默认10分钟保存一次统计信息
-		{Key: SettingKeyCORSAllowOrigins, Value: ""},             // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
-		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},    // 默认24小时更新一次模型信息
-		{Key: SettingKeySyncLLMInterval, Value: "24"},            // 默认24小时同步一次LLM
-		{Key: SettingKeySiteSyncInterval, Value: "12"},           // 默认12小时同步一次站点账号信息
-		{Key: SettingKeySiteCheckinInterval, Value: "24"},        // 默认24小时自动签到一次
-		{Key: SettingKeyRelayLogKeepPeriod, Value: "7"},          // 默认日志保存7天
-		{Key: SettingKeyRelayLogKeepEnabled, Value: "true"},      // 默认保留历史日志
-		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},     // 默认连续失败5次触发熔断
-		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},     // 默认基础冷却60秒
-		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"}, // 默认最大冷却600秒（10分钟）
-		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "false"},   // 默认关闭主动WS上游升级
-		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},        // 默认禁用 SSE 流式心跳
-		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},  // 默认禁用 SSE 上游流建立前心跳
-		{Key: SettingKeyGroupHealthEnabled, Value: "false"},      // 默认不显示/运行分组健康检查，避免打扰主界面
-		{Key: SettingKeyJWTSecret, Value: ""},                    // 为空时自动生成
+		{Key: SettingKeyStatsSaveInterval, Value: "10"},               // 默认10分钟保存一次统计信息
+		{Key: SettingKeyCORSAllowOrigins, Value: ""},                  // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
+		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},         // 默认24小时更新一次模型信息
+		{Key: SettingKeySyncLLMInterval, Value: "24"},                 // 默认24小时同步一次LLM
+		{Key: SettingKeySiteSyncInterval, Value: "12"},                // 默认12小时同步一次站点账号信息
+		{Key: SettingKeySiteCheckinInterval, Value: "24"},             // 默认24小时自动签到一次
+		{Key: SettingKeyRelayLogKeepPeriod, Value: "7"},               // 默认日志保存7天
+		{Key: SettingKeyRelayLogKeepEnabled, Value: "true"},           // 默认保留历史日志
+		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},          // 默认连续失败5次触发熔断
+		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},          // 默认基础冷却60秒
+		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"},      // 默认最大冷却600秒（10分钟）
+		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "false"},        // Deprecated: 默认关闭旧主动WS上游升级
+		{Key: SettingKeyResponsesWSEnabled, Value: "false"},           // 默认关闭 OpenAI Responses WS 新路径
+		{Key: SettingKeyResponsesWSDefaultMode, Value: "passthrough"}, // 启用后默认使用协议保真的 passthrough
+		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},             // 默认禁用 SSE 流式心跳
+		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},       // 默认禁用 SSE 上游流建立前心跳
+		{Key: SettingKeyGroupHealthEnabled, Value: "false"},           // 默认不显示/运行分组健康检查，避免打扰主界面
+		{Key: SettingKeyJWTSecret, Value: ""},                         // 为空时自动生成
 		{Key: SettingKeyStatsSiteModelBackfilled, Value: "false"},
 	}
 }
@@ -76,11 +80,18 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled, SettingKeyGroupHealthEnabled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")
 		}
 		return nil
+	case SettingKeyResponsesWSDefaultMode:
+		switch s.Value {
+		case "off", "transform", "passthrough":
+			return nil
+		default:
+			return fmt.Errorf("setting value must be one of off, transform, passthrough")
+		}
 	case SettingKeyProxyURL:
 		if s.Value == "" {
 			return nil

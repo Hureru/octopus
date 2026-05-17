@@ -1344,6 +1344,8 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	}
 	balancer.Reset()
 	resetWSConversationStateStore()
+	resetWSResponseConnStateForTest()
+	resetWSAffinityStoreForTest()
 	resetWSUpstreamPool()
 
 	dbPath := filepath.Join(t.TempDir(), "octopus-relay-test.db")
@@ -1356,6 +1358,8 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	t.Cleanup(func() {
 		balancer.Reset()
 		resetWSConversationStateStore()
+		resetWSResponseConnStateForTest()
+		resetWSAffinityStoreForTest()
 		resetWSUpstreamPool()
 		_ = dbpkg.Close()
 	})

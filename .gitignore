@@ -8,4 +8,6 @@ static/out/
 .serena/
 .workflow/
 .tmp/
+docs/
+CONTEXT.md
 .impeccable.md

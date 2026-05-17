@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/helper"
@@ -18,9 +19,15 @@ import (
 )
 
 const (
-	wsConnMaxAge       = 55 * time.Minute // slightly less than 60-min limit
-	wsConnIdleTimeout  = 5 * time.Minute
-	wsPoolCleanupEvery = 1 * time.Minute
+	wsConnMaxAge         = 55 * time.Minute // slightly less than 60-min limit
+	wsConnIdleTimeout    = 5 * time.Minute
+	wsPoolCleanupEvery   = 1 * time.Minute
+	wsMaxConnsPerPoolKey = 8
+	wsMaxIdlePerPoolKey  = 2
+	wsQueueLimitPerConn  = 64
+	wsAcquireTimeout     = 30 * time.Second
+	wsHealthCheckIdle    = 90 * time.Second
+	wsHealthCheckTimeout = 2 * time.Second
 
 	wsHealthBackoffBase = 1 * time.Minute  // 首次失败退避
 	wsHealthBackoffMax  = 5 * time.Minute  // 退避上限
@@ -37,11 +44,24 @@ type wsPoolKey struct {
 }
 
 type pooledConn struct {
+	id        string
 	conn      *websocket.Conn
 	createdAt time.Time
 	lastUsed  time.Time
 	busy      bool
+	queue     int
 	poolKey   wsPoolKey
+}
+
+type wsPoolEntry struct {
+	conns []*pooledConn
+}
+
+var wsConnIDCounter uint64
+
+func nextWSConnID() string {
+	id := atomic.AddUint64(&wsConnIDCounter, 1)
+	return fmt.Sprintf("wsconn_%d_%d", time.Now().UnixNano(), id)
 }
 
 // wsChannelHealth tracks transient WS failures per channel for exponential backoff.
@@ -55,7 +75,7 @@ type wsChannelHealth struct {
 
 type wsPool struct {
 	mu    sync.Mutex
-	conns map[wsPoolKey]*pooledConn
+	conns map[wsPoolKey]*wsPoolEntry
 
 	// Track channels that don't support WS to avoid repeated attempts
 	unsupported   map[int]time.Time
@@ -71,7 +91,7 @@ type wsPool struct {
 
 func newWSPool() *wsPool {
 	p := &wsPool{
-		conns:       make(map[wsPoolKey]*pooledConn),
+		conns:       make(map[wsPoolKey]*wsPoolEntry),
 		unsupported: make(map[int]time.Time),
 		health:      make(map[int]*wsChannelHealth),
 		stopCh:      make(chan struct{}),
@@ -82,24 +102,54 @@ func newWSPool() *wsPool {
 
 // Get returns an existing idle connection or nil.
 func (p *wsPool) Get(key wsPoolKey) *pooledConn {
+	return p.GetPreferred(key, "")
+}
+
+// GetPreferred returns the preferred idle connection when available, otherwise
+// the least-busy idle connection for the pool key.
+func (p *wsPool) GetPreferred(key wsPoolKey, preferredConnID string) *pooledConn {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	pc, ok := p.conns[key]
-	if !ok || pc.busy {
+	entry := p.conns[key]
+	if entry == nil || len(entry.conns) == 0 {
 		return nil
 	}
-
-	// Check expiration
-	if time.Since(pc.createdAt) > wsConnMaxAge {
-		pc.conn.Close(websocket.StatusGoingAway, "connection expired")
+	now := time.Now()
+	p.pruneExpiredLocked(key, entry, now)
+	if len(entry.conns) == 0 {
 		delete(p.conns, key)
 		return nil
 	}
-
-	pc.busy = true
-	pc.lastUsed = time.Now()
-	return pc
+	if preferredConnID != "" {
+		for _, pc := range entry.conns {
+			if pc != nil && pc.id == preferredConnID && !pc.busy {
+				if !p.preflightPreferredConnLocked(key, entry, pc, now) {
+					return nil
+				}
+				pc.busy = true
+				pc.queue++
+				pc.lastUsed = now
+				return pc
+			}
+		}
+	}
+	var selected *pooledConn
+	for _, pc := range entry.conns {
+		if pc == nil || pc.busy {
+			continue
+		}
+		if selected == nil || pc.lastUsed.Before(selected.lastUsed) {
+			selected = pc
+		}
+	}
+	if selected == nil {
+		return nil
+	}
+	selected.busy = true
+	selected.queue++
+	selected.lastUsed = now
+	return selected
 }
 
 // Put returns a connection to the pool after use.
@@ -111,17 +161,120 @@ func (p *wsPool) Put(pc *pooledConn) {
 	defer p.mu.Unlock()
 
 	pc.busy = false
+	if pc.queue > 0 {
+		pc.queue--
+	}
 	pc.lastUsed = time.Now()
-	p.conns[pc.poolKey] = pc
+	entry := p.conns[pc.poolKey]
+	if entry == nil {
+		entry = &wsPoolEntry{}
+		p.conns[pc.poolKey] = entry
+	}
+	for _, existing := range entry.conns {
+		if existing == pc || (existing != nil && existing.id == pc.id) {
+			return
+		}
+	}
+	entry.conns = append(entry.conns, pc)
 }
 
-// Remove removes and closes a connection.
+// Remove removes and closes all connections for a pool key.
 func (p *wsPool) Remove(key wsPoolKey) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	entry := p.conns[key]
+	delete(p.conns, key)
+	p.mu.Unlock()
 
-	if pc, ok := p.conns[key]; ok {
-		pc.conn.Close(websocket.StatusNormalClosure, "")
+	if entry == nil {
+		return
+	}
+	for _, pc := range entry.conns {
+		if pc != nil {
+			_ = pc.conn.Close(websocket.StatusNormalClosure, "")
+		}
+	}
+}
+
+func (p *wsPool) RemoveConn(pc *pooledConn) {
+	if pc == nil {
+		return
+	}
+	p.mu.Lock()
+	entry := p.conns[pc.poolKey]
+	if entry != nil {
+		for i, existing := range entry.conns {
+			if existing == pc || (existing != nil && existing.id == pc.id) {
+				entry.conns = append(entry.conns[:i], entry.conns[i+1:]...)
+				break
+			}
+		}
+		if len(entry.conns) == 0 {
+			delete(p.conns, pc.poolKey)
+		}
+	}
+	p.mu.Unlock()
+	_ = pc.conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func (p *wsPool) pooledConnCount(key wsPoolKey) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry := p.conns[key]
+	if entry == nil {
+		return 0
+	}
+	return len(entry.conns)
+}
+
+func (p *wsPool) preflightPreferredConnLocked(key wsPoolKey, entry *wsPoolEntry, pc *pooledConn, now time.Time) bool {
+	if pc == nil || pc.conn == nil {
+		return false
+	}
+	if now.Sub(pc.lastUsed) < wsHealthCheckIdle {
+		return true
+	}
+	p.mu.Unlock()
+	pingCtx, cancel := context.WithTimeout(context.Background(), wsHealthCheckTimeout)
+	err := pc.conn.Ping(pingCtx)
+	cancel()
+	p.mu.Lock()
+	if err == nil {
+		pc.lastUsed = time.Now()
+		return true
+	}
+	log.Debugf("upstream WS preferred connection preflight failed (channel=%d, key=%d, conn_id=%s): %v", key.channelID, key.keyID, pc.id, err)
+	if entry != nil {
+		for i, existing := range entry.conns {
+			if existing == pc || (existing != nil && existing.id == pc.id) {
+				entry.conns = append(entry.conns[:i], entry.conns[i+1:]...)
+				break
+			}
+		}
+		if len(entry.conns) == 0 {
+			delete(p.conns, key)
+		}
+	}
+	_ = pc.conn.Close(websocket.StatusGoingAway, "preflight failed")
+	return false
+}
+
+func (p *wsPool) pruneExpiredLocked(key wsPoolKey, entry *wsPoolEntry, now time.Time) {
+	if entry == nil {
+		return
+	}
+	kept := entry.conns[:0]
+	for _, pc := range entry.conns {
+		if pc == nil {
+			continue
+		}
+		if now.Sub(pc.createdAt) > wsConnMaxAge {
+			_ = pc.conn.Close(websocket.StatusGoingAway, "connection expired")
+			continue
+		}
+		kept = append(kept, pc)
+	}
+	entry.conns = kept
+	if len(entry.conns) == 0 {
 		delete(p.conns, key)
 	}
 }
@@ -228,10 +381,12 @@ func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Chann
 	conn.SetReadLimit(int64(maxSSEEventSize))
 
 	pc := &pooledConn{
+		id:        nextWSConnID(),
 		conn:      conn,
 		createdAt: time.Now(),
 		lastUsed:  time.Now(),
 		busy:      true,
+		queue:     1,
 		poolKey:   key,
 	}
 
@@ -262,6 +417,7 @@ func buildUpstreamWSHeaders(clientHeaders http.Header, channel *dbmodel.Channel,
 		}
 	}
 	headers.Set("Authorization", "Bearer "+key)
+	headers.Set("OpenAI-Beta", "responses_websockets=2026-02-06")
 	return headers
 }
 
@@ -337,8 +493,16 @@ func (p *wsPool) SendResponseCreate(ctx context.Context, pc *pooledConn, request
 	if err != nil {
 		return err
 	}
+	return p.SendRaw(ctx, pc, merged)
+}
 
-	return pc.conn.Write(ctx, websocket.MessageText, merged)
+func (p *wsPool) SendRaw(ctx context.Context, pc *pooledConn, payload []byte) error {
+	if pc == nil || pc.conn == nil {
+		return fmt.Errorf("ws connection is nil")
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
+	defer cancel()
+	return pc.conn.Write(writeCtx, websocket.MessageText, payload)
 }
 
 func buildWSResponseCreateMessage(requestBody json.RawMessage) ([]byte, error) {
@@ -349,8 +513,9 @@ func buildWSResponseCreateMessage(requestBody json.RawMessage) ([]byte, error) {
 	}
 	bodyMap["type"] = json.RawMessage(`"response.create"`)
 
-	// Remove stream and background fields (not used in WS mode)
-	delete(bodyMap, "stream")
+	// OpenAI Responses WS mode uses response.create with a Responses-shaped body.
+	// Keep/force stream=true for Codex/OpenAI fidelity; background is not used in WS mode.
+	bodyMap["stream"] = json.RawMessage(`true`)
 	delete(bodyMap, "background")
 
 	merged, err := json.Marshal(bodyMap)
@@ -389,7 +554,7 @@ func shouldMarkWSUnsupported(response *http.Response, err error) bool {
 		statusCode = response.StatusCode
 	}
 	switch statusCode {
-	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUpgradeRequired, http.StatusNotImplemented:
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
 		return true
 	}
 
@@ -400,11 +565,9 @@ func shouldMarkWSUnsupported(response *http.Response, err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "status code 404") ||
 		strings.Contains(message, "status code 405") ||
-		strings.Contains(message, "status code 426") ||
 		strings.Contains(message, "status code 501") ||
 		strings.Contains(message, " got 404") ||
 		strings.Contains(message, " got 405") ||
-		strings.Contains(message, " got 426") ||
 		strings.Contains(message, " got 501")
 }
 
@@ -427,19 +590,45 @@ func (p *wsPool) cleanup() {
 
 	p.mu.Lock()
 	now := time.Now()
-	for key, pc := range p.conns {
-		if pc.busy {
+	for key, entry := range p.conns {
+		if entry == nil {
+			delete(p.conns, key)
 			continue
 		}
-		if now.Sub(pc.createdAt) > wsConnMaxAge || now.Sub(pc.lastUsed) > wsConnIdleTimeout {
-			toClose = append(toClose, pc)
+		idleCount := 0
+		for _, pc := range entry.conns {
+			if pc != nil && !pc.busy {
+				idleCount++
+			}
+		}
+		kept := entry.conns[:0]
+		for _, pc := range entry.conns {
+			if pc == nil {
+				continue
+			}
+			shouldClose := now.Sub(pc.createdAt) > wsConnMaxAge
+			if !shouldClose && !pc.busy && now.Sub(pc.lastUsed) > wsConnIdleTimeout {
+				shouldClose = true
+			}
+			if !shouldClose && !pc.busy && idleCount > wsMaxIdlePerPoolKey {
+				shouldClose = true
+				idleCount--
+			}
+			if shouldClose {
+				toClose = append(toClose, pc)
+				continue
+			}
+			kept = append(kept, pc)
+		}
+		entry.conns = kept
+		if len(entry.conns) == 0 {
 			delete(p.conns, key)
 		}
 	}
 	p.mu.Unlock()
 
 	for _, pc := range toClose {
-		pc.conn.Close(websocket.StatusGoingAway, "cleanup")
+		_ = pc.conn.Close(websocket.StatusGoingAway, "cleanup")
 	}
 
 	// Clean up old unsupported entries
@@ -469,8 +658,14 @@ func (p *wsPool) Close() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 
-		for key, pc := range p.conns {
-			pc.conn.Close(websocket.StatusGoingAway, "shutdown")
+		for key, entry := range p.conns {
+			if entry != nil {
+				for _, pc := range entry.conns {
+					if pc != nil {
+						_ = pc.conn.Close(websocket.StatusGoingAway, "shutdown")
+					}
+				}
+			}
 			delete(p.conns, key)
 		}
 	})
@@ -479,6 +674,13 @@ func (p *wsPool) Close() {
 // TryUpstreamWS attempts to get or create a WS connection for an upstream channel.
 // Returns nil if the channel doesn't support WS or connection fails.
 func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int, clientHeaders http.Header, forceRedial ...bool) *pooledConn {
+	return TryUpstreamWSWithPreference(ctx, channel, baseUrl, key, keyID, clientHeaders, "", forceRedial...)
+}
+
+func TryUpstreamWSWithPreference(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int, clientHeaders http.Header, preferredConnID string, forceRedial ...bool) *pooledConn {
+	if channel == nil || wsUpstreamPool == nil {
+		return nil
+	}
 	if wsUpstreamPool.IsUnsupported(channel.ID) {
 		return nil
 	}
@@ -491,29 +693,46 @@ func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key s
 	poolKey := newWSPoolKey(channel.ID, keyID, headers)
 	redial := len(forceRedial) > 0 && forceRedial[0]
 
-	// Try existing connection first
-	if !redial {
-		if pc := wsUpstreamPool.Get(poolKey); pc != nil {
-			return pc
-		}
-	} else {
+	if redial {
 		wsUpstreamPool.Remove(poolKey)
 	}
 
-	// Try to dial new connection
-	pc, unsupported, err := wsUpstreamPool.Dial(ctx, poolKey, channel, baseUrl, headers)
-	if err != nil {
-		if unsupported {
-			log.Infof("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)
-			wsUpstreamPool.MarkUnsupported(channel.ID)
-		} else {
-			log.Infof("upstream WS dial failed for channel %d: %v", channel.ID, err)
-			wsUpstreamPool.RecordWSFailure(channel.ID)
+	deadline := time.Now().Add(wsAcquireTimeout)
+	redial = false
+	for {
+		if !redial {
+			if pc := wsUpstreamPool.GetPreferred(poolKey, preferredConnID); pc != nil {
+				return pc
+			}
 		}
-		return nil
+		if wsUpstreamPool.pooledConnCount(poolKey) < wsMaxConnsPerPoolKey {
+			pc, unsupported, err := wsUpstreamPool.Dial(ctx, poolKey, channel, baseUrl, headers)
+			if err != nil {
+				if unsupported {
+					log.Infof("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)
+					wsUpstreamPool.MarkUnsupported(channel.ID)
+				} else {
+					log.Infof("upstream WS dial failed for channel %d: %v", channel.ID, err)
+					wsUpstreamPool.RecordWSFailure(channel.ID)
+				}
+				return nil
+			}
+			return pc
+		}
+		if preferredConnID == "" || time.Now().After(deadline) || ctx.Err() != nil {
+			return nil
+		}
+		log.Debugf("waiting for preferred upstream WS connection (channel=%d, key=%d, conn_id=%s)", channel.ID, keyID, preferredConnID)
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil
+		case <-timer.C:
+		}
 	}
-
-	return pc
 }
 
 // CloseUpstreamWSPool gracefully shuts down the upstream WS pool.

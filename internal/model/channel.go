@@ -15,6 +15,24 @@ const (
 	AutoGroupTypeRegex AutoGroupType = 3 //正则匹配
 )
 
+type ChannelWSMode string
+
+const (
+	ChannelWSModeInherit     ChannelWSMode = "inherit"
+	ChannelWSModeOff         ChannelWSMode = "off"
+	ChannelWSModePassthrough ChannelWSMode = "passthrough"
+	ChannelWSModeTransform   ChannelWSMode = "transform"
+)
+
+func (m ChannelWSMode) Normalize() ChannelWSMode {
+	switch m {
+	case ChannelWSModeOff, ChannelWSModePassthrough, ChannelWSModeTransform:
+		return m
+	default:
+		return ChannelWSModeInherit
+	}
+}
+
 type Channel struct {
 	ID            int                   `json:"id" gorm:"primaryKey"`
 	Name          string                `json:"name" gorm:"unique;not null"`
@@ -30,6 +48,7 @@ type Channel struct {
 	AutoSync      bool                  `json:"auto_sync" gorm:"default:false"`
 	AutoGroup     AutoGroupType         `json:"auto_group" gorm:"default:0"`
 	CustomHeader  []CustomHeader        `json:"custom_header" gorm:"serializer:json"`
+	WSMode        ChannelWSMode         `json:"ws_mode" gorm:"type:varchar(16);not null;default:'inherit'"`
 	ParamOverride *string               `json:"param_override"`
 	ChannelProxy  *string               `json:"-" gorm:"column:channel_proxy"`
 	Stats         *StatsChannel         `json:"stats,omitempty" gorm:"foreignKey:ChannelID"`
@@ -105,6 +124,7 @@ type ChannelUpdateRequest struct {
 	AutoSync      *bool                  `json:"auto_sync,omitempty"`
 	AutoGroup     *AutoGroupType         `json:"auto_group,omitempty"`
 	CustomHeader  *[]CustomHeader        `json:"custom_header,omitempty"`
+	WSMode        *ChannelWSMode         `json:"ws_mode,omitempty"`
 	ChannelProxy  *string                `json:"-"`
 	ParamOverride *string                `json:"param_override,omitempty"`
 	MatchRegex    *string                `json:"match_regex,omitempty"`

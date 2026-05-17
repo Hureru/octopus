@@ -140,6 +140,16 @@ func processWSResponseCreate(
 	}
 	rewriteWSPreviousResponseID(reqBody, conversationState)
 	preferredSticky := wsConversationStateToSticky(conversationState)
+	if preferredSticky == nil && requestedPreviousResponseID != "" {
+		if group, err := op.GroupGetEnabledMap(requestModel, ctx); err == nil {
+			scope := wsAffinityScope{APIKeyID: apiKeyID, GroupID: group.ID, RequestModel: requestModel, ResponseID: requestedPreviousResponseID}
+			if entry, ok := getWSAffinityStore().Get(ctx, scope); ok {
+				preferredSticky = &balancer.SessionEntry{ChannelID: entry.ChannelID, ChannelKeyID: entry.ChannelKeyID, Timestamp: time.Now()}
+				log.Debugf("ws response affinity hit (apikey=%d, group=%d, request_model=%s, previous_response_id=%s, channel=%d, key=%d)",
+					apiKeyID, group.ID, requestModel, requestedPreviousResponseID, entry.ChannelID, entry.ChannelKeyID)
+			}
+		}
+	}
 
 	// Check for generate: false (warmup)
 	if genRaw, ok := reqBody["generate"]; ok {
@@ -428,6 +438,8 @@ func newWSRelayRequest(
 		metrics:         NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest),
 		apiKeyID:        apiKeyID,
 		requestModel:    requestModel,
+		groupID:         group.ID,
+		groupSessionTTL: group.SessionKeepTime,
 		iter:            iter,
 		streamWriter:    NewWSStreamWriter(ctx, conn),
 	}, &group, nil
@@ -679,14 +691,6 @@ func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, m
 		},
 	}
 	writeWSEvent(ctx, conn, errEvent)
-}
-
-func writeWSEvent(ctx context.Context, conn *websocket.Conn, event interface{}) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return
-	}
-	conn.Write(ctx, websocket.MessageText, data)
 }
 
 func finalChannelKey(attempts []dbmodel.ChannelAttempt) (int, int) {

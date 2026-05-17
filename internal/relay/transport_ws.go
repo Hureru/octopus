@@ -61,32 +61,49 @@ func (r *wsUpstreamReader) ReadEvent(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected ws message type: %d", msgType)
 	}
 
-	// Check for error events
+	// Check for error and terminal events.
 	var event struct {
 		Type   string `json:"type"`
 		Status int    `json:"status"`
 		Error  *struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
+			Type    string `json:"type"`
 		} `json:"error"`
+		Response *struct {
+			Status string `json:"status"`
+			Error  *struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
+		} `json:"response"`
 	}
-	if json.Unmarshal(data, &event) == nil && event.Type == "error" {
-		if event.Status > 0 {
-			r.statusCode = event.Status
+	if json.Unmarshal(data, &event) == nil {
+		if isWSStreamTerminalEvent(event.Type) {
+			r.done = true
 		}
-		errCode := ""
-		errMsg := "upstream ws error"
-		if event.Error != nil {
-			errMsg = event.Error.Message
-			errCode = event.Error.Code
+		if event.Response != nil && (event.Response.Status == "failed" || event.Response.Status == "incomplete" || event.Response.Status == "cancelled" || event.Response.Status == "canceled") {
+			r.done = true
 		}
-		return nil, fmt.Errorf("%s (code=%s, status=%d)", errMsg,
-			errCode, event.Status)
-	}
-
-	// Check for terminal events — mark done so next ReadEvent returns EOF
-	if event.Type == "response.completed" || event.Type == "response.failed" || event.Type == "response.incomplete" {
-		r.done = true
+		if isWSStreamErrorEvent(event.Type) || event.Error != nil || (event.Response != nil && event.Response.Error != nil) {
+			if event.Status > 0 {
+				r.statusCode = event.Status
+			} else if r.statusCode < 400 {
+				r.statusCode = http.StatusBadGateway
+			}
+			errCode := ""
+			errMsg := "upstream ws error"
+			if event.Error != nil {
+				errMsg = event.Error.Message
+				errCode = event.Error.Code
+			}
+			if event.Response != nil && event.Response.Error != nil {
+				errMsg = event.Response.Error.Message
+				errCode = event.Response.Error.Code
+			}
+			return nil, fmt.Errorf("%s (code=%s, status=%d)", errMsg, errCode, r.statusCode)
+		}
 	}
 
 	return data, nil
@@ -123,6 +140,5 @@ func (r *wsUpstreamReader) CloseWithError() {
 		return
 	}
 	r.closed = true
-	r.pc.conn.Close(websocket.StatusGoingAway, "error")
-	wsUpstreamPool.Remove(r.pc.poolKey)
+	wsUpstreamPool.RemoveConn(r.pc)
 }

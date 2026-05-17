@@ -382,7 +382,7 @@ Compatible with [bestruirui/octopus](https://github.com/bestruirui/octopus), ~18
 ### 🏗️ New subsystems
 
 - **🌐 Site Management & Site Sync** — full new resource layer (backend `sitesync/` + dedicated frontend modules). Manages aggregator-site accounts: scheduled sync, check-in, balance / today's income, per-site pricing, archive/restore, AnyRouter, route probing, `sub2api`, and projected site channels.
-- **🔌 WebSocket relay** — upstream WS connection pool with health backoff, client-facing WS, and native Responses passthrough for Codex tools.
+- **🔌 WebSocket relay** — upstream WS connection pool with health backoff, client-facing WS, DB-backed response affinity, and opt-in OpenAI Responses passthrough for Codex tools.
 - **🖼️ OpenAI Images API forwarding** with body cache.
 - **🩹 Transformer overhaul** — native StreamEvent pipeline across all adapters, Anthropic patching layer, role-alternation normalization, plus a long tail of cross-format fidelity fixes.
 
@@ -395,7 +395,7 @@ Compatible with [bestruirui/octopus](https://github.com/bestruirui/octopus), ~18
 
 ### 🧬 Misc
 
-- Claude Opus 4.7 adaptive thinking; DB migrations 003–008; new Site Automation panel in Settings.
+- Claude Opus 4.7 adaptive thinking; DB migrations 003–012; new Site Automation panel in Settings.
 
 > Full diff: `git log upstream/dev..HEAD` after adding `https://github.com/bestruirui/octopus` as `upstream`.
 

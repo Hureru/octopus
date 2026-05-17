@@ -11,6 +11,8 @@ export type AttemptStatus = 'success' | 'failed' | 'circuit_break' | 'skipped';
 
 export type RelayLogWSMode = 'fresh' | 'continuation' | 'replay';
 
+export type RelayLogWSExecMode = 'passthrough' | 'transform';
+
 export type RelayLogWSRecovery = 'reconnect' | 'replay' | 'downgrade';
 
 /**
@@ -54,7 +56,8 @@ export interface RelayLog {
     attempts?: ChannelAttempt[]; // 所有尝试记录
     total_attempts?: number;     // 总尝试次数
     used_ws?: boolean;           // 是否使用了上游WebSocket
-    ws_mode?: RelayLogWSMode | null; // 上游 WebSocket 模式
+    ws_mode?: RelayLogWSMode | null; // 上游 WebSocket 会话模式
+    ws_exec_mode?: RelayLogWSExecMode | null; // 上游 WebSocket 事件处理方式
     ws_recovery?: RelayLogWSRecovery | null; // 本次请求触发的恢复动作
 }
 

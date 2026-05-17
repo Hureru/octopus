@@ -95,7 +95,16 @@ func (s *wsConversationState) ShouldRewritePreviousResponseID(responseID string)
 }
 
 func (s *wsConversationState) ShouldUseNativeContinuation(req *transformerModel.InternalLLMRequest) bool {
-	return false
+	if s == nil || req == nil {
+		return false
+	}
+	if strings.TrimSpace(req.OpenAIPreviousResponseID()) == "" {
+		return false
+	}
+	if strings.TrimSpace(s.LastResponseID) == "" {
+		return false
+	}
+	return !s.ReplayPending
 }
 
 func (s *wsConversationState) ShouldUseLocalReplay(req *transformerModel.InternalLLMRequest) bool {

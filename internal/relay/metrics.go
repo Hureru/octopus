@@ -32,6 +32,7 @@ type RelayMetrics struct {
 	Stats             model.StatsMetrics
 	UsedWS            bool
 	WSMode            *model.RelayLogWSMode
+	WSExecMode        *model.RelayLogWSExecMode
 	WSRecovery        *model.RelayLogWSRecovery
 	SelectedChannelID int
 
@@ -68,6 +69,13 @@ func (m *RelayMetrics) SetWSMode(mode model.RelayLogWSMode) {
 		return
 	}
 	m.WSMode = wsModePtr(mode)
+}
+
+func (m *RelayMetrics) SetWSExecMode(mode model.RelayLogWSExecMode) {
+	if mode == "" {
+		return
+	}
+	m.WSExecMode = wsExecModePtr(mode)
 }
 
 func (m *RelayMetrics) SetWSRecovery(recovery model.RelayLogWSRecovery) {
@@ -198,6 +206,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 	relayLog.CacheReadTokens = m.CacheReadTokens
 	relayLog.CacheWriteTokens = m.CacheWriteTokens
 	relayLog.WSMode = m.WSMode
+	relayLog.WSExecMode = m.WSExecMode
 	relayLog.WSRecovery = m.WSRecovery
 
 	// 请求内容：优先原始请求体，保留 provider 专有字段（如 Anthropic cache_control）
@@ -248,6 +257,10 @@ func resolveModelPrice(channelID int, actualModel string) *model.LLMPrice {
 }
 
 func wsModePtr(value model.RelayLogWSMode) *model.RelayLogWSMode {
+	return &value
+}
+
+func wsExecModePtr(value model.RelayLogWSExecMode) *model.RelayLogWSExecMode {
 	return &value
 }
 
