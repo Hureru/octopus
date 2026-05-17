@@ -298,10 +298,7 @@ func siteChannelMutationErrorStatus(err error) int {
 	message := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(message, "not found"):
-		if strings.Contains(message, "manual model") || strings.Contains(message, "projected channel") || strings.Contains(message, "site account") {
-			return http.StatusNotFound
-		}
-		return http.StatusInternalServerError
+		return http.StatusNotFound
 	case strings.Contains(message, "required"),
 		strings.Contains(message, "invalid"),
 		strings.Contains(message, "duplicate"),
