@@ -151,7 +151,10 @@ func processWSResponseCreate(
 		}
 	}
 
-	// Check for generate: false (warmup)
+	// Check for generate: false (warmup). Codex-style clients use this as a
+	// prewarm probe and do not expect a synthetic completed response turn.
+	// Acknowledging it locally caused some clients to wait forever for a normal
+	// response lifecycle. Prime the upstream pool best-effort, then stay silent.
 	if genRaw, ok := reqBody["generate"]; ok {
 		var generate bool
 		if json.Unmarshal(genRaw, &generate) == nil && !generate {
@@ -160,16 +163,6 @@ func processWSResponseCreate(
 			} else {
 				log.Infof("ws warmup ready (apikey=%d)", apiKeyID)
 			}
-			delete(reqBody, "generate")
-			writeWSEvent(ctx, conn, map[string]interface{}{
-				"type": "response.created",
-				"response": map[string]interface{}{
-					"object": "response",
-					"id":     fmt.Sprintf("resp_warmup_%d", time.Now().UnixNano()),
-					"status": "completed",
-					"output": []interface{}{},
-				},
-			})
 			return conversationState
 		}
 		delete(reqBody, "generate")
