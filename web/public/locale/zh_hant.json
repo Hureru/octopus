@@ -167,10 +167,6 @@
             "hint": "為空禁止跨網域，* 允許所有",
             "example": "只允許指定域名: https://example.com,https://example2.com"
         },
-        "wsUpgrade": {
-            "label": "已棄用：主動 WebSocket 上游升級",
-            "description": "已棄用。普通 HTTP 請求不再主動使用上游 WS；客戶端 WebSocket 入站請使用 Responses WS 設定。"
-        },
         "responsesWS": {
             "enabled": {
                 "label": "OpenAI Responses WebSocket",

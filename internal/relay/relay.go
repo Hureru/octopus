@@ -435,13 +435,6 @@ func (ra *relayAttempt) forward() (int, error) {
 			// Safety: HTTP ingress must not proactively use upstream WS for fresh requests,
 			// but an explicit continuation cannot be safely failovered as ordinary HTTP.
 			shouldTryWS = true
-		} else {
-			// Legacy HTTP-upgrade setting is deprecated. Do not proactively use WS, but
-			// keep a downgrade marker for callers/tests that still enable the old flag.
-			legacyWSUpgradeEnabled, _ := op.SettingGetBool(dbmodel.SettingKeyRelayWSUpgradeEnabled)
-			if legacyWSUpgradeEnabled {
-				ra.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryDowngrade)
-			}
 		}
 
 		if shouldTryWS {

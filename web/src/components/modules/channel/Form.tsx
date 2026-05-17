@@ -496,25 +496,27 @@ export function ChannelForm({
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-2">
-                                <label htmlFor={`${idPrefix}-ws-mode`} className="text-sm font-medium text-card-foreground">
-                                    {t('wsMode')}
-                                </label>
-                                <Select
-                                    value={formData.ws_mode ?? 'inherit'}
-                                    onValueChange={(value) => onFormDataChange({ ...formData, ws_mode: value as ChannelWSMode })}
-                                >
-                                    <SelectTrigger id={`${idPrefix}-ws-mode`} className="rounded-xl w-full border border-border px-4 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent className='rounded-xl'>
-                                        <SelectItem className='rounded-xl' value="inherit">{t('wsModeInherit')}</SelectItem>
-                                        <SelectItem className='rounded-xl' value="passthrough">{t('wsModePassthrough')}</SelectItem>
-                                        <SelectItem className='rounded-xl' value="transform">{t('wsModeTransform')}</SelectItem>
-                                        <SelectItem className='rounded-xl' value="off">{t('wsModeOff')}</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                            {formData.type === ChannelType.OpenAIResponse ? (
+                                <div className="space-y-2">
+                                    <label htmlFor={`${idPrefix}-ws-mode`} className="text-sm font-medium text-card-foreground">
+                                        {t('wsMode')}
+                                    </label>
+                                    <Select
+                                        value={formData.ws_mode ?? 'inherit'}
+                                        onValueChange={(value) => onFormDataChange({ ...formData, ws_mode: value as ChannelWSMode })}
+                                    >
+                                        <SelectTrigger id={`${idPrefix}-ws-mode`} className="rounded-xl w-full border border-border px-4 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className='rounded-xl'>
+                                            <SelectItem className='rounded-xl' value="inherit">{t('wsModeInherit')}</SelectItem>
+                                            <SelectItem className='rounded-xl' value="passthrough">{t('wsModePassthrough')}</SelectItem>
+                                            <SelectItem className='rounded-xl' value="transform">{t('wsModeTransform')}</SelectItem>
+                                            <SelectItem className='rounded-xl' value="off">{t('wsModeOff')}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            ) : null}
 
                         </div>
 

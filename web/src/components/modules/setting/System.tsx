@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Monitor, Globe, Clock, Shield, HelpCircle, X, Link, Activity, HeartPulse, Radio } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, HelpCircle, X, Activity, HeartPulse, Radio } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -20,7 +20,6 @@ export function SettingSystem() {
     const [statsSaveInterval, setStatsSaveInterval] = useState('');
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
-    const [wsUpgradeEnabled, setWsUpgradeEnabled] = useState(false);
     const [responsesWSEnabled, setResponsesWSEnabled] = useState(false);
     const [responsesWSDefaultMode, setResponsesWSDefaultMode] = useState('passthrough');
     const [groupHealthEnabled, setGroupHealthEnabled] = useState(false);
@@ -30,7 +29,6 @@ export function SettingSystem() {
     const initialProxyUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
-    const initialWsUpgradeEnabled = useRef(false);
     const initialResponsesWSEnabled = useRef(false);
     const initialResponsesWSDefaultMode = useRef('passthrough');
     const initialGroupHealthEnabled = useRef(false);
@@ -42,7 +40,6 @@ export function SettingSystem() {
             const proxy = settings.find(s => s.key === SettingKey.ProxyURL);
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
-            const wsUpgrade = settings.find(s => s.key === SettingKey.RelayWSUpgradeEnabled);
             const responsesWS = settings.find(s => s.key === SettingKey.ResponsesWSEnabled);
             const responsesWSMode = settings.find(s => s.key === SettingKey.ResponsesWSDefaultMode);
             const groupHealth = settings.find(s => s.key === SettingKey.GroupHealthEnabled);
@@ -59,11 +56,6 @@ export function SettingSystem() {
             if (cors) {
                 queueMicrotask(() => setCorsAllowOrigins(cors.value));
                 initialCorsAllowOrigins.current = cors.value;
-            }
-            if (wsUpgrade) {
-                const isEnabled = wsUpgrade.value === 'true';
-                queueMicrotask(() => setWsUpgradeEnabled(isEnabled));
-                initialWsUpgradeEnabled.current = isEnabled;
             }
             if (responsesWS) {
                 const isEnabled = responsesWS.value === 'true';
@@ -102,8 +94,6 @@ export function SettingSystem() {
                     initialStatsSaveInterval.current = value;
                 } else if (key === SettingKey.CORSAllowOrigins) {
                     initialCorsAllowOrigins.current = value;
-                } else if (key === SettingKey.RelayWSUpgradeEnabled) {
-                    initialWsUpgradeEnabled.current = value === 'true';
                 } else if (key === SettingKey.ResponsesWSEnabled) {
                     initialResponsesWSEnabled.current = value === 'true';
                 } else if (key === SettingKey.ResponsesWSDefaultMode) {
@@ -171,19 +161,6 @@ export function SettingSystem() {
     const handleRemoveCorsOrigin = (originToRemove: string) => {
         const nextOrigins = corsAllowOriginsList.filter(origin => origin !== originToRemove);
         saveCorsAllowOrigins(nextOrigins);
-    };
-
-    const handleWsUpgradeChange = (checked: boolean) => {
-        setWsUpgradeEnabled(checked);
-        setSetting.mutate(
-            { key: SettingKey.RelayWSUpgradeEnabled, value: checked ? 'true' : 'false' },
-            {
-                onSuccess: () => {
-                    toast.success(t('saved'));
-                    initialWsUpgradeEnabled.current = checked;
-                }
-            }
-        );
     };
 
     const handleResponsesWSChange = (checked: boolean) => {
@@ -455,27 +432,6 @@ export function SettingSystem() {
                         <SelectItem value="off">{t('responsesWS.defaultMode.off')}</SelectItem>
                     </SelectContent>
                 </Select>
-            </div>
-
-            <div className="flex items-center justify-between gap-4 opacity-60">
-                <div className="flex items-center gap-3">
-                    <Link className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm font-medium">{t('wsUpgrade.label')}</span>
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {t('wsUpgrade.description')}
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </div>
-                <Switch
-                    checked={wsUpgradeEnabled}
-                    onCheckedChange={handleWsUpgradeChange}
-                />
             </div>
         </div>
     );

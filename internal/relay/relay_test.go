@@ -550,9 +550,6 @@ func TestDefaultWSModeForRequest(t *testing.T) {
 func TestHandlerStopsFailoverWhenContinuationTransportIsUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
-	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
-		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
-	}
 
 	var secondHits atomic.Int32
 	firstChannel := &model.Channel{
@@ -801,12 +798,9 @@ func TestForwardViaWSReconnectsContinuationAfterReadFailureBeforeFirstEvent(t *t
 	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Header, channel, channel.Keys[0].ChannelKey)))
 }
 
-func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
+func TestForwardDoesNotUseWSForFreshHTTPIngress(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
-	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
-		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
-	}
 
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
@@ -857,8 +851,8 @@ func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected downgrade request to succeed via http, got %d", statusCode)
 	}
-	if req.metrics.WSRecovery == nil || *req.metrics.WSRecovery != model.RelayLogWSRecoveryDowngrade {
-		t.Fatalf("expected ws downgrade recovery to be recorded, got %#v", req.metrics.WSRecovery)
+	if req.metrics.UsedWS {
+		t.Fatalf("expected fresh HTTP ingress to avoid upstream websocket")
 	}
 }
 
