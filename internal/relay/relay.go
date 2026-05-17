@@ -732,8 +732,8 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 		log.Warnf("failed to create request: %v", err)
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
-	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
-		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	if err := ra.applyParamOverride(outboundRequest); err != nil {
+		return 0, err
 	}
 
 	// 复制请求头
@@ -808,6 +808,17 @@ func (ra *relayAttempt) getStreamWriter() StreamWriter {
 		return ra.streamWriter
 	}
 	return ra.c.Writer
+}
+
+// applyParamOverride merges channel-level JSON request overrides and records the final upstream payload.
+func (ra *relayAttempt) applyParamOverride(outboundRequest *http.Request) error {
+	if err := helper.ApplyParamOverride(outboundRequest, ra.channel.ParamOverride); err != nil {
+		return err
+	}
+	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
+		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	}
+	return nil
 }
 
 // copyHeaders 复制请求头，过滤 hop-by-hop 头
@@ -1157,8 +1168,8 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughOpenAIResponses(ctx context.Con
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
-		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	if err := ra.applyParamOverride(outboundRequest); err != nil {
+		return 0, err
 	}
 	ra.copyHeaders(outboundRequest)
 	outboundRequest.Header.Set("Content-Type", "application/json")
@@ -1387,8 +1398,8 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughAnthropic(ctx context.Context) 
 	}
 
 	// 记录实际上行 payload；直通路径会在这里把顶层 model 改写成命中的上游模型。
-	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
-		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	if err := ra.applyParamOverride(outboundRequest); err != nil {
+		return 0, err
 	}
 
 	// 复制客户端请求头（hop-by-hop 过滤保证 x-api-key/authorization/host/content-length
@@ -1439,8 +1450,8 @@ func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error)
 		log.Warnf("failed to create request: %v", err)
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
-	if requestBody, readErr := readOutboundRequestBody(outboundRequest); readErr == nil {
-		ra.metrics.SetTransportRequestPayload(requestBody, ra.internalRequest.Model)
+	if err := ra.applyParamOverride(outboundRequest); err != nil {
+		return 0, err
 	}
 	ra.copyHeaders(outboundRequest)
 

@@ -36,9 +36,9 @@ _Avoid_: automatic site grouping
 A system setting that makes all projected channels use fuzzy automatic routing group assignment.
 _Avoid_: global site grouping
 
-**Manual Site Model**:
+**Custom Site Model**:
 A site account model added by a user rather than discovered by site synchronization.
-_Avoid_: custom channel model when referring to site accounts
+_Avoid_: manual model, custom channel model when referring to site accounts
 
 **Model Route Type**:
 The API protocol family through which a site model should be exposed.
@@ -57,15 +57,15 @@ _Avoid_: generated ordinary channel
 - A **Routing Group** contains channel-model entries from **Ordinary Channels** or **Projected Channels**.
 - **Automatic Routing Group Assignment** targets **Routing Groups**, not **Site Model Groups**.
 - **Global Projected Channel Automatic Assignment** overrides per-**Projected Channel** automatic assignment while enabled.
-- A **Manual Site Model** belongs to exactly one **Site Account** and **Site Model Group**.
-- A **Manual Site Model** has one **Model Route Type**.
+- A **Custom Site Model** belongs to exactly one **Site Account** and **Site Model Group**.
+- A **Custom Site Model** has one **Model Route Type**.
 - A **Projected Channel** exposes site models with the same **Model Route Type** within a **Site Model Group**.
 - An **Ordinary Channel** is managed directly and is not derived from a **Site Account**.
 
 ## Example dialogue
 
 > **Dev:** "If I add a custom model in a Site Channel, does it become a custom model on the projected channel?"
-> **Domain expert:** "No — it becomes a Manual Site Model, then projection exposes it through the matching Projected Channel."
+> **Domain expert:** "No — it becomes a Custom Site Model, then projection exposes it through the matching Projected Channel."
 
 ## Flagged ambiguities
 

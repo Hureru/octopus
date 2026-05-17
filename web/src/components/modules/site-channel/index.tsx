@@ -27,6 +27,7 @@ import {
     Power,
     RefreshCw,
     Search,
+    Settings,
     SlidersHorizontal,
     Trash2,
     Waypoints,
@@ -1049,7 +1050,7 @@ function SiteChannelTableView({
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="truncate text-sm font-medium">{model.model_name}</span>
                                                 {model.source === 'manual' ? (
-                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-primary/30 bg-primary/10 text-primary">手动</Badge>
+                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-primary/30 bg-primary/10 text-primary">自定义</Badge>
                                                 ) : null}
                                             </div>
                                             {!compactMode ? (
@@ -1157,7 +1158,7 @@ function SiteChannelTableView({
                                                 onClick={() => onDeleteManualModel(model)}
                                                 disabled={isPending}
                                                 className="rounded-lg p-1 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                                                title="删除手动模型"
+                                                title="删除自定义模型"
                                             >
                                                 <Trash2 className="size-4" />
                                             </button>
@@ -1220,6 +1221,7 @@ function SiteAccountPanel({
     const [creatingGroup, setCreatingGroup] = useState<SiteChannelGroup | null>(null);
     const [editingProjectedGroup, setEditingProjectedGroup] = useState<SiteChannelGroup | null>(null);
     const [editingAdvancedGroup, setEditingAdvancedGroup] = useState<SiteChannelGroup | null>(null);
+    const [selectedAdvancedChannelId, setSelectedAdvancedChannelId] = useState<number | null>(null);
     const [advancedForm, setAdvancedForm] = useState<Record<number, { auto_group: AutoGroupType; param_override: string }>>({});
     const [addingManualGroup, setAddingManualGroup] = useState<SiteChannelGroup | null>(null);
     const [manualModelsInput, setManualModelsInput] = useState('');
@@ -1544,12 +1546,14 @@ function SiteAccountPanel({
             };
         });
         setEditingAdvancedGroup(group);
+        setSelectedAdvancedChannelId(group.projected_channels[0]?.channel_id ?? null);
         setAdvancedForm(form);
     };
 
     const handleCloseAdvancedSettings = () => {
         if (advancedMutation.isPending) return;
         setEditingAdvancedGroup(null);
+        setSelectedAdvancedChannelId(null);
         setAdvancedForm({});
     };
 
@@ -1588,11 +1592,11 @@ function SiteAccountPanel({
             models: names.map((name) => ({ model_name: name, route_type: manualModelRouteType })),
         }, {
             onSuccess: () => {
-                toast.success(`已添加 ${names.length} 个手动模型`);
+                toast.success(`已添加 ${names.length} 个自定义模型`);
                 handleCloseAddManualModels();
             },
             onError: (error) => {
-                toast.error(translateSiteError(error, '添加手动模型失败'));
+                toast.error(translateSiteError(error, '添加自定义模型失败'));
             },
         });
     };
@@ -1600,8 +1604,8 @@ function SiteAccountPanel({
     const handleDeleteManualModel = (model: SiteModelView) => {
         if (model.source !== 'manual') return;
         deleteManualModelMutation.mutate({ group_key: model.group_key, model_name: model.model_name }, {
-            onSuccess: () => toast.success('手动模型已删除'),
-            onError: (error) => toast.error(translateSiteError(error, '删除手动模型失败')),
+            onSuccess: () => toast.success('自定义模型已删除'),
+            onError: (error) => toast.error(translateSiteError(error, '删除自定义模型失败')),
         });
     };
 
@@ -1634,6 +1638,10 @@ function SiteAccountPanel({
         }
         return true;
     };
+
+    const selectedAdvancedChannel = editingAdvancedGroup?.projected_channels.find((channel) => channel.channel_id === selectedAdvancedChannelId)
+        ?? editingAdvancedGroup?.projected_channels[0]
+        ?? null;
 
     const handleSaveAdvancedSettings = () => {
         if (!editingAdvancedGroup) return;
@@ -1900,6 +1908,18 @@ function SiteAccountPanel({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 rounded-2xl px-3"
+                            onClick={() => activeGroup && handleOpenAddManualModels(activeGroup)}
+                            disabled={!activeGroup}
+                            title={activeGroup ? undefined : '请先选择具体分组'}
+                        >
+                            <Plus className="size-4" />
+                            添加
+                        </Button>
+
                         <Popover>
                             <PopoverTrigger asChild>
                                 <Button type="button" variant="outline" className="h-8 rounded-2xl px-3">
@@ -1946,6 +1966,18 @@ function SiteAccountPanel({
                             </PopoverContent>
                         </Popover>
 
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 rounded-2xl px-3"
+                            onClick={() => activeGroup && handleOpenAdvancedSettings(activeGroup)}
+                            disabled={!activeGroup || activeGroup.projected_channels.length === 0}
+                            title={!activeGroup ? '请先选择具体分组' : activeGroup.projected_channels.length === 0 ? '当前分组暂无投影渠道' : undefined}
+                        >
+                            <Settings className="size-4" />
+                            高级
+                        </Button>
+
                         <Popover>
                             <PopoverTrigger asChild>
                                 <Button type="button" variant="outline" className="h-8 rounded-2xl px-3">
@@ -1966,32 +1998,6 @@ function SiteAccountPanel({
                                         </div>
                                         {panelPreferences.compactMode ? <Check className="size-4 text-primary" /> : null}
                                     </button>
-                                    {activeGroup ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleOpenAddManualModels(activeGroup)}
-                                            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-muted/60"
-                                        >
-                                            <div>
-                                                <div className="text-sm font-medium text-foreground">添加自定义模型</div>
-                                                <div className="text-[11px] text-muted-foreground">批量添加当前站点分组的手动模型</div>
-                                            </div>
-                                            <Plus className="size-4 text-primary" />
-                                        </button>
-                                    ) : null}
-                                    {activeGroup && activeGroup.projected_channels.length > 0 ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleOpenAdvancedSettings(activeGroup)}
-                                            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition hover:bg-muted/60"
-                                        >
-                                            <div>
-                                                <div className="text-sm font-medium text-foreground">当前分组高级设置</div>
-                                                <div className="text-[11px] text-muted-foreground">自动分组与参数覆盖</div>
-                                            </div>
-                                            <Waypoints className="size-4 text-primary" />
-                                        </button>
-                                    ) : null}
                                 </div>
                                 <Button
                                     type="button"
@@ -2186,64 +2192,104 @@ function SiteAccountPanel({
             </Dialog>
 
             <Dialog open={!!editingAdvancedGroup} onOpenChange={(open) => !open && handleCloseAdvancedSettings()}>
-                <DialogContent className="max-w-4xl">
+                <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-4xl">
                     <DialogHeader>
                         <DialogTitle>站点渠道高级设置</DialogTitle>
                         <DialogDescription>
                             配置分组 {editingAdvancedGroup?.group_name || editingAdvancedGroup?.group_key || '-'} 下各投影渠道的自动分组和参数覆盖。自定义 Header 请在站点设置中统一配置。
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         {editingAdvancedGroup?.projected_channels.some((channel) => channel.global_override) ? (
                             <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
                                 全局投影渠道自动分组已开启，当前所有投影渠道会统一使用模糊匹配；这里保存的单独设置会在全局关闭后生效。
                             </div>
                         ) : null}
-                        {editingAdvancedGroup?.projected_channels.map((channel) => {
-                            const form = advancedForm[channel.channel_id] ?? { auto_group: channel.auto_group, param_override: channel.param_override ?? '' };
-                            return (
-                                <div key={channel.channel_id} className="rounded-2xl border border-border/70 bg-muted/20 p-3">
-                                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                        <div>
-                                            <div className="text-sm font-semibold text-foreground">{routeTypeLabel(channel.route_type)}</div>
-                                            <div className="text-xs text-muted-foreground">#{channel.channel_id} · {channel.channel_name}</div>
-                                        </div>
-                                        {channel.global_override ? (
-                                            <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">全局模糊匹配生效中</Badge>
-                                        ) : null}
-                                    </div>
-                                    <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
-                                        <label className="grid gap-1.5 text-xs text-muted-foreground">
-                                            自动分组
-                                            <Select value={String(form.auto_group)} onValueChange={(value) => handleAdvancedAutoGroupChange(channel.channel_id, Number(value) as AutoGroupType)}>
-                                                <SelectTrigger className="h-10 rounded-xl bg-background">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent className="rounded-xl">
-                                                    <SelectItem value={String(AutoGroupType.None)}>不自动分组</SelectItem>
-                                                    <SelectItem value={String(AutoGroupType.Fuzzy)}>模糊匹配</SelectItem>
-                                                    <SelectItem value={String(AutoGroupType.Exact)}>精确匹配</SelectItem>
-                                                    <SelectItem value={String(AutoGroupType.Regex)}>按分组正则</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </label>
-                                        <label className="grid gap-1.5 text-xs text-muted-foreground">
-                                            参数覆盖 JSON（留空表示清除）
-                                            <textarea
-                                                value={form.param_override}
-                                                onChange={(event) => handleAdvancedParamChange(channel.channel_id, event.target.value)}
-                                                placeholder='例如：{"temperature":0.7,"max_tokens":4096}'
-                                                className="min-h-24 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                            />
-                                        </label>
-                                    </div>
+
+                        <div className="grid gap-4 lg:grid-cols-[16rem_1fr]">
+                            <div className="space-y-2">
+                                <div className="px-1 text-xs font-medium text-muted-foreground">投影渠道</div>
+                                <div className="space-y-2">
+                                    {editingAdvancedGroup?.projected_channels.map((channel) => {
+                                        const active = selectedAdvancedChannel?.channel_id === channel.channel_id;
+                                        return (
+                                            <button
+                                                key={channel.channel_id}
+                                                type="button"
+                                                onClick={() => setSelectedAdvancedChannelId(channel.channel_id)}
+                                                className={cn(
+                                                    'flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition',
+                                                    active
+                                                        ? 'border-primary/30 bg-primary/10 text-foreground'
+                                                        : 'border-border/60 bg-muted/10 hover:bg-muted/40',
+                                                )}
+                                            >
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-sm font-medium">{routeTypeLabel(channel.route_type)}</div>
+                                                    <div className="mt-0.5 truncate text-xs text-muted-foreground">#{channel.channel_id}</div>
+                                                </div>
+                                                {channel.global_override ? (
+                                                    <Badge variant="outline" className="shrink-0 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">全局</Badge>
+                                                ) : null}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
-                            );
-                        })}
+                            </div>
+
+                            {selectedAdvancedChannel ? (() => {
+                                const channel = selectedAdvancedChannel;
+                                const form = advancedForm[channel.channel_id] ?? { auto_group: channel.auto_group, param_override: channel.param_override ?? '' };
+                                return (
+                                    <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-foreground">{routeTypeLabel(channel.route_type)}</div>
+                                                <div className="mt-1 truncate text-xs text-muted-foreground">#{channel.channel_id} · {channel.channel_name}</div>
+                                            </div>
+                                            {channel.global_override ? (
+                                                <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">全局模糊匹配生效中</Badge>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <span className="text-sm font-medium">自动分组</span>
+                                                <Select value={String(form.auto_group)} onValueChange={(value) => handleAdvancedAutoGroupChange(channel.channel_id, Number(value) as AutoGroupType)}>
+                                                    <SelectTrigger className="w-48 rounded-xl bg-background">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="rounded-xl">
+                                                        <SelectItem value={String(AutoGroupType.None)}>不自动分组</SelectItem>
+                                                        <SelectItem value={String(AutoGroupType.Fuzzy)}>模糊匹配</SelectItem>
+                                                        <SelectItem value={String(AutoGroupType.Exact)}>精确匹配</SelectItem>
+                                                        <SelectItem value={String(AutoGroupType.Regex)}>按分组正则</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            <label className="grid gap-2 text-sm">
+                                                <span className="font-medium">参数覆盖 JSON</span>
+                                                <textarea
+                                                    value={form.param_override}
+                                                    onChange={(event) => handleAdvancedParamChange(channel.channel_id, event.target.value)}
+                                                    placeholder='留空表示清除；非空时必须是 JSON 对象，例如：{"temperature":0.7,"max_tokens":4096}'
+                                                    className="min-h-40 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+                                );
+                            })() : (
+                                <div className="flex min-h-48 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-muted/10 text-sm text-muted-foreground">
+                                    当前分组暂无投影渠道
+                                </div>
+                            )}
+                        </div>
                     </div>
                     <DialogFooter>
-                        <Button type="button" variant="outline" className="rounded-2xl" onClick={handleCloseAdvancedSettings} disabled={advancedMutation.isPending}>取消</Button>
-                        <Button type="button" className="rounded-2xl" onClick={handleSaveAdvancedSettings} disabled={advancedMutation.isPending || !editingAdvancedGroup}>
+                        <Button type="button" variant="outline" className="rounded-xl" onClick={handleCloseAdvancedSettings} disabled={advancedMutation.isPending}>取消</Button>
+                        <Button type="button" className="rounded-xl" onClick={handleSaveAdvancedSettings} disabled={advancedMutation.isPending || !editingAdvancedGroup}>
                             {advancedMutation.isPending ? '保存中...' : '保存'}
                         </Button>
                     </DialogFooter>
@@ -2251,9 +2297,11 @@ function SiteAccountPanel({
             </Dialog>
 
             <Dialog open={!!addingManualGroup} onOpenChange={(open) => !open && handleCloseAddManualModels()}>
-                <DialogContent className="sm:max-w-2xl">
+                <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle>添加自定义模型</DialogTitle>
+                        <DialogTitle className="flex items-center gap-2 text-2xl">
+                            添加自定义模型
+                        </DialogTitle>
                         <DialogDescription>
                             批量添加到分组 {addingManualGroup?.group_name || addingManualGroup?.group_key || '-'}。同组已存在的模型不能重复添加。
                         </DialogDescription>
@@ -2281,8 +2329,8 @@ function SiteAccountPanel({
                         </label>
                     </div>
                     <DialogFooter>
-                        <Button type="button" variant="outline" className="rounded-2xl" onClick={handleCloseAddManualModels} disabled={addManualModelsMutation.isPending}>取消</Button>
-                        <Button type="button" className="rounded-2xl" onClick={handleAddManualModels} disabled={addManualModelsMutation.isPending || !addingManualGroup}>
+                        <Button type="button" variant="outline" className="rounded-xl" onClick={handleCloseAddManualModels} disabled={addManualModelsMutation.isPending}>取消</Button>
+                        <Button type="button" className="rounded-xl" onClick={handleAddManualModels} disabled={addManualModelsMutation.isPending || !addingManualGroup}>
                             {addManualModelsMutation.isPending ? '添加中...' : '添加'}
                         </Button>
                     </DialogFooter>
