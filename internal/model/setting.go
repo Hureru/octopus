@@ -9,25 +9,26 @@ import (
 type SettingKey string
 
 const (
-	SettingKeyProxyURL                   SettingKey = "proxy_url"
-	SettingKeyStatsSaveInterval          SettingKey = "stats_save_interval"            // 将统计信息写入数据库的周期(分钟)
-	SettingKeyModelInfoUpdateInterval    SettingKey = "model_info_update_interval"     // 模型信息更新间隔(小时)
-	SettingKeySyncLLMInterval            SettingKey = "sync_llm_interval"              // LLM 同步间隔(小时)
-	SettingKeySiteSyncInterval           SettingKey = "site_sync_interval"             // 站点账号同步间隔(小时)
-	SettingKeySiteCheckinInterval        SettingKey = "site_checkin_interval"          // 站点自动签到间隔(小时)
-	SettingKeyRelayLogKeepPeriod         SettingKey = "relay_log_keep_period"          // 日志保存时间范围(天)
-	SettingKeyRelayLogKeepEnabled        SettingKey = "relay_log_keep_enabled"         // 是否保留历史日志
-	SettingKeyCORSAllowOrigins           SettingKey = "cors_allow_origins"             // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
-	SettingKeyCircuitBreakerThreshold    SettingKey = "circuit_breaker_threshold"      // 熔断触发阈值（连续失败次数）
-	SettingKeyCircuitBreakerCooldown     SettingKey = "circuit_breaker_cooldown"       // 熔断基础冷却时间（秒）
-	SettingKeyCircuitBreakerMaxCooldown  SettingKey = "circuit_breaker_max_cooldown"   // 熔断最大冷却时间（秒），指数退避上限
-	SettingKeyResponsesWSEnabled         SettingKey = "responses_ws_enabled"           // 是否启用 OpenAI Responses WS 上游能力（仅客户端 WS 入站）
-	SettingKeyResponsesWSDefaultMode     SettingKey = "responses_ws_default_mode"      // OpenAI Responses WS 默认模式：off/transform/passthrough
-	SettingKeySSEHeartbeatInterval       SettingKey = "sse_heartbeat_interval"         // SSE 流式心跳间隔（秒），0 表示禁用
-	SettingKeySSEPreStreamHeartbeatDelay SettingKey = "sse_pre_stream_heartbeat_delay" // SSE 上游流建立前心跳首次延迟（秒），0 表示禁用
-	SettingKeyGroupHealthEnabled         SettingKey = "group_health_enabled"           // 是否启用分组健康检查功能
-	SettingKeyJWTSecret                  SettingKey = "jwt_secret"                     // JWT 签名密钥（自动生成）
-	SettingKeyStatsSiteModelBackfilled   SettingKey = "stats_site_model_backfilled"    // 站点渠道小时聚合是否已回填历史日志
+	SettingKeyProxyURL                         SettingKey = "proxy_url"
+	SettingKeyStatsSaveInterval                SettingKey = "stats_save_interval"                  // 将统计信息写入数据库的周期(分钟)
+	SettingKeyModelInfoUpdateInterval          SettingKey = "model_info_update_interval"           // 模型信息更新间隔(小时)
+	SettingKeySyncLLMInterval                  SettingKey = "sync_llm_interval"                    // LLM 同步间隔(小时)
+	SettingKeySiteSyncInterval                 SettingKey = "site_sync_interval"                   // 站点账号同步间隔(小时)
+	SettingKeySiteCheckinInterval              SettingKey = "site_checkin_interval"                // 站点自动签到间隔(小时)
+	SettingKeyRelayLogKeepPeriod               SettingKey = "relay_log_keep_period"                // 日志保存时间范围(天)
+	SettingKeyRelayLogKeepEnabled              SettingKey = "relay_log_keep_enabled"               // 是否保留历史日志
+	SettingKeyCORSAllowOrigins                 SettingKey = "cors_allow_origins"                   // 跨域白名单(逗号分隔, 如 "example.com,example2.com"). 为空不允许跨域, "*"允许所有
+	SettingKeyCircuitBreakerThreshold          SettingKey = "circuit_breaker_threshold"            // 熔断触发阈值（连续失败次数）
+	SettingKeyCircuitBreakerCooldown           SettingKey = "circuit_breaker_cooldown"             // 熔断基础冷却时间（秒）
+	SettingKeyCircuitBreakerMaxCooldown        SettingKey = "circuit_breaker_max_cooldown"         // 熔断最大冷却时间（秒），指数退避上限
+	SettingKeyResponsesWSEnabled               SettingKey = "responses_ws_enabled"                 // 是否启用 OpenAI Responses WS 上游能力（仅客户端 WS 入站）
+	SettingKeyResponsesWSDefaultMode           SettingKey = "responses_ws_default_mode"            // OpenAI Responses WS 默认模式：off/transform/passthrough
+	SettingKeySSEHeartbeatInterval             SettingKey = "sse_heartbeat_interval"               // SSE 流式心跳间隔（秒），0 表示禁用
+	SettingKeySSEPreStreamHeartbeatDelay       SettingKey = "sse_pre_stream_heartbeat_delay"       // SSE 上游流建立前心跳首次延迟（秒），0 表示禁用
+	SettingKeyGroupHealthEnabled               SettingKey = "group_health_enabled"                 // 是否启用分组健康检查功能
+	SettingKeyProjectedChannelAutoGroupEnabled SettingKey = "projected_channel_auto_group_enabled" // 是否强制所有站点投影渠道使用模糊自动分组
+	SettingKeyJWTSecret                        SettingKey = "jwt_secret"                           // JWT 签名密钥（自动生成）
+	SettingKeyStatsSiteModelBackfilled         SettingKey = "stats_site_model_backfilled"          // 站点渠道小时聚合是否已回填历史日志
 )
 
 type Setting struct {
@@ -38,23 +39,24 @@ type Setting struct {
 func DefaultSettings() []Setting {
 	return []Setting{
 		{Key: SettingKeyProxyURL, Value: ""},
-		{Key: SettingKeyStatsSaveInterval, Value: "10"},               // 默认10分钟保存一次统计信息
-		{Key: SettingKeyCORSAllowOrigins, Value: ""},                  // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
-		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},         // 默认24小时更新一次模型信息
-		{Key: SettingKeySyncLLMInterval, Value: "24"},                 // 默认24小时同步一次LLM
-		{Key: SettingKeySiteSyncInterval, Value: "12"},                // 默认12小时同步一次站点账号信息
-		{Key: SettingKeySiteCheckinInterval, Value: "24"},             // 默认24小时自动签到一次
-		{Key: SettingKeyRelayLogKeepPeriod, Value: "7"},               // 默认日志保存7天
-		{Key: SettingKeyRelayLogKeepEnabled, Value: "true"},           // 默认保留历史日志
-		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},          // 默认连续失败5次触发熔断
-		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},          // 默认基础冷却60秒
-		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"},      // 默认最大冷却600秒（10分钟）
-		{Key: SettingKeyResponsesWSEnabled, Value: "false"},           // 默认关闭 OpenAI Responses WS 新路径
-		{Key: SettingKeyResponsesWSDefaultMode, Value: "passthrough"}, // 启用后默认使用协议保真的 passthrough
-		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},             // 默认禁用 SSE 流式心跳
-		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},       // 默认禁用 SSE 上游流建立前心跳
-		{Key: SettingKeyGroupHealthEnabled, Value: "false"},           // 默认不显示/运行分组健康检查，避免打扰主界面
-		{Key: SettingKeyJWTSecret, Value: ""},                         // 为空时自动生成
+		{Key: SettingKeyStatsSaveInterval, Value: "10"},                   // 默认10分钟保存一次统计信息
+		{Key: SettingKeyCORSAllowOrigins, Value: ""},                      // CORS 默认不允许跨域，设置为 "*" 才允许所有来源
+		{Key: SettingKeyModelInfoUpdateInterval, Value: "24"},             // 默认24小时更新一次模型信息
+		{Key: SettingKeySyncLLMInterval, Value: "24"},                     // 默认24小时同步一次LLM
+		{Key: SettingKeySiteSyncInterval, Value: "12"},                    // 默认12小时同步一次站点账号信息
+		{Key: SettingKeySiteCheckinInterval, Value: "24"},                 // 默认24小时自动签到一次
+		{Key: SettingKeyRelayLogKeepPeriod, Value: "7"},                   // 默认日志保存7天
+		{Key: SettingKeyRelayLogKeepEnabled, Value: "true"},               // 默认保留历史日志
+		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},              // 默认连续失败5次触发熔断
+		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},              // 默认基础冷却60秒
+		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"},          // 默认最大冷却600秒（10分钟）
+		{Key: SettingKeyResponsesWSEnabled, Value: "false"},               // 默认关闭 OpenAI Responses WS 新路径
+		{Key: SettingKeyResponsesWSDefaultMode, Value: "passthrough"},     // 启用后默认使用协议保真的 passthrough
+		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},                 // 默认禁用 SSE 流式心跳
+		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},           // 默认禁用 SSE 上游流建立前心跳
+		{Key: SettingKeyGroupHealthEnabled, Value: "false"},               // 默认不显示/运行分组健康检查，避免打扰主界面
+		{Key: SettingKeyProjectedChannelAutoGroupEnabled, Value: "false"}, // 默认不强制站点投影渠道自动分组
+		{Key: SettingKeyJWTSecret, Value: ""},                             // 为空时自动生成
 		{Key: SettingKeyStatsSiteModelBackfilled, Value: "false"},
 	}
 }
@@ -78,7 +80,7 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyProjectedChannelAutoGroupEnabled, SettingKeyStatsSiteModelBackfilled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")
 		}

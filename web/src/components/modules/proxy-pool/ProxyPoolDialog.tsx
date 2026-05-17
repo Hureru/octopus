@@ -149,10 +149,10 @@ function buildReferenceTree(references: ProxyConfigurationReference[]) {
     for (const reference of references) {
         if (reference.type !== 'managed_channel') continue;
         const accountParent = siteAccountRoots.find((node) =>
-            node.reference.site_account_id > 0 && node.reference.site_account_id === reference.site_account_id,
+            (node.reference.site_account_id ?? 0) > 0 && node.reference.site_account_id === reference.site_account_id,
         );
         const siteParent = siteRoots.find((node) =>
-            node.reference.site_id > 0 && node.reference.site_id === reference.site_id,
+            (node.reference.site_id ?? 0) > 0 && node.reference.site_id === reference.site_id,
         );
         const parent = accountParent ?? siteParent;
         if (parent) {

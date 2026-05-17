@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { logger } from '@/lib/logger';
 import type { SitePlatform } from './site';
+import type { AutoGroupType } from './channel';
 
 export type SiteModelRouteType =
     | 'unknown'
@@ -52,6 +53,7 @@ export type SiteModelRouteMetadata = {
 
 export type SiteChannelModel = {
     model_name: string;
+    source: string;
     route_type: SiteModelRouteType;
     route_source: SiteModelRouteSource;
     manual_override: boolean;
@@ -59,6 +61,16 @@ export type SiteChannelModel = {
     projected_channel_id?: number | null;
     route_metadata?: SiteModelRouteMetadata | null;
     history?: SiteModelHistorySummary | null;
+};
+
+export type SiteProjectedChannelSettings = {
+    channel_id: number;
+    channel_name: string;
+    route_type: SiteModelRouteType;
+    auto_group: AutoGroupType;
+    effective_auto_group: AutoGroupType;
+    param_override: string;
+    global_override: boolean;
 };
 
 export type SiteChannelGroup = {
@@ -70,6 +82,7 @@ export type SiteChannelGroup = {
     has_keys: boolean;
     has_projected_channel: boolean;
     projected_channel_ids: number[];
+    projected_channels: SiteProjectedChannelSettings[];
     source_keys: SiteSourceKey[];
     projected_keys: SiteProjectedKey[];
     models: SiteChannelModel[];
@@ -138,8 +151,9 @@ type SiteChannelModelServer = Omit<SiteChannelModel, 'route_type' | 'route_metad
     } | null;
 };
 
-type SiteChannelGroupServer = Omit<SiteChannelGroup, 'models' | 'projected_channel_ids' | 'source_keys' | 'projected_keys'> & {
+type SiteChannelGroupServer = Omit<SiteChannelGroup, 'models' | 'projected_channel_ids' | 'projected_channels' | 'source_keys' | 'projected_keys'> & {
     projected_channel_ids?: number[] | null;
+    projected_channels?: SiteProjectedChannelSettings[] | null;
     source_keys?: SiteSourceKey[] | null;
     projected_keys?: SiteProjectedKey[] | null;
     models?: SiteChannelModelServer[] | null;
@@ -226,13 +240,30 @@ function normalizeSiteModel(model: SiteChannelModelServer): SiteChannelModel {
     };
 }
 
+function normalizeAutoGroup(value: unknown): AutoGroupType {
+    return typeof value === 'number' && value >= 0 && value <= 3 ? value as AutoGroupType : 0 as AutoGroupType;
+}
+
+function normalizeProjectedChannel(channel: Partial<SiteProjectedChannelSettings> | null | undefined): SiteProjectedChannelSettings {
+    return {
+        channel_id: typeof channel?.channel_id === 'number' ? channel.channel_id : 0,
+        channel_name: typeof channel?.channel_name === 'string' ? channel.channel_name : '',
+        route_type: normalizeSiteModelRouteType(channel?.route_type),
+        auto_group: normalizeAutoGroup(channel?.auto_group),
+        effective_auto_group: normalizeAutoGroup(channel?.effective_auto_group),
+        param_override: typeof channel?.param_override === 'string' ? channel.param_override : '',
+        global_override: channel?.global_override === true,
+    };
+}
+
 function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteChannelAccount {
     return {
         ...account,
         groups: (account.groups ?? []).map((group) => ({
             ...group,
             masked_pending_key_count: typeof group.masked_pending_key_count === 'number' ? group.masked_pending_key_count : 0,
-            projected_channel_ids: group.projected_channel_ids ?? [],
+            projected_channel_ids: (group.projected_channel_ids ?? []).filter((id) => typeof id === 'number' && id > 0),
+            projected_channels: (group.projected_channels ?? []).map(normalizeProjectedChannel).filter((channel) => channel.channel_id > 0),
             source_keys: (group.source_keys ?? []).map((key) => ({
                 ...key,
                 token: typeof key.token === 'string' ? key.token : '',
@@ -279,6 +310,27 @@ export type SiteModelDisableUpdateRequest = {
     group_key: string;
     model_name: string;
     disabled: boolean;
+};
+
+export type SiteProjectedChannelSettingsUpdateRequest = {
+    channel_id: number;
+    auto_group: AutoGroupType;
+    param_override: string;
+};
+
+export type SiteManualModelAddEntry = {
+    model_name: string;
+    route_type: SiteModelRouteType;
+};
+
+export type SiteManualModelAddRequest = {
+    group_key: string;
+    models: SiteManualModelAddEntry[];
+};
+
+export type SiteManualModelDeleteRequest = {
+    group_key: string;
+    model_name: string;
 };
 
 export type SiteChannelModelDisabledMutationInput = {
@@ -453,6 +505,63 @@ export function useUpdateAnySiteSourceKeys() {
         },
         onError: (error) => {
             logger.error('site source key update failed:', error);
+        },
+    });
+}
+
+export function useUpdateSiteProjectedChannelSettings(siteId: number, accountId: number) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (payload: SiteProjectedChannelSettingsUpdateRequest[]) =>
+            apiClient.put<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/projected-channel-settings'), payload),
+        onSuccess: (account) => {
+            const normalizedAccount = normalizeSiteChannelAccount(account);
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, siteId, normalizedAccount),
+            );
+            invalidateSiteChannelAndRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site projected channel settings update failed:', error);
+        },
+    });
+}
+
+export function useAddSiteManualModels(siteId: number, accountId: number) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (payload: SiteManualModelAddRequest) =>
+            apiClient.post<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/manual-models'), payload),
+        onSuccess: (account) => {
+            const normalizedAccount = normalizeSiteChannelAccount(account);
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, siteId, normalizedAccount),
+            );
+            invalidateSiteChannelAndRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site manual models add failed:', error);
+        },
+    });
+}
+
+export function useDeleteSiteManualModel(siteId: number, accountId: number) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (payload: SiteManualModelDeleteRequest) =>
+            apiClient.post<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/manual-models/delete'), payload),
+        onSuccess: (account) => {
+            const normalizedAccount = normalizeSiteChannelAccount(account);
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, siteId, normalizedAccount),
+            );
+            invalidateSiteChannelAndRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site manual model delete failed:', error);
         },
     });
 }

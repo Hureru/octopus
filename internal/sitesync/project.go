@@ -170,6 +170,9 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 				bindingMap[bindingKey] = binding
 				bindingChannelByKey[bindingKey] = channelPayload.ID
 				managedChannelIDs = append(managedChannelIDs, channelPayload.ID)
+				if effective := op.EffectiveProjectedChannelAutoGroup(channelPayload); effective != model.AutoGroupTypeNone {
+					op.ChannelAutoGroupWithMode(&channelPayload, effective, ctx)
+				}
 				continue
 			}
 
@@ -192,10 +195,13 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 				}
 				bindingChannelByKey[bindingKey] = channelPayload.ID
 				managedChannelIDs = append(managedChannelIDs, channelPayload.ID)
+				if effective := op.EffectiveProjectedChannelAutoGroup(channelPayload); effective != model.AutoGroupTypeNone {
+					op.ChannelAutoGroupWithMode(&channelPayload, effective, ctx)
+				}
 				continue
 			}
 
-			updateReq := &model.ChannelUpdateRequest{ID: existingChannel.ID, Name: &channelPayload.Name, Type: &channelPayload.Type, Enabled: &channelPayload.Enabled, BaseUrls: &channelPayload.BaseUrls, Model: &channelPayload.Model, CustomModel: &channelPayload.CustomModel, ProxyMode: &channelPayload.ProxyMode, ProxyConfigID: channelPayload.ProxyConfigID, AutoSync: &channelPayload.AutoSync, AutoGroup: &channelPayload.AutoGroup, CustomHeader: &channelPayload.CustomHeader, BypassManagedCheck: true}
+			updateReq := &model.ChannelUpdateRequest{ID: existingChannel.ID, Name: &channelPayload.Name, Type: &channelPayload.Type, Enabled: &channelPayload.Enabled, BaseUrls: &channelPayload.BaseUrls, Model: &channelPayload.Model, CustomModel: &channelPayload.CustomModel, ProxyMode: &channelPayload.ProxyMode, ProxyConfigID: channelPayload.ProxyConfigID, AutoSync: &channelPayload.AutoSync, CustomHeader: &channelPayload.CustomHeader, BypassManagedCheck: true}
 			updateReq.KeysToAdd, updateReq.KeysToUpdate, updateReq.KeysToDelete = diffManagedChannelKeys(existingChannel.Keys, channelPayload.Keys)
 			if _, err := op.ChannelUpdate(updateReq, ctx); err != nil {
 				return nil, fmt.Errorf("failed to update managed channel: %w", err)
@@ -211,6 +217,13 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			}
 			bindingChannelByKey[bindingKey] = existingChannel.ID
 			managedChannelIDs = append(managedChannelIDs, existingChannel.ID)
+			updatedChannel, err := op.ChannelGet(existingChannel.ID, ctx)
+			if err != nil {
+				return nil, err
+			}
+			if effective := op.EffectiveProjectedChannelAutoGroup(*updatedChannel); effective != model.AutoGroupTypeNone {
+				op.ChannelAutoGroupWithMode(updatedChannel, effective, ctx)
+			}
 		}
 	}
 

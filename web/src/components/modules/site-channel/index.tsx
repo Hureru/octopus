@@ -23,10 +23,13 @@ import {
     KeyRound,
     MessageSquare,
     MoreHorizontal,
+    Plus,
     Power,
     RefreshCw,
     Search,
+    Settings,
     SlidersHorizontal,
+    Trash2,
     Waypoints,
     XCircle,
 } from 'lucide-react';
@@ -85,8 +88,11 @@ import {
     type SiteModelRouteType,
     type SiteModelRouteUpdateRequest,
     useCreateSiteChannelKey,
+    useAddSiteManualModels,
+    useDeleteSiteManualModel,
     useResetSiteChannelModelRoutes,
     useSiteChannelList,
+    useUpdateSiteProjectedChannelSettings,
     useUpdateAnySiteSourceKeys,
     useUpdateSiteSourceKeys,
     useUpdateSiteChannelModelDisabled,
@@ -125,6 +131,7 @@ import {
 } from './utils';
 import { useJumpStore, type JumpTarget, type PendingJump, type SiteChannelJumpTarget, isSiteChannelJumpTarget } from '@/stores/jump';
 import { useEnableSiteAccount } from '@/api/endpoints/site';
+import { AutoGroupType } from '@/api/endpoints/channel';
 import {
     DEFAULT_SITE_CHANNEL_PANEL_PREFERENCES,
     type SiteChannelQuickFilter,
@@ -928,6 +935,7 @@ function SiteChannelTableView({
     onSortChange,
     onMoveModel,
     onToggleDisabled,
+    onDeleteManualModel,
     onNavigateToChannel,
     registerModelRef,
 }: {
@@ -945,6 +953,7 @@ function SiteChannelTableView({
     onSortChange: (field: SiteChannelTableSortField) => void;
     onMoveModel: (model: SiteModelView, routeType: SiteModelRouteType) => void;
     onToggleDisabled: (model: SiteModelView) => void;
+    onDeleteManualModel: (model: SiteModelView) => void;
     onNavigateToChannel: (channelId: number) => void;
     registerModelRef: (modelKey: string, node: HTMLElement | null) => void;
 }) {
@@ -1038,7 +1047,12 @@ function SiteChannelTableView({
                                     <div className="flex min-w-0 items-center gap-2">
                                         <ModelAvatar size={18} />
                                         <div className="min-w-0">
-                                            <div className="truncate text-sm font-medium">{model.model_name}</div>
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                                <span className="truncate text-sm font-medium">{model.model_name}</span>
+                                                {model.source === 'manual' ? (
+                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-primary/30 bg-primary/10 text-primary">自定义</Badge>
+                                                ) : null}
+                                            </div>
                                             {!compactMode ? (
                                                 <div className="text-[11px] text-muted-foreground">
                                                     {model.manual_override ? '手动覆盖' : '自动映射'}
@@ -1138,6 +1152,17 @@ function SiteChannelTableView({
                                                 <HistorySummary model={model} />
                                             </HoverCardContent>
                                         </HoverCard>
+                                        {model.source === 'manual' ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => onDeleteManualModel(model)}
+                                                disabled={isPending}
+                                                className="rounded-lg p-1 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                                                title="删除自定义模型"
+                                            >
+                                                <Trash2 className="size-4" />
+                                            </button>
+                                        ) : null}
                                         <button
                                             type="button"
                                             onClick={() => onToggleDisabled(model)}
@@ -1195,12 +1220,19 @@ function SiteAccountPanel({
     const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set());
     const [creatingGroup, setCreatingGroup] = useState<SiteChannelGroup | null>(null);
     const [editingProjectedGroup, setEditingProjectedGroup] = useState<SiteChannelGroup | null>(null);
+    const [editingAdvancedGroup, setEditingAdvancedGroup] = useState<SiteChannelGroup | null>(null);
+    const [selectedAdvancedChannelId, setSelectedAdvancedChannelId] = useState<number | null>(null);
+    const [advancedForm, setAdvancedForm] = useState<Record<number, { auto_group: AutoGroupType; param_override: string }>>({});
+    const [addingManualGroup, setAddingManualGroup] = useState<SiteChannelGroup | null>(null);
+    const [manualModelsInput, setManualModelsInput] = useState('');
+    const [manualModelRouteType, setManualModelRouteType] = useState<SiteModelRouteType>('openai_chat');
     const [sourceKeyForm, setSourceKeyForm] = useState<SiteSourceKeyFormItem[]>([]);
     const [visibleSourceKeyRows, setVisibleSourceKeyRows] = useState<Record<string, boolean>>({});
     const [quickCreateName, setQuickCreateName] = useState('');
     const [highlightedModelKey, setHighlightedModelKey] = useState<string | null>(null);
     const [modelSearchTerm, setModelSearchTerm] = useState('');
     const [bulkMoveTarget, setBulkMoveTarget] = useState<SiteModelRouteType>('openai_chat');
+    const [deletingManualModelKey, setDeletingManualModelKey] = useState<string | null>(null);
     const [displayLimit, setDisplayLimit] = useState(SITE_PANEL_INITIAL_DISPLAY_LIMIT);
     const modelElementRefs = useRef<Map<string, HTMLElement>>(new Map());
     const panelKey = `${siteId}:${account.account_id}`;
@@ -1214,6 +1246,9 @@ function SiteAccountPanel({
 
     const createKeyMutation = useCreateSiteChannelKey(siteId, account.account_id);
     const sourceKeyMutation = useUpdateSiteSourceKeys(siteId, account.account_id);
+    const advancedMutation = useUpdateSiteProjectedChannelSettings(siteId, account.account_id);
+    const addManualModelsMutation = useAddSiteManualModels(siteId, account.account_id);
+    const deleteManualModelMutation = useDeleteSiteManualModel(siteId, account.account_id);
     const routeMutation = useUpdateSiteChannelModelRoutes(siteId, account.account_id);
     const disabledMutation = useUpdateSiteChannelModelDisabled();
     const resetMutation = useResetSiteChannelModelRoutes(siteId, account.account_id);
@@ -1307,7 +1342,7 @@ function SiteAccountPanel({
         () => Array.from(selectedModelKeys).map((key) => visibleModelMap.get(key)).filter((model): model is SiteModelView => !!model),
         [selectedModelKeys, visibleModelMap],
     );
-    const hasPendingChanges = pendingModelKeys.size > 0 || routeMutation.isPending || disabledMutation.isPending;
+    const hasPendingChanges = pendingModelKeys.size > 0 || routeMutation.isPending || disabledMutation.isPending || advancedMutation.isPending || addManualModelsMutation.isPending || deleteManualModelMutation.isPending;
 
     useEffect(() => {
         if (!jumpRequest || jumpRequest.target.kind !== 'site-channel-model') return;
@@ -1501,6 +1536,138 @@ function SiteAccountPanel({
         setEditingProjectedGroup(null);
         setSourceKeyForm([]);
         setVisibleSourceKeyRows({});
+    };
+
+    const handleOpenAdvancedSettings = (group: SiteChannelGroup) => {
+        const form: Record<number, { auto_group: AutoGroupType; param_override: string }> = {};
+        group.projected_channels.forEach((channel) => {
+            form[channel.channel_id] = {
+                auto_group: channel.auto_group,
+                param_override: channel.param_override ?? '',
+            };
+        });
+        setEditingAdvancedGroup(group);
+        setSelectedAdvancedChannelId(group.projected_channels[0]?.channel_id ?? null);
+        setAdvancedForm(form);
+    };
+
+    const handleCloseAdvancedSettings = () => {
+        if (advancedMutation.isPending) return;
+        setEditingAdvancedGroup(null);
+        setSelectedAdvancedChannelId(null);
+        setAdvancedForm({});
+    };
+
+    const handleOpenAddManualModels = (group: SiteChannelGroup) => {
+        setAddingManualGroup(group);
+        setManualModelsInput('');
+        setManualModelRouteType('openai_chat');
+    };
+
+    const handleCloseAddManualModels = () => {
+        if (addManualModelsMutation.isPending) return;
+        setAddingManualGroup(null);
+        setManualModelsInput('');
+    };
+
+    const parseManualModelNames = () => Array.from(new Set(manualModelsInput
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)));
+
+    const handleAddManualModels = () => {
+        if (!addingManualGroup) return;
+        const names = parseManualModelNames();
+        if (names.length === 0) {
+            toast.error('请填写模型名称');
+            return;
+        }
+        const existing = new Set(addingManualGroup.models.map((model) => model.model_name));
+        const duplicated = names.filter((name) => existing.has(name));
+        if (duplicated.length > 0) {
+            toast.error(`模型已存在：${duplicated.join(', ')}`);
+            return;
+        }
+        addManualModelsMutation.mutate({
+            group_key: addingManualGroup.group_key,
+            models: names.map((name) => ({ model_name: name, route_type: manualModelRouteType })),
+        }, {
+            onSuccess: () => {
+                toast.success(`已添加 ${names.length} 个自定义模型`);
+                handleCloseAddManualModels();
+            },
+            onError: (error) => {
+                toast.error(translateSiteError(error, '添加自定义模型失败'));
+            },
+        });
+    };
+
+    const handleDeleteManualModel = (model: SiteModelView) => {
+        if (model.source !== 'manual') return;
+        const modelKey = makeModelKey(model.group_key, model.model_name);
+        if (deletingManualModelKey === modelKey) return;
+        setDeletingManualModelKey(modelKey);
+        deleteManualModelMutation.mutate({ group_key: model.group_key, model_name: model.model_name }, {
+            onSuccess: () => toast.success('自定义模型已删除'),
+            onError: (error) => toast.error(translateSiteError(error, '删除自定义模型失败')),
+            onSettled: () => setDeletingManualModelKey((current) => (current === modelKey ? null : current)),
+        });
+    };
+
+    const handleAdvancedAutoGroupChange = (channelId: number, value: AutoGroupType) => {
+        setAdvancedForm((current) => ({
+            ...current,
+            [channelId]: { ...(current[channelId] ?? { auto_group: AutoGroupType.None, param_override: '' }), auto_group: value },
+        }));
+    };
+
+    const handleAdvancedParamChange = (channelId: number, value: string) => {
+        setAdvancedForm((current) => ({
+            ...current,
+            [channelId]: { ...(current[channelId] ?? { auto_group: AutoGroupType.None, param_override: '' }), param_override: value },
+        }));
+    };
+
+    const validateAdvancedSettings = () => {
+        for (const item of Object.values(advancedForm)) {
+            const value = item.param_override.trim();
+            if (!value) continue;
+            try {
+                const parsed = JSON.parse(value) as unknown;
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                    return false;
+                }
+            } catch {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    const selectedAdvancedChannel = editingAdvancedGroup?.projected_channels.find((channel) => channel.channel_id === selectedAdvancedChannelId)
+        ?? editingAdvancedGroup?.projected_channels[0]
+        ?? null;
+
+    const handleSaveAdvancedSettings = () => {
+        if (!editingAdvancedGroup) return;
+        if (!validateAdvancedSettings()) {
+            toast.error('参数覆盖必须是合法的 JSON 对象');
+            return;
+        }
+        const payload = editingAdvancedGroup.projected_channels.map((channel) => ({
+            channel_id: channel.channel_id,
+            auto_group: advancedForm[channel.channel_id]?.auto_group ?? channel.auto_group,
+            param_override: advancedForm[channel.channel_id]?.param_override?.trim() ?? '',
+        }));
+        advancedMutation.mutate(payload, {
+            onSuccess: () => {
+                toast.success('高级设置已保存');
+                handleCloseAdvancedSettings();
+            },
+            onError: (error) => {
+                toast.error(translateSiteError(error, '保存高级设置失败'));
+            },
+        });
     };
 
     const projectedKeyRowId = (item: SiteSourceKeyFormItem, index: number) => `${item.id ?? 'new'}-${index}`;
@@ -1746,6 +1913,18 @@ function SiteAccountPanel({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 rounded-2xl px-3"
+                            onClick={() => activeGroup && handleOpenAddManualModels(activeGroup)}
+                            disabled={!activeGroup}
+                            title={activeGroup ? undefined : '请先选择具体分组'}
+                        >
+                            <Plus className="size-4" />
+                            添加
+                        </Button>
+
                         <Popover>
                             <PopoverTrigger asChild>
                                 <Button type="button" variant="outline" className="h-8 rounded-2xl px-3">
@@ -1791,6 +1970,18 @@ function SiteAccountPanel({
                                 </div>
                             </PopoverContent>
                         </Popover>
+
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 rounded-2xl px-3"
+                            onClick={() => activeGroup && handleOpenAdvancedSettings(activeGroup)}
+                            disabled={!activeGroup || activeGroup.projected_channels.length === 0}
+                            title={!activeGroup ? '请先选择具体分组' : activeGroup.projected_channels.length === 0 ? '当前分组暂无投影渠道' : undefined}
+                        >
+                            <Settings className="size-4" />
+                            高级
+                        </Button>
 
                         <Popover>
                             <PopoverTrigger asChild>
@@ -2005,6 +2196,152 @@ function SiteAccountPanel({
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={!!editingAdvancedGroup} onOpenChange={(open) => !open && handleCloseAdvancedSettings()}>
+                <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-4xl">
+                    <DialogHeader>
+                        <DialogTitle>站点渠道高级设置</DialogTitle>
+                        <DialogDescription>
+                            配置分组 {editingAdvancedGroup?.group_name || editingAdvancedGroup?.group_key || '-'} 下各投影渠道的自动分组和参数覆盖。自定义 Header 请在站点设置中统一配置。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        {editingAdvancedGroup?.projected_channels.some((channel) => channel.global_override) ? (
+                            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                                全局投影渠道自动分组已开启，当前所有投影渠道会统一使用模糊匹配；这里保存的单独设置会在全局关闭后生效。
+                            </div>
+                        ) : null}
+
+                        <div className="grid gap-4 lg:grid-cols-[16rem_1fr]">
+                            <div className="space-y-2">
+                                <div className="px-1 text-xs font-medium text-muted-foreground">投影渠道</div>
+                                <div className="space-y-2">
+                                    {editingAdvancedGroup?.projected_channels.map((channel) => {
+                                        const active = selectedAdvancedChannel?.channel_id === channel.channel_id;
+                                        return (
+                                            <button
+                                                key={channel.channel_id}
+                                                type="button"
+                                                onClick={() => setSelectedAdvancedChannelId(channel.channel_id)}
+                                                className={cn(
+                                                    'flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition',
+                                                    active
+                                                        ? 'border-primary/30 bg-primary/10 text-foreground'
+                                                        : 'border-border/60 bg-muted/10 hover:bg-muted/40',
+                                                )}
+                                            >
+                                                <div className="min-w-0">
+                                                    <div className="truncate text-sm font-medium">{routeTypeLabel(channel.route_type)}</div>
+                                                    <div className="mt-0.5 truncate text-xs text-muted-foreground">#{channel.channel_id}</div>
+                                                </div>
+                                                {channel.global_override ? (
+                                                    <Badge variant="outline" className="shrink-0 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">全局</Badge>
+                                                ) : null}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {selectedAdvancedChannel ? (() => {
+                                const channel = selectedAdvancedChannel;
+                                const form = advancedForm[channel.channel_id] ?? { auto_group: channel.auto_group, param_override: channel.param_override ?? '' };
+                                return (
+                                    <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-medium text-foreground">{routeTypeLabel(channel.route_type)}</div>
+                                                <div className="mt-1 truncate text-xs text-muted-foreground">#{channel.channel_id} · {channel.channel_name}</div>
+                                            </div>
+                                            {channel.global_override ? (
+                                                <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">全局模糊匹配生效中</Badge>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <span className="text-sm font-medium">自动分组</span>
+                                                <Select value={String(form.auto_group)} onValueChange={(value) => handleAdvancedAutoGroupChange(channel.channel_id, Number(value) as AutoGroupType)}>
+                                                    <SelectTrigger className="w-48 rounded-xl bg-background">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="rounded-xl">
+                                                        <SelectItem value={String(AutoGroupType.None)}>不自动分组</SelectItem>
+                                                        <SelectItem value={String(AutoGroupType.Fuzzy)}>模糊匹配</SelectItem>
+                                                        <SelectItem value={String(AutoGroupType.Exact)}>精确匹配</SelectItem>
+                                                        <SelectItem value={String(AutoGroupType.Regex)}>按分组正则</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            <label className="grid gap-2 text-sm">
+                                                <span className="font-medium">参数覆盖 JSON</span>
+                                                <textarea
+                                                    value={form.param_override}
+                                                    onChange={(event) => handleAdvancedParamChange(channel.channel_id, event.target.value)}
+                                                    placeholder='留空表示清除；非空时必须是 JSON 对象，例如：{"temperature":0.7,"max_tokens":4096}'
+                                                    className="min-h-40 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+                                );
+                            })() : (
+                                <div className="flex min-h-48 items-center justify-center rounded-2xl border border-dashed border-border/70 bg-muted/10 text-sm text-muted-foreground">
+                                    当前分组暂无投影渠道
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" className="rounded-xl" onClick={handleCloseAdvancedSettings} disabled={advancedMutation.isPending}>取消</Button>
+                        <Button type="button" className="rounded-xl" onClick={handleSaveAdvancedSettings} disabled={advancedMutation.isPending || !editingAdvancedGroup}>
+                            {advancedMutation.isPending ? '保存中...' : '保存'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!addingManualGroup} onOpenChange={(open) => !open && handleCloseAddManualModels()}>
+                <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-2xl">
+                            添加自定义模型
+                        </DialogTitle>
+                        <DialogDescription>
+                            批量添加到分组 {addingManualGroup?.group_name || addingManualGroup?.group_key || '-'}。同组已存在的模型不能重复添加。
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <label className="grid gap-1.5 text-xs text-muted-foreground">
+                            模型名称（支持换行或逗号分隔）
+                            <textarea
+                                value={manualModelsInput}
+                                onChange={(event) => setManualModelsInput(event.target.value)}
+                                placeholder={"gpt-4o\ngpt-4.1-mini"}
+                                className="min-h-36 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            />
+                        </label>
+                        <label className="grid gap-1.5 text-xs text-muted-foreground">
+                            端点格式
+                            <Select value={manualModelRouteType} onValueChange={(value) => setManualModelRouteType(value as SiteModelRouteType)}>
+                                <SelectTrigger className="h-10 rounded-xl bg-background"><SelectValue /></SelectTrigger>
+                                <SelectContent className="rounded-xl">
+                                    {SITE_ROUTE_COLUMN_ORDER.map((routeType) => (
+                                        <SelectItem key={routeType} value={routeType}>{routeTypeLabel(routeType)}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </label>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" className="rounded-xl" onClick={handleCloseAddManualModels} disabled={addManualModelsMutation.isPending}>取消</Button>
+                        <Button type="button" className="rounded-xl" onClick={handleAddManualModels} disabled={addManualModelsMutation.isPending || !addingManualGroup}>
+                            {addManualModelsMutation.isPending ? '添加中...' : '添加'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={!!editingProjectedGroup} onOpenChange={(open) => !open && handleCloseProjectedKeys()}>
                 <DialogContent className="max-w-3xl">
                     <DialogHeader>
@@ -2161,6 +2498,7 @@ function SiteAccountPanel({
                         onSortChange={handleSortChange}
                         onMoveModel={(model, nextRouteType) => applyRouteChange([model], nextRouteType)}
                         onToggleDisabled={handleToggleDisabled}
+                        onDeleteManualModel={handleDeleteManualModel}
                         onNavigateToChannel={onNavigateToChannel}
                         registerModelRef={registerModelRef}
                     />

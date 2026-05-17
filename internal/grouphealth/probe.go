@@ -1,9 +1,7 @@
 package grouphealth
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,7 +51,7 @@ func (p *Prober) RunCandidate(ctx context.Context, channel model.Channel, usedKe
 	}
 
 	applyCustomHeaders(request, channel.CustomHeader)
-	if err := applyParamOverride(request, channel.ParamOverride); err != nil {
+	if err := helper.ApplyParamOverride(request, channel.ParamOverride); err != nil {
 		result.ErrorMessage = err.Error()
 		result.DurationMS = time.Since(startedAt).Milliseconds()
 		return result
@@ -181,45 +179,4 @@ func applyCustomHeaders(request *http.Request, headers []model.CustomHeader) {
 		}
 		request.Header.Set(key, header.HeaderValue)
 	}
-}
-
-func applyParamOverride(request *http.Request, paramOverride *string) error {
-	if request == nil || request.Body == nil || paramOverride == nil || strings.TrimSpace(*paramOverride) == "" {
-		return nil
-	}
-
-	body, err := io.ReadAll(request.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read request body: %w", err)
-	}
-
-	var bodyMap map[string]any
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		request.Body = io.NopCloser(bytes.NewReader(body))
-		request.ContentLength = int64(len(body))
-		return nil
-	}
-
-	var override map[string]any
-	if err := json.Unmarshal([]byte(*paramOverride), &override); err != nil {
-		request.Body = io.NopCloser(bytes.NewReader(body))
-		request.ContentLength = int64(len(body))
-		return nil
-	}
-
-	for key, value := range override {
-		bodyMap[key] = value
-	}
-
-	modifiedBody, err := json.Marshal(bodyMap)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request body with param override: %w", err)
-	}
-
-	request.Body = io.NopCloser(bytes.NewReader(modifiedBody))
-	request.ContentLength = int64(len(modifiedBody))
-	request.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(modifiedBody)), nil
-	}
-	return nil
 }

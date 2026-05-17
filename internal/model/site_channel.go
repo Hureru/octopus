@@ -28,17 +28,18 @@ type SiteRouteSummary struct {
 }
 
 type SiteChannelGroup struct {
-	GroupKey              string             `json:"group_key"`
-	GroupName             string             `json:"group_name"`
-	KeyCount              int                `json:"key_count"`
-	EnabledKeyCount       int                `json:"enabled_key_count"`
-	MaskedPendingKeyCount int                `json:"masked_pending_key_count"`
-	HasKeys               bool               `json:"has_keys"`
-	HasProjectedChannel   bool               `json:"has_projected_channel"`
-	ProjectedChannelIDs   []int              `json:"projected_channel_ids"`
-	SourceKeys            []SiteSourceKey    `json:"source_keys,omitempty"`
-	ProjectedKeys         []SiteProjectedKey `json:"projected_keys,omitempty"`
-	Models                []SiteChannelModel `json:"models"`
+	GroupKey              string                         `json:"group_key"`
+	GroupName             string                         `json:"group_name"`
+	KeyCount              int                            `json:"key_count"`
+	EnabledKeyCount       int                            `json:"enabled_key_count"`
+	MaskedPendingKeyCount int                            `json:"masked_pending_key_count"`
+	HasKeys               bool                           `json:"has_keys"`
+	HasProjectedChannel   bool                           `json:"has_projected_channel"`
+	ProjectedChannelIDs   []int                          `json:"projected_channel_ids"`
+	ProjectedChannels     []SiteProjectedChannelSettings `json:"projected_channels,omitempty"`
+	SourceKeys            []SiteSourceKey                `json:"source_keys,omitempty"`
+	ProjectedKeys         []SiteProjectedKey             `json:"projected_keys,omitempty"`
+	Models                []SiteChannelModel             `json:"models"`
 }
 
 type SiteSourceKey struct {
@@ -51,6 +52,16 @@ type SiteSourceKey struct {
 	GroupName   string               `json:"group_name"`
 	ValueStatus SiteTokenValueStatus `json:"value_status"`
 	LastSyncAt  *int64               `json:"last_sync_at,omitempty"`
+}
+
+type SiteProjectedChannelSettings struct {
+	ChannelID      int                `json:"channel_id"`
+	ChannelName    string             `json:"channel_name"`
+	RouteType      SiteModelRouteType `json:"route_type"`
+	AutoGroup      AutoGroupType      `json:"auto_group"`
+	EffectiveGroup AutoGroupType      `json:"effective_auto_group"`
+	ParamOverride  string             `json:"param_override"`
+	GlobalOverride bool               `json:"global_override"`
 }
 
 type SiteProjectedKey struct {
@@ -68,6 +79,7 @@ type SiteProjectedKey struct {
 
 type SiteChannelModel struct {
 	ModelName          string                   `json:"model_name"`
+	Source             string                   `json:"source"`
 	RouteType          SiteModelRouteType       `json:"route_type"`
 	RouteSource        SiteModelRouteSource     `json:"route_source"`
 	ManualOverride     bool                     `json:"manual_override"`
@@ -102,6 +114,27 @@ type SiteModelDisableUpdateRequest struct {
 	GroupKey  string `json:"group_key" binding:"required"`
 	ModelName string `json:"model_name" binding:"required"`
 	Disabled  bool   `json:"disabled"`
+}
+
+type SiteProjectedChannelSettingsUpdateRequest struct {
+	ChannelID     int           `json:"channel_id" binding:"required"`
+	AutoGroup     AutoGroupType `json:"auto_group"`
+	ParamOverride string        `json:"param_override"`
+}
+
+type SiteManualModelAddRequest struct {
+	GroupKey string                    `json:"group_key" binding:"required"`
+	Models   []SiteManualModelAddEntry `json:"models" binding:"required"`
+}
+
+type SiteManualModelAddEntry struct {
+	ModelName string             `json:"model_name" binding:"required"`
+	RouteType SiteModelRouteType `json:"route_type" binding:"required"`
+}
+
+type SiteManualModelDeleteRequest struct {
+	GroupKey  string `json:"group_key" binding:"required"`
+	ModelName string `json:"model_name" binding:"required"`
 }
 
 type SiteChannelKeyCreateRequest struct {

@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -15,8 +17,11 @@ import (
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
 )
+
+var projectedAutoGroupQueued atomic.Bool
 
 func init() {
 	router.NewGroupRouter("/api/v1/setting").
@@ -85,6 +90,17 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+	case model.SettingKeyProjectedChannelAutoGroupEnabled:
+		if setting.Value == "true" && projectedAutoGroupQueued.CompareAndSwap(false, true) {
+			safe.Go("projected-channel-auto-group-all", func() {
+				defer projectedAutoGroupQueued.Store(false)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				if err := op.AutoGroupAllProjectedChannels(ctx); err != nil {
+					log.Warnf("failed to auto group all projected channels: %v", err)
+				}
+			})
+		}
 	}
 	resp.Success(c, setting)
 }
