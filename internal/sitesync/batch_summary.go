@@ -108,11 +108,15 @@ type siteBatchGroupKey struct {
 	Reason   SiteBatchReason
 }
 
-func newSiteBatchSummary(phase SiteBatchPhase, opts SiteBatchOptions, total int) *SiteBatchSummary {
-	trigger := opts.Trigger
+func normalizedSiteBatchTrigger(trigger SiteBatchTrigger) SiteBatchTrigger {
 	if trigger == "" {
-		trigger = SiteBatchTriggerScheduled
+		return SiteBatchTriggerScheduled
 	}
+	return trigger
+}
+
+func newSiteBatchSummary(phase SiteBatchPhase, opts SiteBatchOptions, total int) *SiteBatchSummary {
+	trigger := normalizedSiteBatchTrigger(opts.Trigger)
 	return &SiteBatchSummary{
 		Phase:         phase,
 		Trigger:       trigger,

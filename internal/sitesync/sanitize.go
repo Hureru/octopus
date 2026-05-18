@@ -2,6 +2,7 @@ package sitesync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -66,10 +67,10 @@ func siteBatchReason(err error) SiteBatchReason {
 	if err == nil {
 		return SiteBatchReasonUnknown
 	}
-	if err == context.Canceled {
+	if errors.Is(err, context.Canceled) {
 		return SiteBatchReasonContextCanceled
 	}
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return SiteBatchReasonContextDeadlineExceeded
 	}
 	code := apperror.Code(err)
@@ -216,6 +217,11 @@ func truncateSiteStatusMessage(text string) string {
 	if text == "" || utf8.RuneCountInString(text) <= maxSiteStatusMessageRunes {
 		return text
 	}
+	suffix := "...[truncated]"
+	available := maxSiteStatusMessageRunes - utf8.RuneCountInString(suffix)
+	if available < 0 {
+		available = 0
+	}
 	runes := []rune(text)
-	return string(runes[:maxSiteStatusMessageRunes]) + "...[truncated]"
+	return string(runes[:available]) + suffix
 }

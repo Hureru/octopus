@@ -111,10 +111,11 @@ func SyncAll(ctx context.Context) {
 }
 
 func SyncAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatchSummary {
+	trigger := normalizedSiteBatchTrigger(opts.Trigger)
 	sites, err := op.SiteList(ctx)
 	if err != nil {
-		log.Warnw("sitesync.sync.list_failed", "trigger", string(opts.Trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
-		return SiteBatchSummary{Phase: SiteBatchPhaseSync, Trigger: opts.Trigger}
+		log.Warnw("sitesync.sync.list_failed", "trigger", string(trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
+		return SiteBatchSummary{Phase: SiteBatchPhaseSync, Trigger: trigger}
 	}
 	return syncBatchAccounts(ctx, eligibleSyncAccounts(sites), opts)
 }
@@ -167,10 +168,11 @@ func CheckinAll(ctx context.Context) {
 }
 
 func CheckinAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatchSummary {
+	trigger := normalizedSiteBatchTrigger(opts.Trigger)
 	sites, err := op.SiteList(ctx)
 	if err != nil {
-		log.Warnw("sitesync.checkin.list_failed", "trigger", string(opts.Trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
-		return SiteBatchSummary{Phase: SiteBatchPhaseCheckin, Trigger: opts.Trigger}
+		log.Warnw("sitesync.checkin.list_failed", "trigger", string(trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
+		return SiteBatchSummary{Phase: SiteBatchPhaseCheckin, Trigger: trigger}
 	}
 	items := eligibleCheckinAccounts(sites)
 	summary := newSiteBatchSummary(SiteBatchPhaseCheckin, opts, len(items))

@@ -50,7 +50,11 @@ func Logger(cfg LoggerConfig) gin.HandlerFunc {
 		case latency >= cfg.SlowThreshold:
 			log.Warnw("http.slow", fields...)
 		default:
-			log.Debugw("http.request", fields...)
+			if cfg.Enabled {
+				log.Infow("http.request", fields...)
+			} else {
+				log.Debugw("http.request", fields...)
+			}
 		}
 	}
 }
