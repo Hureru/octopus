@@ -687,7 +687,9 @@ func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, m
 			"message": message,
 		},
 	}
-	writeWSEvent(ctx, conn, errEvent)
+	if err := writeWSEvent(ctx, conn, errEvent); err != nil {
+		log.Debugf("ws error event write failed: %v", err)
+	}
 }
 
 func finalChannelKey(attempts []dbmodel.ChannelAttempt) (int, int) {
