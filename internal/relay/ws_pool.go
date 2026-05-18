@@ -76,6 +76,9 @@ type wsChannelHealth struct {
 type wsPool struct {
 	mu    sync.Mutex
 	conns map[wsPoolKey]*wsPoolEntry
+	// inFlight tracks Dial calls in progress per poolKey so concurrent cold
+	// starts cannot exceed wsMaxConnsPerPoolKey.
+	inFlight map[wsPoolKey]int
 
 	// Track channels that don't support WS to avoid repeated attempts
 	unsupported   map[int]time.Time
@@ -92,6 +95,7 @@ type wsPool struct {
 func newWSPool() *wsPool {
 	p := &wsPool{
 		conns:       make(map[wsPoolKey]*wsPoolEntry),
+		inFlight:    make(map[wsPoolKey]int),
 		unsupported: make(map[int]time.Time),
 		health:      make(map[int]*wsChannelHealth),
 		stopCh:      make(chan struct{}),
@@ -219,11 +223,38 @@ func (p *wsPool) RemoveConn(pc *pooledConn) {
 func (p *wsPool) pooledConnCount(key wsPoolKey) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	entry := p.conns[key]
-	if entry == nil {
-		return 0
+	count := 0
+	if entry := p.conns[key]; entry != nil {
+		count = len(entry.conns)
 	}
-	return len(entry.conns)
+	return count + p.inFlight[key]
+}
+
+// reserveDial atomically checks the per-key cap and increments the in-flight
+// counter. Returns true when a dial is allowed; the caller must invoke
+// releaseDial exactly once after the dial completes (success or failure).
+func (p *wsPool) reserveDial(key wsPoolKey) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pooled := 0
+	if entry := p.conns[key]; entry != nil {
+		pooled = len(entry.conns)
+	}
+	if pooled+p.inFlight[key] >= wsMaxConnsPerPoolKey {
+		return false
+	}
+	p.inFlight[key]++
+	return true
+}
+
+func (p *wsPool) releaseDial(key wsPoolKey) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c := p.inFlight[key]; c > 1 {
+		p.inFlight[key] = c - 1
+	} else {
+		delete(p.inFlight, key)
+	}
 }
 
 func (p *wsPool) preflightPreferredConnLocked(key wsPoolKey, entry *wsPoolEntry, pc *pooledConn, now time.Time) bool {
@@ -349,17 +380,22 @@ func wsFailureBackoff(failures int) time.Duration {
 	}
 }
 
-// Dial creates a new WebSocket connection to the upstream.
+// Dial creates a new WebSocket connection to the upstream. The caller must
+// hold an in-flight reservation from reserveDial. On success the reservation
+// is converted into a pooled entry atomically so concurrent dials see the new
+// connection in pooledConnCount. On failure the reservation is released.
 func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Channel, baseUrl string, headers http.Header) (*pooledConn, bool, error) {
 	// Build WS URL
 	wsURL, err := buildWSURL(baseUrl)
 	if err != nil {
+		p.releaseDial(key)
 		return nil, false, fmt.Errorf("invalid base url for ws: %w", err)
 	}
 
 	// Get HTTP client for proxy settings
 	httpClient, err := helper.ChannelHTTPClientWithContext(ctx, channel)
 	if err != nil {
+		p.releaseDial(key)
 		return nil, false, fmt.Errorf("failed to get http client: %w", err)
 	}
 	httpClient = cloneHTTPClientForWSDial(httpClient)
@@ -374,6 +410,7 @@ func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Chann
 
 	conn, response, err := websocket.Dial(dialCtx, wsURL, opts)
 	if err != nil {
+		p.releaseDial(key)
 		return nil, shouldMarkWSUnsupported(response, err), err
 	}
 
@@ -389,6 +426,23 @@ func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Chann
 		queue:     1,
 		poolKey:   key,
 	}
+
+	// Atomically convert the in-flight reservation into a pooled entry so
+	// pooledConnCount stays consistent across concurrent dials. The pc is
+	// busy=true so GetPreferred won't return it until Put toggles it.
+	p.mu.Lock()
+	if c := p.inFlight[key]; c > 1 {
+		p.inFlight[key] = c - 1
+	} else {
+		delete(p.inFlight, key)
+	}
+	entry := p.conns[key]
+	if entry == nil {
+		entry = &wsPoolEntry{}
+		p.conns[key] = entry
+	}
+	entry.conns = append(entry.conns, pc)
+	p.mu.Unlock()
 
 	return pc, false, nil
 }
@@ -668,6 +722,9 @@ func (p *wsPool) Close() {
 			}
 			delete(p.conns, key)
 		}
+		for key := range p.inFlight {
+			delete(p.inFlight, key)
+		}
 	})
 }
 
@@ -693,19 +750,15 @@ func TryUpstreamWSWithPreference(ctx context.Context, channel *dbmodel.Channel, 
 	poolKey := newWSPoolKey(channel.ID, keyID, headers)
 	redial := len(forceRedial) > 0 && forceRedial[0]
 
-	if redial {
-		wsUpstreamPool.Remove(poolKey)
-	}
-
 	deadline := time.Now().Add(wsAcquireTimeout)
-	redial = false
 	for {
 		if !redial {
 			if pc := wsUpstreamPool.GetPreferred(poolKey, preferredConnID); pc != nil {
 				return pc
 			}
 		}
-		if wsUpstreamPool.pooledConnCount(poolKey) < wsMaxConnsPerPoolKey {
+		redial = false
+		if wsUpstreamPool.reserveDial(poolKey) {
 			pc, unsupported, err := wsUpstreamPool.Dial(ctx, poolKey, channel, baseUrl, headers)
 			if err != nil {
 				if unsupported {

@@ -80,7 +80,9 @@ func Init() {
 	})
 
 	Register(TaskWSAffinityCleanup, 10*time.Minute, false, func() {
-		deleted, err := op.WSResponseAffinityCleanup(context.Background(), time.Now())
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		deleted, err := op.WSResponseAffinityCleanup(ctx, time.Now())
 		if err != nil {
 			log.Warnf("ws response affinity cleanup failed: %v", err)
 			return

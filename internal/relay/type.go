@@ -24,6 +24,7 @@ import (
 var maxSSEEventSize = 32 * 1024 * 1024
 
 const wsWriteTimeout = 10 * time.Second
+const wsPassthroughDrainTimeout = 5 * time.Second
 
 func init() {
 	if raw := strings.TrimSpace(os.Getenv(strings.ToUpper(conf.APP_NAME) + "_RELAY_MAX_SSE_EVENT_SIZE")); raw != "" {

@@ -188,8 +188,9 @@ func (ra *relayAttempt) handleWSPassthroughStream(ctx context.Context, pc *poole
 	stats := &wsPassthroughStats{}
 	firstEvent := true
 	dropDownstream := false
+	readCtx := ctx
 	for {
-		msgType, data, err := pc.conn.Read(ctx)
+		msgType, data, err := pc.conn.Read(readCtx)
 		if err != nil {
 			closeStatus := websocket.CloseStatus(err)
 			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway {
@@ -205,6 +206,14 @@ func (ra *relayAttempt) handleWSPassthroughStream(ctx context.Context, pc *poole
 		}
 		observeWSPassthroughEvent(stats, data)
 		if stats.Error != nil {
+			if !dropDownstream {
+				out := ra.rewriteWSPassthroughDownstreamModel(data)
+				if writeErr := writeWSPassthroughDownstream(ctx, writer, out); writeErr != nil {
+					log.Debugf("ws passthrough: failed to forward upstream error frame downstream (channel=%d, key=%d): %v", ra.channel.ID, ra.usedKey.ID, writeErr)
+				} else {
+					ra.streamPayloadWritten.Store(true)
+				}
+			}
 			return stats, stats.Error
 		}
 		if !dropDownstream {
@@ -214,6 +223,11 @@ func (ra *relayAttempt) handleWSPassthroughStream(ctx context.Context, pc *poole
 					log.Debugf("ws passthrough downstream write failed; draining upstream (channel=%d, key=%d): %v", ra.channel.ID, ra.usedKey.ID, writeErr)
 					dropDownstream = true
 					ra.streamPayloadWritten.Store(true)
+					if readCtx == ctx && isClientCancellation(ctx, writeErr) {
+						drainCtx, drainCancel := context.WithTimeout(context.Background(), wsPassthroughDrainTimeout)
+						defer drainCancel()
+						readCtx = drainCtx
+					}
 					continue
 				}
 				return stats, writeErr

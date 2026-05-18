@@ -27,9 +27,21 @@ func bindWSResponseConn(responseID, connID string, ttl time.Duration) {
 	if ttl <= 0 {
 		ttl = wsResponseConnAffinityTTL
 	}
+	now := time.Now()
 	wsResponseConnState.mu.Lock()
-	wsResponseConnState.bindings[responseID] = wsResponseConnBinding{connID: connID, expiresAt: time.Now().Add(ttl)}
+	pruneExpiredWSResponseConnBindingsLocked(now)
+	wsResponseConnState.bindings[responseID] = wsResponseConnBinding{connID: connID, expiresAt: now.Add(ttl)}
 	wsResponseConnState.mu.Unlock()
+}
+
+// pruneExpiredWSResponseConnBindingsLocked deletes any binding whose expiresAt
+// has passed. Must be called with wsResponseConnState.mu held for writing.
+func pruneExpiredWSResponseConnBindingsLocked(now time.Time) {
+	for id, b := range wsResponseConnState.bindings {
+		if !b.expiresAt.IsZero() && now.After(b.expiresAt) {
+			delete(wsResponseConnState.bindings, id)
+		}
+	}
 }
 
 func getWSResponseConn(responseID string) (string, bool) {
