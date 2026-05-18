@@ -58,7 +58,10 @@ func getWSResponseConn(responseID string) (string, bool) {
 	}
 	if !binding.expiresAt.IsZero() && now.After(binding.expiresAt) {
 		wsResponseConnState.mu.Lock()
-		delete(wsResponseConnState.bindings, responseID)
+		if current, exists := wsResponseConnState.bindings[responseID]; exists &&
+			!current.expiresAt.IsZero() && now.After(current.expiresAt) {
+			delete(wsResponseConnState.bindings, responseID)
+		}
 		wsResponseConnState.mu.Unlock()
 		return "", false
 	}
