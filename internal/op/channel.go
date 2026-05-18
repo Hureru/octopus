@@ -250,6 +250,10 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "custom_header")
 		updates.CustomHeader = *req.CustomHeader
 	}
+	if req.WSMode != nil {
+		selectFields = append(selectFields, "ws_mode")
+		updates.WSMode = req.WSMode.Normalize()
+	}
 	if req.ParamOverride != nil {
 		selectFields = append(selectFields, "param_override")
 		updates.ParamOverride = req.ParamOverride

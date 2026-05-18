@@ -613,9 +613,6 @@ func TestDefaultWSModeForRequest(t *testing.T) {
 func TestHandlerStopsFailoverWhenContinuationTransportIsUnavailable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
-	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
-		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
-	}
 
 	var secondHits atomic.Int32
 	firstChannel := &model.Channel{
@@ -864,12 +861,9 @@ func TestForwardViaWSReconnectsContinuationAfterReadFailureBeforeFirstEvent(t *t
 	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Header, channel, channel.Keys[0].ChannelKey)))
 }
 
-func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
+func TestForwardDoesNotUseWSForFreshHTTPIngress(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
-	if err := op.SettingSetString(model.SettingKeyRelayWSUpgradeEnabled, "true"); err != nil {
-		t.Fatalf("SettingSetString relay ws upgrade failed: %v", err)
-	}
 
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
@@ -920,8 +914,49 @@ func TestForwardFallsBackToHTTPWithWSDowngradeRecorded(t *testing.T) {
 	if statusCode != http.StatusOK {
 		t.Fatalf("expected downgrade request to succeed via http, got %d", statusCode)
 	}
-	if req.metrics.WSRecovery == nil || *req.metrics.WSRecovery != model.RelayLogWSRecoveryDowngrade {
-		t.Fatalf("expected ws downgrade recovery to be recorded, got %#v", req.metrics.WSRecovery)
+	if req.metrics.UsedWS {
+		t.Fatalf("expected fresh HTTP ingress to avoid upstream websocket")
+	}
+}
+
+func TestForwardViaHTTPClearsDefaultGoUserAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	var seenUserAgent atomic.Pointer[string]
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua := r.Header.Get("User-Agent")
+		seenUserAgent.Store(&ua)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_ua","object":"response","created":1,"model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-http-ua",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: server.URL + "/v1"}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "ua-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	internalReq := &transformerModel.InternalLLMRequest{Model: "gpt-4o", Stream: boolPtr(false), RawAPIFormat: transformerModel.APIFormatOpenAIResponse}
+	req := &relayRequest{c: c, inAdapter: inbound.Get(inbound.InboundTypeOpenAIResponse), internalRequest: internalReq, metrics: NewRelayMetrics(1, "gpt-4o", nil, internalReq), apiKeyID: 1, requestModel: "gpt-4o"}
+	ra := &relayAttempt{relayRequest: req, outAdapter: outbound.Get(channel.Type), channel: channel, usedKey: channel.Keys[0]}
+
+	statusCode, err := ra.forwardViaHTTP(context.Background())
+	if err != nil || statusCode != http.StatusOK {
+		t.Fatalf("expected http request to succeed status=%d err=%v", statusCode, err)
+	}
+	if got := seenUserAgent.Load(); got == nil || *got != "" {
+		t.Fatalf("expected empty user-agent to suppress Go default, got %#v", got)
 	}
 }
 
@@ -1407,6 +1442,8 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	}
 	balancer.Reset()
 	resetWSConversationStateStore()
+	resetWSResponseConnStateForTest()
+	resetWSAffinityStoreForTest()
 	resetWSUpstreamPool()
 
 	dbPath := filepath.Join(t.TempDir(), "octopus-relay-test.db")
@@ -1419,6 +1456,8 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	t.Cleanup(func() {
 		balancer.Reset()
 		resetWSConversationStateStore()
+		resetWSResponseConnStateForTest()
+		resetWSAffinityStoreForTest()
 		resetWSUpstreamPool()
 		_ = dbpkg.Close()
 	})

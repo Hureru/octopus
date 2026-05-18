@@ -23,6 +23,9 @@ import (
 // 默认 32MB，可通过环境变量 OCTOPUS_RELAY_MAX_SSE_EVENT_SIZE 覆盖。
 var maxSSEEventSize = 32 * 1024 * 1024
 
+const wsWriteTimeout = 10 * time.Second
+const wsPassthroughDrainTimeout = 5 * time.Second
+
 func init() {
 	if raw := strings.TrimSpace(os.Getenv(strings.ToUpper(conf.APP_NAME) + "_RELAY_MAX_SSE_EVENT_SIZE")); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
@@ -88,6 +91,8 @@ type relayRequest struct {
 	metrics         *RelayMetrics
 	apiKeyID        int
 	requestModel    string
+	groupID         int
+	groupSessionTTL int
 	iter            *balancer.Iterator
 
 	// rawBody 保存客户端原始请求 body，用于同格式（如 Anthropic→Anthropic）直通转发时

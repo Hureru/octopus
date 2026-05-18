@@ -21,7 +21,8 @@ const (
 	SettingKeyCircuitBreakerThreshold          SettingKey = "circuit_breaker_threshold"            // 熔断触发阈值（连续失败次数）
 	SettingKeyCircuitBreakerCooldown           SettingKey = "circuit_breaker_cooldown"             // 熔断基础冷却时间（秒）
 	SettingKeyCircuitBreakerMaxCooldown        SettingKey = "circuit_breaker_max_cooldown"         // 熔断最大冷却时间（秒），指数退避上限
-	SettingKeyRelayWSUpgradeEnabled            SettingKey = "relay_ws_upgrade_enabled"             // 是否主动尝试WS上游连接（双向降级）
+	SettingKeyResponsesWSEnabled               SettingKey = "responses_ws_enabled"                 // 是否启用 OpenAI Responses WS 上游能力（仅客户端 WS 入站）
+	SettingKeyResponsesWSDefaultMode           SettingKey = "responses_ws_default_mode"            // OpenAI Responses WS 默认模式：off/transform/passthrough
 	SettingKeySSEHeartbeatInterval             SettingKey = "sse_heartbeat_interval"               // SSE 流式心跳间隔（秒），0 表示禁用
 	SettingKeySSEPreStreamHeartbeatDelay       SettingKey = "sse_pre_stream_heartbeat_delay"       // SSE 上游流建立前心跳首次延迟（秒），0 表示禁用
 	SettingKeyGroupHealthEnabled               SettingKey = "group_health_enabled"                 // 是否启用分组健康检查功能
@@ -49,7 +50,8 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},              // 默认连续失败5次触发熔断
 		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},              // 默认基础冷却60秒
 		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"},          // 默认最大冷却600秒（10分钟）
-		{Key: SettingKeyRelayWSUpgradeEnabled, Value: "false"},            // 默认关闭主动WS上游升级
+		{Key: SettingKeyResponsesWSEnabled, Value: "false"},               // 默认关闭 OpenAI Responses WS 新路径
+		{Key: SettingKeyResponsesWSDefaultMode, Value: "passthrough"},     // 启用后默认使用协议保真的 passthrough
 		{Key: SettingKeySSEHeartbeatInterval, Value: "0"},                 // 默认禁用 SSE 流式心跳
 		{Key: SettingKeySSEPreStreamHeartbeatDelay, Value: "0"},           // 默认禁用 SSE 上游流建立前心跳
 		{Key: SettingKeyGroupHealthEnabled, Value: "false"},               // 默认不显示/运行分组健康检查，避免打扰主界面
@@ -78,11 +80,18 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyRelayWSUpgradeEnabled, SettingKeyGroupHealthEnabled, SettingKeyProjectedChannelAutoGroupEnabled, SettingKeyStatsSiteModelBackfilled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyProjectedChannelAutoGroupEnabled, SettingKeyStatsSiteModelBackfilled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")
 		}
 		return nil
+	case SettingKeyResponsesWSDefaultMode:
+		switch s.Value {
+		case "off", "transform", "passthrough":
+			return nil
+		default:
+			return fmt.Errorf("setting value must be one of off, transform, passthrough")
+		}
 	case SettingKeyProxyURL:
 		if s.Value == "" {
 			return nil

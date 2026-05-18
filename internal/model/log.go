@@ -23,13 +23,21 @@ type ChannelAttempt struct {
 	Msg          string        `json:"msg,omitempty"`
 }
 
-// RelayLogWSMode 表示本次上游 WebSocket 的使用方式。
+// RelayLogWSMode 表示本次上游 WebSocket 的会话/恢复模式。
 type RelayLogWSMode string
 
 const (
 	RelayLogWSModeFresh        RelayLogWSMode = "fresh"        // 新建 WS 会话
 	RelayLogWSModeContinuation RelayLogWSMode = "continuation" // 直接续传上游会话
 	RelayLogWSModeReplay       RelayLogWSMode = "replay"       // 续传失败后回放上下文
+)
+
+// RelayLogWSExecMode 表示本次上游 WebSocket 的事件处理方式。
+type RelayLogWSExecMode string
+
+const (
+	RelayLogWSExecModePassthrough RelayLogWSExecMode = "passthrough" // 原生 WS 事件直通
+	RelayLogWSExecModeTransform   RelayLogWSExecMode = "transform"   // 经内部 transformer 管线转换
 )
 
 // RelayLogWSRecovery 表示本次会话在执行过程中触发的恢复动作。
@@ -64,6 +72,7 @@ type RelayLog struct {
 	Attempts             []ChannelAttempt    `json:"attempts" gorm:"serializer:json"`          // 所有尝试记录
 	TotalAttempts        int                 `json:"total_attempts"`                           // 总尝试次数
 	UsedWS               bool                `json:"used_ws" gorm:"default:false"`             // 是否使用了上游WebSocket
-	WSMode               *RelayLogWSMode     `json:"ws_mode,omitempty"`                        // 上游 WebSocket 模式
+	WSMode               *RelayLogWSMode     `json:"ws_mode,omitempty"`                        // 上游 WebSocket 会话模式
+	WSExecMode           *RelayLogWSExecMode `json:"ws_exec_mode,omitempty"`                   // 上游 WebSocket 事件处理方式
 	WSRecovery           *RelayLogWSRecovery `json:"ws_recovery,omitempty"`                    // 本次请求触发的恢复动作
 }

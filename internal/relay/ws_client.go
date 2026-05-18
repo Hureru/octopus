@@ -140,8 +140,21 @@ func processWSResponseCreate(
 	}
 	rewriteWSPreviousResponseID(reqBody, conversationState)
 	preferredSticky := wsConversationStateToSticky(conversationState)
+	if preferredSticky == nil && requestedPreviousResponseID != "" {
+		if group, err := op.GroupGetEnabledMap(requestModel, ctx); err == nil {
+			scope := wsAffinityScope{APIKeyID: apiKeyID, GroupID: group.ID, RequestModel: requestModel, ResponseID: requestedPreviousResponseID}
+			if entry, ok := getWSAffinityStore().Get(ctx, scope); ok {
+				preferredSticky = &balancer.SessionEntry{ChannelID: entry.ChannelID, ChannelKeyID: entry.ChannelKeyID, Timestamp: time.Now()}
+				log.Debugf("ws response affinity hit (apikey=%d, group=%d, request_model=%s, previous_response_id=%s, channel=%d, key=%d)",
+					apiKeyID, group.ID, requestModel, requestedPreviousResponseID, entry.ChannelID, entry.ChannelKeyID)
+			}
+		}
+	}
 
-	// Check for generate: false (warmup)
+	// Check for generate: false (warmup). Codex-style clients use this as a
+	// prewarm probe and do not expect a synthetic completed response turn.
+	// Acknowledging it locally caused some clients to wait forever for a normal
+	// response lifecycle. Prime the upstream pool best-effort, then stay silent.
 	if genRaw, ok := reqBody["generate"]; ok {
 		var generate bool
 		if json.Unmarshal(genRaw, &generate) == nil && !generate {
@@ -150,16 +163,6 @@ func processWSResponseCreate(
 			} else {
 				log.Infof("ws warmup ready (apikey=%d)", apiKeyID)
 			}
-			delete(reqBody, "generate")
-			writeWSEvent(ctx, conn, map[string]interface{}{
-				"type": "response.created",
-				"response": map[string]interface{}{
-					"object": "response",
-					"id":     fmt.Sprintf("resp_warmup_%d", time.Now().UnixNano()),
-					"status": "completed",
-					"output": []interface{}{},
-				},
-			})
 			return conversationState
 		}
 		delete(reqBody, "generate")
@@ -191,10 +194,14 @@ func processWSResponseCreate(
 		preferredSticky = nil
 	}
 	executionRequest := originalRequest
-	if conversationState != nil && continuationRequested && conversationState.ShouldUseLocalReplay(originalRequest) {
-		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		if replayedRequest != nil {
-			executionRequest = replayedRequest
+	if conversationState != nil && continuationRequested {
+		if conversationState.ShouldUseNativeContinuation(originalRequest) {
+			log.Debugf("ws relay using native continuation (apikey=%d, request_model=%s, previous_response_id=%s)", apiKeyID, requestModel, currentPreviousResponseID(originalRequest))
+		} else if conversationState.ShouldUseLocalReplay(originalRequest) {
+			replayedRequest := conversationState.BuildReplayRequest(originalRequest)
+			if replayedRequest != nil {
+				executionRequest = replayedRequest
+			}
 		}
 	}
 
@@ -428,6 +435,8 @@ func newWSRelayRequest(
 		metrics:         NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest),
 		apiKeyID:        apiKeyID,
 		requestModel:    requestModel,
+		groupID:         group.ID,
+		groupSessionTTL: group.SessionKeepTime,
 		iter:            iter,
 		streamWriter:    NewWSStreamWriter(ctx, conn),
 	}, &group, nil
@@ -678,15 +687,9 @@ func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, m
 			"message": message,
 		},
 	}
-	writeWSEvent(ctx, conn, errEvent)
-}
-
-func writeWSEvent(ctx context.Context, conn *websocket.Conn, event interface{}) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return
+	if err := writeWSEvent(ctx, conn, errEvent); err != nil {
+		log.Debugf("ws error event write failed: %v", err)
 	}
-	conn.Write(ctx, websocket.MessageText, data)
 }
 
 func finalChannelKey(attempts []dbmodel.ChannelAttempt) (int, int) {

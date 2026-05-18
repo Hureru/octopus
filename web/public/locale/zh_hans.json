@@ -167,9 +167,18 @@
             "hint": "为空禁止跨域，* 允许所有",
             "example": "只允许指定域名: https://example.com,https://example2.com"
         },
-        "wsUpgrade": {
-            "label": "主动 WebSocket 上游升级",
-            "description": "启用后无论客户端协议都主动尝试 WS 上游连接，禁用则跟随客户端协议"
+        "responsesWS": {
+            "enabled": {
+                "label": "OpenAI Responses WebSocket",
+                "description": "为客户端 WebSocket /v1/responses 入站启用上游 WebSocket，默认关闭。"
+            },
+            "defaultMode": {
+                "label": "Responses WS 默认模式",
+                "description": "OpenAI Responses 渠道的默认上游 WS 模式，可被渠道级设置覆盖。",
+                "passthrough": "直通",
+                "transform": "转换",
+                "off": "关闭"
+            }
         },
         "sseHeartbeat": {
             "label": "SSE 流式心跳间隔（秒）",
@@ -491,12 +500,16 @@
             "ws": "WS",
             "wsContinuation": "续传",
             "wsReplay": "回放",
+            "wsPassthrough": "直通",
+            "wsTransform": "转换",
             "wsReconnect": "重连恢复",
             "wsReplayRecovery": "回放恢复",
             "wsDowngrade": "降级",
             "wsFreshHint": "本次请求走了上游 WebSocket 新会话。",
             "wsContinuationHint": "本次请求直接续上了上游 WebSocket 会话。",
             "wsReplayHint": "本次请求走了上游 WebSocket，但为了恢复上下文回放了历史内容。",
+            "wsPassthroughHint": "上游 WebSocket 事件原样直通下游，未经过内部 transformer 管线。",
+            "wsTransformHint": "上游 WebSocket 事件经过内部 transformer 管线处理。",
             "wsReconnectHint": "本次请求原本的上游 WebSocket 链路已断开，重新建立连接后恢复成功。",
             "wsReplayRecoveryHint": "本次请求先尝试续传失败，随后自动回放历史内容恢复了上下文，并建立了新的续传锚点。",
             "wsDowngradeHint": "本次请求原本尝试走上游 WebSocket，但因上游不可用已自动降级为 HTTP。",
@@ -602,6 +615,11 @@
             "autoGroupFuzzy": "模糊匹配",
             "autoGroupExact": "准确匹配",
             "autoGroupRegex": "正则匹配",
+            "wsMode": "Responses WS 模式",
+            "wsModeInherit": "跟随全局",
+            "wsModePassthrough": "直通",
+            "wsModeTransform": "转换",
+            "wsModeOff": "关闭",
             "matchRegex": "匹配正则",
             "matchRegexPlaceholder": "可选：用于匹配请求模型名称的正则表达式",
             "remark": "备注"

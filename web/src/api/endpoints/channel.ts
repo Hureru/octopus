@@ -26,6 +26,8 @@ export enum AutoGroupType {
     Regex = 3,  // 正则匹配
 }
 
+export type ChannelWSMode = 'inherit' | 'off' | 'passthrough' | 'transform';
+
 export type BaseUrl = {
     url: string;
     delay: number;
@@ -71,6 +73,7 @@ export type Channel = {
     auto_sync: boolean;
     auto_group: AutoGroupType;
     custom_header: CustomHeader[];
+    ws_mode: ChannelWSMode;
     param_override?: string | null;
     match_regex?: string | null;
     managed: boolean;
@@ -101,6 +104,7 @@ export type CreateChannelRequest = {
     auto_sync?: boolean;
     auto_group?: AutoGroupType;
     custom_header?: CustomHeader[];
+    ws_mode?: ChannelWSMode;
     param_override?: string | null;
     match_regex?: string | null;
 };
@@ -121,6 +125,7 @@ export type UpdateChannelRequest = {
     auto_sync?: boolean;
     auto_group?: AutoGroupType;
     custom_header?: CustomHeader[];
+    ws_mode?: ChannelWSMode;
     param_override?: string | null;
     match_regex?: string | null;
     // keys diff
@@ -163,6 +168,7 @@ export function useChannelList() {
                 managed_source: item.managed_source ?? null,
                 base_urls: item.base_urls ?? [],
                 custom_header: item.custom_header ?? [],
+                ws_mode: item.ws_mode ?? 'inherit',
                 keys: item.keys ?? [],
                 proxy_mode: item.proxy_mode ?? 'direct',
                 proxy_config_id: item.proxy_config_id ?? null,

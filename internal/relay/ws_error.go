@@ -20,6 +20,18 @@ type wsPublicError struct {
 
 func classifyWSPublicError(err error, statusCode int) (wsPublicError, bool) {
 	message := relayErrorMessage(err)
+	var wsErr *wsUpstreamEventError
+	if errors.As(err, &wsErr) && wsErr != nil {
+		if wsErr.Status > 0 {
+			statusCode = wsErr.Status
+		}
+		if wsErr.Code != "" {
+			message += " " + strings.ToLower(wsErr.Code)
+		}
+		if wsErr.Type != "" {
+			message += " " + strings.ToLower(wsErr.Type)
+		}
+	}
 	switch {
 	case needsConversationRestart(message):
 		return wsPublicError{
@@ -33,6 +45,24 @@ func classifyWSPublicError(err error, statusCode int) (wsPublicError, bool) {
 			Status:  http.StatusServiceUnavailable,
 			Code:    "no_available_account",
 			Message: "上游暂无可用账号，请稍后重试",
+		}, true
+	case isUpstreamRateLimitError(message):
+		return wsPublicError{
+			Status:  http.StatusTooManyRequests,
+			Code:    "upstream_rate_limited",
+			Message: "上游限流，请稍后重试",
+		}, true
+	case isUpstreamContextLimitError(message):
+		return wsPublicError{
+			Status:  http.StatusBadRequest,
+			Code:    "context_length_exceeded",
+			Message: "请求上下文超过上游限制，请缩短对话后重试",
+		}, true
+	case isUpstreamQuotaError(message):
+		return wsPublicError{
+			Status:  http.StatusServiceUnavailable,
+			Code:    "upstream_quota_exceeded",
+			Message: "上游额度不足或不可用，请稍后重试",
 		}, true
 	case isBlockedInvalidRequestError(message):
 		return wsPublicError{
@@ -119,6 +149,26 @@ func isNoAvailableAccountError(message string) bool {
 
 func isBlockedInvalidRequestError(message string) bool {
 	return strings.Contains(message, "blocked_invalid_request")
+}
+
+func isUpstreamRateLimitError(message string) bool {
+	return strings.Contains(message, "rate_limit_exceeded") ||
+		strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "too many requests") ||
+		strings.Contains(message, "status=429") ||
+		strings.Contains(message, "status 429")
+}
+
+func isUpstreamContextLimitError(message string) bool {
+	return strings.Contains(message, "context_length_exceeded") ||
+		strings.Contains(message, "maximum context length") ||
+		strings.Contains(message, "context window")
+}
+
+func isUpstreamQuotaError(message string) bool {
+	return strings.Contains(message, "insufficient_quota") ||
+		strings.Contains(message, "quota exceeded") ||
+		strings.Contains(message, "billing") && strings.Contains(message, "hard limit")
 }
 
 func requiresUpstreamWSContinuation(req *transformerModel.InternalLLMRequest) bool {

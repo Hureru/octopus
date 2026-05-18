@@ -8,7 +8,7 @@ import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 import { useTheme } from 'next-themes';
-import { type RelayLog, type RelayLogWSMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
+import { type RelayLog, type RelayLogWSMode, type RelayLogWSExecMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -184,6 +184,25 @@ function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean
     }
 }
 
+function getWSExecBadgeMeta(mode: RelayLogWSExecMode | null | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
+    switch (mode) {
+        case 'passthrough':
+            return {
+                label: t('wsPassthrough'),
+                className: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
+                description: t('wsPassthroughHint'),
+            };
+        case 'transform':
+            return {
+                label: t('wsTransform'),
+                className: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300',
+                description: t('wsTransformHint'),
+            };
+        default:
+            return null;
+    }
+}
+
 function getWSRecoveryBadgeMeta(recovery: RelayLogWSRecovery | null | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
     switch (recovery) {
         case 'reconnect':
@@ -310,9 +329,10 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
 function WSModeBadge({ log }: { log: RelayLog }) {
     const t = useTranslations('log.card');
     const modeMeta = getWSBadgeMeta(log.ws_mode, log.used_ws, t);
+    const execMeta = getWSExecBadgeMeta(log.ws_exec_mode, t);
     const recoveryMeta = getWSRecoveryBadgeMeta(log.ws_recovery, t);
 
-    if (!modeMeta && !recoveryMeta) return null;
+    if (!modeMeta && !execMeta && !recoveryMeta) return null;
 
     return (
         <div className="flex items-center gap-1.5 shrink-0">
@@ -328,6 +348,20 @@ function WSModeBadge({ log }: { log: RelayLog }) {
                         </Badge>
                     </TooltipTrigger>
                     <TooltipContent>{modeMeta.description}</TooltipContent>
+                </Tooltip>
+            ) : null}
+            {execMeta ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Badge
+                            variant="secondary"
+                            className={cn('shrink-0 gap-1 px-1.5 py-0 text-xs', execMeta.className)}
+                        >
+                            <Link className="size-3.5 shrink-0" />
+                            {execMeta.label}
+                        </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>{execMeta.description}</TooltipContent>
                 </Tooltip>
             ) : null}
             {recoveryMeta ? (
