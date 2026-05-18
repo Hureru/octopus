@@ -161,6 +161,7 @@ func embeddedHTMLSummaryForStatus(text string) string {
 	}
 	prefix := strings.TrimSpace(text[:idx])
 	prefix = stripControlCharacters(maskSensitiveSiteText(prefix))
+	prefix = strings.TrimSpace(multiWhitespacePattern.ReplaceAllString(prefix, " "))
 	summary := summarizeHTMLForStatus(text[idx:])
 	if prefix == "" {
 		return summary
