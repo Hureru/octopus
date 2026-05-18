@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
@@ -133,7 +134,7 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 	for iter.Next() {
 		select {
 		case <-ctx.Done():
-			log.Infof("request context canceled, stopping retry")
+			log.Debugf("request context canceled, stopping retry")
 			metrics.Save(ctx, false, context.Canceled, iter.Attempts())
 			return
 		default:
@@ -171,7 +172,7 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 			continue
 		}
 
-		log.Infof("images request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t, stream=%t)",
+		log.Debugf("images request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t, stream=%t)",
 			requestModel, group.Mode, channel.Name, item.ModelName,
 			iter.Index()+1, iter.Len(), iter.IsSticky(), stream)
 
@@ -309,11 +310,27 @@ func (m *imagesRelayMetrics) Save(ctx context.Context, success bool, err error, 
 	op.StatsChannelUpdate(channelID, globalStats)
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 
-	log.Infof("images relay complete: model=%s, channel=%d(%s), success=%t, duration=%dms, input_token=%d, output_token=%d, input_cost=%f, output_cost=%f, total_cost=%f, attempts=%d",
-		m.RequestModel, channelID, channelName, success, duration.Milliseconds(),
-		m.Stats.InputToken, m.Stats.OutputToken,
-		m.Stats.InputCost, m.Stats.OutputCost, m.Stats.InputCost+m.Stats.OutputCost,
-		len(attempts))
+	if conf.AppConfig.Log.Relay.Summary || !success {
+		fields := []interface{}{
+			"model", m.RequestModel,
+			"actual_model", m.ActualModel,
+			"channel_id", channelID,
+			"channel", channelName,
+			"success", success,
+			"duration_ms", duration.Milliseconds(),
+			"input_token", m.Stats.InputToken,
+			"output_token", m.Stats.OutputToken,
+			"input_cost", m.Stats.InputCost,
+			"output_cost", m.Stats.OutputCost,
+			"total_cost", m.Stats.InputCost + m.Stats.OutputCost,
+			"attempts", len(attempts),
+		}
+		if success {
+			log.Infow("relay.images.complete", fields...)
+		} else {
+			log.Warnw("relay.images.complete", fields...)
+		}
+	}
 
 	m.saveLog(ctx, err, duration, attempts, channelID, channelName)
 }

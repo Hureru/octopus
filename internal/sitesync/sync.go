@@ -8,7 +8,6 @@ import (
 
 	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
-	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 func isAlreadyCheckedInMessage(message string) bool {
@@ -167,11 +166,9 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, firstManagedPlatformUserID(account))
-	prices, priceErr := fetchPricing(ctx, siteRecord, account, accessToken, groups)
-	if priceErr != nil {
-		log.Warnf("site pricing fetch skipped (account=%d): %v", account.ID, priceErr)
-	}
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, prices: prices, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: buildSyncSnapshotMessage(groupResults)}, nil
+	prices, priceWarnings := fetchPricingWithWarnings(ctx, siteRecord, account, accessToken, groups)
+	status, message := applySyncWarnings(status, buildSyncSnapshotMessage(groupResults), priceWarnings)
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, prices: prices, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: message, warnings: priceWarnings}, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {

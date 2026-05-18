@@ -2,45 +2,92 @@ package log
 
 import (
 	"os"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var Logger *zap.SugaredLogger
-var atomicLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
-var consoleEncoder = zapcore.EncoderConfig{
-	TimeKey:       "time",
-	LevelKey:      "level",
-	MessageKey:    "msg",
-	CallerKey:     "caller",
-	StacktraceKey: "stacktrace",
-	EncodeLevel:   zapcore.CapitalLevelEncoder,
-	EncodeTime:    zapcore.RFC3339TimeEncoder,
-	EncodeCaller:  zapcore.ShortCallerEncoder,
+type Config struct {
+	Level           string
+	Format          string
+	Caller          bool
+	StacktraceLevel string
 }
 
+var Logger *zap.SugaredLogger
+var atomicLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
+
 func init() {
-	core := zapcore.NewCore(
-		zapcore.NewConsoleEncoder(consoleEncoder),
-		zapcore.AddSync(os.Stdout),
-		atomicLevel,
-	)
-	opts := []zap.Option{
-		zap.AddCaller(),
-		zap.AddCallerSkip(1),
-		zap.AddStacktrace(zap.ErrorLevel),
+	Configure(Config{Level: "info", Format: "console", Caller: true, StacktraceLevel: "error"})
+}
+
+func Configure(cfg Config) {
+	if strings.TrimSpace(cfg.Level) == "" {
+		cfg.Level = atomicLevel.Level().String()
+	}
+	if strings.TrimSpace(cfg.Format) == "" {
+		cfg.Format = "console"
+	}
+	if strings.TrimSpace(cfg.StacktraceLevel) == "" {
+		cfg.StacktraceLevel = "error"
+	}
+	SetLevel(cfg.Level)
+
+	encoderConfig := zapcore.EncoderConfig{
+		TimeKey:        "time",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		MessageKey:     "msg",
+		CallerKey:      "caller",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	var encoder zapcore.Encoder
+	if strings.EqualFold(cfg.Format, "json") {
+		encoderConfig.EncodeTime = zapcore.RFC3339NanoTimeEncoder
+		encoder = zapcore.NewJSONEncoder(encoderConfig)
+	} else {
+		encoderConfig.EncodeTime = shortConsoleTimeEncoder
+		encoder = zapcore.NewConsoleEncoder(encoderConfig)
+	}
+
+	core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), atomicLevel)
+	opts := []zap.Option{zap.AddCallerSkip(1)}
+	if cfg.Caller {
+		opts = append(opts, zap.AddCaller())
+	}
+	if stackLevel, ok := parseLevel(cfg.StacktraceLevel); ok {
+		opts = append(opts, zap.AddStacktrace(stackLevel))
 	}
 	Logger = zap.New(core, opts...).Sugar()
 }
 
-func SetLevel(level string) {
+func shortConsoleTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(t.Format("15:04:05.000"))
+}
+
+func parseLevel(level string) (zapcore.Level, bool) {
 	var lvl zapcore.Level
-	err := lvl.UnmarshalText([]byte(level))
-	if err != nil {
-		return
+	if err := lvl.UnmarshalText([]byte(strings.TrimSpace(level))); err != nil {
+		return zapcore.InfoLevel, false
 	}
-	atomicLevel.SetLevel(lvl)
+	return lvl, true
+}
+
+func SetLevel(level string) {
+	if lvl, ok := parseLevel(level); ok {
+		atomicLevel.SetLevel(lvl)
+	}
+}
+
+func IsDebugEnabled() bool {
+	return atomicLevel.Enabled(zapcore.DebugLevel)
 }
 
 func Infof(template string, args ...interface{}) {

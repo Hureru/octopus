@@ -133,7 +133,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	for iter.Next() {
 		select {
 		case <-c.Request.Context().Done():
-			log.Infof("request context canceled, stopping retry")
+			log.Debugf("request context canceled, stopping retry")
 			metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
 			return
 		default:
@@ -182,7 +182,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		// 设置实际模型
 		internalRequest.Model = item.ModelName
 
-		log.Infof("request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t)",
+		log.Debugf("request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t)",
 			requestModel, group.Mode, channel.Name, item.ModelName,
 			iter.Index()+1, iter.Len(), iter.IsSticky())
 
@@ -219,7 +219,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 					retryNum, maxSameChannelRetries, channel.Name, delay)
 				select {
 				case <-c.Request.Context().Done():
-					log.Infof("request context canceled during retry backoff")
+					log.Debugf("request context canceled during retry backoff")
 					metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
 					return
 				case <-time.After(delay):
@@ -471,7 +471,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		return -1, nil // WS not available
 	}
 
-	log.Infof("using upstream WebSocket for channel %s (key=%d)", ra.channel.Name, ra.usedKey.ID)
+	log.Debugf("using upstream WebSocket for channel %s (key=%d)", ra.channel.Name, ra.usedKey.ID)
 	log.Debugf("upstream WS selected (channel=%s, key=%d, continuation=%t, previous_response_id=%s)",
 		ra.channel.Name, ra.usedKey.ID, continuation, currentPreviousResponseID(ra.internalRequest))
 
@@ -662,7 +662,7 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 			if isLocalRelayBudgetExceeded(ctx, contextError(ctx)) {
 				return contextError(ctx)
 			}
-			log.Infof("client disconnected during ws stream")
+			log.Debugf("client disconnected during ws stream")
 			return nil
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds) on ws stream, switching channel", ra.firstTokenTimeOutSec)
@@ -676,7 +676,7 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 				if firstToken {
 					return fmt.Errorf("ws stream ended before first event")
 				}
-				log.Infof("ws stream end")
+				log.Debugf("ws stream end")
 				return nil
 			}
 			if r.err != nil {
@@ -684,7 +684,7 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 					if firstToken {
 						return fmt.Errorf("ws stream ended before first event")
 					}
-					log.Infof("ws stream end")
+					log.Debugf("ws stream end")
 					return nil
 				}
 				return fmt.Errorf("ws stream read error: %w", r.err)
@@ -970,7 +970,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			if isLocalRelayBudgetExceeded(ctx, err) {
 				return err
 			}
-			log.Infof("client disconnected, stopping stream: written=%t first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), !firstToken, time.Since(ra.metrics.StartTime))
+			log.Debugf("client disconnected, stopping stream: written=%t first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), !firstToken, time.Since(ra.metrics.StartTime))
 			return err
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
@@ -982,7 +982,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			}
 		case r, ok := <-results:
 			if !ok {
-				log.Infof("stream end")
+				log.Debugf("stream end")
 				return nil
 			}
 			if r.err != nil {
@@ -1280,7 +1280,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 			if isLocalRelayBudgetExceeded(ctx, err) {
 				return err
 			}
-			log.Infof("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
+			log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
 			if rawStream.Len() > 0 {
 				ra.collectOpenAIResponsesPassthroughMetrics(context.Background(), rawStream.Bytes())
 			}
@@ -1296,13 +1296,13 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 		case r, ok := <-results:
 			if !ok {
 				ra.collectOpenAIResponsesPassthroughMetrics(ctx, rawStream.Bytes())
-				log.Infof("stream end")
+				log.Debugf("stream end")
 				return nil
 			}
 			if r.err != nil {
 				if r.err == io.EOF {
 					ra.collectOpenAIResponsesPassthroughMetrics(ctx, rawStream.Bytes())
-					log.Infof("stream end")
+					log.Debugf("stream end")
 					return nil
 				}
 				log.Warnf("failed to read event: %v", r.err)
@@ -1565,7 +1565,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			if isLocalRelayBudgetExceeded(ctx, err) {
 				return err
 			}
-			log.Infof("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
+			log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
 			if rawStream.Len() > 0 {
 				ra.collectAnthropicPassthroughMetrics(context.Background(), rawStream.Bytes())
 				ra.collectResponse()
@@ -1583,14 +1583,14 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			if !ok {
 				ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
 				ra.collectResponse()
-				log.Infof("stream end")
+				log.Debugf("stream end")
 				return nil
 			}
 			if r.err != nil {
 				if r.err == io.EOF {
 					ra.collectAnthropicPassthroughMetrics(ctx, rawStream.Bytes())
 					ra.collectResponse()
-					log.Infof("stream end")
+					log.Debugf("stream end")
 					return nil
 				}
 				log.Warnf("failed to read event: %v", r.err)

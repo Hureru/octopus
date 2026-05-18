@@ -15,6 +15,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	sitesvc "github.com/bestruirui/octopus/internal/site"
+	"github.com/bestruirui/octopus/internal/sitesync"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
@@ -81,15 +82,12 @@ func importAllAPIHub(c *gin.Context) {
 		return
 	}
 
-	for _, accountID := range syncAccountIDs {
-		accountID := accountID
+	if len(syncAccountIDs) > 0 {
+		ids := append([]int(nil), syncAccountIDs...)
 		safe.Go("site-import-sync", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
-			_, syncErr := sitesvc.SyncAccount(ctx, accountID)
-			if syncErr != nil {
-				log.Warnf("failed to sync imported all api hub account %d: %v", accountID, syncErr)
-			}
+			sitesvc.SyncAccountsWithOptions(ctx, ids, sitesync.SiteBatchOptions{Trigger: sitesync.SiteBatchTriggerImport})
 		})
 	}
 
@@ -266,7 +264,7 @@ func createSiteAccount(c *gin.Context) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
 			if _, err := sitesvc.SyncAccount(ctx, accountID); err != nil {
-				log.Warnf("background SyncAccount failed (account=%d): %v", accountID, err)
+				log.Debugf("background SyncAccount failed (account=%d): %v", accountID, err)
 			}
 		})
 	}
@@ -300,7 +298,7 @@ func updateSiteAccount(c *gin.Context) {
 		}
 		if autoSync {
 			if _, err := sitesvc.SyncAccount(ctx, accountID); err != nil {
-				log.Warnf("background SyncAccount failed (account=%d): %v", accountID, err)
+				log.Debugf("background SyncAccount failed (account=%d): %v", accountID, err)
 			}
 		}
 	})
@@ -367,7 +365,7 @@ func checkinSiteAccount(c *gin.Context) {
 	}
 	result, err := sitesvc.CheckinAccount(c.Request.Context(), idNum)
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, err)
 		return
 	}
 	resp.Success(c, result)
@@ -375,14 +373,14 @@ func checkinSiteAccount(c *gin.Context) {
 
 func syncAllSiteAccounts(c *gin.Context) {
 	safe.Go("site-sync-all", func() {
-		sitesvc.SyncAll(context.Background())
+		sitesvc.SyncAllWithOptions(context.Background(), sitesync.SiteBatchOptions{Trigger: sitesync.SiteBatchTriggerManual})
 	})
 	resp.Success(c, nil)
 }
 
 func checkinAllSiteAccounts(c *gin.Context) {
 	safe.Go("site-checkin-all", func() {
-		sitesvc.CheckinAll(context.Background())
+		sitesvc.CheckinAllWithOptions(context.Background(), sitesync.SiteBatchOptions{Trigger: sitesync.SiteBatchTriggerManual})
 	})
 	resp.Success(c, nil)
 }
