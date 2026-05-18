@@ -762,10 +762,10 @@ func TryUpstreamWSWithPreference(ctx context.Context, channel *dbmodel.Channel, 
 			pc, unsupported, err := wsUpstreamPool.Dial(ctx, poolKey, channel, baseUrl, headers)
 			if err != nil {
 				if unsupported {
-					log.Infof("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)
+					log.Debugf("upstream WS dial failed for channel %d, marking unsupported: %v", channel.ID, err)
 					wsUpstreamPool.MarkUnsupported(channel.ID)
 				} else {
-					log.Infof("upstream WS dial failed for channel %d: %v", channel.ID, err)
+					log.Debugf("upstream WS dial failed for channel %d: %v", channel.ID, err)
 					wsUpstreamPool.RecordWSFailure(channel.ID)
 				}
 				return nil

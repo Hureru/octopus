@@ -27,8 +27,20 @@ func SyncAll(ctx context.Context) {
 	sitesync.SyncAll(ctx)
 }
 
+func SyncAllWithOptions(ctx context.Context, opts sitesync.SiteBatchOptions) sitesync.SiteBatchSummary {
+	return sitesync.SyncAllWithOptions(ctx, opts)
+}
+
+func SyncAccountsWithOptions(ctx context.Context, accountIDs []int, opts sitesync.SiteBatchOptions) sitesync.SiteBatchSummary {
+	return sitesync.SyncAccountsWithOptions(ctx, accountIDs, opts)
+}
+
 func CheckinAll(ctx context.Context) {
 	sitesync.CheckinAll(ctx)
+}
+
+func CheckinAllWithOptions(ctx context.Context, opts sitesync.SiteBatchOptions) sitesync.SiteBatchSummary {
+	return sitesync.CheckinAllWithOptions(ctx, opts)
 }
 
 func RefreshAccountRandomCheckinSchedule(ctx context.Context, accountID int) error {

@@ -23,30 +23,36 @@ type syncSnapshot struct {
 	balanceUsed  float64
 	todayIncome  float64
 	message      string
+	warnings     []siteSyncWarning
+}
+
+type siteBatchAccount struct {
+	site    *model.Site
+	account *model.SiteAccount
 }
 
 func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, error) {
 	siteRecord, account, err := loadSiteAccount(ctx, accountID)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeSiteError(err)
 	}
 
 	snapshot, err := syncAccountState(ctx, siteRecord, account)
 	if err != nil {
-		updateErr := updateAccountSyncState(ctx, account.ID, model.SiteExecutionStatusFailed, err.Error(), "")
+		updateErr := updateAccountSyncState(ctx, account.ID, model.SiteExecutionStatusFailed, sanitizeSiteStatusMessage(err), "")
 		if updateErr != nil {
 			log.Warnf("failed to update site account sync state (account=%d): %v", account.ID, updateErr)
 		}
-		return nil, err
+		return nil, sanitizeSiteError(err)
 	}
 
 	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
-		return nil, err
+		return nil, sanitizeSiteError(err)
 	}
 
 	channelIDs, err := ProjectAccount(ctx, account.ID)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeSiteError(err)
 	}
 
 	modelNames := make([]string, 0, len(snapshot.models))
@@ -66,14 +72,14 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		ManagedChannels: channelIDs,
 		Models:          modelNames,
 		GroupResults:    exportSiteSyncGroupResults(snapshot.groupResults),
-		Message:         snapshot.message,
+		Message:         sanitizeSiteStatusText(snapshot.message),
 	}, nil
 }
 
 func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResult, error) {
 	siteRecord, account, err := loadSiteAccount(ctx, accountID)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeSiteError(err)
 	}
 
 	result, resolvedAccessToken, err := checkinAccountState(ctx, siteRecord, account)
@@ -83,87 +89,192 @@ func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResul
 		if strings.Contains(lowered, "not supported") || strings.Contains(lowered, "not found") {
 			status = model.SiteExecutionStatusSkipped
 		}
-		updateErr := updateAccountCheckinState(ctx, account, status, err.Error(), false, resolvedAccessToken)
+		message := sanitizeSiteStatusMessage(err)
+		updateErr := updateAccountCheckinState(ctx, account, status, message, false, resolvedAccessToken)
 		if updateErr != nil {
-			return nil, updateErr
+			return nil, sanitizeSiteError(updateErr)
 		}
-		return &model.SiteCheckinResult{AccountID: account.ID, SiteID: siteRecord.ID, Status: status, Message: err.Error()}, nil
+		return &model.SiteCheckinResult{AccountID: account.ID, SiteID: siteRecord.ID, Status: status, Message: message}, nil
 	}
 
 	result.AccountID = account.ID
 	result.SiteID = siteRecord.ID
+	result.Message = sanitizeSiteStatusText(result.Message)
 	if err := updateAccountCheckinState(ctx, account, result.Status, result.Message, result.Status == model.SiteExecutionStatusSuccess, resolvedAccessToken); err != nil {
-		return nil, err
+		return nil, sanitizeSiteError(err)
 	}
 	return result, nil
 }
 
 func SyncAll(ctx context.Context) {
+	SyncAllWithOptions(ctx, SiteBatchOptions{Trigger: SiteBatchTriggerScheduled})
+}
+
+func SyncAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatchSummary {
 	sites, err := op.SiteList(ctx)
 	if err != nil {
-		log.Warnf("failed to list sites for sync: %v", err)
-		return
+		log.Warnw("sitesync.sync.list_failed", "trigger", string(opts.Trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
+		return SiteBatchSummary{Phase: SiteBatchPhaseSync, Trigger: opts.Trigger}
 	}
-	for _, siteRecord := range sites {
-		if !siteRecord.Enabled {
+	return syncBatchAccounts(ctx, eligibleSyncAccounts(sites), opts)
+}
+
+func SyncAccountsWithOptions(ctx context.Context, accountIDs []int, opts SiteBatchOptions) SiteBatchSummary {
+	items := make([]siteBatchAccount, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		siteRecord, account, err := loadSiteAccount(ctx, accountID)
+		if err != nil {
+			log.Debugf("site import sync account load failed (account=%d): %v", accountID, sanitizeSiteStatusMessage(err))
 			continue
 		}
-		for _, account := range siteRecord.Accounts {
-			if !account.Enabled || !account.AutoSync {
-				continue
-			}
-			if !waitSiteBatchInterval(ctx, 500*time.Millisecond) {
-				return
-			}
-			if _, err := SyncAccount(ctx, account.ID); err != nil {
-				log.Warnf("site account sync failed (account=%d): %v", account.ID, err)
-				if IsCloudflareProtectionError(err) {
-					waitSiteCloudflareRetryAfter(ctx, siteRecord.ID, account.ID, err)
-					break
-				}
-			}
+		if siteRecord == nil || account == nil || !siteRecord.Enabled || !account.Enabled {
+			continue
 		}
+		items = append(items, siteBatchAccount{site: siteRecord, account: account})
 	}
+	return syncBatchAccounts(ctx, items, opts)
+}
+
+func syncBatchAccounts(ctx context.Context, items []siteBatchAccount, opts SiteBatchOptions) SiteBatchSummary {
+	// Site batch logging intentionally aggregates account-level business failures.
+	// Individual account messages are stored on the account status; console logs
+	// stay aggregated to avoid leaking upstream HTML and overwhelming operators.
+	summary := newSiteBatchSummary(SiteBatchPhaseSync, opts, len(items))
+	defer summary.emitLog()
+	for i := 0; i < len(items); i++ {
+		item := items[i]
+		if !waitSiteBatchInterval(ctx, 500*time.Millisecond) {
+			summary.markCanceled(ctx.Err())
+			recordBatchCanceledSkips(summary, items[i:])
+			return *summary
+		}
+		result, err := SyncAccount(ctx, item.account.ID)
+		if err != nil {
+			summary.recordFailure(item.site.ID, item.site.Platform, item.account.ID, err)
+			if IsCloudflareProtectionError(err) || siteBatchReason(err) == SiteBatchReasonCloudflareProtection {
+				i = recordCloudflareSkipsAndWait(ctx, summary, items, i, CloudflareRetryAfter(err))
+			}
+			continue
+		}
+		warnings := accountSyncWarnings(result)
+		summary.recordResult(item.site.ID, item.site.Platform, item.account.ID, result.Status, result.Message, warnings)
+	}
+	return *summary
 }
 
 func CheckinAll(ctx context.Context) {
+	CheckinAllWithOptions(ctx, SiteBatchOptions{Trigger: SiteBatchTriggerScheduled})
+}
+
+func CheckinAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatchSummary {
 	sites, err := op.SiteList(ctx)
 	if err != nil {
-		log.Warnf("failed to list sites for checkin: %v", err)
-		return
+		log.Warnw("sitesync.checkin.list_failed", "trigger", string(opts.Trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
+		return SiteBatchSummary{Phase: SiteBatchPhaseCheckin, Trigger: opts.Trigger}
 	}
+	items := eligibleCheckinAccounts(sites)
+	summary := newSiteBatchSummary(SiteBatchPhaseCheckin, opts, len(items))
+	defer summary.emitLog()
 	now := time.Now()
-	for _, siteRecord := range sites {
+	for i := 0; i < len(items); i++ {
+		item := items[i]
+		if item.account.RandomCheckin {
+			nextAt, scheduleErr := ensureRandomCheckinSchedule(ctx, item.account, now)
+			if scheduleErr != nil {
+				summary.recordFailure(item.site.ID, item.site.Platform, item.account.ID, sanitizeSiteError(scheduleErr))
+				continue
+			}
+			if nextAt != nil && now.Before(*nextAt) {
+				summary.recordSkip(item.site.ID, item.site.Platform, SiteBatchReasonScheduledLater, 1)
+				continue
+			}
+		}
+		if !waitSiteBatchInterval(ctx, 500*time.Millisecond) {
+			summary.markCanceled(ctx.Err())
+			recordBatchCanceledSkips(summary, items[i:])
+			return *summary
+		}
+		result, err := CheckinAccount(ctx, item.account.ID)
+		if err != nil {
+			summary.recordFailure(item.site.ID, item.site.Platform, item.account.ID, err)
+			if IsCloudflareProtectionError(err) || siteBatchReason(err) == SiteBatchReasonCloudflareProtection {
+				i = recordCloudflareSkipsAndWait(ctx, summary, items, i, CloudflareRetryAfter(err))
+			}
+			continue
+		}
+		if result.Status == model.SiteExecutionStatusSkipped {
+			summary.recordSkip(item.site.ID, item.site.Platform, SiteBatchReasonUnsupportedCheckin, 1)
+			continue
+		}
+		summary.recordResult(item.site.ID, item.site.Platform, item.account.ID, result.Status, result.Message, nil)
+	}
+	return *summary
+}
+
+func eligibleSyncAccounts(sites []model.Site) []siteBatchAccount {
+	items := make([]siteBatchAccount, 0)
+	for siteIndex := range sites {
+		siteRecord := &sites[siteIndex]
 		if !siteRecord.Enabled {
 			continue
 		}
-		for index := range siteRecord.Accounts {
-			account := &siteRecord.Accounts[index]
+		for accountIndex := range siteRecord.Accounts {
+			account := &siteRecord.Accounts[accountIndex]
+			if !account.Enabled || !account.AutoSync {
+				continue
+			}
+			items = append(items, siteBatchAccount{site: siteRecord, account: account})
+		}
+	}
+	return items
+}
+
+func eligibleCheckinAccounts(sites []model.Site) []siteBatchAccount {
+	items := make([]siteBatchAccount, 0)
+	for siteIndex := range sites {
+		siteRecord := &sites[siteIndex]
+		if !siteRecord.Enabled {
+			continue
+		}
+		for accountIndex := range siteRecord.Accounts {
+			account := &siteRecord.Accounts[accountIndex]
 			if !account.Enabled || !account.AutoCheckin {
 				continue
 			}
-			if account.RandomCheckin {
-				nextAt, scheduleErr := ensureRandomCheckinSchedule(ctx, account, now)
-				if scheduleErr != nil {
-					log.Warnf("failed to ensure site account checkin schedule (account=%d): %v", account.ID, scheduleErr)
-					continue
-				}
-				if nextAt != nil && now.Before(*nextAt) {
-					continue
-				}
-			}
-			if !waitSiteBatchInterval(ctx, 500*time.Millisecond) {
-				return
-			}
-			if _, err := CheckinAccount(ctx, account.ID); err != nil {
-				log.Warnf("site account checkin failed (account=%d): %v", account.ID, err)
-				if IsCloudflareProtectionError(err) {
-					waitSiteCloudflareRetryAfter(ctx, siteRecord.ID, account.ID, err)
-					break
-				}
-			}
+			items = append(items, siteBatchAccount{site: siteRecord, account: account})
 		}
 	}
+	return items
+}
+
+func recordCloudflareSkipsAndWait(ctx context.Context, summary *SiteBatchSummary, items []siteBatchAccount, currentIndex int, retryAfter time.Duration) int {
+	current := items[currentIndex]
+	lastSkipped := currentIndex
+	for j := currentIndex + 1; j < len(items); j++ {
+		if items[j].site.ID != current.site.ID {
+			break
+		}
+		summary.recordSkip(items[j].site.ID, items[j].site.Platform, SiteBatchReasonCloudflareProtection, 1)
+		lastSkipped = j
+	}
+	waitSiteCloudflareRetryAfter(ctx, retryAfter)
+	return lastSkipped
+}
+
+func recordBatchCanceledSkips(summary *SiteBatchSummary, items []siteBatchAccount) {
+	for _, item := range items {
+		summary.recordSkip(item.site.ID, item.site.Platform, SiteBatchReasonBatchCanceled, 1)
+	}
+}
+
+func accountSyncWarnings(result *model.SiteSyncResult) []siteSyncWarning {
+	if result == nil || result.Status != model.SiteExecutionStatusPartial {
+		return nil
+	}
+	if strings.Contains(result.Message, "价格") {
+		return []siteSyncWarning{{Reason: SiteBatchReasonPricingFetchFailed, Message: result.Message}}
+	}
+	return nil
 }
 
 func waitSiteBatchInterval(ctx context.Context, delay time.Duration) bool {
@@ -180,9 +291,7 @@ func waitSiteBatchInterval(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-func waitSiteCloudflareRetryAfter(ctx context.Context, siteID int, accountID int, err error) {
-	retryAfter := CloudflareRetryAfter(err)
-	log.Warnf("site Cloudflare protection detected, skip remaining accounts this round (site=%d account=%d retry_after=%s)", siteID, accountID, retryAfter)
+func waitSiteCloudflareRetryAfter(ctx context.Context, retryAfter time.Duration) {
 	waitSiteBatchInterval(ctx, retryAfter)
 }
 

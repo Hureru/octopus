@@ -15,7 +15,6 @@ import (
 	"unicode"
 
 	"github.com/bestruirui/octopus/internal/model"
-	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 const anyRouterUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
@@ -112,10 +111,8 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	}
 
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, userID)
-	prices, priceErr := fetchPricing(ctx, siteRecord, account, accessToken, groups)
-	if priceErr != nil {
-		log.Warnf("site pricing fetch skipped (account=%d): %v", account.ID, priceErr)
-	}
+	prices, priceWarnings := fetchPricingWithWarnings(ctx, siteRecord, account, accessToken, groups)
+	status, message := applySyncWarnings(status, buildSyncSnapshotMessage(groupResults), priceWarnings)
 	return &syncSnapshot{
 		accessToken:  accessToken,
 		groups:       groups,
@@ -127,7 +124,8 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		balance:      balance,
 		balanceUsed:  balanceUsed,
 		todayIncome:  todayIncome,
-		message:      buildSyncSnapshotMessage(groupResults),
+		message:      message,
+		warnings:     priceWarnings,
 	}, nil
 }
 
@@ -872,7 +870,7 @@ func anyRouterFormatHTTPError(statusCode int, header http.Header, body string) e
 	if summary := anyRouterExtractHTMLErrorSummary(body); summary != "" {
 		return newSiteHTTPError(statusCode, summary)
 	}
-	return newSiteHTTPError(statusCode, strings.TrimSpace(body))
+	return newSiteHTTPError(statusCode, "上游返回非 JSON 响应，无法解析为接口响应")
 }
 
 func anyRouterExtractResponseMessage(payload map[string]any) string {

@@ -137,7 +137,7 @@ func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) e
 	if summary := extractSiteHTMLResponseSummary(header.Get("Content-Type"), bodyBytes); summary != "" {
 		return newSiteHTTPError(statusCode, summary)
 	}
-	return newSiteHTTPError(statusCode, strings.TrimSpace(string(bodyBytes)))
+	return newSiteHTTPError(statusCode, "上游返回非 JSON 响应，无法解析为接口响应")
 }
 
 func isCloudflareProtectionResponse(statusCode int, header http.Header, bodyBytes []byte) bool {

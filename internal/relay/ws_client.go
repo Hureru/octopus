@@ -53,7 +53,7 @@ func HandleWSResponse(c *gin.Context) {
 	apiKeyID := c.GetInt("api_key_id")
 	supportedModels := c.GetString("supported_models")
 
-	log.Infof("ws client connected (apikey=%d)", apiKeyID)
+	log.Debugf("ws client connected (apikey=%d)", apiKeyID)
 
 	downstreamSessionID := fmt.Sprintf("ws_%d", time.Now().UnixNano())
 	var conversationState *wsConversationState
@@ -73,7 +73,7 @@ func HandleWSResponse(c *gin.Context) {
 		if err != nil {
 			closeStatus := websocket.CloseStatus(err)
 			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway {
-				log.Infof("ws client disconnected normally (apikey=%d)", apiKeyID)
+				log.Debugf("ws client disconnected normally (apikey=%d)", apiKeyID)
 			} else {
 				log.Warnf("ws client read error (apikey=%d): %v", apiKeyID, err)
 			}
@@ -161,7 +161,7 @@ func processWSResponseCreate(
 			if err := bestEffortWarmupUpstreamWS(ctx, apiKeyID, supportedModels, reqBody); err != nil {
 				log.Warnf("ws warmup failed (apikey=%d): %v", apiKeyID, err)
 			} else {
-				log.Infof("ws warmup ready (apikey=%d)", apiKeyID)
+				log.Debugf("ws warmup ready (apikey=%d)", apiKeyID)
 			}
 			return conversationState
 		}
@@ -543,7 +543,7 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			continue
 		}
 
-		log.Infof("ws request model %s, forwarding to channel: %s model: %s (attempt %d/%d)",
+		log.Debugf("ws request model %s, forwarding to channel: %s model: %s (attempt %d/%d)",
 			req.requestModel, channel.Name, item.ModelName, req.iter.Index()+1, req.iter.Len())
 
 		var result attemptResult

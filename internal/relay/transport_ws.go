@@ -130,7 +130,7 @@ func (r *wsUpstreamReader) Close() error {
 	r.closed = true
 	// Return connection to pool (don't close it)
 	wsUpstreamPool.Put(r.pc)
-	log.Infof("upstream WS connection returned to pool (channel=%d, key=%d)", r.channelID, r.keyID)
+	log.Debugf("upstream WS connection returned to pool (channel=%d, key=%d)", r.channelID, r.keyID)
 	return nil
 }
 

@@ -76,7 +76,7 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 		updatePayload := map[string]any{
 			"last_sync_at":      &now,
 			"last_sync_status":  snapshot.status,
-			"last_sync_message": snapshot.message,
+			"last_sync_message": sanitizeSiteStatusText(snapshot.message),
 			"balance":           snapshot.balance,
 			"balance_used":      snapshot.balanceUsed,
 			"today_income":      snapshot.todayIncome,
@@ -585,7 +585,7 @@ func updateAccountSyncState(ctx context.Context, accountID int, status model.Sit
 	updatePayload := map[string]any{
 		"last_sync_at":      &now,
 		"last_sync_status":  status,
-		"last_sync_message": message,
+		"last_sync_message": sanitizeSiteStatusText(message),
 	}
 	if strings.TrimSpace(accessToken) != "" {
 		updatePayload["access_token"] = strings.TrimSpace(accessToken)
@@ -601,7 +601,7 @@ func updateAccountCheckinState(ctx context.Context, account *model.SiteAccount, 
 	updatePayload := map[string]any{
 		"last_checkin_at":      &now,
 		"last_checkin_status":  status,
-		"last_checkin_message": message,
+		"last_checkin_message": sanitizeSiteStatusText(message),
 	}
 	account.LastCheckinAt = &now
 	account.LastCheckinStatus = status

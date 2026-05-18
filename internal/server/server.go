@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/relay/bodycache"
@@ -45,9 +46,10 @@ func Start() error {
 		gzip.WithExcludedPathsRegexs([]string{`/api/v1/log/stream`}),
 	))
 
-	if conf.IsDebug() {
-		r.Use(middleware.Logger())
-	}
+	r.Use(middleware.Logger(middleware.LoggerConfig{
+		Enabled:       conf.AppConfig.Log.Access.Enabled || conf.IsDebug(),
+		SlowThreshold: time.Duration(conf.AppConfig.Log.Access.SlowThresholdMS) * time.Millisecond,
+	}))
 	r.Use(middleware.Cors())
 	r.Use(middleware.StaticEmbed("/", static.StaticFS))
 

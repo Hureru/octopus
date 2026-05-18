@@ -15,7 +15,17 @@ type Server struct {
 }
 
 type Log struct {
-	Level string `mapstructure:"level"`
+	Level           string `mapstructure:"level"`
+	Format          string `mapstructure:"format"`
+	Caller          bool   `mapstructure:"caller"`
+	StacktraceLevel string `mapstructure:"stacktrace_level"`
+	Access          struct {
+		Enabled         bool `mapstructure:"enabled"`
+		SlowThresholdMS int  `mapstructure:"slow_threshold_ms"`
+	} `mapstructure:"access"`
+	Relay struct {
+		Summary bool `mapstructure:"summary"`
+	} `mapstructure:"relay"`
 }
 
 type Database struct {
@@ -74,4 +84,10 @@ func setDefaults() {
 	viper.SetDefault("database.type", "sqlite")
 	viper.SetDefault("database.path", "data/data.db")
 	viper.SetDefault("log.level", "info")
+	viper.SetDefault("log.format", "console")
+	viper.SetDefault("log.caller", false)
+	viper.SetDefault("log.stacktrace_level", "error")
+	viper.SetDefault("log.access.enabled", false)
+	viper.SetDefault("log.access.slow_threshold_ms", 3000)
+	viper.SetDefault("log.relay.summary", true)
 }
