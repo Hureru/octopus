@@ -374,6 +374,8 @@
             "updated": "Updated successfully",
             "updateFailed": "Update failed",
             "deleted": "Deleted successfully",
+            "autoAddSuccess": "Auto add finished",
+            "autoAddSummary": "{added} added, {skipped} skipped, {matched} matched",
             "autoAddFailed": "Auto add failed"
         },
         "create": {
@@ -390,6 +392,8 @@
                 "cancel": "Cancel",
                 "save": "Save",
                 "copyName": "Copy Name",
+                "autoAdd": "Auto Add",
+                "autoAdding": "Auto Adding...",
                 "delete": "Delete",
                 "confirmDelete": "Confirm Delete"
             }

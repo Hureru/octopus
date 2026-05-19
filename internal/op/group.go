@@ -2,10 +2,13 @@ package op
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
+	model2 "github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/cache"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -13,6 +16,8 @@ import (
 
 var groupCache = cache.New[int, model.Group](16)
 var groupMap = cache.New[string, model.Group](16)
+
+var ErrGroupNotFound = errors.New("group not found")
 
 func GroupList(ctx context.Context) ([]model.Group, error) {
 	groups := make([]model.Group, 0, groupCache.Len())
@@ -33,7 +38,7 @@ func GroupListModel(ctx context.Context) ([]string, error) {
 func GroupGet(id int, ctx context.Context) (*model.Group, error) {
 	group, ok := groupCache.Get(id)
 	if !ok {
-		return nil, fmt.Errorf("group not found")
+		return nil, ErrGroupNotFound
 	}
 	return &group, nil
 }
@@ -41,7 +46,7 @@ func GroupGet(id int, ctx context.Context) (*model.Group, error) {
 func GroupGetEnabledMap(name string, ctx context.Context) (model.Group, error) {
 	group, ok := groupMap.Get(name)
 	if !ok {
-		return model.Group{}, fmt.Errorf("group not found")
+		return model.Group{}, ErrGroupNotFound
 	}
 	if len(group.Items) == 0 {
 		group.Items = nil
@@ -72,7 +77,7 @@ func GroupCreate(group *model.Group, ctx context.Context) error {
 func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Group, error) {
 	oldGroup, ok := groupCache.Get(req.ID)
 	if !ok {
-		return nil, fmt.Errorf("group not found")
+		return nil, ErrGroupNotFound
 	}
 	oldName := oldGroup.Name
 	affectedChannelIDs := groupUpdateAffectedChannelIDs(oldGroup, req)
@@ -226,7 +231,7 @@ func groupUpdateAffectedChannelIDs(oldGroup model.Group, req *model.GroupUpdateR
 func GroupDel(id int, ctx context.Context) error {
 	group, ok := groupCache.Get(id)
 	if !ok {
-		return fmt.Errorf("group not found")
+		return ErrGroupNotFound
 	}
 
 	tx := db.GetDB().WithContext(ctx).Begin()
@@ -260,7 +265,7 @@ func GroupDel(id int, ctx context.Context) error {
 
 func GroupItemAdd(item *model.GroupItem, ctx context.Context) error {
 	if _, ok := groupCache.Get(item.GroupID); !ok {
-		return fmt.Errorf("group not found")
+		return ErrGroupNotFound
 	}
 
 	if err := db.GetDB().WithContext(ctx).Create(item).Error; err != nil {
@@ -281,7 +286,7 @@ func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context
 
 	group, ok := groupCache.Get(groupID)
 	if !ok {
-		return fmt.Errorf("group not found")
+		return ErrGroupNotFound
 	}
 
 	seen := make(map[string]struct{}, len(items))
@@ -470,4 +475,157 @@ func groupRefreshCacheByIDs(ids []int, ctx context.Context) error {
 
 func GroupRefreshCacheByIDs(ids []int, ctx context.Context) error {
 	return groupRefreshCacheByIDs(ids, ctx)
+}
+
+type GroupAutoAddResult struct {
+	GroupID           int `json:"group_id"`
+	MatchedCandidates int `json:"matched_candidates"`
+	AddedCandidates   int `json:"added_candidates"`
+	SkippedCandidates int `json:"skipped_candidates"`
+}
+
+func GroupAutoAddItems(groupID int, ctx context.Context) (*GroupAutoAddResult, error) {
+	group, ok := groupCache.Get(groupID)
+	if !ok {
+		return nil, ErrGroupNotFound
+	}
+
+	modelChannels, err := ChannelLLMList(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list channel models: %w", err)
+	}
+
+	existingKeys := make(map[string]struct{}, len(group.Items))
+	endpointPreference := deriveGroupAutoAddEndpoint(group.Items)
+	for _, item := range group.Items {
+		existingKeys[groupAutoAddKey(item.ChannelID, item.ModelName)] = struct{}{}
+	}
+
+	matched := make([]model.GroupIDAndLLMName, 0)
+	matchedCount := 0
+	addedCount := 0
+	skippedCount := 0
+	seen := make(map[string]struct{})
+
+	for _, candidate := range modelChannels {
+		if !candidate.Enabled {
+			continue
+		}
+		if !groupAutoAddModelMatchesGroup(candidate.Name, group) {
+			continue
+		}
+		if endpointPreference != nil && !groupAutoAddEndpointMatches(candidate.EndpointType, *endpointPreference) {
+			continue
+		}
+
+		matchedCount++
+		key := groupAutoAddKey(candidate.ChannelID, candidate.Name)
+		if _, exists := existingKeys[key]; exists {
+			skippedCount++
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			skippedCount++
+			continue
+		}
+		seen[key] = struct{}{}
+		matched = append(matched, model.GroupIDAndLLMName{
+			ChannelID: candidate.ChannelID,
+			ModelName: candidate.Name,
+		})
+		addedCount++
+	}
+
+	if len(matched) > 0 {
+		if err := GroupItemBatchAdd(groupID, matched, ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	return &GroupAutoAddResult{
+		GroupID:           groupID,
+		MatchedCandidates: matchedCount,
+		AddedCandidates:   addedCount,
+		SkippedCandidates: skippedCount,
+	}, nil
+}
+
+func groupAutoAddKey(channelID int, modelName string) string {
+	return fmt.Sprintf("%d|%s", channelID, strings.TrimSpace(strings.ToLower(modelName)))
+}
+
+func groupAutoAddModelMatchesGroup(modelName string, group model.Group) bool {
+	name := strings.TrimSpace(modelName)
+	if name == "" {
+		return false
+	}
+
+	groupName := strings.TrimSpace(group.Name)
+	if groupName == "" {
+		return false
+	}
+
+	return strings.EqualFold(name, groupName)
+}
+
+func deriveGroupAutoAddEndpoint(items []model.GroupItem) *string {
+	if len(items) == 0 {
+		return nil
+	}
+
+	counts := make(map[string]int)
+	for _, item := range items {
+		channel, ok := channelCache.Get(item.ChannelID)
+		if !ok {
+			continue
+		}
+		endpoint := groupAutoAddEndpointName(channel.Type)
+		if endpoint == "" {
+			continue
+		}
+		counts[endpoint]++
+	}
+
+	if len(counts) == 0 {
+		return nil
+	}
+
+	var selected string
+	var maxCount int
+	for endpoint, count := range counts {
+		if count > maxCount || (count == maxCount && (selected == "" || endpoint < selected)) {
+			selected = endpoint
+			maxCount = count
+		}
+	}
+	if selected == "" {
+		return nil
+	}
+
+	return &selected
+}
+
+func groupAutoAddEndpointName(channelType model2.OutboundType) string {
+	switch channelType {
+	case model2.OutboundTypeOpenAIChat:
+		return "openai"
+	case model2.OutboundTypeOpenAIResponse:
+		return "response"
+	case model2.OutboundTypeAnthropic:
+		return "anthropic"
+	case model2.OutboundTypeGemini:
+		return "gemini"
+	default:
+		return ""
+	}
+}
+
+func groupAutoAddEndpointMatches(candidateEndpoint string, expected string) bool {
+	normalizedCandidate := strings.TrimSpace(strings.ToLower(candidateEndpoint))
+	normalizedExpected := strings.TrimSpace(strings.ToLower(expected))
+	if normalizedExpected == "" {
+		return true
+	}
+
+	return normalizedCandidate == normalizedExpected
 }

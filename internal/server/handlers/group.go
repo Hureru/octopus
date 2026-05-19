@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -33,6 +34,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/delete/:id", http.MethodDelete).
 				Handle(deleteGroup),
+		).
+		AddRoute(
+			router.NewRoute("/auto-add-item", http.MethodPost).
+				Handle(autoAddGroupItem),
 		)
 }
 
@@ -98,4 +103,26 @@ func deleteGroup(c *gin.Context) {
 		return
 	}
 	resp.Success(c, "group deleted successfully")
+}
+
+func autoAddGroupItem(c *gin.Context) {
+	var req struct {
+		ID int `json:"id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+
+	result, err := op.GroupAutoAddItems(req.ID, c.Request.Context())
+	if err != nil {
+		if errors.Is(err, op.ErrGroupNotFound) {
+			resp.ErrorWithAppError(c, http.StatusNotFound, apperror.New(codeGroupNotFound, err.Error()).WithStatus(http.StatusNotFound))
+			return
+		}
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupUpdateFailed, "group auto add failed", err))
+		return
+	}
+
+	resp.Success(c, result)
 }

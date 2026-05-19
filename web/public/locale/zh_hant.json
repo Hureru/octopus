@@ -374,6 +374,8 @@
             "updated": "更新成功",
             "updateFailed": "更新失敗",
             "deleted": "刪除成功",
+            "autoAddSuccess": "自動補充完成",
+            "autoAddSummary": "新增 {added} 項，跳過 {skipped} 項，共匹配 {matched} 項",
             "autoAddFailed": "自動新增失敗"
         },
         "create": {
@@ -390,6 +392,8 @@
                 "cancel": "取消",
                 "save": "儲存",
                 "copyName": "複製名稱",
+                "autoAdd": "自動補充",
+                "autoAdding": "自動補充中...",
                 "delete": "刪除",
                 "confirmDelete": "確認刪除"
             }
