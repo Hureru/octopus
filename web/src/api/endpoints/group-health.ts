@@ -6,6 +6,7 @@ import type { GroupMode } from './group';
 
 export type GroupHealthStatus = 'running' | 'success' | 'partial' | 'failed';
 export type GroupHealthAttemptStatus = 'success' | 'failed' | 'skipped';
+export type GroupHealthProbeMode = 'standard' | 'full';
 
 export interface GroupHealthAttempt {
     id: number;
@@ -29,6 +30,7 @@ export interface GroupHealthSnapshot {
     group_id: number;
     group_name: string;
     group_mode: GroupMode;
+    probe_mode: GroupHealthProbeMode;
     request_model: string;
     status: GroupHealthStatus;
     started_at: string;
@@ -49,6 +51,16 @@ export interface GroupHealthGroupView {
 export type RunGroupHealthAccepted = {
     group_id?: number;
     all_groups?: boolean;
+    probe_mode?: GroupHealthProbeMode;
+};
+
+export type RunGroupHealthRequest = {
+    groupId: number;
+    probeMode?: GroupHealthProbeMode;
+};
+
+export type RunAllGroupHealthRequest = {
+    probeMode?: GroupHealthProbeMode;
 };
 
 function normalizeAttempt(attempt: Partial<GroupHealthAttempt>): GroupHealthAttempt {
@@ -79,6 +91,7 @@ function normalizeSnapshot(snapshot: Partial<GroupHealthSnapshot> | null | undef
         group_id: typeof snapshot.group_id === 'number' ? snapshot.group_id : 0,
         group_name: snapshot.group_name ?? '',
         group_mode: typeof snapshot.group_mode === 'number' ? snapshot.group_mode : 1,
+        probe_mode: snapshot.probe_mode === 'full' ? 'full' : 'standard',
         request_model: snapshot.request_model ?? '',
         status: snapshot.status === 'running' || snapshot.status === 'success' || snapshot.status === 'partial' || snapshot.status === 'failed'
             ? snapshot.status
@@ -138,9 +151,12 @@ export function useRunGroupHealth() {
     const queryClient = useQueryClient();
     const { enabled } = useGroupHealthEnabled();
     return useMutation({
-        mutationFn: async (groupId: number) => {
+        mutationFn: async ({ groupId, probeMode }: RunGroupHealthRequest) => {
             if (!enabled) throw new Error('Group health checks are disabled');
-            return apiClient.post<RunGroupHealthAccepted>(`/api/v1/group/health/${groupId}/run`, {});
+            return apiClient.post<RunGroupHealthAccepted>(
+                `/api/v1/group/health/${groupId}/run`,
+                probeMode ? { probe_mode: probeMode } : {},
+            );
         },
         onSuccess: () => invalidateGroupHealth(queryClient),
         onError: (error) => logger.error('group health run failed:', error),
@@ -151,9 +167,12 @@ export function useRunAllGroupHealth() {
     const queryClient = useQueryClient();
     const { enabled } = useGroupHealthEnabled();
     return useMutation({
-        mutationFn: async () => {
+        mutationFn: async ({ probeMode }: RunAllGroupHealthRequest = {}) => {
             if (!enabled) throw new Error('Group health checks are disabled');
-            return apiClient.post<RunGroupHealthAccepted>('/api/v1/group/health/run-all', {});
+            return apiClient.post<RunGroupHealthAccepted>(
+                '/api/v1/group/health/run-all',
+                probeMode ? { probe_mode: probeMode } : {},
+            );
         },
         onSuccess: () => invalidateGroupHealth(queryClient),
         onError: (error) => logger.error('group health run-all failed:', error),

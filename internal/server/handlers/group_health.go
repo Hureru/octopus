@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -18,6 +19,10 @@ import (
 )
 
 var defaultGroupHealthService = grouphealth.NewService(nil, nil)
+
+type groupHealthRunRequest struct {
+	ProbeMode model.GroupHealthProbeMode `json:"probe_mode"`
+}
 
 func init() {
 	router.NewGroupRouter("/api/v1/group/health").
@@ -82,6 +87,29 @@ func getGroupHealth(c *gin.Context) {
 	resp.Success(c, view)
 }
 
+func parseGroupHealthRunRequest(c *gin.Context) (model.GroupHealthProbeMode, error) {
+	if c.Request.Body == nil || c.Request.ContentLength == 0 {
+		return model.GroupHealthProbeModeStandard, nil
+	}
+
+	var req groupHealthRunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return model.GroupHealthProbeModeStandard, nil
+		}
+		return "", err
+	}
+
+	switch req.ProbeMode {
+	case "", model.GroupHealthProbeModeStandard:
+		return model.GroupHealthProbeModeStandard, nil
+	case model.GroupHealthProbeModeFull:
+		return model.GroupHealthProbeModeFull, nil
+	default:
+		return "", errors.New("invalid probe_mode")
+	}
+}
+
 func runGroupHealth(c *gin.Context) {
 	if !ensureGroupHealthEnabled(c) {
 		return
@@ -105,16 +133,23 @@ func runGroupHealth(c *gin.Context) {
 		return
 	}
 
+	probeMode, err := parseGroupHealthRunRequest(c)
+	if err != nil {
+		resp.InvalidParam(c)
+		return
+	}
+
 	safe.Go("group-health-run", func() {
 		runCtx := context.Background()
-		_ = defaultGroupHealthService.RunGroupHealth(runCtx, groupID)
+		_ = defaultGroupHealthService.RunGroupHealth(runCtx, groupID, probeMode)
 	})
 
 	c.JSON(http.StatusAccepted, resp.ResponseStruct{
 		Code:    http.StatusAccepted,
 		Message: "accepted",
 		Data: gin.H{
-			"group_id": groupID,
+			"group_id":   groupID,
+			"probe_mode": probeMode,
 		},
 	})
 }
@@ -123,9 +158,15 @@ func runAllGroupHealth(c *gin.Context) {
 	if !ensureGroupHealthEnabled(c) {
 		return
 	}
+
+	probeMode, err := parseGroupHealthRunRequest(c)
+	if err != nil {
+		resp.InvalidParam(c)
+		return
+	}
 	safe.Go("group-health-run-all", func() {
 		runCtx := context.Background()
-		defaultGroupHealthService.RunAllGroupHealth(runCtx, 2)
+		defaultGroupHealthService.RunAllGroupHealth(runCtx, 2, probeMode)
 	})
 
 	c.JSON(http.StatusAccepted, resp.ResponseStruct{
@@ -133,6 +174,7 @@ func runAllGroupHealth(c *gin.Context) {
 		Message: "accepted",
 		Data: gin.H{
 			"all_groups": true,
+			"probe_mode": probeMode,
 		},
 	})
 }
