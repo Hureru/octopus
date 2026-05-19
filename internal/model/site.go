@@ -374,7 +374,7 @@ func SiteMaskedTokenMatches(fullToken string, maskedToken string) bool {
 	if prefix == "" && suffix == "" {
 		return false
 	}
-	if len(normalizedFull) < len(prefix)+len(suffix) {
+	if len(normalizedFull) < len(prefix)+len(suffix)+1 {
 		return false
 	}
 	if prefix != "" && !strings.HasPrefix(normalizedFull, prefix) {

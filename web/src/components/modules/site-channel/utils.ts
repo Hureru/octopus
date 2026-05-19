@@ -225,7 +225,7 @@ export function matchesMaskedToken(fullValue: string, maskedValue: string) {
     const prefix = normalizedMasked.slice(0, first);
     const suffix = normalizedMasked.slice(last + 1);
     if (!prefix && !suffix) return false;
-    if (normalizedFull.length < prefix.length + suffix.length) return false;
+    if (normalizedFull.length < prefix.length + suffix.length + 1) return false;
     if (prefix && !normalizedFull.startsWith(prefix)) return false;
     if (suffix && !normalizedFull.endsWith(suffix)) return false;
     return true;
