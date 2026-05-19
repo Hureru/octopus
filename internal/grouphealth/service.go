@@ -17,7 +17,7 @@ import (
 var ErrGroupHealthAlreadyRunning = errors.New("group health check already running")
 
 type Repository interface {
-	CreateRunningSnapshot(ctx context.Context, group model.Group) (*model.GroupHealthSnapshot, error)
+	CreateRunningSnapshot(ctx context.Context, group model.Group, probeMode model.GroupHealthProbeMode) (*model.GroupHealthSnapshot, error)
 	AppendAttempt(ctx context.Context, snapshotID int, attempt model.GroupHealthAttempt) error
 	FinishSnapshot(ctx context.Context, snapshotID int, status model.GroupHealthStatus, successfulChannelID *int, durationMS int64, message string, finishedAt time.Time) error
 	GetLatestSnapshotByGroupID(ctx context.Context, groupID int) (*model.GroupHealthSnapshot, error)
@@ -55,7 +55,29 @@ func lockGroup(groupID int) func() {
 	}
 }
 
-func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
+// normalizeProbeMode returns the effective probe mode from a prioritized list.
+// An empty list defaults to model.GroupHealthProbeModeStandard, and only the
+// first element is considered. model.GroupHealthProbeModeFull is honored only
+// when it appears first; all other cases fall back to Standard semantics.
+func normalizeProbeMode(probeModes []model.GroupHealthProbeMode) model.GroupHealthProbeMode {
+	if len(probeModes) == 0 {
+		return model.GroupHealthProbeModeStandard
+	}
+	if probeModes[0] == model.GroupHealthProbeModeFull {
+		return model.GroupHealthProbeModeFull
+	}
+	return model.GroupHealthProbeModeStandard
+}
+
+func resolveChannelName(ctx context.Context, channelID int) string {
+	channel, err := op.ChannelGet(channelID, ctx)
+	if err != nil {
+		return fmt.Sprintf("channel-%d", channelID)
+	}
+	return channel.Name
+}
+
+func (s *Service) RunGroupHealth(ctx context.Context, groupID int, probeModes ...model.GroupHealthProbeMode) error {
 	unlock := lockGroup(groupID)
 	defer unlock()
 
@@ -70,7 +92,9 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 		return err
 	}
 
-	snapshot, err := s.repo.CreateRunningSnapshot(ctx, *group)
+	probeMode := normalizeProbeMode(probeModes)
+
+	snapshot, err := s.repo.CreateRunningSnapshot(ctx, *group, probeMode)
 	if err != nil {
 		return err
 	}
@@ -89,15 +113,18 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 		return items[i].ID < items[j].ID
 	})
 
-	finalStatus := model.GroupHealthStatusFailed
 	var successfulChannelID *int
 	message := "all candidates failed"
-	stopAfterSuccess := group.Mode == model.GroupModeFailover
+	stopAfterSuccess := group.Mode == model.GroupModeFailover && probeMode != model.GroupHealthProbeModeFull
 	successFound := false
+	firstSuccessIndex := -1
+	attemptedCount := 0
+	successCount := 0
 
 	for index, item := range items {
 		channel, err := op.ChannelGet(item.ChannelID, ctx)
 		if err != nil {
+			attemptedCount++
 			appendErr := s.repo.AppendAttempt(ctx, snapshot.ID, model.GroupHealthAttempt{
 				GroupItemID:  item.ID,
 				ChannelID:    item.ChannelID,
@@ -116,6 +143,7 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 
 		usedKey := channel.GetChannelKey()
 		if usedKey.ID == 0 || strings.TrimSpace(usedKey.ChannelKey) == "" {
+			attemptedCount++
 			appendErr := s.repo.AppendAttempt(ctx, snapshot.ID, model.GroupHealthAttempt{
 				GroupItemID:  item.ID,
 				ChannelID:    item.ChannelID,
@@ -133,18 +161,19 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 		}
 
 		result := s.prober.RunCandidate(ctx, *channel, usedKey, item.ModelName)
+		attemptedCount++
 		attempt := model.GroupHealthAttempt{
-			GroupItemID:   item.ID,
-			ChannelID:     item.ChannelID,
-			ChannelName:   channel.Name,
-			ChannelKeyID:  usedKey.ID,
-			KeyRemark:     usedKey.Remark,
-			ModelName:     item.ModelName,
-			Priority:      item.Priority,
-			Weight:        item.Weight,
-			HTTPStatus:    result.HTTPStatus,
-			DurationMS:    result.DurationMS,
-			ErrorMessage:  result.ErrorMessage,
+			GroupItemID:  item.ID,
+			ChannelID:    item.ChannelID,
+			ChannelName:  channel.Name,
+			ChannelKeyID: usedKey.ID,
+			KeyRemark:    usedKey.Remark,
+			ModelName:    item.ModelName,
+			Priority:     item.Priority,
+			Weight:       item.Weight,
+			HTTPStatus:   result.HTTPStatus,
+			DurationMS:   result.DurationMS,
+			ErrorMessage: result.ErrorMessage,
 		}
 		if result.Success {
 			attempt.Status = model.GroupHealthAttemptStatusSuccess
@@ -157,13 +186,10 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 
 		if result.Success {
 			successFound = true
-			successfulChannelID = &item.ChannelID
-			if index == 0 {
-				finalStatus = model.GroupHealthStatusSuccess
-				message = fmt.Sprintf("candidate %s succeeded", channel.Name)
-			} else {
-				finalStatus = model.GroupHealthStatusPartial
-				message = fmt.Sprintf("candidate %s succeeded after failover", channel.Name)
+			successCount++
+			if firstSuccessIndex == -1 {
+				firstSuccessIndex = index
+				successfulChannelID = &item.ChannelID
 			}
 			if stopAfterSuccess {
 				for _, skipped := range items[index+1:] {
@@ -188,8 +214,25 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 		}
 	}
 
+	finalStatus := model.GroupHealthStatusFailed
 	if !successFound && len(items) == 0 {
 		message = "group has no items"
+	} else if successFound {
+		successChannelName := resolveChannelName(ctx, items[firstSuccessIndex].ChannelID)
+		switch {
+		case stopAfterSuccess && firstSuccessIndex == 0:
+			finalStatus = model.GroupHealthStatusSuccess
+			message = fmt.Sprintf("candidate %s succeeded", successChannelName)
+		case stopAfterSuccess:
+			finalStatus = model.GroupHealthStatusPartial
+			message = fmt.Sprintf("candidate %s succeeded after failover", successChannelName)
+		case successCount == attemptedCount:
+			finalStatus = model.GroupHealthStatusSuccess
+			message = fmt.Sprintf("all %d candidates succeeded", successCount)
+		default:
+			finalStatus = model.GroupHealthStatusPartial
+			message = fmt.Sprintf("%d/%d candidates succeeded", successCount, attemptedCount)
+		}
 	}
 
 	finishedAt := time.Now()
@@ -197,10 +240,11 @@ func (s *Service) RunGroupHealth(ctx context.Context, groupID int) error {
 	return s.repo.FinishSnapshot(ctx, snapshot.ID, finalStatus, successfulChannelID, durationMS, message, finishedAt)
 }
 
-func (s *Service) RunAllGroupHealth(ctx context.Context, maxConcurrency int) {
+func (s *Service) RunAllGroupHealth(ctx context.Context, maxConcurrency int, probeModes ...model.GroupHealthProbeMode) {
 	if maxConcurrency <= 0 {
 		maxConcurrency = 2
 	}
+	probeMode := normalizeProbeMode(probeModes)
 	groups, err := op.GroupList(ctx)
 	if err != nil {
 		return
@@ -214,7 +258,7 @@ func (s *Service) RunAllGroupHealth(ctx context.Context, maxConcurrency int) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			_ = s.RunGroupHealth(ctx, groupID)
+			_ = s.RunGroupHealth(ctx, groupID, probeMode)
 		}()
 	}
 	wg.Wait()

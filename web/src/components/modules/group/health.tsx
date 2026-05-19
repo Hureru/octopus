@@ -21,6 +21,7 @@ import {
     useRunGroupHealth,
     type GroupHealthAttempt,
     type GroupHealthAttemptStatus,
+    type GroupHealthProbeMode,
     type GroupHealthStatus,
 } from '@/api/endpoints/group-health';
 
@@ -83,6 +84,12 @@ function statusTextTone(status?: GroupHealthStatus | null) {
     }
 }
 
+function probeModeTone(mode?: GroupHealthProbeMode | null) {
+    return mode === 'full'
+        ? 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+        : 'border-border bg-muted/40 text-muted-foreground';
+}
+
 function attemptBadgeTone(status: GroupHealthAttemptStatus) {
     switch (status) {
         case 'success':
@@ -95,7 +102,7 @@ function attemptBadgeTone(status: GroupHealthAttemptStatus) {
     }
 }
 
-function AttemptDetails({ attempt }: { attempt: GroupHealthAttempt }) {
+export function GroupHealthAttemptDetails({ attempt }: { attempt: GroupHealthAttempt }) {
     const t = useTranslations('group.health');
     const hasError = Boolean(attempt.error_message);
 
@@ -117,7 +124,7 @@ function AttemptDetails({ attempt }: { attempt: GroupHealthAttempt }) {
                 </div>
             </div>
             <Badge variant="outline" className={cn('shrink-0 text-[11px]', attemptBadgeTone(attempt.status))}>
-                {attempt.status}
+                {t(`attemptStatus.${attempt.status}`)}
             </Badge>
         </div>
     );
@@ -166,7 +173,12 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
     if (!enabled || !groupId) return null;
 
     const isRunning = latest?.status === 'running';
-    const isRunningMutation = runGroupHealth.isPending && runGroupHealth.variables === groupId;
+    const isRunPendingForGroup = runGroupHealth.isPending
+        && runGroupHealth.variables?.groupId === groupId;
+    const isStandardRunPending = isRunPendingForGroup
+        && (runGroupHealth.variables?.probeMode ?? 'standard') === 'standard';
+    const isFullRunPending = isRunPendingForGroup
+        && runGroupHealth.variables?.probeMode === 'full';
     const lastRunRelative = formatRelativeTime(latest?.finished_at ?? latest?.started_at ?? null, locale, t('never'));
 
     return (
@@ -181,6 +193,9 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
                                 {lastRunRelative}
                             </span>
                             <span className="col-start-2 col-span-2 flex min-w-0 items-center gap-3 text-xs leading-4 text-muted-foreground">
+                                <Badge variant="outline" className={cn('h-5 px-1.5 text-[10px] uppercase tracking-wide', probeModeTone(latest?.probe_mode ?? 'standard'))}>
+                                    {t(`probeMode.${latest?.probe_mode ?? 'standard'}`)}
+                                </Badge>
                                 <span className="inline-flex items-center gap-1">
                                     <Activity className="size-3.5" />
                                     {successCount}/{attempts.length || 0}
@@ -197,11 +212,22 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
                         size="sm"
                         variant="outline"
                         className="h-7 rounded-lg px-2 text-xs"
-                        disabled={isRunningMutation || isRunning}
-                        onClick={() => runGroupHealth.mutate(groupId)}
+                        disabled={isRunPendingForGroup || isRunning}
+                        onClick={() => runGroupHealth.mutate({ groupId })}
                     >
-                        {isRunning || isRunningMutation ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                        {isRunning || isStandardRunPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
                         {t('run')}
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 rounded-lg px-2 text-xs"
+                        disabled={isRunPendingForGroup || isRunning}
+                        onClick={() => runGroupHealth.mutate({ groupId, probeMode: 'full' })}
+                    >
+                        {isFullRunPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                        {t('runFull')}
                     </Button>
                 </CardContent>
             </Card>
@@ -221,7 +247,10 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
                     <Card className="gap-0 rounded-2xl border-border/60 bg-card/80 py-0 shadow-xs">
                         <CardContent className="p-3">
                             <div className="text-xs text-muted-foreground">{t('status')}</div>
-                            <div className={cn('mt-1 font-medium', statusTextTone(latest?.status))}>{statusLabel(latest?.status)}</div>
+                            <div className={cn('mt-1 font-medium', statusTextTone(latest?.status))}>{t(`statusValue.${statusLabel(latest?.status)}`)}</div>
+                            <Badge variant="outline" className={cn('mt-2 h-5 px-1.5 text-[10px] uppercase tracking-wide', probeModeTone(latest?.probe_mode ?? 'standard'))}>
+                                {t(`probeMode.${latest?.probe_mode ?? 'standard'}`)}
+                            </Badge>
                         </CardContent>
                     </Card>
                     <Card className="gap-0 rounded-2xl border-border/60 bg-card/80 py-0 shadow-xs">
@@ -246,7 +275,7 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
 
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                     {attempts.length ? attempts.map((attempt) => (
-                        <AttemptDetails key={attempt.id} attempt={attempt} />
+                        <GroupHealthAttemptDetails key={attempt.id} attempt={attempt} />
                     )) : (
                         <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 px-3 py-6 text-center text-xs text-muted-foreground">
                             {t('empty')}
