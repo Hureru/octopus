@@ -39,6 +39,13 @@ export interface Group {
     items?: GroupItem[];
 }
 
+export interface GroupAutoAddResult {
+    group_id: number;
+    matched_candidates: number;
+    added_candidates: number;
+    skipped_candidates: number;
+}
+
 /**
  * 新增 item 请求
  */
@@ -192,20 +199,20 @@ export function useDeleteGroup() {
  * const autoAdd = useAutoAddGroupItem();
  * autoAdd.mutate(1); // 为 groupId=1 自动添加匹配的 items
  */
-// export function useAutoAddGroupItem() {
-//     const queryClient = useQueryClient();
+export function useAutoAddGroupItem() {
+    const queryClient = useQueryClient();
 
-//     return useMutation({
-//         mutationFn: async (groupId: number) => {
-//             return apiClient.post<null>(`/api/v1/group/auto-add-item`, { id: groupId });
-//         },
-//         onSuccess: () => {
-//             logger.log('自动添加分组 item 成功');
-//             queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
-//         },
-//         onError: (error) => {
-//             logger.error('自动添加分组 item 失败:', error);
-//         },
-//     });
-// }
-
+    return useMutation({
+        mutationFn: async (groupId: number) => {
+            return apiClient.post<GroupAutoAddResult>('/api/v1/group/auto-add-item', { id: groupId });
+        },
+        onSuccess: (data) => {
+            logger.log('自动添加分组 item 成功:', data);
+            queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
+            queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+        },
+        onError: (error) => {
+            logger.error('自动添加分组 item 失败:', error);
+        },
+    });
+}

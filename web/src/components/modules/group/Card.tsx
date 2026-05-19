@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Trash2, X, Pencil } from 'lucide-react';
+import { Trash2, WandSparkles, X, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { type Group, useDeleteGroup, useUpdateGroup } from '@/api/endpoints/group';
+import { type Group, useAutoAddGroupItem, useDeleteGroup, useUpdateGroup } from '@/api/endpoints/group';
 import { useModelChannelList } from '@/api/endpoints/model';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -74,6 +74,7 @@ function EditDialogContent({ group, displayMembers, isSubmitting, onSubmit }: Ed
 export function GroupCard({ group }: { group: Group }) {
     const t = useTranslations('group');
     const updateGroup = useUpdateGroup();
+    const autoAddGroupItem = useAutoAddGroupItem();
     const deleteGroup = useDeleteGroup();
     const { data: modelChannels = [] } = useModelChannelList();
 
@@ -284,6 +285,24 @@ export function GroupCard({ group }: { group: Group }) {
         });
     }, [group.first_token_time_out, group.session_keep_time, group.retry_enabled, group.max_retries, group.id, group.items, group.match_regex, group.mode, group.name, onSuccess, onError, updateGroup]);
 
+    const handleAutoAdd = useCallback(() => {
+        if (!group.id) return;
+        autoAddGroupItem.mutate(group.id, {
+            onSuccess: (result) => {
+                toast.success(t('toast.autoAddSuccess'), {
+                    description: t('toast.autoAddSummary', {
+                        matched: result.matched_candidates,
+                        added: result.added_candidates,
+                        skipped: result.skipped_candidates,
+                    }),
+                });
+            },
+            onError: (error: Error) => {
+                toast.error(t('toast.autoAddFailed'), { description: error.message });
+            },
+        });
+    }, [autoAddGroupItem, group.id, t]);
+
     return (
         <article className="flex flex-col rounded-3xl border border-border bg-card text-card-foreground p-4 custom-shadow">
             <header className="flex items-start justify-between mb-3 relative overflow-visible rounded-xl -mx-1 px-1 -my-1 py-1">
@@ -382,6 +401,26 @@ export function GroupCard({ group }: { group: Group }) {
             </div>
 
             <GroupHealthBadge groupId={group.id} />
+
+            <div className="mb-3 flex items-center justify-end">
+                <button
+                    type="button"
+                    onClick={handleAutoAdd}
+                    disabled={!group.id || autoAddGroupItem.isPending}
+                    className={cn(
+                        'inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-border/60 bg-background/70 px-2.5 text-xs text-muted-foreground transition-colors',
+                        (!group.id || autoAddGroupItem.isPending)
+                            ? 'cursor-not-allowed opacity-50'
+                            : 'hover:border-border hover:bg-muted/60 hover:text-foreground'
+                    )}
+                    title={t('detail.actions.autoAdd')}
+                >
+                    <WandSparkles className="size-3.5 shrink-0" />
+                    <span className="truncate">
+                        {autoAddGroupItem.isPending ? t('detail.actions.autoAdding') : t('detail.actions.autoAdd')}
+                    </span>
+                </button>
+            </div>
 
             <section className="rounded-xl border border-border/50 bg-muted/30 overflow-hidden relative h-101">
                 <MemberList

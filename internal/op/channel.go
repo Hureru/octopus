@@ -487,7 +487,7 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 		siteAccountName := ""
 		siteGroupKey := ""
 		siteGroupName := ""
-		endpointType := "openai"
+		endpointType := channelEndpointTypeName(channel.Type)
 		var siteID *int
 		var siteAccountID *int
 		if binding != nil {
@@ -521,14 +521,6 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 			if siteGroupName == "" {
 				siteGroupName = model.NormalizeSiteGroupName(siteGroupKey, "")
 			}
-			switch channel.Type {
-			case model2.OutboundTypeAnthropic:
-				endpointType = "anthropic"
-			case model2.OutboundTypeGemini:
-				endpointType = "gemini"
-			default:
-				endpointType = "openai"
-			}
 		}
 		modelNames := xstrings.SplitTrimCompact(",", channel.Model, channel.CustomModel)
 		for _, modelName := range modelNames {
@@ -560,6 +552,19 @@ func ChannelGet(id int, ctx context.Context) (*model.Channel, error) {
 	}
 	normalizeChannelProxyFields(&channel)
 	return &channel, nil
+}
+
+func channelEndpointTypeName(channelType model2.OutboundType) string {
+	switch channelType {
+	case model2.OutboundTypeOpenAIResponse:
+		return "response"
+	case model2.OutboundTypeAnthropic:
+		return "anthropic"
+	case model2.OutboundTypeGemini:
+		return "gemini"
+	default:
+		return "openai"
+	}
 }
 
 func ChannelGetByName(name string, ctx context.Context) (*model.Channel, error) {
