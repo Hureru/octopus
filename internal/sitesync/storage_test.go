@@ -159,7 +159,7 @@ func TestMergePersistedSiteTokensKeepsMaskedPendingWhenMatchIsAmbiguous(t *testi
 	}
 }
 
-func TestMergePersistedSiteTokensDoesNotOverwriteReadyTokenOnNameOnlyMaskedFallback(t *testing.T) {
+func TestMergePersistedSiteTokensDemotesReadyTokenWhenMaskedPatternMismatches(t *testing.T) {
 	now := time.Unix(1711929600, 0)
 	existing := []model.SiteToken{{
 		ID:            5,
@@ -186,11 +186,14 @@ func TestMergePersistedSiteTokensDoesNotOverwriteReadyTokenOnNameOnlyMaskedFallb
 	if len(merged) != 1 {
 		t.Fatalf("expected exactly one merged token, got %+v", merged)
 	}
-	if merged[0].Token != "sk-different-full-token" {
-		t.Fatalf("expected ready token to be preserved on name-only fallback, got %q", merged[0].Token)
+	if merged[0].Token != "yzFy**********OTkb" {
+		t.Fatalf("expected stale ready token to be replaced by incoming masked value, got %q", merged[0].Token)
 	}
-	if merged[0].ValueStatus != model.SiteTokenValueStatusReady {
-		t.Fatalf("expected ready token to stay ready, got %q", merged[0].ValueStatus)
+	if merged[0].ValueStatus != model.SiteTokenValueStatusMaskedPending {
+		t.Fatalf("expected merged token to be demoted to masked_pending, got %q", merged[0].ValueStatus)
+	}
+	if merged[0].Enabled {
+		t.Fatalf("expected demoted token to be disabled until the user re-fills it")
 	}
 }
 

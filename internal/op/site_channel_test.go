@@ -1,6 +1,7 @@
 package op
 
 import (
+	"strings"
 	"testing"
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
@@ -193,6 +194,71 @@ func TestUpdateSiteSourceKeysRestoresReadyWhenMaskedPendingTokenIsCompleted(t *t
 	}
 	if saved.ValueStatus != model.SiteTokenValueStatusReady {
 		t.Fatalf("expected completed token value_status to restore ready, got %q", saved.ValueStatus)
+	}
+}
+
+func TestUpdateSiteSourceKeysRejectsMaskedPendingTokenWhenInputDoesNotMatch(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "site-channel-source-mask-reject-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "site-channel-source-mask-reject-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	row := model.SiteToken{
+		SiteAccountID: account.ID,
+		Name:          "legacy",
+		Token:         "yzFy**********OTkb",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       false,
+		ValueStatus:   model.SiteTokenValueStatusMaskedPending,
+		Source:        "sync",
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&row).Error; err != nil {
+		t.Fatalf("create site token failed: %v", err)
+	}
+
+	wrong := "abcdSOMETHINGzzzz"
+	err := UpdateSiteSourceKeys(site.ID, account.ID, &model.SiteSourceKeyUpdateRequest{
+		GroupKey: model.SiteDefaultGroupKey,
+		KeysToUpdate: []model.SiteSourceKeyUpdateItem{{
+			ID:    row.ID,
+			Token: &wrong,
+		}},
+	}, ctx)
+	if err == nil {
+		t.Fatalf("expected UpdateSiteSourceKeys to reject mismatched key, got nil error")
+	}
+	if !strings.Contains(err.Error(), "脱敏") {
+		t.Fatalf("expected error to mention masked-mismatch, got %v", err)
+	}
+
+	var saved model.SiteToken
+	if err := dbpkg.GetDB().WithContext(ctx).First(&saved, row.ID).Error; err != nil {
+		t.Fatalf("reload site token failed: %v", err)
+	}
+	if saved.Token != "yzFy**********OTkb" {
+		t.Fatalf("expected token row to remain unchanged on rejection, got %q", saved.Token)
+	}
+	if saved.ValueStatus != model.SiteTokenValueStatusMaskedPending {
+		t.Fatalf("expected token row to stay masked_pending on rejection, got %q", saved.ValueStatus)
 	}
 }
 

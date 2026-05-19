@@ -123,6 +123,7 @@ import {
     getErrorMessage,
     hasSourceKeyChanges,
     isMaskedTokenValue,
+    matchesMaskedToken,
     isSameGroupFilter,
     platformLabel,
     routeSourceLabel,
@@ -285,6 +286,13 @@ function UnifiedCompletionDialog({
                 setAccountErrors((current) => ({
                     ...current,
                     [accountKey]: `分组「${item.group_name || item.group_key}」仍是脱敏值，必须填写完整 Key`,
+                }));
+                return;
+            }
+            if (!matchesMaskedToken(value, item.token)) {
+                setAccountErrors((current) => ({
+                    ...current,
+                    [accountKey]: `分组「${item.group_name || item.group_key}」的 Key 与已同步的脱敏值不匹配，请核对输入`,
                 }));
                 return;
             }
@@ -1703,6 +1711,24 @@ function SiteAccountPanel({
 
     const handleSaveProjectedKeys = () => {
         if (!editingProjectedGroup) return;
+        const originalById = new Map(editingProjectedGroup.source_keys.map((key) => [key.id, key] as const));
+        for (const item of sourceKeyForm) {
+            if (!item.id) continue;
+            const original = originalById.get(item.id);
+            if (!original) continue;
+            if (original.value_status !== 'masked_pending') continue;
+            const trimmed = item.token.trim();
+            if (trimmed === (original.token ?? '').trim()) continue;
+            if (!trimmed) continue;
+            if (isMaskedTokenValue(trimmed)) {
+                toast.error(`Key #${item.id} 仍是脱敏值，必须填写完整 Key`);
+                return;
+            }
+            if (!matchesMaskedToken(trimmed, original.token)) {
+                toast.error(`Key #${item.id} 与已同步的脱敏值不匹配，请核对输入`);
+                return;
+            }
+        }
         const payload = buildSourceKeyUpdatePayload(editingProjectedGroup.group_key, editingProjectedGroup.source_keys, sourceKeyForm);
         if (!payload.keys_to_add?.length && !payload.keys_to_update?.length && !payload.keys_to_delete?.length) {
             toast.error('没有需要保存的 Key 变更');

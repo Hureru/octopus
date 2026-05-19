@@ -184,6 +184,53 @@ export function isMaskedTokenValue(value: string) {
     return trimmed.includes('*') || trimmed.includes('•');
 }
 
+function normalizeComparableTokenValue(value: string) {
+    const trimmed = value.trim();
+    if (trimmed.length >= 3 && trimmed.slice(0, 3).toLowerCase() === 'sk-') {
+        return trimmed.slice(3).trim();
+    }
+    return trimmed;
+}
+
+function firstMaskIndex(value: string) {
+    for (let i = 0; i < value.length; i++) {
+        const ch = value[i];
+        if (ch === '*' || ch === '\u2022') return i;
+    }
+    return -1;
+}
+
+function lastMaskIndex(value: string) {
+    for (let i = value.length - 1; i >= 0; i--) {
+        const ch = value[i];
+        if (ch === '*' || ch === '\u2022') return i;
+    }
+    return -1;
+}
+
+// matchesMaskedToken mirrors model.SiteMaskedTokenMatches on the backend:
+// it tolerates either side missing the "sk-" prefix and matches a full token
+// against a masked sample by checking the unmasked prefix/suffix segments.
+export function matchesMaskedToken(fullValue: string, maskedValue: string) {
+    const normalizedFull = normalizeComparableTokenValue(fullValue);
+    const normalizedMasked = normalizeComparableTokenValue(maskedValue);
+    if (!normalizedFull || !normalizedMasked) return false;
+    if (!isMaskedTokenValue(normalizedMasked)) {
+        return normalizedFull === normalizedMasked;
+    }
+    const first = firstMaskIndex(normalizedMasked);
+    if (first < 0) return normalizedFull === normalizedMasked;
+    const last = lastMaskIndex(normalizedMasked);
+    if (last < first) return normalizedFull === normalizedMasked;
+    const prefix = normalizedMasked.slice(0, first);
+    const suffix = normalizedMasked.slice(last + 1);
+    if (!prefix && !suffix) return false;
+    if (normalizedFull.length < prefix.length + suffix.length) return false;
+    if (prefix && !normalizedFull.startsWith(prefix)) return false;
+    if (suffix && !normalizedFull.endsWith(suffix)) return false;
+    return true;
+}
+
 export function buildSiteTokenManagementUrl(baseUrl: string, platform: SiteChannelCard['platform']) {
     const trimmed = baseUrl.trim();
     if (!trimmed) return '';

@@ -558,6 +558,11 @@ func UpdateSiteSourceKeys(siteID int, accountID int, req *model.SiteSourceKeyUpd
 				if err != nil {
 					return err
 				}
+				if existing.ValueStatus == model.SiteTokenValueStatusMaskedPending && model.IsMaskedSiteTokenValue(existing.Token) {
+					if !model.SiteMaskedTokenMatches(normalizedToken, existing.Token) {
+						return fmt.Errorf("新 Key 与已有脱敏 Key 模式不匹配，请确认输入")
+					}
+				}
 				updates["token"] = normalizedToken
 				updates["value_status"] = model.NormalizeSiteTokenValueStatus(existing.ValueStatus, normalizedToken)
 			}

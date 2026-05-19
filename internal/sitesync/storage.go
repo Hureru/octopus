@@ -406,10 +406,10 @@ func mergeMaskedIncomingSiteToken(incoming model.SiteToken, existingTokens []mod
 			continue
 		}
 		if model.IsReadySiteToken(existing) && !model.IsMaskedSiteTokenValue(existing.Token) {
+			log.Warnf("site token demoted to masked_pending due to mask mismatch (account=%d, group=%s, token_id=%d)", existing.SiteAccountID, existing.GroupKey, existing.ID)
 			incoming.ID = existing.ID
-			incoming.Token = existing.Token
-			incoming.ValueStatus = model.SiteTokenValueStatusReady
-			incoming.Enabled = incoming.Enabled && existing.Enabled
+			incoming.Enabled = false
+			incoming.IsDefault = false
 			if existing.ID != 0 {
 				usedExistingIDs[existing.ID] = struct{}{}
 			}
@@ -439,37 +439,7 @@ func normalizeSiteTokenName(name string) string {
 }
 
 func siteMaskedTokenMatches(fullToken string, maskedToken string) bool {
-	normalizedFull := model.NormalizeComparableSiteTokenValue(fullToken)
-	normalizedMasked := model.NormalizeComparableSiteTokenValue(maskedToken)
-	if normalizedFull == "" || normalizedMasked == "" {
-		return false
-	}
-	if !model.IsMaskedSiteTokenValue(normalizedMasked) {
-		return normalizedFull == normalizedMasked
-	}
-	firstMask := strings.IndexAny(normalizedMasked, "*•")
-	if firstMask < 0 {
-		return normalizedFull == normalizedMasked
-	}
-	lastMask := strings.LastIndexAny(normalizedMasked, "*•")
-	if lastMask < firstMask {
-		return normalizedFull == normalizedMasked
-	}
-	prefix := normalizedMasked[:firstMask]
-	suffix := normalizedMasked[lastMask+1:]
-	if prefix == "" && suffix == "" {
-		return false
-	}
-	if len(normalizedFull) < len(prefix)+len(suffix) {
-		return false
-	}
-	if prefix != "" && !strings.HasPrefix(normalizedFull, prefix) {
-		return false
-	}
-	if suffix != "" && !strings.HasSuffix(normalizedFull, suffix) {
-		return false
-	}
-	return true
+	return model.SiteMaskedTokenMatches(fullToken, maskedToken)
 }
 
 func sameComparableSiteTokenValue(left string, right string) bool {
