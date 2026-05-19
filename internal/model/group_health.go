@@ -19,19 +19,27 @@ const (
 	GroupHealthAttemptStatusSkipped GroupHealthAttemptStatus = "skipped"
 )
 
+type GroupHealthProbeMode string
+
+const (
+	GroupHealthProbeModeStandard GroupHealthProbeMode = "standard"
+	GroupHealthProbeModeFull     GroupHealthProbeMode = "full"
+)
+
 type GroupHealthSnapshot struct {
-	ID                  int                   `json:"id" gorm:"primaryKey"`
-	GroupID             int                   `json:"group_id" gorm:"index:idx_group_health_group_started"`
-	GroupName           string                `json:"group_name" gorm:"type:varchar(255);not null"`
-	GroupMode           GroupMode             `json:"group_mode" gorm:"not null"`
-	RequestModel        string                `json:"request_model" gorm:"type:varchar(255);not null"`
-	Status              GroupHealthStatus     `json:"status" gorm:"type:varchar(16);index:idx_group_health_status_started;not null"`
-	StartedAt           time.Time             `json:"started_at" gorm:"index:idx_group_health_group_started;not null"`
-	FinishedAt          *time.Time            `json:"finished_at"`
-	DurationMS          int64                 `json:"duration_ms" gorm:"not null;default:0"`
-	SuccessfulChannelID *int                  `json:"successful_channel_id"`
-	Message             string                `json:"message"`
-	Attempts            []GroupHealthAttempt  `json:"attempts,omitempty" gorm:"foreignKey:SnapshotID"`
+	ID                  int                  `json:"id" gorm:"primaryKey"`
+	GroupID             int                  `json:"group_id" gorm:"index:idx_group_health_group_started"`
+	GroupName           string               `json:"group_name" gorm:"type:varchar(255);not null"`
+	GroupMode           GroupMode            `json:"group_mode" gorm:"not null"`
+	ProbeMode           GroupHealthProbeMode `json:"probe_mode" gorm:"type:varchar(16);not null;default:'standard'"`
+	RequestModel        string               `json:"request_model" gorm:"type:varchar(255);not null"`
+	Status              GroupHealthStatus    `json:"status" gorm:"type:varchar(16);index:idx_group_health_status_started;not null"`
+	StartedAt           time.Time            `json:"started_at" gorm:"index:idx_group_health_group_started;not null"`
+	FinishedAt          *time.Time           `json:"finished_at"`
+	DurationMS          int64                `json:"duration_ms" gorm:"not null;default:0"`
+	SuccessfulChannelID *int                 `json:"successful_channel_id"`
+	Message             string               `json:"message"`
+	Attempts            []GroupHealthAttempt `json:"attempts,omitempty" gorm:"foreignKey:SnapshotID"`
 }
 
 type GroupHealthAttempt struct {
@@ -52,8 +60,8 @@ type GroupHealthAttempt struct {
 }
 
 type GroupHealthGroupView struct {
-	GroupID    int                  `json:"group_id"`
-	GroupName  string               `json:"group_name"`
-	GroupMode  GroupMode            `json:"group_mode"`
-	Latest     *GroupHealthSnapshot `json:"latest,omitempty"`
+	GroupID   int                  `json:"group_id"`
+	GroupName string               `json:"group_name"`
+	GroupMode GroupMode            `json:"group_mode"`
+	Latest    *GroupHealthSnapshot `json:"latest,omitempty"`
 }

@@ -136,7 +136,11 @@
             "partial": "{count} partial",
             "failed": "{count} failed",
             "idle": "{count} unchecked",
-            "runAll": "Run All"
+            "runAll": "Run All",
+            "runAllFull": "Full Probe All",
+            "viewDetails": "View details",
+            "detailTitle": "Group health details",
+            "detailDescription": "Inspect the latest health snapshot for each group and run standard or full probes from the home dashboard."
         }
     },
     "setting": {
@@ -424,12 +428,31 @@
             "title": "Health",
             "detailTitle": "Group Health Details",
             "run": "Run",
+            "runFull": "Full Probe",
             "lastRun": "Last run {time}",
             "never": "Never checked",
             "status": "Status",
             "healthy": "Healthy",
+            "healthyCount": "{success}/{total} healthy",
             "duration": "Duration",
             "attempts": "Attempts",
+            "attemptListToggle": "Attempts ({count})",
+            "attemptStatus": {
+                "success": "Success",
+                "failed": "Failed",
+                "skipped": "Skipped"
+            },
+            "statusValue": {
+                "idle": "Idle",
+                "running": "Running",
+                "success": "Healthy",
+                "partial": "Partial",
+                "failed": "Failed"
+            },
+            "probeMode": {
+                "standard": "Standard",
+                "full": "Full"
+            },
             "empty": "No health snapshot yet.",
             "errorDetails": "Error details",
             "noHttpStatus": "No HTTP status"
