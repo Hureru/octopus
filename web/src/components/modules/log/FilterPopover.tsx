@@ -45,6 +45,7 @@ interface DateTimePickerProps {
 }
 
 function DateTimePicker({ value, placeholder, defaultTime, disabledRange, onChange }: DateTimePickerProps) {
+    const t = useTranslations('toolbar');
     const [open, setOpen] = useState(false);
     const selectedDate = unixToDate(value);
     const timeString = value
@@ -95,9 +96,17 @@ function DateTimePicker({ value, placeholder, defaultTime, disabledRange, onChan
                     {value ? (
                         <span
                             role="button"
-                            tabIndex={-1}
+                            tabIndex={0}
+                            aria-label={t('popover.logFilter.date.clear')}
                             onClick={handleClear}
-                            className="-mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onChange(undefined);
+                                }
+                            }}
+                            className="-mr-1 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                             <X className="size-3" />
                         </span>
@@ -172,7 +181,7 @@ export function LogFilterPopover() {
             list.sort((a, b) => a.name.localeCompare(b.name));
             result.push({
                 key: `site:${siteId}`,
-                label: siteNameById.get(siteId) ?? `站点 #${siteId}`,
+                label: siteNameById.get(siteId) ?? t('popover.logFilter.channel.siteFallback', { id: siteId }),
                 channels: list,
             });
         }

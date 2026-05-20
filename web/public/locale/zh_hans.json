@@ -94,12 +94,14 @@
                     "title": "时间范围",
                     "startPlaceholder": "开始时间",
                     "endPlaceholder": "结束时间",
+                    "clear": "清除时间",
                     "hint": "可选时间会受设置中的日志保留天数限制。"
                 },
                 "channel": {
                     "title": "渠道",
                     "searchPlaceholder": "搜索渠道...",
                     "manualGroup": "手动渠道",
+                    "siteFallback": "站点 #{id}",
                     "empty": "未找到渠道"
                 }
             }
@@ -562,7 +564,7 @@
             "cacheWrite": "缓存写入"
         },
         "filters": {
-            "keywordPlaceholder": "搜索模型、渠道、API Key 或内容",
+            "keywordPlaceholder": "搜索模型、API Key 或内容",
             "channel": "渠道",
             "allChannels": "全部渠道",
             "status": "状态",
@@ -575,7 +577,8 @@
         "pagination": {
             "prev": "上一页",
             "next": "下一页",
-            "page": "第 {page} 页"
+            "page": "第 {page} 页",
+            "pagesRange": "第 {from} ~ {to} 页"
         }
     },
     "channel": {

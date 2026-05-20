@@ -356,18 +356,12 @@ func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB 
 	return query
 }
 
-// logMatchesChannels 检查日志是否属于指定的渠道集合
-// 检查顶层 ChannelId 和 Attempts 中的 ChannelID
+// logMatchesChannels 检查日志是否属于指定的渠道集合。
+// 仅匹配顶层 ChannelId，保持与 DB 查询 channel_id IN ? 一致，
+// 避免缓存与 DB 分页/计数语义偏差。
 func logMatchesChannels(log model.RelayLog, channelSet map[int]struct{}) bool {
-	if _, ok := channelSet[log.ChannelId]; ok {
-		return true
-	}
-	for _, attempt := range log.Attempts {
-		if _, ok := channelSet[attempt.ChannelID]; ok {
-			return true
-		}
-	}
-	return false
+	_, ok := channelSet[log.ChannelId]
+	return ok
 }
 
 func logMatchesKeyword(relayLog model.RelayLog, keyword string) bool {
@@ -381,12 +375,6 @@ func logMatchesKeyword(relayLog model.RelayLog, keyword string) bool {
 	}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(field), keyword) {
-			return true
-		}
-	}
-	for _, attempt := range relayLog.Attempts {
-		if strings.Contains(strings.ToLower(attempt.ModelName), keyword) ||
-			strings.Contains(strings.ToLower(attempt.Msg), keyword) {
 			return true
 		}
 	}

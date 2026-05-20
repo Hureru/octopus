@@ -94,12 +94,14 @@
                     "title": "Time range",
                     "startPlaceholder": "Start time",
                     "endPlaceholder": "End time",
+                    "clear": "Clear time",
                     "hint": "Selectable time is limited by the log retention period in Settings."
                 },
                 "channel": {
                     "title": "Channel",
                     "searchPlaceholder": "Search channels...",
                     "manualGroup": "Manual channels",
+                    "siteFallback": "Site #{id}",
                     "empty": "No channels found"
                 }
             }
@@ -562,7 +564,7 @@
             "cacheWrite": "Cache Write"
         },
         "filters": {
-            "keywordPlaceholder": "Search model, channel, API key or content",
+            "keywordPlaceholder": "Search model, API key or content",
             "channel": "Channel",
             "allChannels": "All channels",
             "status": "Status",
@@ -575,7 +577,8 @@
         "pagination": {
             "prev": "Prev",
             "next": "Next",
-            "page": "Page {page}"
+            "page": "Page {page}",
+            "pagesRange": "Pages {from}–{to}"
         }
     },
     "channel": {

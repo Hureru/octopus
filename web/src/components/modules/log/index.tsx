@@ -258,7 +258,10 @@ export function Log() {
         void loadMore();
     }, [canLoadMore, loadMore]);
 
+    const refreshIdRef = useRef(0);
     const handleRefresh = useCallback(async () => {
+        refreshIdRef.current += 1;
+        const myId = refreshIdRef.current;
         setRefreshing(true);
         const startedAt = Date.now();
         try {
@@ -270,7 +273,9 @@ export function Log() {
         } finally {
             const elapsed = Date.now() - startedAt;
             const remaining = Math.max(0, 500 - elapsed);
-            setTimeout(() => setRefreshing(false), remaining);
+            setTimeout(() => {
+                if (refreshIdRef.current === myId) setRefreshing(false);
+            }, remaining);
         }
     }, [filterMode, liveLogsQuery, pagedLogsQuery, setRefreshing]);
 
@@ -417,6 +422,7 @@ function EllipsisPagePopover({
     onSelect: (page: number) => void;
     disabled?: boolean;
 }) {
+    const t = useTranslations('log');
     const [open, setOpen] = useState(false);
     const pages = useMemo(() => {
         const out: number[] = [];
@@ -430,7 +436,7 @@ function EllipsisPagePopover({
                 <button
                     type="button"
                     disabled={disabled}
-                    aria-label={`Pages ${from}-${to}`}
+                    aria-label={t('pagination.pagesRange', { from, to })}
                     className="inline-flex size-7 items-center justify-center rounded-full text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     …
