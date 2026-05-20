@@ -83,6 +83,27 @@
                     "priced": "僅收費",
                     "free": "僅免費"
                 }
+            },
+            "logRefresh": {
+                "refresh": "刷新日誌"
+            },
+            "logFilter": {
+                "title": "日誌篩選",
+                "date": {
+                    "title": "日期",
+                    "all": "全部",
+                    "today": "今天",
+                    "last7Days": "近 7 天",
+                    "last30Days": "近 30 天",
+                    "custom": "自訂",
+                    "hint": "可選日期會受設定中的日誌保留天數限制。"
+                },
+                "channelScope": {
+                    "title": "供應源類型",
+                    "all": "全部",
+                    "site": "站點",
+                    "manual": "一般"
+                }
             }
         }
     },
@@ -541,6 +562,22 @@
             "billInput": "計費輸入",
             "cacheRead": "快取讀取",
             "cacheWrite": "快取寫入"
+        },
+        "filters": {
+            "keywordPlaceholder": "搜尋模型、供應源、API Key 或內容",
+            "channel": "供應源",
+            "allChannels": "全部供應源",
+            "status": "狀態",
+            "allStatus": "全部狀態",
+            "success": "成功",
+            "error": "錯誤",
+            "reset": "重置",
+            "refresh": "刷新"
+        },
+        "pagination": {
+            "prev": "上一頁",
+            "next": "下一頁",
+            "page": "第 {page} 頁"
         }
     },
     "channel": {

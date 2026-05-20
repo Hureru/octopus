@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/snowflake"
+	"gorm.io/gorm"
 )
 
 const relayLogMaxSize = 20
@@ -186,38 +188,71 @@ func relayLogCleanup(ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Where("time < ?", cutoffTime).Delete(&model.RelayLog{}).Error
 }
 
+type RelayLogStatusFilter string
+
+const (
+	RelayLogStatusAll     RelayLogStatusFilter = ""
+	RelayLogStatusSuccess RelayLogStatusFilter = "success"
+	RelayLogStatusError   RelayLogStatusFilter = "error"
+)
+
+type RelayLogListFilter struct {
+	StartTime  *int
+	EndTime    *int
+	ChannelIDs []int
+	Status     RelayLogStatusFilter
+	Keyword    string
+	Page       int
+	PageSize   int
+}
+
 // RelayLogList 查询日志列表，支持可选的时间范围和渠道ID过滤
 // startTime 和 endTime 为 nil 时表示不限制时间范围
 // channelIDs 为 nil 或空时表示不限制渠道
 func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int, page, pageSize int) ([]model.RelayLog, error) {
+	return RelayLogListWithFilter(ctx, RelayLogListFilter{
+		StartTime:  startTime,
+		EndTime:    endTime,
+		ChannelIDs: channelIDs,
+		Page:       page,
+		PageSize:   pageSize,
+	})
+}
+
+// RelayLogListWithFilter 查询日志列表，支持时间、渠道、状态和关键字过滤。
+func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) ([]model.RelayLog, error) {
 	enabled, err := SettingGetBool(model.SettingKeyRelayLogKeepEnabled)
 	if err != nil {
 		return nil, err
 	}
-	hasTimeFilter := startTime != nil && endTime != nil
-	hasChannelFilter := len(channelIDs) > 0
 
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 || filter.PageSize > 100 {
+		filter.PageSize = 20
+	}
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+
+	hasChannelFilter := len(filter.ChannelIDs) > 0
 	var channelSet map[int]struct{}
 	if hasChannelFilter {
-		channelSet = make(map[int]struct{}, len(channelIDs))
-		for _, id := range channelIDs {
+		channelSet = make(map[int]struct{}, len(filter.ChannelIDs))
+		for _, id := range filter.ChannelIDs {
 			channelSet[id] = struct{}{}
 		}
 	}
 
+	keyword := strings.ToLower(filter.Keyword)
+
 	// 获取缓存中符合条件的日志
 	relayLogCacheLock.Lock()
 	var cachedLogs []model.RelayLog
-	for _, log := range relayLogCache {
-		if hasTimeFilter {
-			if log.Time < int64(*startTime) || log.Time > int64(*endTime) {
-				continue
-			}
-		}
-		if hasChannelFilter && !logMatchesChannels(log, channelSet) {
+	for _, relayLog := range relayLogCache {
+		if !relayLogMatchesFilter(relayLog, filter, channelSet, keyword) {
 			continue
 		}
-		cachedLogs = append(cachedLogs, log)
+		cachedLogs = append(cachedLogs, relayLog)
 	}
 	relayLogCacheLock.Unlock()
 
@@ -227,13 +262,13 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int
 	}
 
 	cacheCount := len(cachedLogs)
-	offset := (page - 1) * pageSize
+	offset := (filter.Page - 1) * filter.PageSize
 
 	var result []model.RelayLog
 
 	// 先从缓存中取（缓存是最新的日志）
 	if offset < cacheCount {
-		cacheEnd := offset + pageSize
+		cacheEnd := offset + filter.PageSize
 		if cacheEnd > cacheCount {
 			cacheEnd = cacheCount
 		}
@@ -242,7 +277,7 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int
 
 	// 如果启用了日志保存，缓存不够时从数据库补充
 	if enabled {
-		remaining := pageSize - len(result)
+		remaining := filter.PageSize - len(result)
 		if remaining > 0 {
 			dbOffset := 0
 			if offset > cacheCount {
@@ -250,12 +285,7 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int
 			}
 
 			query := db.GetDB().WithContext(ctx)
-			if hasTimeFilter {
-				query = query.Where("time >= ? AND time <= ?", *startTime, *endTime)
-			}
-			if hasChannelFilter {
-				query = query.Where("channel_id IN ?", channelIDs)
-			}
+			query = applyRelayLogDBFilters(query, filter)
 
 			var dbLogs []model.RelayLog
 			if err := query.Order("id DESC").Offset(dbOffset).Limit(remaining).Find(&dbLogs).Error; err != nil {
@@ -268,6 +298,54 @@ func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int
 	return result, nil
 }
 
+func relayLogMatchesFilter(relayLog model.RelayLog, filter RelayLogListFilter, channelSet map[int]struct{}, keyword string) bool {
+	if filter.StartTime != nil && relayLog.Time < int64(*filter.StartTime) {
+		return false
+	}
+	if filter.EndTime != nil && relayLog.Time > int64(*filter.EndTime) {
+		return false
+	}
+	if len(channelSet) > 0 && !logMatchesChannels(relayLog, channelSet) {
+		return false
+	}
+	if filter.Status == RelayLogStatusSuccess && relayLog.Error != "" {
+		return false
+	}
+	if filter.Status == RelayLogStatusError && relayLog.Error == "" {
+		return false
+	}
+	if keyword != "" && !logMatchesKeyword(relayLog, keyword) {
+		return false
+	}
+	return true
+}
+
+func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB {
+	if filter.StartTime != nil {
+		query = query.Where("time >= ?", *filter.StartTime)
+	}
+	if filter.EndTime != nil {
+		query = query.Where("time <= ?", *filter.EndTime)
+	}
+	if len(filter.ChannelIDs) > 0 {
+		query = query.Where("channel_id IN ?", filter.ChannelIDs)
+	}
+	if filter.Status == RelayLogStatusSuccess {
+		query = query.Where("error = ''")
+	} else if filter.Status == RelayLogStatusError {
+		query = query.Where("error <> ''")
+	}
+	keyword := strings.ToLower(strings.TrimSpace(filter.Keyword))
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where(
+			"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(channel_name) LIKE ? OR LOWER(request_content) LIKE ? OR LOWER(response_content) LIKE ? OR LOWER(error) LIKE ?",
+			like, like, like, like, like, like, like,
+		)
+	}
+	return query
+}
+
 // logMatchesChannels 检查日志是否属于指定的渠道集合
 // 检查顶层 ChannelId 和 Attempts 中的 ChannelID
 func logMatchesChannels(log model.RelayLog, channelSet map[int]struct{}) bool {
@@ -276,6 +354,31 @@ func logMatchesChannels(log model.RelayLog, channelSet map[int]struct{}) bool {
 	}
 	for _, attempt := range log.Attempts {
 		if _, ok := channelSet[attempt.ChannelID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func logMatchesKeyword(relayLog model.RelayLog, keyword string) bool {
+	fields := []string{
+		relayLog.RequestModelName,
+		relayLog.ActualModelName,
+		relayLog.RequestAPIKeyName,
+		relayLog.ChannelName,
+		relayLog.RequestContent,
+		relayLog.ResponseContent,
+		relayLog.Error,
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), keyword) {
+			return true
+		}
+	}
+	for _, attempt := range relayLog.Attempts {
+		if strings.Contains(strings.ToLower(attempt.ChannelName), keyword) ||
+			strings.Contains(strings.ToLower(attempt.ModelName), keyword) ||
+			strings.Contains(strings.ToLower(attempt.Msg), keyword) {
 			return true
 		}
 	}

@@ -83,6 +83,27 @@
                     "priced": "Priced only",
                     "free": "Free only"
                 }
+            },
+            "logRefresh": {
+                "refresh": "Refresh logs"
+            },
+            "logFilter": {
+                "title": "Log filters",
+                "date": {
+                    "title": "Date",
+                    "all": "All",
+                    "today": "Today",
+                    "last7Days": "Last 7 days",
+                    "last30Days": "Last 30 days",
+                    "custom": "Custom",
+                    "hint": "Options are limited by the log retention period in Settings."
+                },
+                "channelScope": {
+                    "title": "Channel type",
+                    "all": "All",
+                    "site": "Site",
+                    "manual": "Manual"
+                }
             }
         }
     },
@@ -541,6 +562,22 @@
             "billInput": "Billed Input",
             "cacheRead": "Cache Read",
             "cacheWrite": "Cache Write"
+        },
+        "filters": {
+            "keywordPlaceholder": "Search model, channel, API key or content",
+            "channel": "Channel",
+            "allChannels": "All channels",
+            "status": "Status",
+            "allStatus": "All status",
+            "success": "Success",
+            "error": "Error",
+            "reset": "Reset",
+            "refresh": "Refresh"
+        },
+        "pagination": {
+            "prev": "Prev",
+            "next": "Next",
+            "page": "Page {page}"
         }
     },
     "channel": {

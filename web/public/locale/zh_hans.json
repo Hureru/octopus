@@ -83,6 +83,27 @@
                     "priced": "仅收费",
                     "free": "仅免费"
                 }
+            },
+            "logRefresh": {
+                "refresh": "刷新日志"
+            },
+            "logFilter": {
+                "title": "日志筛选",
+                "date": {
+                    "title": "日期",
+                    "all": "全部",
+                    "today": "今天",
+                    "last7Days": "近 7 天",
+                    "last30Days": "近 30 天",
+                    "custom": "自定义",
+                    "hint": "可选日期会受设置中的日志保留天数限制。"
+                },
+                "channelScope": {
+                    "title": "渠道类型",
+                    "all": "全部",
+                    "site": "站点",
+                    "manual": "普通"
+                }
             }
         }
     },
@@ -541,6 +562,22 @@
             "billInput": "计费输入",
             "cacheRead": "缓存读取",
             "cacheWrite": "缓存写入"
+        },
+        "filters": {
+            "keywordPlaceholder": "搜索模型、渠道、API Key 或内容",
+            "channel": "渠道",
+            "allChannels": "全部渠道",
+            "status": "状态",
+            "allStatus": "全部状态",
+            "success": "成功",
+            "error": "错误",
+            "reset": "重置",
+            "refresh": "刷新"
+        },
+        "pagination": {
+            "prev": "上一页",
+            "next": "下一页",
+            "page": "第 {page} 页"
         }
     },
     "channel": {

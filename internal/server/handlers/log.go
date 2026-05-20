@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
@@ -41,6 +42,9 @@ func listLog(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	startTimeStr := c.Query("start_time")
 	endTimeStr := c.Query("end_time")
+	channelIDsStr := c.Query("channel_ids")
+	status := op.RelayLogStatusFilter(strings.TrimSpace(c.Query("status")))
+	keyword := c.Query("keyword")
 
 	if page < 1 {
 		page = 1
@@ -50,22 +54,53 @@ func listLog(c *gin.Context) {
 	}
 
 	var startTime, endTime *int
-	if startTimeStr != "" && endTimeStr != "" {
+	if startTimeStr != "" {
 		st, err := strconv.Atoi(startTimeStr)
 		if err != nil {
 			resp.Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		startTime = &st
+	}
+	if endTimeStr != "" {
 		et, err := strconv.Atoi(endTimeStr)
 		if err != nil {
 			resp.Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
-		startTime = &st
 		endTime = &et
 	}
 
-	logs, err := op.RelayLogList(c.Request.Context(), startTime, endTime, nil, page, pageSize)
+	if status != op.RelayLogStatusAll && status != op.RelayLogStatusSuccess && status != op.RelayLogStatusError {
+		resp.Error(c, http.StatusBadRequest, "invalid status")
+		return
+	}
+
+	var channelIDs []int
+	if channelIDsStr != "" {
+		for _, item := range strings.Split(channelIDsStr, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			id, err := strconv.Atoi(item)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			channelIDs = append(channelIDs, id)
+		}
+	}
+
+	logs, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
+		StartTime:  startTime,
+		EndTime:    endTime,
+		ChannelIDs: channelIDs,
+		Status:     status,
+		Keyword:    keyword,
+		Page:       page,
+		PageSize:   pageSize,
+	})
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
