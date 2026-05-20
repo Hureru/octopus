@@ -101,6 +101,11 @@ function appendLogListParams(params: URLSearchParams, filters?: UseLogsOptions['
     if (keyword) params.set('keyword', keyword);
 }
 
+export interface LogPageResponse {
+    logs: RelayLog[];
+    total: number;
+}
+
 export function useLogPage(params: LogListParams) {
     const page = params.page ?? 1;
     const pageSize = params.page_size ?? 20;
@@ -108,13 +113,18 @@ export function useLogPage(params: LogListParams) {
 
     return useQuery({
         queryKey: ['logs', 'page', pageSize, page, filters],
-        queryFn: async () => {
+        queryFn: async (): Promise<LogPageResponse> => {
             const search = new URLSearchParams();
             search.set('page', String(page));
             search.set('page_size', String(pageSize));
             appendLogListParams(search, params);
-            const result = await apiClient.get<RelayLog[] | null>(`/api/v1/log/list?${search.toString()}`);
-            return result ?? [];
+            const result = await apiClient.get<{ logs: RelayLog[] | null; total: number } | null>(
+                `/api/v1/log/list?${search.toString()}`,
+            );
+            return {
+                logs: result?.logs ?? [],
+                total: result?.total ?? 0,
+            };
         },
         placeholderData: keepPreviousData,
         staleTime: 0,
@@ -182,8 +192,10 @@ export function useLogs(options: UseLogsOptions = {}) {
             params.set('page', String(pageParam));
             params.set('page_size', String(pageSize));
             appendLogListParams(params, filters);
-            const result = await apiClient.get<RelayLog[] | null>(`/api/v1/log/list?${params.toString()}`);
-            return result ?? [];
+            const result = await apiClient.get<{ logs: RelayLog[] | null; total: number } | null>(
+                `/api/v1/log/list?${params.toString()}`,
+            );
+            return result?.logs ?? [];
         },
         getNextPageParam: (lastPage, allPages) => {
             if (!lastPage || lastPage.length < pageSize) return undefined;

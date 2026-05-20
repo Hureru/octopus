@@ -89,20 +89,18 @@
             },
             "logFilter": {
                 "title": "Log filters",
+                "clearAll": "Clear filters",
                 "date": {
-                    "title": "Date",
-                    "all": "All",
-                    "today": "Today",
-                    "last7Days": "Last 7 days",
-                    "last30Days": "Last 30 days",
-                    "custom": "Custom",
-                    "hint": "Options are limited by the log retention period in Settings."
+                    "title": "Time range",
+                    "startPlaceholder": "Start time",
+                    "endPlaceholder": "End time",
+                    "hint": "Selectable time is limited by the log retention period in Settings."
                 },
-                "channelScope": {
-                    "title": "Channel type",
-                    "all": "All",
-                    "site": "Site",
-                    "manual": "Manual"
+                "channel": {
+                    "title": "Channel",
+                    "searchPlaceholder": "Search channels...",
+                    "manualGroup": "Manual channels",
+                    "empty": "No channels found"
                 }
             }
         }

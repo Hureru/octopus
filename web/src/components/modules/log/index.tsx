@@ -10,6 +10,8 @@ import { useChannelList } from '@/api/endpoints/channel';
 import { useSiteChannelList } from '@/api/endpoints/site-channel';
 import { useSearchStore, useToolbarViewOptionsStore } from '@/components/modules/toolbar';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 import { useLogUIStore } from './ui-store';
 
 type ManagedChannelLookup = {
@@ -25,23 +27,59 @@ type LogFilters = {
     keyword: string;
     channelIds: number[];
     startTime?: number;
+    endTime?: number;
 };
+
+type PageItem = number | { kind: 'ellipsis'; from: number; to: number };
 
 const LOG_PAGE_SIZE = 10;
 
-function filtersActive(filters: LogFilters) {
-    return !!filters.keyword.trim() || filters.channelIds.length > 0 || !!filters.startTime;
+function useDebouncedValue<T>(value: T, delay = 200) {
+    const [debounced, setDebounced] = useState(value);
+    useEffect(() => {
+        const handle = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(handle);
+    }, [value, delay]);
+    return debounced;
 }
 
-function resolveStartTime(dateFilter: string) {
-    const now = new Date();
-    if (dateFilter === 'today') {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        return Math.floor(start.getTime() / 1000);
+function filtersActive(filters: LogFilters) {
+    return (
+        !!filters.keyword.trim() ||
+        filters.channelIds.length > 0 ||
+        !!filters.startTime ||
+        !!filters.endTime
+    );
+}
+
+function buildPageItems(current: number, total: number): PageItem[] {
+    if (total <= 1) return [1];
+    const show = new Set<number>();
+    show.add(1);
+    show.add(total);
+    if (total >= 2) {
+        show.add(2);
+        show.add(total - 1);
     }
-    if (dateFilter === '7d') return Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000);
-    if (dateFilter === '30d') return Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
-    return undefined;
+    for (let p = current - 1; p <= current + 1; p += 1) {
+        if (p >= 1 && p <= total) show.add(p);
+    }
+    if (current <= 4) {
+        for (let p = 1; p <= Math.min(4, total); p += 1) show.add(p);
+    }
+    if (current >= total - 3) {
+        for (let p = Math.max(1, total - 3); p <= total; p += 1) show.add(p);
+    }
+    const sorted = Array.from(show).sort((a, b) => a - b);
+    const items: PageItem[] = [];
+    for (let i = 0; i < sorted.length; i += 1) {
+        const p = sorted[i];
+        if (i > 0 && p - sorted[i - 1] > 1) {
+            items.push({ kind: 'ellipsis', from: sorted[i - 1] + 1, to: p - 1 });
+        }
+        items.push(p);
+    }
+    return items;
 }
 
 function getBaseGroupKey(groupKey: string) {
@@ -130,32 +168,29 @@ export function Log() {
     const pageKey = 'log' as const;
     const searchTerm = useSearchStore((s) => s.getSearchTerm(pageKey));
     const refreshRequestId = useLogUIStore((s) => s.refreshRequestId);
+    const setRefreshing = useLogUIStore((s) => s.setRefreshing);
     const lastHandledRefreshRequestIdRef = useRef(refreshRequestId);
-    const logDateFilter = useToolbarViewOptionsStore((s) => s.logDateFilter);
-    const logChannelScope = useToolbarViewOptionsStore((s) => s.logChannelScope);
+    const logDateRange = useToolbarViewOptionsStore((s) => s.logDateRange);
+    const logChannelIds = useToolbarViewOptionsStore((s) => s.logChannelIds);
     const [pageState, setPageState] = useState({ key: '', page: 1 });
     const { data: channelsData } = useChannelList();
     const { data: siteChannelsData } = useSiteChannelList();
-    const effectiveDateFilter = logDateFilter;
-    const scopedChannelIds = useMemo(() => {
-        if (logChannelScope === 'all') return [];
-        return (channelsData ?? [])
-            .filter((channel) => (logChannelScope === 'site' ? channel.raw.managed : !channel.raw.managed))
-            .map((channel) => channel.raw.id);
-    }, [channelsData, logChannelScope]);
     const filters = useMemo<LogFilters>(() => ({
         keyword: searchTerm,
-        channelIds: scopedChannelIds,
-        startTime: resolveStartTime(effectiveDateFilter),
-    }), [effectiveDateFilter, scopedChannelIds, searchTerm]);
-    const filterMode = filtersActive(filters);
-    const filterKey = `${filters.keyword.trim()}|${filters.channelIds.join(',')}|${filters.startTime ?? ''}`;
+        channelIds: logChannelIds,
+        startTime: logDateRange.start,
+        endTime: logDateRange.end,
+    }), [logDateRange.end, logDateRange.start, logChannelIds, searchTerm]);
+    const debouncedFilters = useDebouncedValue(filters, 200);
+    const filterMode = filtersActive(debouncedFilters);
+    const filterKey = `${debouncedFilters.keyword.trim()}|${debouncedFilters.channelIds.join(',')}|${debouncedFilters.startTime ?? ''}|${debouncedFilters.endTime ?? ''}`;
     const page = pageState.key === filterKey ? pageState.page : 1;
     const logFilters = useMemo(() => ({
-        keyword: filters.keyword.trim() || undefined,
-        channel_ids: filters.channelIds.length > 0 ? filters.channelIds : undefined,
-        start_time: filters.startTime,
-    }), [filters]);
+        keyword: debouncedFilters.keyword.trim() || undefined,
+        channel_ids: debouncedFilters.channelIds.length > 0 ? debouncedFilters.channelIds : undefined,
+        start_time: debouncedFilters.startTime,
+        end_time: debouncedFilters.endTime,
+    }), [debouncedFilters]);
     const liveLogsQuery = useLogs({ pageSize: LOG_PAGE_SIZE, mode: filterMode ? 'paged' : 'stream' });
     const pagedLogsQuery = useLogPage({
         page,
@@ -163,8 +198,11 @@ export function Log() {
         ...logFilters,
         enabled: filterMode,
     });
-    const logs = useMemo(() => (filterMode ? (pagedLogsQuery.data ?? []) : liveLogsQuery.logs), [filterMode, liveLogsQuery.logs, pagedLogsQuery.data]);
-    const hasMore = filterMode ? (pagedLogsQuery.data?.length ?? 0) >= LOG_PAGE_SIZE : liveLogsQuery.hasMore;
+    const pagedDisplay = pagedLogsQuery.data?.logs ?? [];
+    const totalMatches = pagedLogsQuery.data?.total ?? 0;
+    const totalPages = filterMode ? Math.max(1, Math.ceil(totalMatches / LOG_PAGE_SIZE)) : 1;
+    const logs = useMemo(() => (filterMode ? pagedDisplay : liveLogsQuery.logs), [filterMode, liveLogsQuery.logs, pagedDisplay]);
+    const hasMore = filterMode ? page < totalPages : liveLogsQuery.hasMore;
     const isLoading = filterMode ? pagedLogsQuery.isLoading : liveLogsQuery.isLoading;
     const isLoadingMore = !filterMode && liveLogsQuery.isLoadingMore;
     const loadMore = liveLogsQuery.loadMore;
@@ -220,18 +258,26 @@ export function Log() {
         void loadMore();
     }, [canLoadMore, loadMore]);
 
-    const handleRefresh = useCallback(() => {
-        if (filterMode) {
-            void pagedLogsQuery.refetch();
-            return;
+    const handleRefresh = useCallback(async () => {
+        setRefreshing(true);
+        const startedAt = Date.now();
+        try {
+            if (filterMode) {
+                await pagedLogsQuery.refetch();
+            } else {
+                await liveLogsQuery.refetch();
+            }
+        } finally {
+            const elapsed = Date.now() - startedAt;
+            const remaining = Math.max(0, 500 - elapsed);
+            setTimeout(() => setRefreshing(false), remaining);
         }
-        void liveLogsQuery.refetch();
-    }, [filterMode, liveLogsQuery, pagedLogsQuery]);
+    }, [filterMode, liveLogsQuery, pagedLogsQuery, setRefreshing]);
 
     useEffect(() => {
         if (refreshRequestId === lastHandledRefreshRequestIdRef.current) return;
         lastHandledRefreshRequestIdRef.current = refreshRequestId;
-        handleRefresh();
+        void handleRefresh();
     }, [handleRefresh, refreshRequestId]);
 
     const footer = useMemo(() => {
@@ -252,37 +298,29 @@ export function Log() {
         return null;
     }, [hasMore, isLoading, isLoadingMore, logs.length, t]);
 
+    const showPagination = filterMode && totalPages > 1;
+
+    const pageItems = useMemo<PageItem[]>(() => {
+        if (!showPagination) return [];
+        return buildPageItems(page, totalPages);
+    }, [page, showPagination, totalPages]);
+
+    const goToPage = (target: number) => {
+        if (target < 1 || target > totalPages || pagedLogsQuery.isFetching) return;
+        setPageState({ key: filterKey, page: target });
+    };
+
+    const [paginationDimmed, setPaginationDimmed] = useState(false);
+    const [paginationHovered, setPaginationHovered] = useState(false);
+
+    const handleListScroll = useCallback((info: { scrollTop: number; scrollHeight: number; clientHeight: number }) => {
+        const distance = info.scrollHeight - info.clientHeight - info.scrollTop;
+        setPaginationDimmed(distance < 80);
+    }, []);
+
     return (
         <div className="flex h-full min-h-0 flex-col gap-3">
-            {filterMode && (
-                <div className="flex items-center justify-end gap-2 px-1">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPageState({ key: filterKey, page: Math.max(1, page - 1) })}
-                        disabled={page <= 1 || pagedLogsQuery.isFetching}
-                        className="rounded-xl"
-                    >
-                        <ChevronLeft className="size-4" />
-                        {t('pagination.prev')}
-                    </Button>
-                    <span className="min-w-16 text-center text-sm text-muted-foreground">
-                        {t('pagination.page', { page })}
-                    </span>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPageState({ key: filterKey, page: page + 1 })}
-                        disabled={!hasMore || pagedLogsQuery.isFetching}
-                        className="rounded-xl"
-                    >
-                        {t('pagination.next')}
-                        <ChevronRight className="size-4" />
-                    </Button>
-                </div>
-            )}
-
-            <div className="min-h-0 flex-1">
+            <div className="relative min-h-0 flex-1">
                 <VirtualizedGrid
                     items={logs}
                     layout="list"
@@ -295,8 +333,131 @@ export function Log() {
                     onReachEnd={handleReachEnd}
                     reachEndEnabled={canLoadMore}
                     reachEndOffset={2}
+                    onScroll={showPagination ? handleListScroll : undefined}
                 />
+
+                {showPagination && (
+                    <div className="pointer-events-none absolute bottom-3 right-3 z-10">
+                        <div
+                            onMouseEnter={() => setPaginationHovered(true)}
+                            onMouseLeave={() => setPaginationHovered(false)}
+                            className={cn(
+                                'pointer-events-auto inline-flex items-center gap-0.5 rounded-full border border-border/60 bg-card/95 px-1.5 py-1 shadow-lg backdrop-blur transition-opacity duration-200',
+                                paginationDimmed && !paginationHovered ? 'opacity-40' : 'opacity-100',
+                            )}
+                        >
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => goToPage(page - 1)}
+                                disabled={page <= 1 || pagedLogsQuery.isFetching}
+                                aria-label={t('pagination.prev')}
+                                className="size-7 rounded-full"
+                            >
+                                <ChevronLeft className="size-4" />
+                            </Button>
+                            {pageItems.map((item, idx) => {
+                                if (typeof item === 'object') {
+                                    return (
+                                        <EllipsisPagePopover
+                                            key={`ellipsis-${idx}`}
+                                            from={item.from}
+                                            to={item.to}
+                                            onSelect={goToPage}
+                                            disabled={pagedLogsQuery.isFetching}
+                                        />
+                                    );
+                                }
+                                const active = item === page;
+                                return (
+                                    <button
+                                        key={item}
+                                        type="button"
+                                        onClick={() => goToPage(item)}
+                                        disabled={pagedLogsQuery.isFetching}
+                                        aria-current={active ? 'page' : undefined}
+                                        className={cn(
+                                            'inline-flex size-7 items-center justify-center rounded-full text-xs font-medium tabular-nums transition-colors',
+                                            active
+                                                ? 'bg-primary text-primary-foreground shadow-sm'
+                                                : 'text-foreground hover:bg-muted',
+                                            pagedLogsQuery.isFetching && !active && 'cursor-not-allowed opacity-60',
+                                        )}
+                                    >
+                                        {item}
+                                    </button>
+                                );
+                            })}
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => goToPage(page + 1)}
+                                disabled={page >= totalPages || pagedLogsQuery.isFetching}
+                                aria-label={t('pagination.next')}
+                                className="size-7 rounded-full"
+                            >
+                                <ChevronRight className="size-4" />
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
+    );
+}
+
+function EllipsisPagePopover({
+    from,
+    to,
+    onSelect,
+    disabled,
+}: {
+    from: number;
+    to: number;
+    onSelect: (page: number) => void;
+    disabled?: boolean;
+}) {
+    const [open, setOpen] = useState(false);
+    const pages = useMemo(() => {
+        const out: number[] = [];
+        for (let p = from; p <= to; p += 1) out.push(p);
+        return out;
+    }, [from, to]);
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <button
+                    type="button"
+                    disabled={disabled}
+                    aria-label={`Pages ${from}-${to}`}
+                    className="inline-flex size-7 items-center justify-center rounded-full text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                    …
+                </button>
+            </PopoverTrigger>
+            <PopoverContent
+                align="center"
+                side="top"
+                sideOffset={6}
+                className="w-14 rounded-2xl border border-border/60 bg-card p-1 shadow-xl"
+            >
+                <div className="flex max-h-56 flex-col overflow-y-auto">
+                    {pages.map((p) => (
+                        <button
+                            key={p}
+                            type="button"
+                            onClick={() => {
+                                onSelect(p);
+                                setOpen(false);
+                            }}
+                            className="inline-flex h-7 items-center justify-center rounded-md text-xs font-medium tabular-nums text-foreground transition-colors hover:bg-muted"
+                        >
+                            {p}
+                        </button>
+                    ))}
+                </div>
+            </PopoverContent>
+        </Popover>
     );
 }

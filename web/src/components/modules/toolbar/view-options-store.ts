@@ -11,8 +11,7 @@ export type ChannelFilter = 'all' | 'enabled' | 'disabled';
 export type GroupFilter = 'all' | 'with-members' | 'empty';
 export type ModelFilter = 'all' | 'priced' | 'free';
 export type SiteFilter = 'all' | 'abnormal' | 'enabled' | 'disabled' | 'pinned';
-export type LogDateFilter = 'all' | 'today' | '7d' | '30d' | 'custom';
-export type LogChannelScope = 'all' | 'site' | 'manual';
+export type LogDateRange = { start?: number; end?: number };
 
 interface ToolbarViewOptionsState {
     layouts: Partial<Record<ToolbarPage, ToolbarLayout>>;
@@ -22,8 +21,8 @@ interface ToolbarViewOptionsState {
     channelFilter: ChannelFilter;
     groupFilter: GroupFilter;
     modelFilter: ModelFilter;
-    logDateFilter: LogDateFilter;
-    logChannelScope: LogChannelScope;
+    logDateRange: LogDateRange;
+    logChannelIds: number[];
 
     getLayout: (item: ToolbarPage) => ToolbarLayout;
     setLayout: (item: ToolbarPage, value: ToolbarLayout) => void;
@@ -42,8 +41,8 @@ interface ToolbarViewOptionsState {
     setChannelFilter: (value: ChannelFilter) => void;
     setGroupFilter: (value: GroupFilter) => void;
     setModelFilter: (value: ModelFilter) => void;
-    setLogDateFilter: (value: LogDateFilter) => void;
-    setLogChannelScope: (value: LogChannelScope) => void;
+    setLogDateRange: (value: LogDateRange) => void;
+    setLogChannelIds: (value: number[]) => void;
 }
 
 export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
@@ -56,8 +55,8 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
             channelFilter: 'all',
             groupFilter: 'all',
             modelFilter: 'all',
-            logDateFilter: 'all',
-            logChannelScope: 'all',
+            logDateRange: {},
+            logChannelIds: [],
 
             getLayout: (item) => get().layouts[item] || 'grid',
             setLayout: (item, value) => {
@@ -81,8 +80,8 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
             setChannelFilter: (value) => set({ channelFilter: value }),
             setGroupFilter: (value) => set({ groupFilter: value }),
             setModelFilter: (value) => set({ modelFilter: value }),
-            setLogDateFilter: (value) => set({ logDateFilter: value }),
-            setLogChannelScope: (value) => set({ logChannelScope: value }),
+            setLogDateRange: (value) => set({ logDateRange: value }),
+            setLogChannelIds: (value) => set({ logChannelIds: value }),
         }),
         {
             name: 'toolbar-view-options-storage',
@@ -94,8 +93,8 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
                 channelFilter: state.channelFilter,
                 groupFilter: state.groupFilter,
                 modelFilter: state.modelFilter,
-                logDateFilter: state.logDateFilter,
-                logChannelScope: state.logChannelScope,
+                logDateRange: state.logDateRange,
+                logChannelIds: state.logChannelIds,
             }),
         }
     )

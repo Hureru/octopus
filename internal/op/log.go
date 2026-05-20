@@ -210,20 +210,21 @@ type RelayLogListFilter struct {
 // startTime 和 endTime 为 nil 时表示不限制时间范围
 // channelIDs 为 nil 或空时表示不限制渠道
 func RelayLogList(ctx context.Context, startTime, endTime *int, channelIDs []int, page, pageSize int) ([]model.RelayLog, error) {
-	return RelayLogListWithFilter(ctx, RelayLogListFilter{
+	logs, _, err := RelayLogListWithFilter(ctx, RelayLogListFilter{
 		StartTime:  startTime,
 		EndTime:    endTime,
 		ChannelIDs: channelIDs,
 		Page:       page,
 		PageSize:   pageSize,
 	})
+	return logs, err
 }
 
-// RelayLogListWithFilter 查询日志列表，支持时间、渠道、状态和关键字过滤。
-func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) ([]model.RelayLog, error) {
+// RelayLogListWithFilter 查询日志列表，支持时间、渠道、状态和关键字过滤；返回当前页和总匹配数。
+func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) ([]model.RelayLog, int, error) {
 	enabled, err := SettingGetBool(model.SettingKeyRelayLogKeepEnabled)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	if filter.Page < 1 {
@@ -265,6 +266,7 @@ func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) ([]m
 	offset := (filter.Page - 1) * filter.PageSize
 
 	var result []model.RelayLog
+	total := cacheCount
 
 	// 先从缓存中取（缓存是最新的日志）
 	if offset < cacheCount {
@@ -275,8 +277,16 @@ func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) ([]m
 		result = append(result, cachedLogs[offset:cacheEnd]...)
 	}
 
-	// 如果启用了日志保存，缓存不够时从数据库补充
+	// 如果启用了日志保存，从数据库读取剩余条目并统计总数
 	if enabled {
+		var dbCount int64
+		countQuery := db.GetDB().WithContext(ctx).Model(&model.RelayLog{})
+		countQuery = applyRelayLogDBFilters(countQuery, filter)
+		if err := countQuery.Count(&dbCount).Error; err != nil {
+			return nil, 0, err
+		}
+		total += int(dbCount)
+
 		remaining := filter.PageSize - len(result)
 		if remaining > 0 {
 			dbOffset := 0
@@ -288,14 +298,14 @@ func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) ([]m
 			query = applyRelayLogDBFilters(query, filter)
 
 			var dbLogs []model.RelayLog
-			if err := query.Order("id DESC").Offset(dbOffset).Limit(remaining).Find(&dbLogs).Error; err != nil {
-				return nil, err
+			if err := query.Order("time DESC").Order("id DESC").Offset(dbOffset).Limit(remaining).Find(&dbLogs).Error; err != nil {
+				return nil, 0, err
 			}
 			result = append(result, dbLogs...)
 		}
 	}
 
-	return result, nil
+	return result, total, nil
 }
 
 func relayLogMatchesFilter(relayLog model.RelayLog, filter RelayLogListFilter, channelSet map[int]struct{}, keyword string) bool {
@@ -339,8 +349,8 @@ func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB 
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where(
-			"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(channel_name) LIKE ? OR LOWER(request_content) LIKE ? OR LOWER(response_content) LIKE ? OR LOWER(error) LIKE ?",
-			like, like, like, like, like, like, like,
+			"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(request_content) LIKE ? OR LOWER(response_content) LIKE ? OR LOWER(error) LIKE ?",
+			like, like, like, like, like, like,
 		)
 	}
 	return query
@@ -365,7 +375,6 @@ func logMatchesKeyword(relayLog model.RelayLog, keyword string) bool {
 		relayLog.RequestModelName,
 		relayLog.ActualModelName,
 		relayLog.RequestAPIKeyName,
-		relayLog.ChannelName,
 		relayLog.RequestContent,
 		relayLog.ResponseContent,
 		relayLog.Error,
@@ -376,8 +385,7 @@ func logMatchesKeyword(relayLog model.RelayLog, keyword string) bool {
 		}
 	}
 	for _, attempt := range relayLog.Attempts {
-		if strings.Contains(strings.ToLower(attempt.ChannelName), keyword) ||
-			strings.Contains(strings.ToLower(attempt.ModelName), keyword) ||
+		if strings.Contains(strings.ToLower(attempt.ModelName), keyword) ||
 			strings.Contains(strings.ToLower(attempt.Msg), keyword) {
 			return true
 		}

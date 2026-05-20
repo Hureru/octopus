@@ -89,20 +89,18 @@
             },
             "logFilter": {
                 "title": "日志筛选",
+                "clearAll": "清除筛选",
                 "date": {
-                    "title": "日期",
-                    "all": "全部",
-                    "today": "今天",
-                    "last7Days": "近 7 天",
-                    "last30Days": "近 30 天",
-                    "custom": "自定义",
-                    "hint": "可选日期会受设置中的日志保留天数限制。"
+                    "title": "时间范围",
+                    "startPlaceholder": "开始时间",
+                    "endPlaceholder": "结束时间",
+                    "hint": "可选时间会受设置中的日志保留天数限制。"
                 },
-                "channelScope": {
-                    "title": "渠道类型",
-                    "all": "全部",
-                    "site": "站点",
-                    "manual": "普通"
+                "channel": {
+                    "title": "渠道",
+                    "searchPlaceholder": "搜索渠道...",
+                    "manualGroup": "手动渠道",
+                    "empty": "未找到渠道"
                 }
             }
         }

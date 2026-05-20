@@ -89,20 +89,18 @@
             },
             "logFilter": {
                 "title": "日誌篩選",
+                "clearAll": "清除篩選",
                 "date": {
-                    "title": "日期",
-                    "all": "全部",
-                    "today": "今天",
-                    "last7Days": "近 7 天",
-                    "last30Days": "近 30 天",
-                    "custom": "自訂",
-                    "hint": "可選日期會受設定中的日誌保留天數限制。"
+                    "title": "時間範圍",
+                    "startPlaceholder": "開始時間",
+                    "endPlaceholder": "結束時間",
+                    "hint": "可選時間會受設定中的日誌保留天數限制。"
                 },
-                "channelScope": {
-                    "title": "供應源類型",
-                    "all": "全部",
-                    "site": "站點",
-                    "manual": "一般"
+                "channel": {
+                    "title": "供應源",
+                    "searchPlaceholder": "搜尋供應源...",
+                    "manualGroup": "一般供應源",
+                    "empty": "找不到供應源"
                 }
             }
         }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowUpAZ, Clock3, Filter, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     MorphingDialog,
@@ -18,8 +18,8 @@ import { CreateDialogContent as GroupCreateContent } from '@/components/modules/
 import { CreateDialogContent as ModelCreateContent } from '@/components/modules/model/Create';
 import { useSiteUIStore } from '@/components/modules/site/ui-store';
 import { useLogUIStore } from '@/components/modules/log/ui-store';
+import { LogFilterPopover } from '@/components/modules/log/FilterPopover';
 import { useTranslations } from 'next-intl';
-import { SettingKey, useSettingValue } from '@/api/endpoints/setting';
 import { useSearchStore } from './search-store';
 import {
     useToolbarViewOptionsStore,
@@ -29,8 +29,6 @@ import {
     type ChannelFilter,
     type GroupFilter,
     type ModelFilter,
-    type LogChannelScope,
-    type LogDateFilter,
     type ToolbarSortField,
     type ToolbarSortOrder,
 } from './view-options-store';
@@ -39,8 +37,6 @@ const CHANNEL_FILTER_OPTIONS: ChannelFilter[] = ['all', 'enabled', 'disabled'];
 const GROUP_FILTER_OPTIONS: GroupFilter[] = ['all', 'with-members', 'empty'];
 const MODEL_FILTER_OPTIONS: ModelFilter[] = ['all', 'priced', 'free'];
 const SITE_FILTER_OPTIONS: SiteFilter[] = ['all', 'abnormal', 'enabled', 'disabled', 'pinned'];
-const LOG_DATE_FILTER_OPTIONS: LogDateFilter[] = ['all', 'today', '7d', '30d'];
-const LOG_CHANNEL_SCOPE_OPTIONS: LogChannelScope[] = ['all', 'site', 'manual'];
 type CombinedSortOption = {
     value: `${ToolbarSortField}-${ToolbarSortOrder}`;
     field: ToolbarSortField;
@@ -91,21 +87,17 @@ export function Toolbar() {
     const channelFilter = useToolbarViewOptionsStore((s) => s.channelFilter);
     const groupFilter = useToolbarViewOptionsStore((s) => s.groupFilter);
     const modelFilter = useToolbarViewOptionsStore((s) => s.modelFilter);
-    const logDateFilter = useToolbarViewOptionsStore((s) => s.logDateFilter);
-    const logChannelScope = useToolbarViewOptionsStore((s) => s.logChannelScope);
     const setSiteFilter = useToolbarViewOptionsStore((s) => s.setSiteFilter);
     const setChannelFilter = useToolbarViewOptionsStore((s) => s.setChannelFilter);
     const setGroupFilter = useToolbarViewOptionsStore((s) => s.setGroupFilter);
     const setModelFilter = useToolbarViewOptionsStore((s) => s.setModelFilter);
-    const setLogDateFilter = useToolbarViewOptionsStore((s) => s.setLogDateFilter);
-    const setLogChannelScope = useToolbarViewOptionsStore((s) => s.setLogChannelScope);
     const requestOpenCreateSite = useSiteUIStore((s) => s.requestOpenCreateDialog);
     const requestOpenImportDialog = useSiteUIStore((s) => s.requestOpenImportDialog);
     const requestOpenArchivedDialog = useSiteUIStore((s) => s.requestOpenArchivedDialog);
     const requestSyncAll = useSiteUIStore((s) => s.requestSyncAll);
     const requestCheckinAll = useSiteUIStore((s) => s.requestCheckinAll);
     const requestLogRefresh = useLogUIStore((s) => s.requestRefresh);
-    const { value: logKeepPeriodValue } = useSettingValue(SettingKey.RelayLogKeepPeriod, '0');
+    const isLogRefreshing = useLogUIStore((s) => s.isRefreshing);
     const [expandedSearchItem, setExpandedSearchItem] = useState<ToolbarPage | null>(null);
     const searchExpanded = expandedSearchItem === toolbarItem;
 
@@ -185,25 +177,6 @@ export function Toolbar() {
                 setModelFilter(value as ModelFilter);
                 break;
         }
-    };
-
-    const logKeepPeriod = Number.parseInt(logKeepPeriodValue, 10) || 0;
-    const availableLogDateFilterOptions = LOG_DATE_FILTER_OPTIONS.filter((value) => {
-        if (value === '30d') return logKeepPeriod <= 0 || logKeepPeriod >= 30;
-        if (value === '7d') return logKeepPeriod <= 0 || logKeepPeriod >= 7;
-        return true;
-    });
-    const logDateLabelKeys: Record<LogDateFilter, string> = {
-        all: 'popover.logFilter.date.all',
-        today: 'popover.logFilter.date.today',
-        '7d': 'popover.logFilter.date.last7Days',
-        '30d': 'popover.logFilter.date.last30Days',
-        custom: 'popover.logFilter.date.custom',
-    };
-    const logChannelScopeLabelKeys: Record<LogChannelScope, string> = {
-        all: 'popover.logFilter.channelScope.all',
-        site: 'popover.logFilter.channelScope.site',
-        manual: 'popover.logFilter.channelScope.manual',
     };
 
     return (
@@ -429,83 +402,20 @@ export function Toolbar() {
 
                 {isLogToolbar && (
                     <>
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <button
-                                    type="button"
-                                    aria-label={t('popover.logFilter.title')}
-                                    className={buttonVariants({
-                                        variant: 'ghost',
-                                        size: 'icon',
-                                        className: 'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground',
-                                    })}
-                                >
-                                    <Filter className="size-4 transition-colors duration-300" />
-                                </button>
-                            </PopoverTrigger>
-                            <PopoverContent
-                                align="center"
-                                side="bottom"
-                                sideOffset={8}
-                                className="w-72 rounded-2xl border border-border/60 bg-card p-3 shadow-xl"
-                            >
-                                <div className="grid gap-3">
-                                    <div className="grid gap-2">
-                                        <p className="text-xs font-medium text-muted-foreground">{t('popover.logFilter.date.title')}</p>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {availableLogDateFilterOptions.map((value) => (
-                                                <button
-                                                    key={value}
-                                                    type="button"
-                                                    onClick={() => setLogDateFilter(value)}
-                                                    className={cn(
-                                                        'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center transition-colors',
-                                                        logDateFilter === value
-                                                            ? 'border-primary/30 bg-primary text-primary-foreground'
-                                                            : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
-                                                    )}
-                                                >
-                                                    {t(logDateLabelKeys[value])}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <p className="text-[11px] leading-4 text-muted-foreground">{t('popover.logFilter.date.hint')}</p>
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <p className="text-xs font-medium text-muted-foreground">{t('popover.logFilter.channelScope.title')}</p>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {LOG_CHANNEL_SCOPE_OPTIONS.map((value) => (
-                                                <button
-                                                    key={value}
-                                                    type="button"
-                                                    onClick={() => setLogChannelScope(value)}
-                                                    className={cn(
-                                                        'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center transition-colors',
-                                                        logChannelScope === value
-                                                            ? 'border-primary/30 bg-primary text-primary-foreground'
-                                                            : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
-                                                    )}
-                                                >
-                                                    {t(logChannelScopeLabelKeys[value])}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            </PopoverContent>
-                        </Popover>
+                        <LogFilterPopover />
 
                         <button
                             type="button"
                             aria-label={t('popover.logRefresh.refresh')}
                             onClick={requestLogRefresh}
+                            disabled={isLogRefreshing}
                             className={buttonVariants({
                                 variant: 'ghost',
                                 size: 'icon',
-                                className: 'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground',
+                                className: 'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground disabled:opacity-100',
                             })}
                         >
-                            <RefreshCw className="size-4 transition-colors duration-300" />
+                            <RefreshCw className={cn('size-4 transition-colors duration-300', isLogRefreshing && 'animate-spin')} />
                         </button>
                     </>
                 )}

@@ -92,7 +92,7 @@ func listLog(c *gin.Context) {
 		}
 	}
 
-	logs, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
+	logs, total, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
 		StartTime:  startTime,
 		EndTime:    endTime,
 		ChannelIDs: channelIDs,
@@ -106,7 +106,10 @@ func listLog(c *gin.Context) {
 		return
 	}
 
-	resp.Success(c, logs)
+	resp.Success(c, gin.H{
+		"logs":  logs,
+		"total": total,
+	})
 }
 
 func clearLog(c *gin.Context) {

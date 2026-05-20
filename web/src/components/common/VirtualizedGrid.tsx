@@ -35,6 +35,7 @@ interface VirtualizedGridProps<T> {
     onReachEnd?: () => void;
     reachEndEnabled?: boolean;
     reachEndOffset?: number;
+    onScroll?: (info: { scrollTop: number; scrollHeight: number; clientHeight: number }) => void;
 }
 
 function getColumnsForWidth(
@@ -63,6 +64,7 @@ export function VirtualizedGrid<T>({
     onReachEnd,
     reachEndEnabled = false,
     reachEndOffset = 1,
+    onScroll,
 }: VirtualizedGridProps<T>) {
     'use no memo';
 
@@ -165,6 +167,14 @@ export function VirtualizedGrid<T>({
         <div className="relative h-full min-h-0 w-full">
             <div
                 ref={containerRef}
+                onScroll={onScroll ? (event) => {
+                    const target = event.currentTarget;
+                    onScroll({
+                        scrollTop: target.scrollTop,
+                        scrollHeight: target.scrollHeight,
+                        clientHeight: target.clientHeight,
+                    });
+                } : undefined}
                 className="relative h-full w-full overflow-y-auto overscroll-contain rounded-t-3xl"
             >
                 {rowCount === 0 ? null : (
