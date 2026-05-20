@@ -369,8 +369,11 @@ func SiteMaskedTokenMatches(fullToken string, maskedToken string) bool {
 	if lastMask < firstMask {
 		return normalizedFull == normalizedMasked
 	}
-	prefix := normalizedMasked[:firstMask]
-	suffix := normalizedMasked[lastMask+1:]
+	maskedRunes := []rune(normalizedMasked)
+	runeFirst := len([]rune(normalizedMasked[:firstMask]))
+	runeLast := len([]rune(normalizedMasked[:lastMask])) + 1
+	prefix := string(maskedRunes[:runeFirst])
+	suffix := string(maskedRunes[runeLast:])
 	if prefix == "" && suffix == "" {
 		return false
 	}

@@ -32,6 +32,12 @@ func TestSiteMaskedTokenMatchesRequiresHiddenCharacter(t *testing.T) {
 	}
 }
 
+func TestSiteMaskedTokenMatchesWithBulletMask(t *testing.T) {
+	if !SiteMaskedTokenMatches("prefix-secret-suffix", "prefix••••••suffix") {
+		t.Fatal("expected bullet-masked token to match without splitting multibyte mask runes")
+	}
+}
+
 func TestNormalizeSiteTokenValueStatusRestoresReadyWhenTokenIsComplete(t *testing.T) {
 	if actual := NormalizeSiteTokenValueStatus(SiteTokenValueStatusMaskedPending, "sk-real-token"); actual != SiteTokenValueStatusReady {
 		t.Fatalf("expected full token to restore ready status, got %q", actual)
