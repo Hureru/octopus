@@ -2277,6 +2277,38 @@ export function Site() {
         {selectedSiteIds.length > 0 ? (
           <section className="rounded-3xl border border-primary/30 bg-primary/5 p-4">
             <div className="flex flex-wrap items-center gap-3">
+              {(() => {
+                const visibleIds = visibleSites.map((item) => item.site.id);
+                const allVisibleSelected =
+                  visibleIds.length > 0 &&
+                  visibleIds.every((id) => selectedSiteIds.includes(id));
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (allVisibleSelected) {
+                        setSelectedSiteIds((prev) =>
+                          prev.filter((id) => !visibleIds.includes(id))
+                        );
+                      } else {
+                        setSelectedSiteIds((prev) =>
+                          Array.from(new Set([...prev, ...visibleIds]))
+                        );
+                      }
+                    }}
+                    disabled={visibleIds.length === 0}
+                    title={allVisibleSelected ? "取消全选" : "全选当前可见站点"}
+                    className="inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {allVisibleSelected ? (
+                      <CheckSquare className="size-5 text-primary" />
+                    ) : (
+                      <Square className="size-5" />
+                    )}
+                    全选
+                  </button>
+                );
+              })()}
               <span className="text-sm font-medium">
                 已选 {selectedSiteIds.length} 个站点
               </span>
