@@ -17,11 +17,12 @@ func NewGroupHealthRepository() *GroupHealthRepository {
 	return &GroupHealthRepository{}
 }
 
-func (r *GroupHealthRepository) CreateRunningSnapshot(ctx context.Context, group model.Group) (*model.GroupHealthSnapshot, error) {
+func (r *GroupHealthRepository) CreateRunningSnapshot(ctx context.Context, group model.Group, probeMode model.GroupHealthProbeMode) (*model.GroupHealthSnapshot, error) {
 	snapshot := &model.GroupHealthSnapshot{
 		GroupID:      group.ID,
 		GroupName:    group.Name,
 		GroupMode:    group.Mode,
+		ProbeMode:    probeMode,
 		RequestModel: group.Name,
 		Status:       model.GroupHealthStatusRunning,
 		StartedAt:    time.Now(),
@@ -39,10 +40,10 @@ func (r *GroupHealthRepository) AppendAttempt(ctx context.Context, snapshotID in
 
 func (r *GroupHealthRepository) FinishSnapshot(ctx context.Context, snapshotID int, status model.GroupHealthStatus, successfulChannelID *int, durationMS int64, message string, finishedAt time.Time) error {
 	update := map[string]any{
-		"status":       status,
-		"finished_at":  finishedAt,
-		"duration_ms":  durationMS,
-		"message":      message,
+		"status":      status,
+		"finished_at": finishedAt,
+		"duration_ms": durationMS,
+		"message":     message,
 	}
 	if successfulChannelID != nil {
 		update["successful_channel_id"] = *successfulChannelID

@@ -136,7 +136,11 @@
             "partial": "{count} 部分可用",
             "failed": "{count} 失败",
             "idle": "{count} 未检查",
-            "runAll": "全部检查"
+            "runAll": "全部检查",
+            "runAllFull": "全部完整探活",
+            "viewDetails": "查看详情",
+            "detailTitle": "分组健康详情",
+            "detailDescription": "在首页查看各分组最新健康快照，并直接执行标准探活或完整探活。"
         }
     },
     "setting": {
@@ -424,12 +428,31 @@
             "title": "健康",
             "detailTitle": "分组健康详情",
             "run": "检查",
+            "runFull": "完整探活",
             "lastRun": "上次检查 {time}",
             "never": "从未检查",
             "status": "状态",
             "healthy": "健康",
+            "healthyCount": "{success}/{total} 健康",
             "duration": "耗时",
             "attempts": "尝试",
+            "attemptListToggle": "尝试列表（{count}）",
+            "attemptStatus": {
+                "success": "成功",
+                "failed": "失败",
+                "skipped": "跳过"
+            },
+            "statusValue": {
+                "idle": "未检查",
+                "running": "检查中",
+                "success": "健康",
+                "partial": "部分可用",
+                "failed": "失败"
+            },
+            "probeMode": {
+                "standard": "标准",
+                "full": "完整"
+            },
             "empty": "暂无健康快照。",
             "errorDetails": "错误详情",
             "noHttpStatus": "无 HTTP 状态"

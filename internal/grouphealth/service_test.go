@@ -160,7 +160,7 @@ func TestRunGroupHealthReturnsAlreadyRunning(t *testing.T) {
 	}
 
 	repo := op.NewGroupHealthRepository()
-	if _, err := repo.CreateRunningSnapshot(ctx, *group); err != nil {
+	if _, err := repo.CreateRunningSnapshot(ctx, *group, model.GroupHealthProbeModeStandard); err != nil {
 		t.Fatalf("CreateRunningSnapshot failed: %v", err)
 	}
 
@@ -171,5 +171,86 @@ func TestRunGroupHealthReturnsAlreadyRunning(t *testing.T) {
 	}
 	if !errors.Is(err, ErrGroupHealthAlreadyRunning) {
 		t.Fatalf("expected ErrGroupHealthAlreadyRunning, got %v", err)
+	}
+}
+
+func TestRunGroupHealthFullProbeDoesNotSkipRemainingFailoverCandidates(t *testing.T) {
+	ctx := setupGroupHealthTestDB(t)
+
+	firstServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_first","object":"response","status":"completed"}`))
+	}))
+	defer firstServer.Close()
+
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"upstream unavailable"}`, http.StatusServiceUnavailable)
+	}))
+	defer secondServer.Close()
+
+	firstChannel := &model.Channel{
+		Name:     "group-health-full-first",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: firstServer.URL + "/v1"}},
+		Model:    "probe-model",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "sk-full-first", Remark: "first"}},
+	}
+	if err := op.ChannelCreate(firstChannel, ctx); err != nil {
+		t.Fatalf("ChannelCreate first failed: %v", err)
+	}
+
+	secondChannel := &model.Channel{
+		Name:     "group-health-full-second",
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: secondServer.URL + "/v1"}},
+		Model:    "probe-model",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "sk-full-second", Remark: "second"}},
+	}
+	if err := op.ChannelCreate(secondChannel, ctx); err != nil {
+		t.Fatalf("ChannelCreate second failed: %v", err)
+	}
+
+	group := &model.Group{Name: "probe-full-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: firstChannel.ID, ModelName: "probe-model", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd first failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: secondChannel.ID, ModelName: "probe-model", Priority: 2, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd second failed: %v", err)
+	}
+
+	service := NewService(op.NewGroupHealthRepository(), &Prober{CandidateTimeout: 5 * time.Second})
+	if err := service.RunGroupHealth(ctx, group.ID, model.GroupHealthProbeModeFull); err != nil {
+		t.Fatalf("RunGroupHealth full failed: %v", err)
+	}
+
+	view, err := service.GetGroupHealthViewByID(ctx, group.ID)
+	if err != nil {
+		t.Fatalf("GetGroupHealthViewByID failed: %v", err)
+	}
+	if view.Latest == nil {
+		t.Fatal("expected latest snapshot")
+	}
+	if view.Latest.ProbeMode != model.GroupHealthProbeModeFull {
+		t.Fatalf("expected full probe mode, got %s", view.Latest.ProbeMode)
+	}
+	if view.Latest.Status != model.GroupHealthStatusPartial {
+		t.Fatalf("expected partial status, got %s", view.Latest.Status)
+	}
+	if len(view.Latest.Attempts) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(view.Latest.Attempts))
+	}
+	if view.Latest.Attempts[0].Status != model.GroupHealthAttemptStatusSuccess {
+		t.Fatalf("expected first attempt success, got %s", view.Latest.Attempts[0].Status)
+	}
+	if view.Latest.Attempts[1].Status != model.GroupHealthAttemptStatusFailed {
+		t.Fatalf("expected second attempt failed, got %s", view.Latest.Attempts[1].Status)
+	}
+	if view.Latest.Attempts[1].HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("expected second attempt http status %d, got %d", http.StatusServiceUnavailable, view.Latest.Attempts[1].HTTPStatus)
 	}
 }
