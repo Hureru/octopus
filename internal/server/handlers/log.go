@@ -213,7 +213,7 @@ func getLogSiteActionTargets(c *gin.Context) {
 
 func getLog(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
+	if err != nil || id <= 0 {
 		resp.InvalidParam(c)
 		return
 	}
