@@ -8,7 +8,7 @@ import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 import { useTheme } from 'next-themes';
-import { type RelayLog, type RelayLogWSMode, type RelayLogWSExecMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
+import { getLogDetail, type RelayLog, type RelayLogWSMode, type RelayLogWSExecMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -425,7 +425,7 @@ function InputTokenDetailsPopover({ log }: { log: RelayLog }) {
     );
 }
 
-function DeferredJsonContent({ content, fallbackText }: { content: string | undefined; fallbackText: string }) {
+function DeferredJsonContent({ content, fallbackText, isLoading }: { content: string | undefined; fallbackText: string; isLoading?: boolean }) {
     const { resolvedTheme } = useTheme();
     const { isOpen } = useMorphingDialog();
     const [shouldRender, setShouldRender] = useState(false);
@@ -454,7 +454,7 @@ function DeferredJsonContent({ content, fallbackText }: { content: string | unde
     if (!content) {
         return (
             <pre className="p-4 text-xs text-muted-foreground whitespace-pre-wrap wrap-break-word leading-relaxed">
-                {fallbackText}
+                {isLoading ? 'Loading…' : fallbackText}
             </pre>
         );
     }
@@ -575,6 +575,9 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
     const [activeDisableTarget, setActiveDisableTarget] = useState<LogSiteActionTarget | null>(null);
     const [pendingDisableKey, setPendingDisableKey] = useState<string | null>(null);
+    const [detailLog, setDetailLog] = useState<RelayLog | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailRequestID, setDetailRequestID] = useState(0);
 
     const attemptTargets = siteTargets?.attemptTargets ?? [];
     const legacyErrorTarget = siteTargets?.legacyErrorTarget ?? null;
@@ -582,6 +585,27 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     const diagnosticTitle = hasAttempts ? t('retryDetails') : t('errorInfo');
     const diagnosticIcon = hasAttempts ? RotateCw : AlertCircle;
     const DiagnosticIcon = diagnosticIcon;
+    const displayLog = detailLog ?? log;
+
+    useEffect(() => {
+        if (detailRequestID === 0 || detailLog) return;
+        let cancelled = false;
+        getLogDetail(log.id)
+            .then((item) => {
+                if (!cancelled) setDetailLog(item);
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    toast.error(error instanceof Error ? error.message : 'Failed to load log detail');
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setDetailLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [detailLog, detailRequestID, log.id]);
 
     const openDisableDialog = (target: LogSiteActionTarget) => {
         if (!target.canDisableModel || target.modelDisabled) return;
@@ -641,6 +665,12 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
         <TooltipProvider>
             <MorphingDialog>
                 <MorphingDialogTrigger
+                    onClick={() => {
+                        if (!detailLog && !detailLoading) {
+                            setDetailLoading(true);
+                            setDetailRequestID((value) => value + 1);
+                        }
+                    }}
                     className={cn(
                         'rounded-3xl border bg-card w-full text-left',
                         hasError ? 'border-destructive/40' : 'border-border',
@@ -945,11 +975,11 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                 <Send className="size-4 text-green-500" />
                                                 <span className="text-sm font-medium text-card-foreground">{t('requestContent')}</span>
                                                 <Badge variant="secondary" className="ml-auto text-xs">
-                                                    {getHeadlineInputTokens(log).toLocaleString()} {t('tokens')}
+                                                    {getHeadlineInputTokens(displayLog).toLocaleString()} {t('tokens')}
                                                 </Badge>
                                             </div>
                                             <div className="flex-1 overflow-auto min-h-0">
-                                                <DeferredJsonContent content={log.request_content} fallbackText={t('noRequestContent')} />
+                                                <DeferredJsonContent content={displayLog.request_content} fallbackText={t('noRequestContent')} isLoading={detailLoading} />
                                             </div>
                                         </div>
                                         <div className="flex flex-col rounded-2xl border border-border bg-muted/30 overflow-hidden min-h-0">
@@ -957,11 +987,11 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                 <MessageSquare className="size-4 text-purple-500" />
                                                 <span className="text-sm font-medium text-card-foreground">{t('responseContent')}</span>
                                                 <Badge variant="secondary" className="ml-auto text-xs">
-                                                    {log.output_tokens.toLocaleString()} {t('tokens')}
+                                                    {displayLog.output_tokens.toLocaleString()} {t('tokens')}
                                                 </Badge>
                                             </div>
                                             <div className="flex-1 overflow-auto min-h-0">
-                                                <DeferredJsonContent content={log.response_content} fallbackText={t('noResponseContent')} />
+                                                <DeferredJsonContent content={displayLog.response_content} fallbackText={t('noResponseContent')} isLoading={detailLoading} />
                                             </div>
                                         </div>
                                     </div>

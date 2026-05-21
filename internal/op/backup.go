@@ -20,7 +20,8 @@ const (
 	// Keep import batches small enough for SQLite builds with low SQL variable limits.
 	// Some exported tables (for example relay_logs) have many columns, so a conservative
 	// row count avoids "too many SQL variables" during bulk insert/upsert.
-	dbImportBatchSize = 20
+	dbImportBatchSize    = 20
+	dbExportLogBatchSize = 1000
 )
 
 func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DBDump, error) {
@@ -101,12 +102,36 @@ func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DB
 	}
 
 	if includeLogs {
-		if err := conn.Find(&d.RelayLogs).Error; err != nil {
-			return nil, fmt.Errorf("export relay_logs: %w", err)
+		if err := exportRelayLogsPaged(ctx, conn, d); err != nil {
+			return nil, err
 		}
 	}
 
 	return d, nil
+}
+
+func exportRelayLogsPaged(ctx context.Context, conn *gorm.DB, d *model.DBDump) error {
+	var lastID int64
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		var batch []model.RelayLog
+		if err := conn.Where("id > ?", lastID).Order("id ASC").Limit(dbExportLogBatchSize).Find(&batch).Error; err != nil {
+			return fmt.Errorf("export relay_logs: %w", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		d.RelayLogs = append(d.RelayLogs, batch...)
+		lastID = batch[len(batch)-1].ID
+		if len(batch) < dbExportLogBatchSize {
+			break
+		}
+	}
+	return nil
 }
 
 func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImportResult, error) {

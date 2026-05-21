@@ -17,9 +17,16 @@ func SiteChannelList(ctx context.Context) ([]model.SiteChannelCard, error) {
 	if err != nil {
 		return nil, err
 	}
+	accountIDs := make([]int, 0)
+	for _, site := range sites {
+		for _, account := range site.Accounts {
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	histories, _ := SiteChannelModelHourlyForAccounts(ctx, accountIDs)
 	cards := make([]model.SiteChannelCard, 0, len(sites))
 	for _, site := range sites {
-		card, err := buildSiteChannelCard(ctx, site)
+		card, err := buildSiteChannelCardWithHistories(ctx, site, histories)
 		if err != nil {
 			return nil, err
 		}
@@ -113,6 +120,15 @@ func SiteChannelModelHistory(siteID int, accountID int, ctx context.Context) (ma
 }
 
 func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChannelCard, error) {
+	accountIDs := make([]int, 0, len(site.Accounts))
+	for _, account := range site.Accounts {
+		accountIDs = append(accountIDs, account.ID)
+	}
+	histories, _ := SiteChannelModelHourlyForAccounts(ctx, accountIDs)
+	return buildSiteChannelCardWithHistories(ctx, site, histories)
+}
+
+func buildSiteChannelCardWithHistories(ctx context.Context, site model.Site, histories map[int]map[string]*model.SiteModelHistorySummary) (model.SiteChannelCard, error) {
 	card := model.SiteChannelCard{
 		SiteID:       site.ID,
 		SiteName:     site.Name,
@@ -123,7 +139,10 @@ func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChann
 		Accounts:     make([]model.SiteChannelAccount, 0, len(site.Accounts)),
 	}
 	for _, account := range site.Accounts {
-		history, _ := SiteChannelModelHourlyForAccount(ctx, account.ID)
+		history := histories[account.ID]
+		if history == nil {
+			history = map[string]*model.SiteModelHistorySummary{}
+		}
 		view := model.SiteChannelAccount{
 			SiteID:      site.ID,
 			AccountID:   account.ID,

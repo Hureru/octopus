@@ -22,6 +22,10 @@ func init() {
 				Handle(listLog),
 		).
 		AddRoute(
+			router.NewRoute("/:id", http.MethodGet).
+				Handle(getLog),
+		).
+		AddRoute(
 			router.NewRoute("/clear", http.MethodDelete).
 				Handle(clearLog),
 		).
@@ -45,6 +49,27 @@ func listLog(c *gin.Context) {
 	channelIDsStr := c.Query("channel_ids")
 	status := op.RelayLogStatusFilter(strings.TrimSpace(c.Query("status")))
 	keyword := c.Query("keyword")
+	keywordScope := op.RelayLogKeywordScope(strings.TrimSpace(c.Query("keyword_scope")))
+	includeContent := parseBoolQuery(c, "include_content", false)
+	withTotal := parseBoolQuery(c, "with_total", true)
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	var beforeTime, beforeID *int64
+	if raw := strings.TrimSpace(c.Query("before_time")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		beforeTime = &value
+	}
+	if raw := strings.TrimSpace(c.Query("before_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		beforeID = &value
+	}
 
 	if page < 1 {
 		page = 1
@@ -75,6 +100,10 @@ func listLog(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "invalid status")
 		return
 	}
+	if keywordScope != op.RelayLogKeywordScopeDefault && keywordScope != op.RelayLogKeywordScopeContent {
+		resp.Error(c, http.StatusBadRequest, "invalid keyword_scope")
+		return
+	}
 
 	var channelIDs []int
 	if channelIDsStr != "" {
@@ -92,14 +121,20 @@ func listLog(c *gin.Context) {
 		}
 	}
 
-	logs, total, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
-		StartTime:  startTime,
-		EndTime:    endTime,
-		ChannelIDs: channelIDs,
-		Status:     status,
-		Keyword:    keyword,
-		Page:       page,
-		PageSize:   pageSize,
+	result, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
+		StartTime:      startTime,
+		EndTime:        endTime,
+		ChannelIDs:     channelIDs,
+		Status:         status,
+		Keyword:        keyword,
+		KeywordScope:   keywordScope,
+		Page:           page,
+		PageSize:       pageSize,
+		IncludeContent: includeContent,
+		WithTotal:      withTotal,
+		Limit:          limit,
+		BeforeTime:     beforeTime,
+		BeforeID:       beforeID,
 	})
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -107,9 +142,37 @@ func listLog(c *gin.Context) {
 	}
 
 	resp.Success(c, gin.H{
-		"logs":  logs,
-		"total": total,
+		"logs":        result.Logs,
+		"total":       result.Total,
+		"has_more":    result.HasMore,
+		"next_cursor": result.NextCursor,
 	})
+}
+
+func parseBoolQuery(c *gin.Context, key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+func getLog(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		resp.InvalidParam(c)
+		return
+	}
+	logItem, err := op.RelayLogGet(c.Request.Context(), id)
+	if err != nil {
+		resp.Error(c, http.StatusNotFound, err.Error())
+		return
+	}
+	resp.Success(c, logItem)
 }
 
 func clearLog(c *gin.Context) {

@@ -373,6 +373,7 @@ func (m *imagesRelayMetrics) saveLog(ctx context.Context, err error, duration ti
 	if err != nil {
 		relayLog.Error = err.Error()
 	}
+	relayLog.Success = err == nil
 
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)
