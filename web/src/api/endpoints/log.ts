@@ -191,7 +191,19 @@ export function useLogSiteActionTargets(ids: number[], enabled = true) {
         queryKey: ['logs', 'site-action-targets', stableIds],
         queryFn: async () => {
             if (stableIds.length === 0) return {} as Record<number, LogSiteActionTargets>;
-            return apiClient.get<Record<number, LogSiteActionTargets>>(`/api/v1/log/site-action-targets?ids=${stableIds.join(',')}`);
+            const chunkSize = 100;
+            const chunks: number[][] = [];
+            for (let i = 0; i < stableIds.length; i += chunkSize) {
+                chunks.push(stableIds.slice(i, i + chunkSize));
+            }
+            const results = await Promise.all(
+                chunks.map((chunk) =>
+                    apiClient.get<Record<number, LogSiteActionTargets>>(
+                        `/api/v1/log/site-action-targets?ids=${chunk.join(',')}`,
+                    ),
+                ),
+            );
+            return Object.assign({}, ...results) as Record<number, LogSiteActionTargets>;
         },
         enabled: enabled && stableIds.length > 0,
         staleTime: 30000,

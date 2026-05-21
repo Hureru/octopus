@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/db"
@@ -46,7 +47,9 @@ var startCmd = &cobra.Command{
 		relayLogWriterCtx, stopRelayLogWriter := context.WithCancel(context.Background())
 		shutdown.Register(func() error {
 			stopRelayLogWriter()
-			return op.RelayLogFlushPending(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return op.RelayLogFlushPending(ctx)
 		})
 		shutdown.Register(op.SaveCache)
 

@@ -33,7 +33,10 @@ func SiteChannelListWithOptions(ctx context.Context, opts SiteChannelListOptions
 				accountIDs = append(accountIDs, account.ID)
 			}
 		}
-		histories, _ = SiteChannelModelHourlyForAccounts(ctx, accountIDs)
+		histories, err = SiteChannelModelHourlyForAccounts(ctx, accountIDs)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cards := make([]model.SiteChannelCard, 0, len(sites))
 	for _, site := range sites {
@@ -135,7 +138,10 @@ func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChann
 	for _, account := range site.Accounts {
 		accountIDs = append(accountIDs, account.ID)
 	}
-	histories, _ := SiteChannelModelHourlyForAccounts(ctx, accountIDs)
+	histories, err := SiteChannelModelHourlyForAccounts(ctx, accountIDs)
+	if err != nil {
+		return model.SiteChannelCard{}, err
+	}
 	return buildSiteChannelCardWithHistories(ctx, site, histories)
 }
 

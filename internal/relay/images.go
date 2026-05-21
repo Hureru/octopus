@@ -338,10 +338,10 @@ func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success b
 		}
 	}
 
-	m.saveLog(ctx, err, duration, attempts, channelID, channelName)
+	m.saveLog(ctx, success, err, duration, attempts, channelID, channelName)
 }
 
-func (m *imagesRelayMetrics) saveLog(ctx context.Context, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
+func (m *imagesRelayMetrics) saveLog(ctx context.Context, success bool, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
 	actualModel := m.ActualModel
 	if actualModel == "" {
 		actualModel = m.RequestModel
@@ -379,7 +379,7 @@ func (m *imagesRelayMetrics) saveLog(ctx context.Context, err error, duration ti
 	if err != nil {
 		relayLog.Error = err.Error()
 	}
-	relayLog.Success = err == nil
+	relayLog.Success = success
 
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)

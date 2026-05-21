@@ -550,7 +550,7 @@ func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) (Rel
 			if err := query.Order("time DESC").Order("id DESC").Offset(dbOffset).Limit(remaining).Find(&dbLogs).Error; err != nil {
 				return RelayLogListResult{}, err
 			}
-			logs = append(logs, dbLogs...)
+			logs = appendDedupedByID(logs, cachedLogs, dbLogs)
 		}
 	}
 
@@ -584,7 +584,7 @@ func relayLogListCursor(ctx context.Context, filter RelayLogListFilter, cachedLo
 		if err := query.Order("time DESC").Order("id DESC").Limit(remaining).Find(&dbLogs).Error; err != nil {
 			return RelayLogListResult{}, err
 		}
-		logs = append(logs, dbLogs...)
+		logs = appendDedupedByID(logs, cachedLogs, dbLogs)
 	}
 
 	hasMore := len(logs) > limit
@@ -655,6 +655,30 @@ func selectRelayLogListFields(query *gorm.DB, includeContent bool) *gorm.DB {
 		"ws_exec_mode",
 		"ws_recovery",
 	)
+}
+
+// appendDedupedByID appends dbLogs to logs, skipping any entry whose ID is
+// already present in cachedSource. The cache snapshot and DB read are not
+// transactionally consistent — a batch flushed between the two reads could
+// otherwise surface in both, producing duplicate rows by ID.
+func appendDedupedByID(logs []model.RelayLog, cachedSource []model.RelayLog, dbLogs []model.RelayLog) []model.RelayLog {
+	if len(dbLogs) == 0 {
+		return logs
+	}
+	if len(cachedSource) == 0 {
+		return append(logs, dbLogs...)
+	}
+	seen := make(map[int64]struct{}, len(cachedSource))
+	for _, entry := range cachedSource {
+		seen[entry.ID] = struct{}{}
+	}
+	for _, entry := range dbLogs {
+		if _, ok := seen[entry.ID]; ok {
+			continue
+		}
+		logs = append(logs, entry)
+	}
+	return logs
 }
 
 func RelayLogGet(ctx context.Context, id int64) (*model.RelayLog, error) {
@@ -750,10 +774,10 @@ func relayLogMatchesFilter(relayLog model.RelayLog, filter RelayLogListFilter, c
 	if len(channelSet) > 0 && !logMatchesChannels(relayLog, channelSet) {
 		return false
 	}
-	if filter.Status == RelayLogStatusSuccess && relayLog.Error != "" {
+	if filter.Status == RelayLogStatusSuccess && !relayLog.Success {
 		return false
 	}
-	if filter.Status == RelayLogStatusError && relayLog.Error == "" {
+	if filter.Status == RelayLogStatusError && relayLog.Success {
 		return false
 	}
 	if keyword != "" && !logMatchesKeyword(relayLog, keyword, filter.KeywordScope) {
@@ -828,6 +852,7 @@ func RelayLogClear(ctx context.Context) error {
 
 	relayLogPendingLock.Lock()
 	relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+	relayLogPendingBytes = 0
 	relayLogPendingLock.Unlock()
 
 	relayLogRecentLock.Lock()

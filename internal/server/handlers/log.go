@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func init() {
@@ -54,8 +56,16 @@ func listLog(c *gin.Context) {
 	status := op.RelayLogStatusFilter(strings.TrimSpace(c.Query("status")))
 	keyword := c.Query("keyword")
 	keywordScope := op.RelayLogKeywordScope(strings.TrimSpace(c.Query("keyword_scope")))
-	includeContent := parseBoolQuery(c, "include_content", false)
-	withTotal := parseBoolQuery(c, "with_total", true)
+	includeContent, err := parseBoolQuery(c, "include_content", false)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	withTotal, err := parseBoolQuery(c, "with_total", true)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
 	var beforeTime, beforeID *int64
 	if raw := strings.TrimSpace(c.Query("before_time")); raw != "" {
@@ -153,16 +163,16 @@ func listLog(c *gin.Context) {
 	})
 }
 
-func parseBoolQuery(c *gin.Context, key string, defaultValue bool) bool {
+func parseBoolQuery(c *gin.Context, key string, defaultValue bool) (bool, error) {
 	raw := strings.TrimSpace(c.Query(key))
 	if raw == "" {
-		return defaultValue
+		return defaultValue, nil
 	}
 	value, err := strconv.ParseBool(raw)
 	if err != nil {
-		return defaultValue
+		return defaultValue, fmt.Errorf("invalid boolean %q for %s", raw, key)
 	}
-	return value
+	return value, nil
 }
 
 func getLogSiteActionTargets(c *gin.Context) {
@@ -187,6 +197,10 @@ func getLogSiteActionTargets(c *gin.Context) {
 			resp.InvalidParam(c)
 			return
 		}
+		if id <= 0 {
+			resp.InvalidParam(c)
+			return
+		}
 		ids = append(ids, id)
 	}
 	data, err := op.RelayLogSiteActionTargets(c.Request.Context(), ids)
@@ -205,7 +219,11 @@ func getLog(c *gin.Context) {
 	}
 	logItem, err := op.RelayLogGet(c.Request.Context(), id)
 	if err != nil {
-		resp.Error(c, http.StatusNotFound, err.Error())
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			resp.NotFound(c)
+			return
+		}
+		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	resp.Success(c, logItem)
