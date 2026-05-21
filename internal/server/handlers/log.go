@@ -22,6 +22,10 @@ func init() {
 				Handle(listLog),
 		).
 		AddRoute(
+			router.NewRoute("/site-action-targets", http.MethodGet).
+				Handle(getLogSiteActionTargets),
+		).
+		AddRoute(
 			router.NewRoute("/:id", http.MethodGet).
 				Handle(getLog),
 		).
@@ -159,6 +163,38 @@ func parseBoolQuery(c *gin.Context, key string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return value
+}
+
+func getLogSiteActionTargets(c *gin.Context) {
+	rawIDs := strings.TrimSpace(c.Query("ids"))
+	if rawIDs == "" {
+		resp.Success(c, gin.H{})
+		return
+	}
+	parts := strings.Split(rawIDs, ",")
+	if len(parts) > 100 {
+		resp.Error(c, http.StatusBadRequest, "too many ids")
+		return
+	}
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil {
+			resp.InvalidParam(c)
+			return
+		}
+		ids = append(ids, id)
+	}
+	data, err := op.RelayLogSiteActionTargets(c.Request.Context(), ids)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, data)
 }
 
 func getLog(c *gin.Context) {

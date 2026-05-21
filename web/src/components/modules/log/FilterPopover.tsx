@@ -149,7 +149,7 @@ export function LogFilterPopover() {
     const setLogChannelIds = useToolbarViewOptionsStore((s) => s.setLogChannelIds);
     const { value: logKeepPeriodValue } = useSettingValue(SettingKey.RelayLogKeepPeriod, '0');
     const { data: channels } = useChannelList();
-    const { data: sites } = useSiteChannelList();
+    const { data: sites } = useSiteChannelList({ includeHistory: false });
 
     const [search, setSearch] = useState('');
     const [expanded, setExpanded] = useState<Set<string>>(new Set(['__manual__']));

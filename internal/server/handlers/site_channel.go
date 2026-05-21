@@ -40,7 +40,8 @@ func init() {
 }
 
 func listSiteChannel(c *gin.Context) {
-	data, err := op.SiteChannelList(c.Request.Context())
+	includeHistory := parseBoolQuery(c, "include_history", true)
+	data, err := op.SiteChannelListWithOptions(c.Request.Context(), op.SiteChannelListOptions{IncludeHistory: includeHistory})
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return

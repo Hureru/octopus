@@ -134,7 +134,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		select {
 		case <-c.Request.Context().Done():
 			log.Debugf("request context canceled, stopping retry")
-			metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), false, context.Canceled, iter.Attempts(), false)
 			return
 		default:
 		}
@@ -220,7 +220,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				select {
 				case <-c.Request.Context().Done():
 					log.Debugf("request context canceled during retry backoff")
-					metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
+					metrics.SaveWithChannelStats(c.Request.Context(), false, context.Canceled, iter.Attempts(), false)
 					return
 				case <-time.After(delay):
 				}
@@ -254,15 +254,15 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		}
 
 		if result.Success {
-			metrics.Save(c.Request.Context(), true, nil, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), true, nil, iter.Attempts(), false)
 			return
 		}
 		if result.Canceled {
-			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), false, result.Err, iter.Attempts(), false)
 			return
 		}
 		if result.ResetConversation {
-			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), false, result.Err, iter.Attempts(), false)
 			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
 				hb.FlushOrError(c, publicErr.Status, publicErr.Message)
 			} else {
@@ -271,7 +271,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			return
 		}
 		if result.Written {
-			metrics.Save(c.Request.Context(), false, result.Err, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), false, result.Err, iter.Attempts(), false)
 			return
 		}
 		lastErr = result.Err
@@ -281,11 +281,11 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	// 所有候选通道均失败
 	if responsesPassthroughRequired && !responsesPassthroughCapableFound {
 		err := fmt.Errorf("openai responses native tools require an openai responses channel")
-		metrics.Save(c.Request.Context(), false, err, iter.Attempts())
+		metrics.SaveWithChannelStats(c.Request.Context(), false, err, iter.Attempts(), false)
 		hb.FlushOrError(c, http.StatusBadRequest, "当前请求包含 OpenAI Responses 原生工具，仅支持 OpenAI Responses 通道直通")
 		return
 	}
-	metrics.Save(c.Request.Context(), false, lastErr, iter.Attempts())
+	metrics.SaveWithChannelStats(c.Request.Context(), false, lastErr, iter.Attempts(), false)
 
 	// 透传 429/503 状态码和 Retry-After 头，让客户端 SDK 的重试机制接管
 	if isPassthroughStatus(lastResult.StatusCode) {

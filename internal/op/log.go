@@ -20,12 +20,15 @@ const (
 	relayLogBatchSize        = 200
 	relayLogFlushInterval    = time.Second
 	relayLogQueueSize        = 5000
+	relayLogQueueBytes       = 64 << 20
 	relayLogRecentMaxSize    = 100 // 最近日志缓存，用于实时查询/不落库模式
 	relayLogCleanupBatchSize = 1000
 	relayLogCleanupBatchWait = 30 * time.Millisecond
+	relayLogWriterMaxBatches = 25
 )
 
 var relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+var relayLogPendingBytes int64
 var relayLogPendingLock sync.Mutex
 
 var relayLogRecent = make([]model.RelayLog, 0, relayLogRecentMaxSize)
@@ -110,11 +113,11 @@ func RelayLogWriterRun(ctx context.Context) {
 			cancel()
 			return
 		case <-relayLogFlushSignal:
-			if err := relayLogFlushPendingBatch(ctx, relayLogBatchSize); err != nil {
+			if err := relayLogDrainPending(ctx, relayLogWriterMaxBatches); err != nil {
 				log.Warnw("relay_log.flush_failed", "batch_size", relayLogBatchSize, "queue_length", RelayLogPendingLen(), "error", err.Error())
 			}
 		case <-ticker.C:
-			if err := relayLogFlushPendingBatch(ctx, relayLogBatchSize); err != nil {
+			if err := relayLogDrainPending(ctx, relayLogWriterMaxBatches); err != nil {
 				log.Warnw("relay_log.flush_failed", "batch_size", relayLogBatchSize, "queue_length", RelayLogPendingLen(), "error", err.Error())
 			}
 		}
@@ -139,18 +142,30 @@ func appendRelayLogRecent(relayLog model.RelayLog) {
 }
 
 func enqueueRelayLogPending(relayLog model.RelayLog) bool {
+	estimatedBytes := relayLogApproxBytes(relayLog)
 	relayLogPendingLock.Lock()
 	defer relayLogPendingLock.Unlock()
-	if len(relayLogPending) >= relayLogQueueSize {
+	if len(relayLogPending) >= relayLogQueueSize || relayLogPendingBytes+estimatedBytes > relayLogQueueBytes {
 		dropped := relayLogDroppedTotal.Add(1)
 		warnRelayLogDropped(dropped)
 		return false
 	}
 	relayLogPending = append(relayLogPending, relayLog)
+	relayLogPendingBytes += estimatedBytes
 	if len(relayLogPending) >= relayLogBatchSize {
 		signalRelayLogFlush()
 	}
 	return true
+}
+
+func relayLogApproxBytes(relayLog model.RelayLog) int64 {
+	size := 256
+	size += len(relayLog.RequestModelName) + len(relayLog.RequestAPIKeyName) + len(relayLog.ChannelName) + len(relayLog.ActualModelName)
+	size += len(relayLog.RequestContent) + len(relayLog.ResponseContent) + len(relayLog.Error)
+	for _, attempt := range relayLog.Attempts {
+		size += 96 + len(attempt.ChannelName) + len(attempt.ModelName) + len(attempt.Msg)
+	}
+	return int64(size)
 }
 
 func warnRelayLogDropped(dropped uint64) {
@@ -160,7 +175,7 @@ func warnRelayLogDropped(dropped uint64) {
 		return
 	}
 	if relayLogLastDropWarn.CompareAndSwap(last, now) {
-		log.Warnw("relay_log.queue_full", "dropped_total", dropped, "queue_size", relayLogQueueSize)
+		log.Warnw("relay_log.queue_full", "dropped_total", dropped, "queue_size", relayLogQueueSize, "queue_bytes", relayLogQueueBytes)
 	}
 }
 
@@ -172,6 +187,29 @@ func RelayLogPendingLen() int {
 
 func RelayLogDroppedTotal() uint64 {
 	return relayLogDroppedTotal.Load()
+}
+
+func relayLogDrainPending(ctx context.Context, maxBatches int) error {
+	if maxBatches <= 0 {
+		maxBatches = 1
+	}
+	for i := 0; i < maxBatches; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if RelayLogPendingLen() == 0 {
+			return nil
+		}
+		if err := relayLogFlushPendingBatch(ctx, relayLogBatchSize); err != nil {
+			return err
+		}
+	}
+	if RelayLogPendingLen() > 0 {
+		signalRelayLogFlush()
+	}
+	return nil
 }
 
 func relayLogFlushPendingBatch(ctx context.Context, batchSize int) error {
@@ -191,6 +229,7 @@ func relayLogFlushPendingBatch(ctx context.Context, batchSize int) error {
 	}
 	batch := make([]model.RelayLog, batchSize)
 	copy(batch, relayLogPending[:batchSize])
+	batchBytes := relayLogBatchApproxBytes(batch)
 	relayLogPendingLock.Unlock()
 
 	start := time.Now()
@@ -204,25 +243,41 @@ func relayLogFlushPendingBatch(ctx context.Context, batchSize int) error {
 	relayLogPendingLock.Lock()
 	if len(relayLogPending) >= batchSize && relayLogPending[0].ID == batch[0].ID && relayLogPending[batchSize-1].ID == batch[batchSize-1].ID {
 		relayLogPending = relayLogPending[batchSize:]
+		relayLogPendingBytes -= batchBytes
 	} else {
 		flushed := make(map[int64]struct{}, len(batch))
 		for _, item := range batch {
 			flushed[item.ID] = struct{}{}
 		}
 		kept := relayLogPending[:0]
+		keptBytes := int64(0)
 		for _, item := range relayLogPending {
 			if _, ok := flushed[item.ID]; !ok {
 				kept = append(kept, item)
+				keptBytes += relayLogApproxBytes(item)
 			}
 		}
 		relayLogPending = kept
+		relayLogPendingBytes = keptBytes
+	}
+	if relayLogPendingBytes < 0 {
+		relayLogPendingBytes = 0
 	}
 	if len(relayLogPending) == 0 {
 		relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+		relayLogPendingBytes = 0
 	}
 	relayLogPendingLock.Unlock()
 
 	return nil
+}
+
+func relayLogBatchApproxBytes(batch []model.RelayLog) int64 {
+	var total int64
+	for _, item := range batch {
+		total += relayLogApproxBytes(item)
+	}
+	return total
 }
 
 func RelayLogFlushPending(ctx context.Context) error {
@@ -323,7 +378,7 @@ func relayLogCleanup(ctx context.Context) error {
 		if len(ids) == 0 {
 			break
 		}
-		result := dbConn.Where("id IN ?", ids).Delete(&model.RelayLog{})
+		result := dbConn.Where("id IN ?", ids).Unscoped().Delete(&model.RelayLog{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -444,22 +499,7 @@ func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) (Rel
 
 	keyword := strings.ToLower(filter.Keyword)
 
-	cachedSource := relayLogRecentSnapshot()
-	if enabled {
-		cachedSource = relayLogPendingSnapshot()
-	}
-	var cachedLogs []model.RelayLog
-	for _, relayLog := range cachedSource {
-		if !relayLogMatchesFilter(relayLog, filter, channelSet, keyword) {
-			continue
-		}
-		cachedLogs = append(cachedLogs, relayLog)
-	}
-
-	// 反转缓存日志顺序（原本新的在末尾，反转后新的在前面，方便分页）
-	for i, j := 0, len(cachedLogs)-1; i < j; i, j = i+1, j-1 {
-		cachedLogs[i], cachedLogs[j] = cachedLogs[j], cachedLogs[i]
-	}
+	cachedLogs := relayLogCachedMatches(filter, channelSet, keyword, enabled, !filter.IncludeContent)
 
 	cacheCount := len(cachedLogs)
 	offset := (filter.Page - 1) * filter.PageSize
@@ -618,17 +658,11 @@ func selectRelayLogListFields(query *gorm.DB, includeContent bool) *gorm.DB {
 }
 
 func RelayLogGet(ctx context.Context, id int64) (*model.RelayLog, error) {
-	for _, entry := range relayLogPendingSnapshot() {
-		if entry.ID == id {
-			item := entry
-			return &item, nil
-		}
+	if item, ok := relayLogFindPending(id); ok {
+		return &item, nil
 	}
-	for _, entry := range relayLogRecentSnapshot() {
-		if entry.ID == id {
-			item := entry
-			return &item, nil
-		}
+	if item, ok := relayLogFindRecent(id); ok {
+		return &item, nil
 	}
 	var entry model.RelayLog
 	if err := db.GetDB().WithContext(ctx).First(&entry, "id = ?", id).Error; err != nil {
@@ -637,20 +671,73 @@ func RelayLogGet(ctx context.Context, id int64) (*model.RelayLog, error) {
 	return &entry, nil
 }
 
-func relayLogPendingSnapshot() []model.RelayLog {
+func relayLogCachedMatches(filter RelayLogListFilter, channelSet map[int]struct{}, keyword string, enabled bool, light bool) []model.RelayLog {
+	if enabled {
+		return relayLogCollectPending(filter, channelSet, keyword, light)
+	}
+	return relayLogCollectRecent(filter, channelSet, keyword, light)
+}
+
+func relayLogCollectPending(filter RelayLogListFilter, channelSet map[int]struct{}, keyword string, light bool) []model.RelayLog {
 	relayLogPendingLock.Lock()
 	defer relayLogPendingLock.Unlock()
-	result := make([]model.RelayLog, len(relayLogPending))
-	copy(result, relayLogPending)
+	result := make([]model.RelayLog, 0, min(len(relayLogPending), filter.PageSize+filter.Limit+1))
+	for i := len(relayLogPending) - 1; i >= 0; i-- {
+		entry := relayLogPending[i]
+		if !relayLogMatchesFilter(entry, filter, channelSet, keyword) {
+			continue
+		}
+		if light {
+			entry = relayLogLightCopy(entry)
+		}
+		result = append(result, entry)
+	}
 	return result
 }
 
-func relayLogRecentSnapshot() []model.RelayLog {
+func relayLogCollectRecent(filter RelayLogListFilter, channelSet map[int]struct{}, keyword string, light bool) []model.RelayLog {
 	relayLogRecentLock.Lock()
 	defer relayLogRecentLock.Unlock()
-	result := make([]model.RelayLog, len(relayLogRecent))
-	copy(result, relayLogRecent)
+	result := make([]model.RelayLog, 0, min(len(relayLogRecent), filter.PageSize+filter.Limit+1))
+	for i := len(relayLogRecent) - 1; i >= 0; i-- {
+		entry := relayLogRecent[i]
+		if !relayLogMatchesFilter(entry, filter, channelSet, keyword) {
+			continue
+		}
+		if light {
+			entry = relayLogLightCopy(entry)
+		}
+		result = append(result, entry)
+	}
 	return result
+}
+
+func relayLogFindPending(id int64) (model.RelayLog, bool) {
+	relayLogPendingLock.Lock()
+	defer relayLogPendingLock.Unlock()
+	for i := len(relayLogPending) - 1; i >= 0; i-- {
+		if relayLogPending[i].ID == id {
+			return relayLogPending[i], true
+		}
+	}
+	return model.RelayLog{}, false
+}
+
+func relayLogFindRecent(id int64) (model.RelayLog, bool) {
+	relayLogRecentLock.Lock()
+	defer relayLogRecentLock.Unlock()
+	for i := len(relayLogRecent) - 1; i >= 0; i-- {
+		if relayLogRecent[i].ID == id {
+			return relayLogRecent[i], true
+		}
+	}
+	return model.RelayLog{}, false
+}
+
+func relayLogLightCopy(entry model.RelayLog) model.RelayLog {
+	entry.RequestContent = ""
+	entry.ResponseContent = ""
+	return entry
 }
 
 func relayLogMatchesFilter(relayLog model.RelayLog, filter RelayLogListFilter, channelSet map[int]struct{}, keyword string) bool {
@@ -768,7 +855,7 @@ func RelayLogClear(ctx context.Context) error {
 		if len(ids) == 0 {
 			break
 		}
-		result := dbConn.Where("id IN ?", ids).Delete(&model.RelayLog{})
+		result := dbConn.Where("id IN ?", ids).Unscoped().Delete(&model.RelayLog{})
 		if result.Error != nil {
 			return result.Error
 		}

@@ -144,7 +144,9 @@ func StatsSiteModelHourlySaveDB(ctx context.Context) error {
 	}).Create(&rows).Error
 }
 
-// SiteChannelModelHourlyForAccount 读取指定 site account 下所有 (group, model) 的小时聚合，
+const siteChannelModelHistoryWindow = 90 * 24 * time.Hour
+
+// SiteChannelModelHourlyForAccount 读取指定 site account 下最近一段时间的 (group, model) 小时聚合，
 // 合并未刷盘的内存桶后，按自适应桶宽生成 SiteModelHistorySummary。
 // key 与 site_channel.go 保持一致：baseGroupKey + "\x00" + modelName。
 func SiteChannelModelHourlyForAccount(ctx context.Context, siteAccountID int) (map[string]*model.SiteModelHistorySummary, error) {
@@ -178,9 +180,10 @@ func SiteChannelModelHourlyForAccounts(ctx context.Context, siteAccountIDs []int
 		return map[int]map[string]*model.SiteModelHistorySummary{}, nil
 	}
 
+	minHour := int(time.Now().Add(-siteChannelModelHistoryWindow).Unix() / 3600)
 	var rows []model.StatsSiteModelHourly
 	if err := db.GetDB().WithContext(ctx).
-		Where("site_account_id IN ?", ids).
+		Where("site_account_id IN ? AND hour >= ?", ids, minHour).
 		Order("site_account_id ASC").
 		Order("hour ASC").
 		Find(&rows).Error; err != nil {
@@ -191,7 +194,7 @@ func SiteChannelModelHourlyForAccounts(ctx context.Context, siteAccountIDs []int
 	siteModelHourlyCacheLock.Lock()
 	pending := make([]model.StatsSiteModelHourly, 0, len(siteModelHourlyCache))
 	for k, entry := range siteModelHourlyCache {
-		if _, ok := accountSet[k.SiteAccountID]; ok {
+		if _, ok := accountSet[k.SiteAccountID]; ok && k.Hour >= minHour {
 			pending = append(pending, *entry)
 		}
 	}

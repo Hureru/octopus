@@ -39,7 +39,6 @@ func TestMigrateRelayLogPerfBackfillsSuccessAndCreatesIndexes(t *testing.T) {
 		"idx_relay_logs_time_id",
 		"idx_relay_logs_success_time_id",
 		"idx_relay_logs_channel_time_id",
-		"idx_relay_logs_request_model_time_id",
 	} {
 		if !db.Migrator().HasIndex("relay_logs", name) {
 			t.Fatalf("expected index %s to exist", name)

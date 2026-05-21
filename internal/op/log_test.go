@@ -11,6 +11,7 @@ import (
 func resetRelayLogStateForTest() {
 	relayLogPendingLock.Lock()
 	relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+	relayLogPendingBytes = 0
 	relayLogPendingLock.Unlock()
 
 	relayLogRecentLock.Lock()
