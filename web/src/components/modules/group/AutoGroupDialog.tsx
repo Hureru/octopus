@@ -151,9 +151,16 @@ function SelectedSourceRow({
 
     return (
         <div className="mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border border-border/50 bg-background px-2 text-left transition-colors hover:bg-muted">
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                {source.channel_name}
-            </span>
+            <TooltipProvider>
+                <Tooltip side="top" sideOffset={10} align="center">
+                    <TooltipTrigger asChild>
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                            {source.channel_name}
+                        </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{source.channel_name}</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
             {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
             <ModelPreview source={source} />
             <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
