@@ -524,7 +524,9 @@
                 "moreModels": "+{count}",
                 "noModels": "No models",
                 "unknownSite": "Unknown site",
-                "manualGroup": "Manual channels"
+                "manualGroup": "Manual channels",
+                "globalActiveCount": "Global {count}",
+                "globalActiveTip": "All site-projected channels are using the global auto group mode above. Per-channel settings are kept and take effect after the global mode is disabled."
             },
             "mode": {
                 "none": "Off",

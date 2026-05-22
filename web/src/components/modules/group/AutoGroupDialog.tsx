@@ -160,7 +160,6 @@ function SelectedSourceRow({
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                 {selectedSourceLabel(source)}
             </span>
-            {source.global_override ? <Badge variant="outline" className="h-5 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">{t('source.globalActive')}</Badge> : null}
             {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
             <ModelPreview source={source} />
             <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
@@ -271,6 +270,7 @@ export function GroupAutoGroupDialogContent() {
     }, [config, selectedModes, sources]);
 
     const globalDirty = !!config && projectedGlobalMode !== config.projected_global_auto_group;
+    const globalOverrideCount = useMemo(() => sources.filter((source) => source.global_override).length, [sources]);
     const hasChanges = globalDirty || dirtyItems.length > 0;
     const isPending = updateConfig.isPending;
 
@@ -408,8 +408,24 @@ export function GroupAutoGroupDialogContent() {
                             </section>
 
                             <section className="flex min-h-0 flex-col rounded-xl border border-border/60 bg-muted/20">
-                                <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-                                    <span className="text-sm font-medium text-foreground">{t('sections.selected')}</span>
+                                <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        <span className="truncate text-sm font-medium text-foreground">{t('sections.selected')}</span>
+                                        {globalOverrideCount > 0 ? (
+                                            <TooltipProvider>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Badge variant="outline" className="h-5 cursor-help border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">
+                                                            {t('source.globalActiveCount', { count: globalOverrideCount })}
+                                                        </Badge>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent className="max-w-xs">
+                                                        {t('source.globalActiveTip')}
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </TooltipProvider>
+                                        ) : null}
+                                    </div>
                                     <span className="text-xs tabular-nums text-muted-foreground">{Object.keys(selectedModes).length}</span>
                                 </div>
                                 <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">

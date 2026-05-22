@@ -524,7 +524,9 @@
                 "moreModels": "+{count} 个",
                 "noModels": "暂无模型",
                 "unknownSite": "未知站点",
-                "manualGroup": "普通渠道"
+                "manualGroup": "普通渠道",
+                "globalActiveCount": "全局 {count}",
+                "globalActiveTip": "全部站点投影渠道正在使用上方全局自动分组模式；单独渠道设置会保留，并在全局关闭后生效。"
             },
             "mode": {
                 "none": "关闭",

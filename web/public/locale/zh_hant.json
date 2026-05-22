@@ -524,7 +524,9 @@
                 "moreModels": "+{count} 個",
                 "noModels": "暫無模型",
                 "unknownSite": "未知站點",
-                "manualGroup": "普通供應源"
+                "manualGroup": "普通供應源",
+                "globalActiveCount": "全域 {count}",
+                "globalActiveTip": "全部站點投影供應源正在使用上方全域自動分組模式；單獨供應源設定會保留，並在全域關閉後生效。"
             },
             "mode": {
                 "none": "關閉",
