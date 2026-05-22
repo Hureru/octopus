@@ -36,6 +36,41 @@ var statsAPIKeyCache = cache.New[int, model.StatsAPIKey](16)
 var statsAPIKeyCacheNeedUpdate = make(map[int]struct{})
 var statsAPIKeyCacheNeedUpdateLock sync.Mutex
 
+// pendingDailyOverrides holds prev-day StatsDaily snapshots whose persistence
+// failed. Retried on the next StatsSaveDB cycle so a rollover snapshot is
+// never silently dropped after the in-memory cache has advanced.
+var pendingDailyOverrides []model.StatsDaily
+var pendingDailyOverridesLock sync.Mutex
+
+func enqueuePendingDailyOverride(d model.StatsDaily) {
+	if d.Date == "" {
+		return
+	}
+	pendingDailyOverridesLock.Lock()
+	pendingDailyOverrides = append(pendingDailyOverrides, d)
+	pendingDailyOverridesLock.Unlock()
+}
+
+func flushPendingDailyOverrides(ctx context.Context) error {
+	pendingDailyOverridesLock.Lock()
+	pending := pendingDailyOverrides
+	pendingDailyOverrides = nil
+	pendingDailyOverridesLock.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	dbConn := db.GetDB().WithContext(ctx)
+	for i, p := range pending {
+		if result := dbConn.Save(&p); result.Error != nil {
+			pendingDailyOverridesLock.Lock()
+			pendingDailyOverrides = append(pending[i:], pendingDailyOverrides...)
+			pendingDailyOverridesLock.Unlock()
+			return result.Error
+		}
+	}
+	return nil
+}
+
 func StatsSaveDBTask() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -51,6 +86,10 @@ func StatsSaveDBTask() {
 }
 
 func StatsSaveDB(ctx context.Context) error {
+	if err := flushPendingDailyOverrides(ctx); err != nil {
+		return err
+	}
+
 	statsTotalCacheLock.RLock()
 	totalSnap := statsTotalCache
 	statsTotalCacheLock.RUnlock()
@@ -223,6 +262,7 @@ func statsSaveDBWithDailyOverride(ctx context.Context, dailyOverride model.Stats
 
 	if err := persistStatsSnapshots(ctx, totalSnap, dailyOverride, hourlyAll, channelIDs, modelIDs, apiKeyIDs); err != nil {
 		restoreStatsDirtyIDs(channelIDs, modelIDs, apiKeyIDs)
+		enqueuePendingDailyOverride(dailyOverride)
 		return err
 	}
 	return nil

@@ -806,8 +806,8 @@ func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB 
 		like := "%" + keyword + "%"
 		if filter.KeywordScope == RelayLogKeywordScopeContent {
 			query = query.Where(
-				"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(request_content) LIKE ? OR LOWER(response_content) LIKE ? OR LOWER(error) LIKE ?",
-				like, like, like, like, like, like,
+				"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(channel_name) LIKE ? OR LOWER(request_content) LIKE ? OR LOWER(response_content) LIKE ? OR LOWER(error) LIKE ?",
+				like, like, like, like, like, like, like,
 			)
 		} else {
 			query = query.Where(
