@@ -21,7 +21,7 @@ export function ChannelTabSwitcher({ className }: Props) {
     const activeTab = useChannelTabStore((s) => s.activeTab);
     const setActiveTab = useChannelTabStore((s) => s.setActiveTab);
     const { data: channelsData } = useChannelList();
-    const { data: siteChannelsData } = useSiteChannelList();
+    const { data: siteChannelsData } = useSiteChannelList({ includeHistory: false });
 
     const counts = useMemo(
         () => ({

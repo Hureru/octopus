@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"context"
+	"time"
+
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/op"
@@ -41,6 +44,13 @@ var startCmd = &cobra.Command{
 			log.Errorf("cache init error: %v", err)
 			return
 		}
+		relayLogWriterCtx, stopRelayLogWriter := context.WithCancel(context.Background())
+		shutdown.Register(func() error {
+			stopRelayLogWriter()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return op.RelayLogFlushPending(ctx)
+		})
 		shutdown.Register(op.SaveCache)
 
 		if err := op.UserInit(); err != nil {
@@ -56,6 +66,10 @@ var startCmd = &cobra.Command{
 		shutdown.Register(func() error {
 			relay.CloseUpstreamWSPool()
 			return nil
+		})
+
+		safe.Go("relay-log-writer", func() {
+			op.RelayLogWriterRun(relayLogWriterCtx)
 		})
 
 		task.Init()
