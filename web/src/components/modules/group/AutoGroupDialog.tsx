@@ -275,6 +275,11 @@ export function GroupAutoGroupDialogContent() {
 
     const globalDirty = !!config && projectedGlobalMode !== config.projected_global_auto_group;
     const globalOverrideCount = useMemo(() => sources.filter((source) => source.global_override).length, [sources]);
+    const shouldRunAfterSave = useMemo(() => {
+        if (!config) return false;
+        if (globalDirty && projectedGlobalMode !== AutoGroupType.None) return true;
+        return dirtyItems.some((item) => item.auto_group !== AutoGroupType.None);
+    }, [config, dirtyItems, globalDirty, projectedGlobalMode]);
     const hasChanges = globalDirty || dirtyItems.length > 0;
     const isPending = updateConfig.isPending;
 
@@ -302,15 +307,15 @@ export function GroupAutoGroupDialogContent() {
         });
     };
 
-    const handleSave = (runNow: boolean) => {
+    const handleSave = () => {
         if (!config) return;
         updateConfig.mutate({
             projected_global_auto_group: globalDirty ? projectedGlobalMode : undefined,
             items: dirtyItems,
-            run_now: runNow,
+            run_now: shouldRunAfterSave,
         }, {
             onSuccess: () => {
-                toast.success(runNow ? t('toast.savedAndRun') : t('toast.saved'));
+                toast.success(shouldRunAfterSave ? t('toast.savedAndRun') : t('toast.saved'));
                 setIsOpen(false);
             },
             onError: (err) => toast.error(t('toast.saveFailed'), { description: err.message }),
@@ -450,11 +455,8 @@ export function GroupAutoGroupDialogContent() {
 
                         <div className="mt-4 flex shrink-0 flex-col gap-2 sm:flex-row">
                             <Button type="button" variant="secondary" className="h-11 flex-1 rounded-xl" onClick={() => setIsOpen(false)} disabled={isPending}>{t('buttons.cancel')}</Button>
-                            <Button type="button" variant="outline" className="h-11 flex-1 rounded-xl" onClick={() => handleSave(false)} disabled={isPending || isLoading || !hasChanges}>
+                            <Button type="button" className="h-11 flex-1 rounded-xl" onClick={handleSave} disabled={isPending || isLoading || !hasChanges}>
                                 {updateConfig.isPending ? t('buttons.saving') : t('buttons.save')}
-                            </Button>
-                            <Button type="button" className="h-11 flex-1 rounded-xl" onClick={() => handleSave(true)} disabled={isPending || isLoading || (!hasChanges && Object.keys(selectedModes).length === 0 && projectedGlobalMode === AutoGroupType.None)}>
-                                {updateConfig.isPending ? t('buttons.running') : t('buttons.saveAndRun')}
                             </Button>
                         </div>
                     </>
