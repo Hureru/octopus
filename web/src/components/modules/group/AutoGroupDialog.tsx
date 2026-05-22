@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Check, ChevronDown, Globe2, HelpCircle, Plus, Search, Sparkles, X } from 'lucide-react';
+import { ChevronDown, Globe2, HelpCircle, Plus, Search, Sparkles, X } from 'lucide-react';
 import { AutoGroupType } from '@/api/endpoints/channel';
 import {
     type GroupAutoGroupSource,
@@ -57,11 +57,6 @@ function modeKey(value: AutoGroupType) {
         default:
             return 'none';
     }
-}
-
-function selectedSourceLabel(source: GroupAutoGroupSource) {
-    if (!source.managed) return source.channel_name;
-    return [source.site_name, source.channel_name].map((item) => item?.trim()).filter(Boolean).join(' / ') || source.channel_name;
 }
 
 function matchesKeyword(source: GroupAutoGroupSource, keyword: string) {
@@ -156,9 +151,8 @@ function SelectedSourceRow({
 
     return (
         <div className="mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border border-border/50 bg-background px-2 text-left transition-colors hover:bg-muted">
-            <Check className="size-3.5 shrink-0 text-primary" />
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                {selectedSourceLabel(source)}
+                {source.channel_name}
             </span>
             {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
             <ModelPreview source={source} />
