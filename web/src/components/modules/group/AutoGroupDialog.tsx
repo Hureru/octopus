@@ -123,7 +123,7 @@ function AvailableSourceRow({ source, onAdd }: { source: GroupAutoGroupSource; o
     const t = useTranslations('group.autoGroup');
 
     return (
-        <div className="flex h-8 items-center gap-2 px-2 pl-8 text-left hover:bg-muted/40">
+        <div className="mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border border-border/50 bg-background px-2 text-left transition-colors hover:bg-muted">
             <button type="button" onClick={() => onAdd(source)} className="min-w-0 flex-1 truncate text-left text-xs text-foreground">
                 {source.channel_name}
             </button>
@@ -155,7 +155,7 @@ function SelectedSourceRow({
     const t = useTranslations('group.autoGroup');
 
     return (
-        <div className="flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-left">
+        <div className="mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border border-border/50 bg-background px-2 text-left transition-colors hover:bg-muted">
             <Check className="size-3.5 shrink-0 text-primary" />
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                 {selectedSourceLabel(source)}
@@ -163,7 +163,7 @@ function SelectedSourceRow({
             {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
             <ModelPreview source={source} />
             <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
-                <SelectTrigger className="h-7 w-28 rounded-lg bg-background text-xs shadow-none">
+                <SelectTrigger className="h-6 w-28 rounded-lg bg-background text-xs shadow-none">
                     <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
@@ -314,7 +314,7 @@ export function GroupAutoGroupDialogContent() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-6rem)] max-h-[42rem] w-screen max-w-full flex-col overflow-hidden md:max-w-4xl">
+        <div className="flex h-[calc(100vh-2rem)] min-h-0 w-screen max-w-full flex-col overflow-hidden md:max-w-4xl">
             <MorphingDialogTitle className="shrink-0">
                 <header className="mb-3 flex items-center justify-between gap-4">
                     <h2 className="flex items-center gap-2 text-2xl font-bold text-card-foreground">
@@ -332,7 +332,7 @@ export function GroupAutoGroupDialogContent() {
                     </div>
                 ) : (
                     <>
-                        <div className="mb-3 shrink-0 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+                        <div className="mb-3 shrink-0 rounded-xl border border-border/50 bg-muted/30 px-3 py-2">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex min-w-0 items-center gap-2">
                                     <Globe2 className="size-4 shrink-0 text-muted-foreground" />
@@ -362,16 +362,16 @@ export function GroupAutoGroupDialogContent() {
                         </div>
 
                         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-2">
-                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
-                                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/50 px-3 py-2">
+                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
+                                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
                                     <span className="min-w-0 truncate text-sm font-medium text-foreground">{t('sections.available')}</span>
-                                    <div className="relative w-36 sm:w-44">
+                                    <div className="relative w-40 sm:w-48">
                                         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                                         <input
                                             value={keyword}
                                             onChange={(event) => setKeyword(event.target.value)}
                                             placeholder={t('searchPlaceholder')}
-                                            className="h-7 w-full rounded-lg border border-border/60 bg-background/70 pl-7 pr-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            className="h-6 w-full rounded-lg border border-border/60 bg-background/70 pl-7 pr-2 text-xs shadow-none outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                         />
                                     </div>
                                     <span className="text-xs tabular-nums text-muted-foreground">{availableSources.length}</span>
@@ -388,7 +388,7 @@ export function GroupAutoGroupDialogContent() {
                                                 <button
                                                     type="button"
                                                     onClick={() => toggleExpanded(group.key)}
-                                                    className="flex h-8 w-full items-center gap-2 px-2 text-left hover:bg-muted/30"
+                                                    className="mx-2 my-1 flex h-8 w-[calc(100%-1rem)] items-center gap-2 rounded-lg bg-muted px-2 text-left transition-colors hover:bg-muted/80"
                                                 >
                                                     <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isExpanded ? '' : '-rotate-90')} />
                                                     <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{group.label}</span>
@@ -407,8 +407,8 @@ export function GroupAutoGroupDialogContent() {
                                 </div>
                             </section>
 
-                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
-                                <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
+                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
+                                <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
                                     <div className="flex min-w-0 items-center gap-2">
                                         <span className="truncate text-sm font-medium text-foreground">{t('sections.selected')}</span>
                                         {globalOverrideCount > 0 ? (
@@ -428,7 +428,7 @@ export function GroupAutoGroupDialogContent() {
                                     </div>
                                     <span className="text-xs tabular-nums text-muted-foreground">{Object.keys(selectedModes).length}</span>
                                 </div>
-                                <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
+                                <div className="min-h-0 flex-1 overflow-y-auto py-1">
                                     {selectedSources.length === 0 ? (
                                         <div className="p-6 text-center text-sm text-muted-foreground">{t('emptySelected')}</div>
                                     ) : selectedSources.map((source) => (
