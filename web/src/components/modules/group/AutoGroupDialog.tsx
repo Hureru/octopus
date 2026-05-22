@@ -157,7 +157,10 @@ function SelectedSourceRow({
             {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
             <ModelPreview source={source} />
             <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
-                <SelectTrigger className="h-6 w-28 rounded-lg bg-background text-xs shadow-none">
+                <SelectTrigger
+                    size="sm"
+                    className="!h-6 w-auto min-w-18 justify-end rounded-md border-transparent bg-transparent px-1 py-0 text-xs text-muted-foreground shadow-none hover:text-foreground focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent"
+                >
                     <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
