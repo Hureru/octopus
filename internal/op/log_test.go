@@ -91,12 +91,54 @@ func TestRelayLogListDefaultsToLightFieldsAndNoContentKeyword(t *testing.T) {
 		t.Fatalf("default keyword unexpectedly searched content: %+v", contentResult)
 	}
 
-	contentResult, err = RelayLogListWithFilter(ctx, RelayLogListFilter{Keyword: "hidden-needle", KeywordScope: RelayLogKeywordScopeContent, Page: 1, PageSize: 10, WithTotal: true})
+	contentResult, err = RelayLogListWithFilter(ctx, RelayLogListFilter{Keyword: "hidden-needle", KeywordScope: RelayLogKeywordScopeContent, StartTime: intPtr(0), EndTime: intPtr(200), Page: 1, PageSize: 10, WithTotal: true})
 	if err != nil {
 		t.Fatalf("RelayLogListWithFilter content keyword failed: %v", err)
 	}
 	if contentResult.Total != 1 || len(contentResult.Logs) != 1 || contentResult.Logs[0].ID != 101 {
 		t.Fatalf("content keyword did not find expected row: %+v", contentResult)
+	}
+}
+
+func intPtr(v int) *int { return &v }
+
+func TestRelayLogListContainsKeywordRequiresMinLength(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	if err := settingRefreshCache(ctx); err != nil {
+		t.Fatalf("settingRefreshCache failed: %v", err)
+	}
+	resetRelayLogStateForTest()
+
+	_, err := RelayLogListWithFilter(ctx, RelayLogListFilter{Keyword: "ab", KeywordMode: RelayLogKeywordModeContains, Page: 1, PageSize: 10})
+	if err == nil {
+		t.Fatalf("expected ErrRelayLogContainsKeywordTooShort, got nil")
+	}
+}
+
+func TestRelayLogListPrefixKeywordMatchesModelPrefix(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	if err := settingRefreshCache(ctx); err != nil {
+		t.Fatalf("settingRefreshCache failed: %v", err)
+	}
+	resetRelayLogStateForTest()
+
+	rows := []model.RelayLog{
+		{ID: 401, Time: 401, RequestModelName: "gpt-4o-mini", ChannelName: "primary", Success: true},
+		{ID: 402, Time: 402, RequestModelName: "claude-3", ChannelName: "secondary", Success: false},
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&rows).Error; err != nil {
+		t.Fatalf("create relay logs failed: %v", err)
+	}
+
+	result, err := RelayLogListWithFilter(ctx, RelayLogListFilter{Keyword: "gpt", Page: 1, PageSize: 10, WithTotal: true})
+	if err != nil {
+		t.Fatalf("prefix search failed: %v", err)
+	}
+	if result.Total != 1 || len(result.Logs) != 1 || result.Logs[0].ID != 401 {
+		t.Fatalf("prefix search returned unexpected rows: %+v", result)
+	}
+	if result.SearchMode != "fast" {
+		t.Fatalf("expected SearchMode=fast, got %q", result.SearchMode)
 	}
 }
 

@@ -107,6 +107,7 @@ export interface DBImportResult {
 export interface DBExportOptions {
     include_logs?: boolean;
     include_stats?: boolean;
+    format?: 'json' | 'zip';
 }
 
 type ApiResponse<T> = {
@@ -143,11 +144,11 @@ function parseFilename(contentDisposition: string | null): string | null {
     return match?.[1] ?? null;
 }
 
-function exportFallbackFilename() {
+function exportFallbackFilename(format: 'json' | 'zip' = 'json') {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    return `octopus-export-${ts}.json`;
+    return `octopus-export-${ts}.${format}`;
 }
 
 async function downloadBlob(blob: Blob, filename: string) {
@@ -170,9 +171,11 @@ async function downloadBlob(blob: Blob, filename: string) {
 export function useExportDB() {
     return useMutation({
         mutationFn: async (options: DBExportOptions = {}) => {
+            const format: 'json' | 'zip' = options.format ?? 'json';
             const params = new URLSearchParams();
             params.set('include_logs', String(!!options.include_logs));
             params.set('include_stats', String(!!options.include_stats));
+            params.set('format', format);
 
             const res = await fetch(`${API_BASE_URL}/api/v1/setting/export?${params.toString()}`, {
                 method: 'GET',
@@ -187,7 +190,7 @@ export function useExportDB() {
             }
 
             const blob = await res.blob();
-            const filename = parseFilename(res.headers.get('content-disposition')) || exportFallbackFilename();
+            const filename = parseFilename(res.headers.get('content-disposition')) || exportFallbackFilename(format);
             await downloadBlob(blob, filename);
             return { filename };
         },

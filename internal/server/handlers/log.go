@@ -56,6 +56,8 @@ func listLog(c *gin.Context) {
 	status := op.RelayLogStatusFilter(strings.TrimSpace(c.Query("status")))
 	keyword := c.Query("keyword")
 	keywordScope := op.RelayLogKeywordScope(strings.TrimSpace(c.Query("keyword_scope")))
+	keywordMode := op.RelayLogKeywordMode(strings.TrimSpace(c.Query("keyword_mode")))
+	pagination := strings.TrimSpace(c.Query("pagination"))
 	includeContent, err := parseBoolQuery(c, "include_content", false)
 	if err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
@@ -118,6 +120,18 @@ func listLog(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "invalid keyword_scope")
 		return
 	}
+	switch keywordMode {
+	case op.RelayLogKeywordModeDefault, op.RelayLogKeywordModePrefix, op.RelayLogKeywordModeExact, op.RelayLogKeywordModeContains:
+	default:
+		resp.Error(c, http.StatusBadRequest, "invalid keyword_mode")
+		return
+	}
+	switch pagination {
+	case "", "cursor", "page":
+	default:
+		resp.Error(c, http.StatusBadRequest, "invalid pagination")
+		return
+	}
 
 	var channelIDs []int
 	if channelIDsStr != "" {
@@ -142,6 +156,7 @@ func listLog(c *gin.Context) {
 		Status:         status,
 		Keyword:        keyword,
 		KeywordScope:   keywordScope,
+		KeywordMode:    keywordMode,
 		Page:           page,
 		PageSize:       pageSize,
 		IncludeContent: includeContent,
@@ -149,8 +164,14 @@ func listLog(c *gin.Context) {
 		Limit:          limit,
 		BeforeTime:     beforeTime,
 		BeforeID:       beforeID,
+		Pagination:     pagination,
 	})
 	if err != nil {
+		var fe *op.RelayLogFilterError
+		if errors.As(err, &fe) {
+			resp.Error(c, http.StatusBadRequest, fe.Message)
+			return
+		}
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -160,6 +181,8 @@ func listLog(c *gin.Context) {
 		"total":       result.Total,
 		"has_more":    result.HasMore,
 		"next_cursor": result.NextCursor,
+		"search_mode": result.SearchMode,
+		"warning":     result.Warning,
 	})
 }
 

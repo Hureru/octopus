@@ -86,6 +86,8 @@ export type LogStatusFilter = 'all' | 'success' | 'error';
  * 日志列表查询参数
  */
 export type LogKeywordScope = 'default' | 'content';
+export type LogKeywordMode = 'default' | 'prefix' | 'exact' | 'contains';
+export type LogPaginationMode = 'cursor' | 'page';
 
 export interface LogCursor {
     time: number;
@@ -104,6 +106,8 @@ export interface LogListParams {
     status?: LogStatusFilter;
     keyword?: string;
     keyword_scope?: LogKeywordScope;
+    keyword_mode?: LogKeywordMode;
+    pagination?: LogPaginationMode;
     include_content?: boolean;
     with_total?: boolean;
     enabled?: boolean;
@@ -121,6 +125,8 @@ const logFiltersKey = (filters?: UseLogsOptions['filters']) => ({
     channel_ids: filters?.channel_ids?.filter((id) => id > 0).sort((a, b) => a - b) ?? [],
     status: filters?.status && filters.status !== 'all' ? filters.status : 'all',
     keyword: filters?.keyword?.trim() ?? '',
+    keyword_scope: filters?.keyword_scope ?? 'default',
+    keyword_mode: filters?.keyword_mode ?? 'default',
 });
 
 function appendLogListParams(params: URLSearchParams, filters?: UseLogsOptions['filters']) {
@@ -132,6 +138,7 @@ function appendLogListParams(params: URLSearchParams, filters?: UseLogsOptions['
     const keyword = filters?.keyword?.trim();
     if (keyword) params.set('keyword', keyword);
     if (filters?.keyword_scope && filters.keyword_scope !== 'default') params.set('keyword_scope', filters.keyword_scope);
+    if (filters?.keyword_mode && filters.keyword_mode !== 'default') params.set('keyword_mode', filters.keyword_mode);
 }
 
 export interface LogPageResponse {
@@ -139,6 +146,8 @@ export interface LogPageResponse {
     total: number;
     has_more?: boolean;
     next_cursor?: LogCursor | null;
+    search_mode?: string;
+    warning?: string;
 }
 
 export function useLogPage(params: LogListParams) {
@@ -253,7 +262,7 @@ export function useLogs(options: UseLogsOptions = {}) {
 
     const queryClient = useQueryClient();
 
-    type CursorPage = { logs: RelayLog[]; next_cursor?: LogCursor | null; has_more: boolean };
+    type CursorPage = { logs: RelayLog[]; next_cursor?: LogCursor | null; has_more: boolean; warning?: string; search_mode?: string };
 
     const logsQuery = useInfiniteQuery({
         queryKey: logsInfiniteQueryKey(pageSize, filters),
@@ -263,18 +272,21 @@ export function useLogs(options: UseLogsOptions = {}) {
             params.set('limit', String(pageSize));
             params.set('with_total', 'false');
             params.set('include_content', 'false');
+            params.set('pagination', 'cursor');
             if (pageParam?.time && pageParam?.id) {
                 params.set('before_time', String(pageParam.time));
                 params.set('before_id', String(pageParam.id));
             }
             appendLogListParams(params, filters);
-            const result = await apiClient.get<{ logs: RelayLog[] | null; has_more?: boolean; next_cursor?: LogCursor | null } | null>(
+            const result = await apiClient.get<{ logs: RelayLog[] | null; has_more?: boolean; next_cursor?: LogCursor | null; warning?: string; search_mode?: string } | null>(
                 `/api/v1/log/list?${params.toString()}`,
             );
             return {
                 logs: result?.logs ?? [],
                 has_more: result?.has_more ?? false,
                 next_cursor: result?.next_cursor ?? null,
+                warning: result?.warning,
+                search_mode: result?.search_mode,
             } satisfies CursorPage;
         },
         getNextPageParam: (lastPage) => {
@@ -420,5 +432,7 @@ export function useLogs(options: UseLogsOptions = {}) {
         isRefetching: logsQuery.isRefetching,
         loadMore,
         clear,
+        warning: logsQuery.data?.pages?.[0]?.warning ?? null,
+        searchMode: logsQuery.data?.pages?.[0]?.search_mode ?? null,
     };
 }

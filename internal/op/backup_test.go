@@ -303,3 +303,41 @@ func buildTestDump() *model.DBDump {
 func mustSprintf(format string, args ...any) string {
 	return fmt.Sprintf(format, args...)
 }
+
+func TestDBExportZipContainsRelayLogsNDJSON(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+
+	if err := dbpkg.GetDB().Create(&[]model.RelayLog{
+		{ID: 1001, Time: 1, RequestModelName: "a", Success: true},
+		{ID: 1002, Time: 2, RequestModelName: "b", Success: true},
+	}).Error; err != nil {
+		t.Fatalf("seed relay logs failed: %v", err)
+	}
+
+	var buf bytesBuffer
+	if err := DBExportZip(ctx, &buf, true, false); err != nil {
+		t.Fatalf("DBExportZip failed: %v", err)
+	}
+
+	zr, err := zipReaderFromBytes(buf.Bytes())
+	if err != nil {
+		t.Fatalf("zip open failed: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	for _, required := range []string{"manifest.json", "channels.json", "relay_logs.ndjson"} {
+		if !names[required] {
+			t.Fatalf("zip missing %q (have %v)", required, names)
+		}
+	}
+
+	ndjson := readZipFile(t, zr, "relay_logs.ndjson")
+	if ndjson == "" {
+		t.Fatalf("relay_logs.ndjson is empty")
+	}
+	if linesCount(ndjson) != 2 {
+		t.Fatalf("expected 2 ndjson lines, got %d (%q)", linesCount(ndjson), ndjson)
+	}
+}

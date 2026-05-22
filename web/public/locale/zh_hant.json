@@ -97,6 +97,16 @@
                     "clear": "清除時間",
                     "hint": "可選時間會受設定中的日誌保留天數限制。"
                 },
+                "search": {
+                    "title": "搜尋模式",
+                    "mode": {
+                        "prefix": "前綴",
+                        "exact": "精確",
+                        "contains": "包含"
+                    },
+                    "includeContent": "搜尋請求/回應內容",
+                    "slowHint": "包含模式（特別是內容搜尋）較慢，建議配合時間範圍。"
+                },
                 "channel": {
                     "title": "供應源",
                     "searchPlaceholder": "搜尋供應源...",
@@ -244,9 +254,16 @@
                 "title": "匯出",
                 "includeLogs": "包含日誌",
                 "includeStats": "包含統計",
-                "button": "下載 JSON",
+                "format": {
+                    "label": "格式",
+                    "json": "JSON",
+                    "zip": "ZIP",
+                    "logsHint": "包含日誌時強制使用 ZIP（NDJSON 串流寫入），避免記憶體佔用過高。"
+                },
+                "button": "下載",
                 "exporting": "匯出中...",
-                "success": "開始匯出"
+                "success": "開始匯出",
+                "failed": "匯出失敗"
             },
             "import": {
                 "title": "匯入（增量）",

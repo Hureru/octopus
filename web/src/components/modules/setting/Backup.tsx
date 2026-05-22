@@ -17,6 +17,9 @@ export function SettingBackup() {
 
     const [includeLogs, setIncludeLogs] = useState(false);
     const [includeStats, setIncludeStats] = useState(false);
+    const [format, setFormat] = useState<'json' | 'zip'>('json');
+
+    const effectiveFormat: 'json' | 'zip' = includeLogs ? 'zip' : format;
 
     const [file, setFile] = useState<File | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -50,7 +53,7 @@ export function SettingBackup() {
 
     const onExport = async () => {
         try {
-            await exportDB.mutateAsync({ include_logs: includeLogs, include_stats: includeStats });
+            await exportDB.mutateAsync({ include_logs: includeLogs, include_stats: includeStats, format: effectiveFormat });
             toast.success(t('backup.export.success'));
         } catch (e) {
             toast.error(e instanceof Error ? e.message : t('backup.export.failed'));
@@ -77,6 +80,31 @@ export function SettingBackup() {
                     <div className="text-sm text-muted-foreground">{t('backup.export.includeStats')}</div>
                     <Switch checked={includeStats} onCheckedChange={setIncludeStats} />
                 </div>
+
+                <div className="flex items-center justify-between gap-4">
+                    <div className="text-sm text-muted-foreground">{t('backup.export.format.label')}</div>
+                    <div className="inline-flex rounded-lg border border-border p-0.5 text-xs">
+                        {(['json', 'zip'] as const).map((opt) => {
+                            const active = effectiveFormat === opt;
+                            const disabled = includeLogs && opt === 'json';
+                            return (
+                                <button
+                                    key={opt}
+                                    type="button"
+                                    disabled={disabled}
+                                    onClick={() => setFormat(opt)}
+                                    className={`rounded-md px-3 py-1 transition-colors ${active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                >
+                                    {t(`backup.export.format.${opt}`)}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {includeLogs ? (
+                    <p className="text-xs text-muted-foreground">{t('backup.export.format.logsHint')}</p>
+                ) : null}
 
                 <Button
                     type="button"

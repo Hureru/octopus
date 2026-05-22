@@ -97,6 +97,16 @@
                     "clear": "Clear time",
                     "hint": "Selectable time is limited by the log retention period in Settings."
                 },
+                "search": {
+                    "title": "Search mode",
+                    "mode": {
+                        "prefix": "Prefix",
+                        "exact": "Exact",
+                        "contains": "Contains"
+                    },
+                    "includeContent": "Search request/response content",
+                    "slowHint": "Contains mode (especially over content) is slower; pair with a time range."
+                },
                 "channel": {
                     "title": "Channel",
                     "searchPlaceholder": "Search channels...",
@@ -244,9 +254,16 @@
                 "title": "Export",
                 "includeLogs": "Include Logs",
                 "includeStats": "Include Stats",
-                "button": "Download JSON",
+                "format": {
+                    "label": "Format",
+                    "json": "JSON",
+                    "zip": "ZIP",
+                    "logsHint": "ZIP is required when including logs (NDJSON streaming) to avoid memory spikes."
+                },
+                "button": "Download",
                 "exporting": "Exporting...",
-                "success": "Export started"
+                "success": "Export started",
+                "failed": "Export failed"
             },
             "import": {
                 "title": "Import (Incremental)",

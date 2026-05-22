@@ -108,6 +108,24 @@ func setSetting(c *gin.Context) {
 func exportDB(c *gin.Context) {
 	includeLogs, _ := strconv.ParseBool(c.DefaultQuery("include_logs", "false"))
 	includeStats, _ := strconv.ParseBool(c.DefaultQuery("include_stats", "false"))
+	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "json")))
+	if format != "json" && format != "zip" {
+		resp.Error(c, http.StatusBadRequest, "invalid format")
+		return
+	}
+
+	if format == "zip" {
+		filename := "octopus-export-" + time.Now().Format("20060102150405") + ".zip"
+		c.Header("Content-Type", "application/zip")
+		c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+		c.Status(http.StatusOK)
+		if err := op.DBExportZip(c.Request.Context(), c.Writer, includeLogs, includeStats); err != nil {
+			// Headers already sent; we can't switch to a JSON error. Log it and
+			// let the client surface the truncated download.
+			log.Warnf("zip export failed mid-stream: %v", err)
+		}
+		return
+	}
 
 	dump, err := op.DBExportAll(c.Request.Context(), includeLogs, includeStats)
 	if err != nil {

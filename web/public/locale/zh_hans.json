@@ -97,6 +97,16 @@
                     "clear": "清除时间",
                     "hint": "可选时间会受设置中的日志保留天数限制。"
                 },
+                "search": {
+                    "title": "搜索模式",
+                    "mode": {
+                        "prefix": "前缀",
+                        "exact": "精确",
+                        "contains": "包含"
+                    },
+                    "includeContent": "搜索请求/响应内容",
+                    "slowHint": "包含模式（特别是搜索内容）较慢，建议配合时间范围使用。"
+                },
                 "channel": {
                     "title": "渠道",
                     "searchPlaceholder": "搜索渠道...",
@@ -244,9 +254,16 @@
                 "title": "导出",
                 "includeLogs": "包含日志",
                 "includeStats": "包含统计",
-                "button": "下载 JSON",
+                "format": {
+                    "label": "格式",
+                    "json": "JSON",
+                    "zip": "ZIP",
+                    "logsHint": "包含日志时强制使用 ZIP（NDJSON 流式写入），避免内存占用过高。"
+                },
+                "button": "下载",
                 "exporting": "导出中...",
-                "success": "开始导出"
+                "success": "开始导出",
+                "failed": "导出失败"
             },
             "import": {
                 "title": "导入（增量）",

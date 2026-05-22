@@ -145,8 +145,12 @@ export function LogFilterPopover() {
     const t = useTranslations('toolbar');
     const logDateRange = useToolbarViewOptionsStore((s) => s.logDateRange);
     const logChannelIds = useToolbarViewOptionsStore((s) => s.logChannelIds);
+    const logKeywordMode = useToolbarViewOptionsStore((s) => s.logKeywordMode);
+    const logKeywordScope = useToolbarViewOptionsStore((s) => s.logKeywordScope);
     const setLogDateRange = useToolbarViewOptionsStore((s) => s.setLogDateRange);
     const setLogChannelIds = useToolbarViewOptionsStore((s) => s.setLogChannelIds);
+    const setLogKeywordMode = useToolbarViewOptionsStore((s) => s.setLogKeywordMode);
+    const setLogKeywordScope = useToolbarViewOptionsStore((s) => s.setLogKeywordScope);
     const { value: logKeepPeriodValue } = useSettingValue(SettingKey.RelayLogKeepPeriod, '0');
     const { data: channels } = useChannelList();
     const { data: sites } = useSiteChannelList({ includeHistory: false });
@@ -239,6 +243,8 @@ export function LogFilterPopover() {
     const handleClear = () => {
         setLogDateRange({});
         setLogChannelIds([]);
+        setLogKeywordMode('default');
+        setLogKeywordScope('default');
         setSearch('');
     };
 
@@ -273,7 +279,12 @@ export function LogFilterPopover() {
     };
 
     const dateActive = !!logDateRange.start || !!logDateRange.end;
-    const activeCount = (dateActive ? 1 : 0) + (logChannelIds.length > 0 ? 1 : 0);
+    const keywordModeActive = logKeywordMode !== 'default' && logKeywordMode !== 'prefix';
+    const keywordScopeActive = logKeywordScope === 'content';
+    const activeCount =
+        (dateActive ? 1 : 0) +
+        (logChannelIds.length > 0 ? 1 : 0) +
+        (keywordModeActive || keywordScopeActive ? 1 : 0);
 
     return (
         <Popover>
@@ -336,6 +347,46 @@ export function LogFilterPopover() {
                         </div>
                         {logKeepPeriod > 0 ? (
                             <p className="text-[11px] leading-4 text-muted-foreground">{t('popover.logFilter.date.hint')}</p>
+                        ) : null}
+                    </div>
+
+                    <div className="grid gap-2">
+                        <p className="text-xs font-medium text-muted-foreground">{t('popover.logFilter.search.title')}</p>
+                        <div className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-muted/20 p-0.5">
+                            {(['prefix', 'exact', 'contains'] as const).map((mode) => {
+                                const active = (logKeywordMode === 'default' ? 'prefix' : logKeywordMode) === mode;
+                                return (
+                                    <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() => setLogKeywordMode(mode)}
+                                        className={cn(
+                                            'rounded-md py-1 text-[11px] transition-colors',
+                                            active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                                        )}
+                                    >
+                                        {t(`popover.logFilter.search.mode.${mode}`)}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <label className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                            <span>{t('popover.logFilter.search.includeContent')}</span>
+                            <input
+                                type="checkbox"
+                                checked={logKeywordScope === 'content'}
+                                onChange={(e) => {
+                                    const next = e.target.checked ? 'content' : 'default';
+                                    setLogKeywordScope(next);
+                                    if (next === 'content') setLogKeywordMode('contains');
+                                }}
+                                className="size-3.5"
+                            />
+                        </label>
+                        {(logKeywordMode === 'contains' || logKeywordScope === 'content') ? (
+                            <p className="text-[11px] leading-4 text-amber-600 dark:text-amber-400">
+                                {t('popover.logFilter.search.slowHint')}
+                            </p>
                         ) : null}
                     </div>
 
