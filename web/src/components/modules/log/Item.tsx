@@ -8,7 +8,7 @@ import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 import { useTheme } from 'next-themes';
-import { type RelayLog, type RelayLogWSMode, type RelayLogWSExecMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus } from '@/api/endpoints/log';
+import { getLogDetail, type RelayLog, type RelayLogWSMode, type RelayLogWSExecMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus, type LogSiteActionTarget as ApiLogSiteActionTarget, type LogSiteActionTargets as ApiLogSiteActionTargets } from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -38,24 +38,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { toast } from '@/components/common/Toast';
 import { useUpdateSiteChannelModelDisabled } from '@/api/endpoints/site-channel';
 
-export type LogSiteActionTarget = {
-    siteId: number;
-    siteName: string;
-    accountId: number;
-    accountName: string;
-    groupKey: string;
-    groupName: string;
-    modelName: string;
-    modelDisabled: boolean;
-    canDisableModel: boolean;
-    channelId: number;
-    channelName: string;
-};
-
-export type LogSiteActionTargets = {
-    attemptTargets: Array<LogSiteActionTarget | null>;
-    legacyErrorTarget: LogSiteActionTarget | null;
-};
+export type LogSiteActionTarget = ApiLogSiteActionTarget;
+export type LogSiteActionTargets = ApiLogSiteActionTargets;
 
 function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
@@ -135,7 +119,7 @@ function mergeAdjacentAttempts(attempts: ChannelAttempt[]): MergedAttempt[] {
 
 function makeDisableTargetKey(target: LogSiteActionTarget | null | undefined) {
     if (!target) return '';
-    return `${target.siteId}\u0000${target.accountId}\u0000${target.groupKey}\u0000${target.modelName}`;
+    return `${target.site_id}\u0000${target.account_id}\u0000${target.group_key}\u0000${target.model_name}`;
 }
 
 function formatOptionalTokenCount(value: number | null | undefined) {
@@ -425,7 +409,7 @@ function InputTokenDetailsPopover({ log }: { log: RelayLog }) {
     );
 }
 
-function DeferredJsonContent({ content, fallbackText }: { content: string | undefined; fallbackText: string }) {
+function DeferredJsonContent({ content, fallbackText, isLoading }: { content: string | undefined; fallbackText: string; isLoading?: boolean }) {
     const { resolvedTheme } = useTheme();
     const { isOpen } = useMorphingDialog();
     const [shouldRender, setShouldRender] = useState(false);
@@ -454,7 +438,7 @@ function DeferredJsonContent({ content, fallbackText }: { content: string | unde
     if (!content) {
         return (
             <pre className="p-4 text-xs text-muted-foreground whitespace-pre-wrap wrap-break-word leading-relaxed">
-                {fallbackText}
+                {isLoading ? 'Loading…' : fallbackText}
             </pre>
         );
     }
@@ -521,9 +505,9 @@ function AttemptDisableButton({
 }) {
     const t = useTranslations('log.card');
 
-    if (!target?.canDisableModel) return null;
+    if (!target?.can_disable_model) return null;
 
-    const tooltipLabel = target.modelDisabled
+    const tooltipLabel = target.model_disabled
         ? t('disabled')
         : pending
             ? t('disabling')
@@ -534,11 +518,11 @@ function AttemptDisableButton({
             <TooltipTrigger asChild>
                 <button
                     type="button"
-                    disabled={pending || target.modelDisabled}
+                    disabled={pending || target.model_disabled}
                     onClick={() => onDisable(target)}
                     className={cn(
                         'inline-flex size-7 items-center justify-center rounded-lg transition disabled:cursor-not-allowed disabled:opacity-60',
-                        target.modelDisabled
+                        target.model_disabled
                             ? 'text-destructive hover:bg-destructive/10'
                             : 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
                     )}
@@ -575,16 +559,40 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
     const [activeDisableTarget, setActiveDisableTarget] = useState<LogSiteActionTarget | null>(null);
     const [pendingDisableKey, setPendingDisableKey] = useState<string | null>(null);
+    const [detailLog, setDetailLog] = useState<RelayLog | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailRequestID, setDetailRequestID] = useState(0);
 
-    const attemptTargets = siteTargets?.attemptTargets ?? [];
-    const legacyErrorTarget = siteTargets?.legacyErrorTarget ?? null;
+    const attemptTargets = siteTargets?.attempt_targets ?? [];
+    const legacyErrorTarget = siteTargets?.legacy_error_target ?? null;
     const showDiagnosticPanel = hasError || hasAttempts;
     const diagnosticTitle = hasAttempts ? t('retryDetails') : t('errorInfo');
     const diagnosticIcon = hasAttempts ? RotateCw : AlertCircle;
     const DiagnosticIcon = diagnosticIcon;
+    const displayLog = detailLog ?? log;
+
+    useEffect(() => {
+        if (detailRequestID === 0 || detailLog) return;
+        let cancelled = false;
+        getLogDetail(log.id)
+            .then((item) => {
+                if (!cancelled) setDetailLog(item);
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    toast.error(error instanceof Error ? error.message : 'Failed to load log detail');
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setDetailLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [detailLog, detailRequestID, log.id]);
 
     const openDisableDialog = (target: LogSiteActionTarget) => {
-        if (!target.canDisableModel || target.modelDisabled) return;
+        if (!target.can_disable_model || target.model_disabled) return;
         setActiveDisableTarget(target);
         setConfirmDisableOpen(true);
     };
@@ -598,7 +606,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     };
 
     const confirmDisableModel = () => {
-        if (!activeDisableTarget || !activeDisableTarget.canDisableModel || activeDisableTarget.modelDisabled) return;
+        if (!activeDisableTarget || !activeDisableTarget.can_disable_model || activeDisableTarget.model_disabled) return;
 
         const target = activeDisableTarget;
         const targetKey = makeDisableTargetKey(target);
@@ -606,12 +614,12 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
 
         disableMutation.mutate(
             {
-                siteId: target.siteId,
-                accountId: target.accountId,
+                siteId: target.site_id,
+                accountId: target.account_id,
                 payload: [
                     {
-                        group_key: target.groupKey,
-                        model_name: target.modelName,
+                        group_key: target.group_key,
+                        model_name: target.model_name,
                         disabled: true,
                     },
                 ],
@@ -620,7 +628,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                 onSuccess: () => {
                     setConfirmDisableOpen(false);
                     setActiveDisableTarget(null);
-                    toast.success(`已禁用 ${target.groupName} / ${target.modelName}`);
+                    toast.success(`已禁用 ${target.group_name} / ${target.model_name}`);
                 },
                 onError: (error) => {
                     toast.error(error.message);
@@ -641,6 +649,12 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
         <TooltipProvider>
             <MorphingDialog>
                 <MorphingDialogTrigger
+                    onClick={() => {
+                        if (!detailLog && !detailLoading) {
+                            setDetailLoading(true);
+                            setDetailRequestID((value) => value + 1);
+                        }
+                    }}
                     className={cn(
                         'rounded-3xl border bg-card w-full text-left',
                         hasError ? 'border-destructive/40' : 'border-border',
@@ -869,7 +883,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                                     return merged.map((attempt, idx) => {
                                                                         const statusMeta = getAttemptStatusMeta(attempt.status, t);
                                                                         const attemptTarget = attemptTargets[attempt.originalIndex] ?? null;
-                                                                        const canDisableAttempt = attempt.status === 'failed' && !!attemptTarget?.canDisableModel;
+                                                                        const canDisableAttempt = attempt.status === 'failed' && !!attemptTarget?.can_disable_model;
                                                                         const sanitizedMsg = sanitizeErrorMessage(attempt.msg);
 
                                                                         return (
@@ -945,11 +959,11 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                 <Send className="size-4 text-green-500" />
                                                 <span className="text-sm font-medium text-card-foreground">{t('requestContent')}</span>
                                                 <Badge variant="secondary" className="ml-auto text-xs">
-                                                    {getHeadlineInputTokens(log).toLocaleString()} {t('tokens')}
+                                                    {getHeadlineInputTokens(displayLog).toLocaleString()} {t('tokens')}
                                                 </Badge>
                                             </div>
                                             <div className="flex-1 overflow-auto min-h-0">
-                                                <DeferredJsonContent content={log.request_content} fallbackText={t('noRequestContent')} />
+                                                <DeferredJsonContent content={displayLog.request_content} fallbackText={t('noRequestContent')} isLoading={detailLoading} />
                                             </div>
                                         </div>
                                         <div className="flex flex-col rounded-2xl border border-border bg-muted/30 overflow-hidden min-h-0">
@@ -957,11 +971,11 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                 <MessageSquare className="size-4 text-purple-500" />
                                                 <span className="text-sm font-medium text-card-foreground">{t('responseContent')}</span>
                                                 <Badge variant="secondary" className="ml-auto text-xs">
-                                                    {log.output_tokens.toLocaleString()} {t('tokens')}
+                                                    {displayLog.output_tokens.toLocaleString()} {t('tokens')}
                                                 </Badge>
                                             </div>
                                             <div className="flex-1 overflow-auto min-h-0">
-                                                <DeferredJsonContent content={log.response_content} fallbackText={t('noResponseContent')} />
+                                                <DeferredJsonContent content={displayLog.response_content} fallbackText={t('noResponseContent')} isLoading={detailLoading} />
                                             </div>
                                         </div>
                                     </div>
@@ -1000,13 +1014,13 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                     </MorphingDialogContent>
                 </MorphingDialogContainer>
             </MorphingDialog>
-            {activeDisableTarget?.canDisableModel ? (
+            {activeDisableTarget?.can_disable_model ? (
                 <AlertDialog open={confirmDisableOpen} onOpenChange={handleConfirmDisableOpenChange}>
                     <AlertDialogContent>
                         <AlertDialogHeader>
                             <AlertDialogTitle>确认禁用站点模型</AlertDialogTitle>
                             <AlertDialogDescription>
-                                将在 {activeDisableTarget.siteName} / {activeDisableTarget.accountName} / {activeDisableTarget.groupName} 中禁用模型 {activeDisableTarget.modelName}。
+                                将在 {activeDisableTarget.site_name} / {activeDisableTarget.account_name} / {activeDisableTarget.group_name} 中禁用模型 {activeDisableTarget.model_name}。
                                 禁用后对应投影渠道和分组会刷新为最新状态。
                             </AlertDialogDescription>
                         </AlertDialogHeader>

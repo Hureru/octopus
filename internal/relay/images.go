@@ -135,7 +135,7 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 		select {
 		case <-ctx.Done():
 			log.Debugf("request context canceled, stopping retry")
-			metrics.Save(ctx, false, context.Canceled, iter.Attempts())
+			metrics.SaveWithChannelStats(ctx, false, context.Canceled, iter.Attempts(), false)
 			return
 		default:
 		}
@@ -209,7 +209,7 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 			// 会话保持：更新粘性记录
 			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
 
-			metrics.Save(ctx, true, nil, iter.Attempts())
+			metrics.SaveWithChannelStats(ctx, true, nil, iter.Attempts(), false)
 			return
 		}
 
@@ -227,7 +227,7 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 		balancer.RecordFailure(channel.ID, usedKey.ID, item.ModelName, circuitFailureKind(group.RetryEnabled, statusCode))
 
 		if written {
-			metrics.Save(ctx, false, fwdErr, iter.Attempts())
+			metrics.SaveWithChannelStats(ctx, false, fwdErr, iter.Attempts(), false)
 			return
 		}
 
@@ -235,7 +235,7 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 	}
 
 	// 所有通道都失败
-	metrics.Save(ctx, false, lastErr, iter.Attempts())
+	metrics.SaveWithChannelStats(ctx, false, lastErr, iter.Attempts(), false)
 	hb.FlushOrError(c, http.StatusBadGateway, "all channels failed")
 }
 
@@ -287,6 +287,10 @@ func (m *imagesRelayMetrics) SetUsageFromImages(actualModel string, u imagesUsag
 }
 
 func (m *imagesRelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
+	m.SaveWithChannelStats(ctx, success, err, attempts, true)
+}
+
+func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt, updateChannelStats bool) {
 	duration := time.Since(m.StartTime)
 
 	globalStats := model.StatsMetrics{
@@ -307,7 +311,9 @@ func (m *imagesRelayMetrics) Save(ctx context.Context, success bool, err error, 
 	op.StatsHourlyUpdate(globalStats)
 	op.StatsDailyUpdate(context.Background(), globalStats)
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
-	op.StatsChannelUpdate(channelID, globalStats)
+	if updateChannelStats {
+		op.StatsChannelUpdate(channelID, globalStats)
+	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 
 	if conf.AppConfig.Log.Relay.Summary || !success {
@@ -332,10 +338,10 @@ func (m *imagesRelayMetrics) Save(ctx context.Context, success bool, err error, 
 		}
 	}
 
-	m.saveLog(ctx, err, duration, attempts, channelID, channelName)
+	m.saveLog(ctx, success, err, duration, attempts, channelID, channelName)
 }
 
-func (m *imagesRelayMetrics) saveLog(ctx context.Context, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
+func (m *imagesRelayMetrics) saveLog(ctx context.Context, success bool, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
 	actualModel := m.ActualModel
 	if actualModel == "" {
 		actualModel = m.RequestModel
@@ -373,6 +379,7 @@ func (m *imagesRelayMetrics) saveLog(ctx context.Context, err error, duration ti
 	if err != nil {
 		relayLog.Error = err.Error()
 	}
+	relayLog.Success = success
 
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)

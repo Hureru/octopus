@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func init() {
@@ -20,6 +22,14 @@ func init() {
 		AddRoute(
 			router.NewRoute("/list", http.MethodGet).
 				Handle(listLog),
+		).
+		AddRoute(
+			router.NewRoute("/site-action-targets", http.MethodGet).
+				Handle(getLogSiteActionTargets),
+		).
+		AddRoute(
+			router.NewRoute("/:id", http.MethodGet).
+				Handle(getLog),
 		).
 		AddRoute(
 			router.NewRoute("/clear", http.MethodDelete).
@@ -45,6 +55,35 @@ func listLog(c *gin.Context) {
 	channelIDsStr := c.Query("channel_ids")
 	status := op.RelayLogStatusFilter(strings.TrimSpace(c.Query("status")))
 	keyword := c.Query("keyword")
+	keywordScope := op.RelayLogKeywordScope(strings.TrimSpace(c.Query("keyword_scope")))
+	includeContent, err := parseBoolQuery(c, "include_content", false)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	withTotal, err := parseBoolQuery(c, "with_total", true)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	var beforeTime, beforeID *int64
+	if raw := strings.TrimSpace(c.Query("before_time")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		beforeTime = &value
+	}
+	if raw := strings.TrimSpace(c.Query("before_id")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		beforeID = &value
+	}
 
 	if page < 1 {
 		page = 1
@@ -75,6 +114,10 @@ func listLog(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "invalid status")
 		return
 	}
+	if keywordScope != op.RelayLogKeywordScopeDefault && keywordScope != op.RelayLogKeywordScopeContent {
+		resp.Error(c, http.StatusBadRequest, "invalid keyword_scope")
+		return
+	}
 
 	var channelIDs []int
 	if channelIDsStr != "" {
@@ -92,14 +135,20 @@ func listLog(c *gin.Context) {
 		}
 	}
 
-	logs, total, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
-		StartTime:  startTime,
-		EndTime:    endTime,
-		ChannelIDs: channelIDs,
-		Status:     status,
-		Keyword:    keyword,
-		Page:       page,
-		PageSize:   pageSize,
+	result, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
+		StartTime:      startTime,
+		EndTime:        endTime,
+		ChannelIDs:     channelIDs,
+		Status:         status,
+		Keyword:        keyword,
+		KeywordScope:   keywordScope,
+		Page:           page,
+		PageSize:       pageSize,
+		IncludeContent: includeContent,
+		WithTotal:      withTotal,
+		Limit:          limit,
+		BeforeTime:     beforeTime,
+		BeforeID:       beforeID,
 	})
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -107,9 +156,77 @@ func listLog(c *gin.Context) {
 	}
 
 	resp.Success(c, gin.H{
-		"logs":  logs,
-		"total": total,
+		"logs":        result.Logs,
+		"total":       result.Total,
+		"has_more":    result.HasMore,
+		"next_cursor": result.NextCursor,
 	})
+}
+
+func parseBoolQuery(c *gin.Context, key string, defaultValue bool) (bool, error) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return defaultValue, fmt.Errorf("invalid boolean %q for %s", raw, key)
+	}
+	return value, nil
+}
+
+func getLogSiteActionTargets(c *gin.Context) {
+	rawIDs := strings.TrimSpace(c.Query("ids"))
+	if rawIDs == "" {
+		resp.Success(c, gin.H{})
+		return
+	}
+	parts := strings.Split(rawIDs, ",")
+	if len(parts) > 100 {
+		resp.Error(c, http.StatusBadRequest, "too many ids")
+		return
+	}
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil {
+			resp.InvalidParam(c)
+			return
+		}
+		if id <= 0 {
+			resp.InvalidParam(c)
+			return
+		}
+		ids = append(ids, id)
+	}
+	data, err := op.RelayLogSiteActionTargets(c.Request.Context(), ids)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, data)
+}
+
+func getLog(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		resp.InvalidParam(c)
+		return
+	}
+	logItem, err := op.RelayLogGet(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			resp.NotFound(c)
+			return
+		}
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, logItem)
 }
 
 func clearLog(c *gin.Context) {

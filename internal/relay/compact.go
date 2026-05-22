@@ -104,7 +104,7 @@ func HandleResponsesCompact(c *gin.Context) {
 		select {
 		case <-c.Request.Context().Done():
 			log.Infof("compact request context canceled, stopping retry")
-			metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), false, context.Canceled, iter.Attempts(), false)
 			return
 		default:
 		}
@@ -158,7 +158,7 @@ func HandleResponsesCompact(c *gin.Context) {
 				delay := computeBackoff(retryNum, retryAfter)
 				select {
 				case <-c.Request.Context().Done():
-					metrics.Save(c.Request.Context(), false, context.Canceled, iter.Attempts())
+					metrics.SaveWithChannelStats(c.Request.Context(), false, context.Canceled, iter.Attempts(), false)
 					return
 				case <-time.After(delay):
 				}
@@ -179,12 +179,14 @@ func HandleResponsesCompact(c *gin.Context) {
 		op.ChannelKeyUpdate(usedKey)
 
 		if success {
+			op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{RequestSuccess: 1})
 			balancer.RecordSuccess(channel.ID, usedKey.ID, requestModel)
 			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
-			metrics.Save(c.Request.Context(), true, nil, iter.Attempts())
+			metrics.SaveWithChannelStats(c.Request.Context(), true, nil, iter.Attempts(), false)
 			return
 		}
 
+		op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{RequestFailed: 1})
 		failureKind := circuitFailureKind(group.RetryEnabled, statusCode)
 		balancer.RecordFailure(channel.ID, usedKey.ID, requestModel, failureKind)
 		lastErr = attemptErr
@@ -192,7 +194,7 @@ func HandleResponsesCompact(c *gin.Context) {
 		lastRetryAfter = retryAfter
 	}
 
-	metrics.Save(c.Request.Context(), false, lastErr, iter.Attempts())
+	metrics.SaveWithChannelStats(c.Request.Context(), false, lastErr, iter.Attempts(), false)
 	if lastErr == nil && lastStatusCode == 0 {
 		resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no available channel")
 		return

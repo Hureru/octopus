@@ -121,6 +121,10 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 }
 
 func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
+	m.SaveWithChannelStats(ctx, success, err, attempts, true)
+}
+
+func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt, updateChannelStats bool) {
 	duration := time.Since(m.StartTime)
 
 	globalStats := model.StatsMetrics{
@@ -141,7 +145,9 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 	op.StatsHourlyUpdate(globalStats)
 	op.StatsDailyUpdate(context.Background(), globalStats)
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
-	op.StatsChannelUpdate(channelID, globalStats)
+	if updateChannelStats {
+		op.StatsChannelUpdate(channelID, globalStats)
+	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 
 	if conf.AppConfig.Log.Relay.Summary || !success {
@@ -167,7 +173,7 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 		}
 	}
 
-	m.saveLog(ctx, err, duration, attempts, channelID, channelName)
+	m.saveLog(ctx, success, err, duration, attempts, channelID, channelName)
 }
 
 func finalChannel(attempts []model.ChannelAttempt) (int, string) {
@@ -186,7 +192,7 @@ func finalChannel(attempts []model.ChannelAttempt) (int, string) {
 	return lastID, lastName
 }
 
-func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
+func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
 	actualModel := m.ActualModel
 	if actualModel == "" {
 		actualModel = m.RequestModel
@@ -248,6 +254,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, err error, duration time.Dur
 	if err != nil {
 		relayLog.Error = err.Error()
 	}
+	relayLog.Success = success
 
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)
