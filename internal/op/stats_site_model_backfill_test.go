@@ -1,6 +1,7 @@
 package op
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -138,10 +139,8 @@ func TestStatsSiteModelBackfillIgnoresHeavyContent(t *testing.T) {
 // 把这一约束钉死，避免后续重构时不小心把大字段加回来。
 func TestStatsSiteModelBackfillRowTypeSkipsContentFields(t *testing.T) {
 	row := backfillLogRow{}
-	// Compile-time guard via reflection is overkill; a typed access here is enough
-	// because adding the field would make the test file fail to compile if we ever
-	// removed it, and removing it from the struct again will fail at the assignment
-	// below. Either direction makes the regression visible in the diff.
+	// Typed reads keep the allowed field set load-bearing: removing or renaming
+	// any of them breaks compilation here.
 	_ = row.ID
 	_ = row.Time
 	_ = row.ChannelId
@@ -149,4 +148,13 @@ func TestStatsSiteModelBackfillRowTypeSkipsContentFields(t *testing.T) {
 	_ = row.RequestModelName
 	_ = row.Error
 	_ = row.Attempts
+
+	// Reflective denylist: adding RequestContent / ResponseContent back would
+	// make GORM SELECT the large content columns and reintroduce the OOM risk.
+	rowType := reflect.TypeOf(row)
+	for _, name := range []string{"RequestContent", "ResponseContent"} {
+		if _, ok := rowType.FieldByName(name); ok {
+			t.Fatalf("backfillLogRow must not contain %q: adding it forces GORM to SELECT the large content column and reintroduces the OOM risk", name)
+		}
+	}
 }
