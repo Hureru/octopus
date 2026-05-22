@@ -615,11 +615,11 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 
 func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, result wsRelayResult) wsRelayResult {
 	if result.Success {
-		req.metrics.SaveWithChannelStats(ctx, true, nil, req.iter.Attempts(), false)
+		req.metrics.Save(ctx, true, nil, req.iter.Attempts())
 		return result
 	}
 
-	req.metrics.SaveWithChannelStats(ctx, false, result.Err, req.iter.Attempts(), false)
+	req.metrics.Save(ctx, false, result.Err, req.iter.Attempts())
 	if result.Canceled || result.Written {
 		return result
 	}

@@ -90,11 +90,7 @@ func StatsSaveDB(ctx context.Context) error {
 	statsAPIKeyCacheNeedUpdate = make(map[int]struct{})
 	statsAPIKeyCacheNeedUpdateLock.Unlock()
 
-	if err := persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, modelIDs, apiKeyIDs); err != nil {
-		restoreStatsDirtyIDs(channelIDs, modelIDs, apiKeyIDs)
-		return err
-	}
-	return nil
+	return persistStatsSnapshots(ctx, totalSnap, dailySnap, hourlyAll, channelIDs, modelIDs, apiKeyIDs)
 }
 
 func persistStatsSnapshots(
@@ -130,50 +126,32 @@ func persistStatsSnapshots(
 		}
 	}
 
-	channelRows := make([]model.StatsChannel, 0, len(channelIDs))
 	for _, id := range channelIDs {
 		ch, ok := statsChannelCache.Get(id)
-		if ok {
-			channelRows = append(channelRows, ch)
+		if !ok {
+			continue
 		}
-	}
-	if len(channelRows) > 0 {
-		if result := dbConn.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "channel_id"}},
-			UpdateAll: true,
-		}).CreateInBatches(&channelRows, 100); result.Error != nil {
+		if result := dbConn.Save(&ch); result.Error != nil {
 			return result.Error
 		}
 	}
 
-	modelRows := make([]model.StatsModel, 0, len(modelIDs))
 	for _, id := range modelIDs {
 		m, ok := statsModelCache.Get(id)
-		if ok {
-			modelRows = append(modelRows, m)
+		if !ok {
+			continue
 		}
-	}
-	if len(modelRows) > 0 {
-		if result := dbConn.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			UpdateAll: true,
-		}).CreateInBatches(&modelRows, 100); result.Error != nil {
+		if result := dbConn.Save(&m); result.Error != nil {
 			return result.Error
 		}
 	}
 
-	apiKeyRows := make([]model.StatsAPIKey, 0, len(apiKeyIDs))
 	for _, id := range apiKeyIDs {
 		ak, ok := statsAPIKeyCache.Get(id)
-		if ok {
-			apiKeyRows = append(apiKeyRows, ak)
+		if !ok {
+			continue
 		}
-	}
-	if len(apiKeyRows) > 0 {
-		if result := dbConn.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "api_key_id"}},
-			UpdateAll: true,
-		}).CreateInBatches(&apiKeyRows, 100); result.Error != nil {
+		if result := dbConn.Save(&ak); result.Error != nil {
 			return result.Error
 		}
 	}
@@ -221,35 +199,7 @@ func statsSaveDBWithDailyOverride(ctx context.Context, dailyOverride model.Stats
 	statsAPIKeyCacheNeedUpdate = make(map[int]struct{})
 	statsAPIKeyCacheNeedUpdateLock.Unlock()
 
-	if err := persistStatsSnapshots(ctx, totalSnap, dailyOverride, hourlyAll, channelIDs, modelIDs, apiKeyIDs); err != nil {
-		restoreStatsDirtyIDs(channelIDs, modelIDs, apiKeyIDs)
-		return err
-	}
-	return nil
-}
-
-func restoreStatsDirtyIDs(channelIDs []int, modelIDs []int, apiKeyIDs []int) {
-	if len(channelIDs) > 0 {
-		statsChannelCacheNeedUpdateLock.Lock()
-		for _, id := range channelIDs {
-			statsChannelCacheNeedUpdate[id] = struct{}{}
-		}
-		statsChannelCacheNeedUpdateLock.Unlock()
-	}
-	if len(modelIDs) > 0 {
-		statsModelCacheNeedUpdateLock.Lock()
-		for _, id := range modelIDs {
-			statsModelCacheNeedUpdate[id] = struct{}{}
-		}
-		statsModelCacheNeedUpdateLock.Unlock()
-	}
-	if len(apiKeyIDs) > 0 {
-		statsAPIKeyCacheNeedUpdateLock.Lock()
-		for _, id := range apiKeyIDs {
-			statsAPIKeyCacheNeedUpdate[id] = struct{}{}
-		}
-		statsAPIKeyCacheNeedUpdateLock.Unlock()
-	}
+	return persistStatsSnapshots(ctx, totalSnap, dailyOverride, hourlyAll, channelIDs, modelIDs, apiKeyIDs)
 }
 
 func StatsDailyUpdate(ctx context.Context, metrics model.StatsMetrics) error {

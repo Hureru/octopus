@@ -13,34 +13,13 @@ import (
 )
 
 func SiteChannelList(ctx context.Context) ([]model.SiteChannelCard, error) {
-	return SiteChannelListWithOptions(ctx, SiteChannelListOptions{IncludeHistory: true})
-}
-
-type SiteChannelListOptions struct {
-	IncludeHistory bool
-}
-
-func SiteChannelListWithOptions(ctx context.Context, opts SiteChannelListOptions) ([]model.SiteChannelCard, error) {
 	sites, err := SiteList(ctx)
 	if err != nil {
 		return nil, err
 	}
-	histories := map[int]map[string]*model.SiteModelHistorySummary{}
-	if opts.IncludeHistory {
-		accountIDs := make([]int, 0)
-		for _, site := range sites {
-			for _, account := range site.Accounts {
-				accountIDs = append(accountIDs, account.ID)
-			}
-		}
-		histories, err = SiteChannelModelHourlyForAccounts(ctx, accountIDs)
-		if err != nil {
-			return nil, err
-		}
-	}
 	cards := make([]model.SiteChannelCard, 0, len(sites))
 	for _, site := range sites {
-		card, err := buildSiteChannelCardWithHistories(ctx, site, histories)
+		card, err := buildSiteChannelCard(ctx, site)
 		if err != nil {
 			return nil, err
 		}
@@ -134,18 +113,6 @@ func SiteChannelModelHistory(siteID int, accountID int, ctx context.Context) (ma
 }
 
 func buildSiteChannelCard(ctx context.Context, site model.Site) (model.SiteChannelCard, error) {
-	accountIDs := make([]int, 0, len(site.Accounts))
-	for _, account := range site.Accounts {
-		accountIDs = append(accountIDs, account.ID)
-	}
-	histories, err := SiteChannelModelHourlyForAccounts(ctx, accountIDs)
-	if err != nil {
-		return model.SiteChannelCard{}, err
-	}
-	return buildSiteChannelCardWithHistories(ctx, site, histories)
-}
-
-func buildSiteChannelCardWithHistories(ctx context.Context, site model.Site, histories map[int]map[string]*model.SiteModelHistorySummary) (model.SiteChannelCard, error) {
 	card := model.SiteChannelCard{
 		SiteID:       site.ID,
 		SiteName:     site.Name,
@@ -156,10 +123,7 @@ func buildSiteChannelCardWithHistories(ctx context.Context, site model.Site, his
 		Accounts:     make([]model.SiteChannelAccount, 0, len(site.Accounts)),
 	}
 	for _, account := range site.Accounts {
-		history := histories[account.ID]
-		if history == nil {
-			history = map[string]*model.SiteModelHistorySummary{}
-		}
+		history, _ := SiteChannelModelHourlyForAccount(ctx, account.ID)
 		view := model.SiteChannelAccount{
 			SiteID:      site.ID,
 			AccountID:   account.ID,

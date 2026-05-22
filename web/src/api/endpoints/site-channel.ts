@@ -397,11 +397,10 @@ function invalidateSiteChannelAndRelated(queryClient: ReturnType<typeof useQuery
     queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
 }
 
-export function useSiteChannelList(options: { includeHistory?: boolean } = {}) {
-    const includeHistory = options.includeHistory ?? true;
+export function useSiteChannelList() {
     return useQuery({
-        queryKey: ['site-channel', 'list', { includeHistory }],
-        queryFn: async () => apiClient.get<SiteChannelCardServer[]>(`/api/v1/site-channel/list?include_history=${includeHistory}`),
+        queryKey: ['site-channel', 'list'],
+        queryFn: async () => apiClient.get<SiteChannelCardServer[]>('/api/v1/site-channel/list'),
         select: (cards) => cards.map(normalizeSiteChannelCard),
         refetchInterval: 30000,
     });

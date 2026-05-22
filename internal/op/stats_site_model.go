@@ -144,47 +144,13 @@ func StatsSiteModelHourlySaveDB(ctx context.Context) error {
 	}).Create(&rows).Error
 }
 
-const siteChannelModelHistoryWindow = 90 * 24 * time.Hour
-
-// SiteChannelModelHourlyForAccount 读取指定 site account 下最近一段时间的 (group, model) 小时聚合，
+// SiteChannelModelHourlyForAccount 读取指定 site account 下所有 (group, model) 的小时聚合，
 // 合并未刷盘的内存桶后，按自适应桶宽生成 SiteModelHistorySummary。
 // key 与 site_channel.go 保持一致：baseGroupKey + "\x00" + modelName。
 func SiteChannelModelHourlyForAccount(ctx context.Context, siteAccountID int) (map[string]*model.SiteModelHistorySummary, error) {
-	result, err := SiteChannelModelHourlyForAccounts(ctx, []int{siteAccountID})
-	if err != nil {
-		return nil, err
-	}
-	if result[siteAccountID] == nil {
-		return map[string]*model.SiteModelHistorySummary{}, nil
-	}
-	return result[siteAccountID], nil
-}
-
-func SiteChannelModelHourlyForAccounts(ctx context.Context, siteAccountIDs []int) (map[int]map[string]*model.SiteModelHistorySummary, error) {
-	if len(siteAccountIDs) == 0 {
-		return map[int]map[string]*model.SiteModelHistorySummary{}, nil
-	}
-	accountSet := make(map[int]struct{}, len(siteAccountIDs))
-	ids := make([]int, 0, len(siteAccountIDs))
-	for _, id := range siteAccountIDs {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := accountSet[id]; ok {
-			continue
-		}
-		accountSet[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return map[int]map[string]*model.SiteModelHistorySummary{}, nil
-	}
-
-	minHour := int(time.Now().Add(-siteChannelModelHistoryWindow).Unix() / 3600)
 	var rows []model.StatsSiteModelHourly
 	if err := db.GetDB().WithContext(ctx).
-		Where("site_account_id IN ? AND hour >= ?", ids, minHour).
-		Order("site_account_id ASC").
+		Where("site_account_id = ?", siteAccountID).
 		Order("hour ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -194,21 +160,20 @@ func SiteChannelModelHourlyForAccounts(ctx context.Context, siteAccountIDs []int
 	siteModelHourlyCacheLock.Lock()
 	pending := make([]model.StatsSiteModelHourly, 0, len(siteModelHourlyCache))
 	for k, entry := range siteModelHourlyCache {
-		if _, ok := accountSet[k.SiteAccountID]; ok && k.Hour >= minHour {
+		if k.SiteAccountID == siteAccountID {
 			pending = append(pending, *entry)
 		}
 	}
 	siteModelHourlyCacheLock.Unlock()
 
 	type compositeKey struct {
-		SiteAccountID int
-		Hour          int
-		GroupKey      string
-		ModelName     string
+		Hour      int
+		GroupKey  string
+		ModelName string
 	}
 	merged := make(map[compositeKey]*model.StatsSiteModelHourly, len(rows)+len(pending))
 	add := func(r model.StatsSiteModelHourly) {
-		k := compositeKey{SiteAccountID: r.SiteAccountID, Hour: r.Hour, GroupKey: r.GroupKey, ModelName: r.ModelName}
+		k := compositeKey{Hour: r.Hour, GroupKey: r.GroupKey, ModelName: r.ModelName}
 		if existing, ok := merged[k]; ok {
 			existing.StatsMetrics.Add(r.StatsMetrics)
 			if r.LastRequestAt > existing.LastRequestAt {
@@ -226,19 +191,15 @@ func SiteChannelModelHourlyForAccounts(ctx context.Context, siteAccountIDs []int
 		add(r)
 	}
 
+	// 按 (group_key, model_name) 分组。
 	type groupedSeries struct {
 		GroupKey  string
 		ModelName string
 		Hours     []model.StatsSiteModelHourly
 	}
-	groupedByAccount := make(map[int]map[string]*groupedSeries)
+	grouped := make(map[string]*groupedSeries)
 	for _, entry := range merged {
 		key := entry.GroupKey + "\x00" + entry.ModelName
-		grouped := groupedByAccount[entry.SiteAccountID]
-		if grouped == nil {
-			grouped = make(map[string]*groupedSeries)
-			groupedByAccount[entry.SiteAccountID] = grouped
-		}
 		series, ok := grouped[key]
 		if !ok {
 			series = &groupedSeries{GroupKey: entry.GroupKey, ModelName: entry.ModelName}
@@ -247,22 +208,12 @@ func SiteChannelModelHourlyForAccounts(ctx context.Context, siteAccountIDs []int
 		series.Hours = append(series.Hours, *entry)
 	}
 
-	result := make(map[int]map[string]*model.SiteModelHistorySummary, len(ids))
-	for _, id := range ids {
-		result[id] = make(map[string]*model.SiteModelHistorySummary)
-	}
-	for accountID, grouped := range groupedByAccount {
-		accountResult := result[accountID]
-		if accountResult == nil {
-			accountResult = make(map[string]*model.SiteModelHistorySummary, len(grouped))
-			result[accountID] = accountResult
-		}
-		for key, series := range grouped {
-			sort.Slice(series.Hours, func(i, j int) bool {
-				return series.Hours[i].Hour < series.Hours[j].Hour
-			})
-			accountResult[key] = buildSiteModelSummary(series.Hours)
-		}
+	result := make(map[string]*model.SiteModelHistorySummary, len(grouped))
+	for key, series := range grouped {
+		sort.Slice(series.Hours, func(i, j int) bool {
+			return series.Hours[i].Hour < series.Hours[j].Hour
+		})
+		result[key] = buildSiteModelSummary(series.Hours)
 	}
 	return result, nil
 }

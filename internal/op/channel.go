@@ -14,7 +14,6 @@ import (
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/xstrings"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var channelCache = cache.New[int, model.Channel](16)
@@ -136,26 +135,15 @@ func ChannelKeySaveDB(ctx context.Context) error {
 		return nil
 	}
 
-	rows := make([]model.ChannelKey, 0, len(keyIDs))
+	dbConn := db.GetDB().WithContext(ctx)
 	for _, id := range keyIDs {
 		k, ok := channelKeyCache.Get(id)
-		if ok {
-			rows = append(rows, k)
+		if !ok {
+			continue
 		}
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	if err := db.GetDB().WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "id"}},
-		UpdateAll: true,
-	}).CreateInBatches(&rows, 100).Error; err != nil {
-		channelKeyCacheNeedUpdateLock.Lock()
-		for _, id := range keyIDs {
-			channelKeyCacheNeedUpdate[id] = struct{}{}
+		if err := dbConn.Save(&k).Error; err != nil {
+			return err
 		}
-		channelKeyCacheNeedUpdateLock.Unlock()
-		return err
 	}
 	return nil
 }
