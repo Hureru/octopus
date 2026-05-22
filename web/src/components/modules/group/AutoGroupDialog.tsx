@@ -274,6 +274,7 @@ export function GroupAutoGroupDialogContent() {
     }, [config, selectedModes, sources]);
 
     const globalDirty = !!config && projectedGlobalMode !== config.projected_global_auto_group;
+    const globalModeEnabled = projectedGlobalMode !== AutoGroupType.None;
     const globalOverrideCount = useMemo(() => sources.filter((source) => source.global_override).length, [sources]);
     const shouldRunAfterSave = useMemo(() => {
         if (!config) return false;
@@ -416,8 +417,14 @@ export function GroupAutoGroupDialogContent() {
                                 </div>
                             </section>
 
-                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
-                                <div className="flex h-10 items-center justify-between gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
+                            <section className={cn(
+                                'flex min-h-0 flex-col overflow-hidden rounded-xl border transition-opacity',
+                                globalModeEnabled ? 'border-muted-foreground/20 bg-muted/20 opacity-60' : 'border-border/50 bg-muted/30',
+                            )}>
+                                <div className={cn(
+                                    'flex h-10 items-center justify-between gap-2 border-b px-3 py-2',
+                                    globalModeEnabled ? 'border-muted-foreground/20 bg-muted/30' : 'border-border/30 bg-muted/50',
+                                )}>
                                     <div className="flex min-w-0 items-center gap-2">
                                         <span className="truncate text-sm font-medium text-foreground">{t('sections.selected')}</span>
                                         {globalOverrideCount > 0 ? (
