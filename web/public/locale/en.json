@@ -495,7 +495,54 @@
             "errorDetails": "Error details",
             "noHttpStatus": "No HTTP status"
         },
-        "empty": "No groups yet, click the button above to create one"
+        "empty": "No groups yet, click the button above to create one",
+        "autoGroup": {
+            "title": "Auto Group Configuration",
+            "description": "Add channels or site groups to the list, and the system will automatically add models to matching model groups by group name or regex.",
+            "loadFailed": "Failed to load auto group configuration: {message}",
+            "searchPlaceholder": "Search channels, sites, accounts, groups, or models",
+            "runAll": "Run all enabled now",
+            "loading": "Loading...",
+            "emptyAvailable": "No sources available",
+            "emptySelected": "Add channels or site groups from the left, then configure the match mode here.",
+            "add": "Add",
+            "matchMode": "Match mode",
+            "notice": "Removing a source or disabling the global setting will not delete existing model group members. Remove them manually in each model group if needed. Current global site-projected channel mode: {mode}.",
+            "global": {
+                "title": "All site-projected channels auto group",
+                "description": "This is the former global site-projected channel auto group setting. When enabled, all site-projected channels use the selected match mode. Per-channel settings are kept and take effect after the global mode is disabled."
+            },
+            "sections": {
+                "available": "Available channels / site groups",
+                "selected": "Enabled auto group list"
+            },
+            "source": {
+                "siteGroup": "Site group",
+                "disabled": "Disabled",
+                "globalActive": "Global",
+                "modelCount": "{count} models"
+            },
+            "mode": {
+                "none": "Off",
+                "fuzzy": "Fuzzy",
+                "exact": "Exact",
+                "regex": "Regex"
+            },
+            "buttons": {
+                "cancel": "Cancel",
+                "save": "Save",
+                "saving": "Saving...",
+                "saveAndRun": "Save and run now",
+                "running": "Running..."
+            },
+            "toast": {
+                "saved": "Auto group configuration saved",
+                "savedAndRun": "Auto group configuration saved and run",
+                "saveFailed": "Failed to save auto group configuration",
+                "runSuccess": "Auto grouping has run",
+                "runFailed": "Failed to run auto grouping"
+            }
+        }
     },
     "model": {
         "create": {
@@ -716,6 +763,20 @@
                 "totalCost": "Cost",
                 "lastRequestAt": "Last used"
             }
+        },
+        "advanced": {
+            "title": "Site Channel Advanced Settings",
+            "description": "Configure parameter overrides for projected channels under group {group}. Configure auto grouping from the top-right of the Model Groups page. Configure custom headers in Site Settings.",
+            "channelList": "Projected channels",
+            "empty": "No projected channels in this group",
+            "paramOverride": "Parameter override JSON",
+            "paramOverridePlaceholder": "Leave empty to clear. Non-empty value must be a JSON object, e.g. {\"temperature\":0.7,\"max_tokens\":4096}",
+            "cancel": "Cancel",
+            "save": "Save",
+            "saving": "Saving...",
+            "saved": "Advanced settings saved",
+            "invalidParamOverride": "Parameter override must be a valid JSON object",
+            "saveFailed": "Failed to save advanced settings"
         }
     },
     "siteImport": {

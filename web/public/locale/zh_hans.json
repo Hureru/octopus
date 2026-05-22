@@ -495,7 +495,54 @@
             "errorDetails": "错误详情",
             "noHttpStatus": "无 HTTP 状态"
         },
-        "empty": "暂无分组，点击左上角按钮创建"
+        "empty": "暂无分组，点击左上角按钮创建",
+        "autoGroup": {
+            "title": "自动分组配置",
+            "description": "将渠道或站点分组加入列表后，系统会按模型组名称或正则自动把模型加入匹配的模型组。",
+            "loadFailed": "加载自动分组配置失败：{message}",
+            "searchPlaceholder": "搜索渠道、站点、账号、分组或模型",
+            "runAll": "立即执行全部已启用",
+            "loading": "加载中...",
+            "emptyAvailable": "暂无可加入项",
+            "emptySelected": "将左侧渠道或站点组加入列表后，在这里配置匹配方式。",
+            "add": "加入",
+            "matchMode": "匹配方式",
+            "notice": "移出列表或关闭全局设置后，不会删除已存在的模型组成员；如需清理，请在具体模型组中手动移除。当前全局站点投影渠道模式：{mode}。",
+            "global": {
+                "title": "全部站点投影渠道自动分组",
+                "description": "这是原全局站点投影渠道自动分组设置。开启后，所有站点投影渠道会统一使用所选匹配方式；单独渠道设置会保留，并在全局关闭后生效。"
+            },
+            "sections": {
+                "available": "可选渠道 / 站点组",
+                "selected": "已启用自动分组列表"
+            },
+            "source": {
+                "siteGroup": "站点组",
+                "disabled": "停用",
+                "globalActive": "全局生效",
+                "modelCount": "{count} 个模型"
+            },
+            "mode": {
+                "none": "关闭",
+                "fuzzy": "模糊匹配",
+                "exact": "精确匹配",
+                "regex": "正则匹配"
+            },
+            "buttons": {
+                "cancel": "取消",
+                "save": "保存",
+                "saving": "保存中...",
+                "saveAndRun": "保存并立即执行",
+                "running": "执行中..."
+            },
+            "toast": {
+                "saved": "自动分组配置已保存",
+                "savedAndRun": "自动分组配置已保存并执行",
+                "saveFailed": "保存自动分组配置失败",
+                "runSuccess": "已执行自动分组",
+                "runFailed": "执行自动分组失败"
+            }
+        }
     },
     "model": {
         "create": {
@@ -716,6 +763,20 @@
                 "totalCost": "成本",
                 "lastRequestAt": "最近使用"
             }
+        },
+        "advanced": {
+            "title": "站点渠道高级设置",
+            "description": "配置分组 {group} 下各投影渠道的参数覆盖。自动分组请前往「模型组」页面右上角统一配置，自定义 Header 请在站点设置中统一配置。",
+            "channelList": "投影渠道",
+            "empty": "当前分组暂无投影渠道",
+            "paramOverride": "参数覆盖 JSON",
+            "paramOverridePlaceholder": "留空表示清除；非空时必须是 JSON 对象，例如：{\"temperature\":0.7,\"max_tokens\":4096}",
+            "cancel": "取消",
+            "save": "保存",
+            "saving": "保存中...",
+            "saved": "高级设置已保存",
+            "invalidParamOverride": "参数覆盖必须是合法的 JSON 对象",
+            "saveFailed": "保存高级设置失败"
         }
     },
     "siteImport": {

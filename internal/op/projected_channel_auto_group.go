@@ -12,17 +12,25 @@ import (
 	"github.com/dlclark/regexp2"
 )
 
-func ProjectedChannelGlobalAutoGroupEnabled() bool {
-	enabled, err := SettingGetBool(model.SettingKeyProjectedChannelAutoGroupEnabled)
+func ProjectedChannelGlobalAutoGroupMode() model.AutoGroupType {
+	value, err := SettingGetString(model.SettingKeyProjectedChannelAutoGroupEnabled)
 	if err != nil {
-		return false
+		return model.AutoGroupTypeNone
 	}
-	return enabled
+	mode, ok := model.ParseAutoGroupSettingValue(value)
+	if !ok {
+		return model.AutoGroupTypeNone
+	}
+	return mode
+}
+
+func ProjectedChannelGlobalAutoGroupEnabled() bool {
+	return ProjectedChannelGlobalAutoGroupMode() != model.AutoGroupTypeNone
 }
 
 func EffectiveProjectedChannelAutoGroup(channel model.Channel) model.AutoGroupType {
-	if ProjectedChannelGlobalAutoGroupEnabled() {
-		return model.AutoGroupTypeFuzzy
+	if mode := ProjectedChannelGlobalAutoGroupMode(); mode != model.AutoGroupTypeNone {
+		return mode
 	}
 	return channel.AutoGroup
 }
@@ -111,6 +119,10 @@ func ChannelAutoGroup(channel *model.Channel, ctx context.Context) {
 }
 
 func AutoGroupAllProjectedChannels(ctx context.Context) error {
+	mode := ProjectedChannelGlobalAutoGroupMode()
+	if mode == model.AutoGroupTypeNone {
+		return nil
+	}
 	channels := channelCache.GetAll()
 	if len(channels) == 0 {
 		return nil
@@ -127,7 +139,7 @@ func AutoGroupAllProjectedChannels(ctx context.Context) error {
 		if _, ok := bindingMap[id]; !ok {
 			continue
 		}
-		ChannelAutoGroupWithMode(&channel, model.AutoGroupTypeFuzzy, ctx)
+		ChannelAutoGroupWithMode(&channel, mode, ctx)
 	}
 	return nil
 }

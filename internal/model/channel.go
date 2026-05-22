@@ -2,6 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 )
@@ -14,6 +16,30 @@ const (
 	AutoGroupTypeExact AutoGroupType = 2 //准确匹配
 	AutoGroupTypeRegex AutoGroupType = 3 //正则匹配
 )
+
+func (t AutoGroupType) Valid() bool {
+	switch t {
+	case AutoGroupTypeNone, AutoGroupTypeFuzzy, AutoGroupTypeExact, AutoGroupTypeRegex:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseAutoGroupSettingValue(value string) (AutoGroupType, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "false":
+		return AutoGroupTypeNone, true
+	case "true":
+		return AutoGroupTypeFuzzy, true
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return AutoGroupTypeNone, false
+	}
+	mode := AutoGroupType(parsed)
+	return mode, mode.Valid()
+}
 
 type ChannelWSMode string
 

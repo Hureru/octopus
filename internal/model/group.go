@@ -14,10 +14,10 @@ type Group struct {
 	Name              string      `json:"name" gorm:"unique;not null"`
 	Mode              GroupMode   `json:"mode" gorm:"not null"`
 	MatchRegex        string      `json:"match_regex"`
-	FirstTokenTimeOut int         `json:"first_token_time_out"` // 单个渠道首个Token响应超时时间(秒)
-	SessionKeepTime   int         `json:"session_keep_time"`    // 会话保持时间(秒) 0 为禁用
-	RetryEnabled      bool        `json:"retry_enabled" gorm:"default:false"`       // 启用同通道重试+透传429/503
-	MaxRetries        int         `json:"max_retries" gorm:"default:3"`             // 同通道最大重试次数(RetryEnabled启用时生效)
+	FirstTokenTimeOut int         `json:"first_token_time_out"`               // 单个渠道首个Token响应超时时间(秒)
+	SessionKeepTime   int         `json:"session_keep_time"`                  // 会话保持时间(秒) 0 为禁用
+	RetryEnabled      bool        `json:"retry_enabled" gorm:"default:false"` // 启用同通道重试+透传429/503
+	MaxRetries        int         `json:"max_retries" gorm:"default:3"`       // 同通道最大重试次数(RetryEnabled启用时生效)
 	Items             []GroupItem `json:"items,omitempty" gorm:"foreignKey:GroupID"`
 }
 
@@ -62,4 +62,43 @@ type GroupItemUpdateRequest struct {
 type GroupIDAndLLMName struct {
 	ChannelID int
 	ModelName string
+}
+
+type GroupAutoGroupConfig struct {
+	ProjectedGlobalAutoGroup AutoGroupType          `json:"projected_global_auto_group"`
+	Sources                  []GroupAutoGroupSource `json:"sources"`
+}
+
+type GroupAutoGroupSource struct {
+	ChannelID          int           `json:"channel_id"`
+	ChannelName        string        `json:"channel_name"`
+	Enabled            bool          `json:"enabled"`
+	Managed            bool          `json:"managed"`
+	AutoGroup          AutoGroupType `json:"auto_group"`
+	EffectiveAutoGroup AutoGroupType `json:"effective_auto_group"`
+	GlobalOverride     bool          `json:"global_override"`
+	ModelCount         int           `json:"model_count"`
+	Models             []string      `json:"models"`
+	SiteID             *int          `json:"site_id,omitempty"`
+	SiteName           string        `json:"site_name,omitempty"`
+	SiteAccountID      *int          `json:"site_account_id,omitempty"`
+	SiteAccountName    string        `json:"site_account_name,omitempty"`
+	SiteGroupKey       string        `json:"site_group_key,omitempty"`
+	SiteGroupName      string        `json:"site_group_name,omitempty"`
+	EndpointType       string        `json:"endpoint_type,omitempty"`
+}
+
+type GroupAutoGroupSourceUpdateRequest struct {
+	ChannelID int           `json:"channel_id" binding:"required"`
+	AutoGroup AutoGroupType `json:"auto_group"`
+}
+
+type GroupAutoGroupConfigUpdateRequest struct {
+	ProjectedGlobalAutoGroup *AutoGroupType                      `json:"projected_global_auto_group,omitempty"`
+	Items                    []GroupAutoGroupSourceUpdateRequest `json:"items,omitempty"`
+	RunNow                   bool                                `json:"run_now"`
+}
+
+type GroupAutoGroupRunRequest struct {
+	ChannelIDs []int `json:"channel_ids,omitempty"`
 }

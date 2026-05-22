@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     MorphingDialog,
@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { useNavStore, type NavItem } from '@/components/modules/navbar';
 import { CreateDialogContent as ChannelCreateContent } from '@/components/modules/channel/Create';
 import { CreateDialogContent as GroupCreateContent } from '@/components/modules/group/Create';
+import { GroupAutoGroupDialogContent } from '@/components/modules/group/AutoGroupDialog';
 import { CreateDialogContent as ModelCreateContent } from '@/components/modules/model/Create';
 import { useSiteUIStore } from '@/components/modules/site/ui-store';
 import { useLogUIStore } from '@/components/modules/log/ui-store';
@@ -418,6 +419,20 @@ export function Toolbar() {
                             <RefreshCw className={cn('size-4 transition-colors duration-300', isLogRefreshing && 'animate-spin')} />
                         </button>
                     </>
+                )}
+
+                {toolbarItem === 'group' && (
+                    <MorphingDialog>
+                        <MorphingDialogTrigger className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}>
+                            <Sparkles className="size-4 transition-colors duration-300" />
+                        </MorphingDialogTrigger>
+
+                        <MorphingDialogContainer>
+                            <MorphingDialogContent className="w-fit max-w-full bg-card text-card-foreground px-6 py-4 rounded-3xl custom-shadow max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+                                <GroupAutoGroupDialogContent />
+                            </MorphingDialogContent>
+                        </MorphingDialogContainer>
+                    </MorphingDialog>
                 )}
 
                 {toolbarItem === 'site' ? (

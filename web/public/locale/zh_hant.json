@@ -495,7 +495,54 @@
             "errorDetails": "錯誤詳情",
             "noHttpStatus": "無 HTTP 狀態"
         },
-        "empty": "暫無分組，點擊左上角按鈕建立"
+        "empty": "暫無分組，點擊左上角按鈕建立",
+        "autoGroup": {
+            "title": "自動分組配置",
+            "description": "將供應源或站點分組加入列表後，系統會按模型組名稱或正規自動把模型加入匹配的模型組。",
+            "loadFailed": "載入自動分組配置失敗：{message}",
+            "searchPlaceholder": "搜尋供應源、站點、帳號、分組或模型",
+            "runAll": "立即執行全部已啟用",
+            "loading": "載入中...",
+            "emptyAvailable": "暫無可加入項",
+            "emptySelected": "將左側供應源或站點分組加入列表後，在這裡配置匹配方式。",
+            "add": "加入",
+            "matchMode": "匹配方式",
+            "notice": "移出列表或關閉全域設定後，不會刪除已存在的模型組成員；如需清理，請在具體模型組中手動移除。目前全域站點投影供應源模式：{mode}。",
+            "global": {
+                "title": "全部站點投影供應源自動分組",
+                "description": "這是原全域站點投影供應源自動分組設定。啟用後，所有站點投影供應源會統一使用所選匹配方式；單獨供應源設定會保留，並在全域關閉後生效。"
+            },
+            "sections": {
+                "available": "可選供應源 / 站點組",
+                "selected": "已啟用自動分組列表"
+            },
+            "source": {
+                "siteGroup": "站點組",
+                "disabled": "停用",
+                "globalActive": "全域生效",
+                "modelCount": "{count} 個模型"
+            },
+            "mode": {
+                "none": "關閉",
+                "fuzzy": "模糊比對",
+                "exact": "精確比對",
+                "regex": "正規比對"
+            },
+            "buttons": {
+                "cancel": "取消",
+                "save": "儲存",
+                "saving": "儲存中...",
+                "saveAndRun": "儲存並立即執行",
+                "running": "執行中..."
+            },
+            "toast": {
+                "saved": "自動分組配置已儲存",
+                "savedAndRun": "自動分組配置已儲存並執行",
+                "saveFailed": "儲存自動分組配置失敗",
+                "runSuccess": "已執行自動分組",
+                "runFailed": "執行自動分組失敗"
+            }
+        }
     },
     "model": {
         "create": {
@@ -716,6 +763,20 @@
                 "totalCost": "成本",
                 "lastRequestAt": "最近使用"
             }
+        },
+        "advanced": {
+            "title": "站點供應源進階設定",
+            "description": "配置分組 {group} 下各投影供應源的參數覆蓋。自動分組請前往「模型組」頁面右上角統一配置，自訂 Header 請在站點設定中統一配置。",
+            "channelList": "投影供應源",
+            "empty": "目前分組暫無投影供應源",
+            "paramOverride": "參數覆蓋 JSON",
+            "paramOverridePlaceholder": "留空表示清除；非空時必須是 JSON 物件，例如：{\"temperature\":0.7,\"max_tokens\":4096}",
+            "cancel": "取消",
+            "save": "儲存",
+            "saving": "儲存中...",
+            "saved": "進階設定已儲存",
+            "invalidParamOverride": "參數覆蓋必須是合法的 JSON 物件",
+            "saveFailed": "儲存進階設定失敗"
         }
     },
     "siteImport": {

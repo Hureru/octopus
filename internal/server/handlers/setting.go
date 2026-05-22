@@ -91,7 +91,8 @@ func setSetting(c *gin.Context) {
 		}
 		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
 	case model.SettingKeyProjectedChannelAutoGroupEnabled:
-		if setting.Value == "true" && projectedAutoGroupQueued.CompareAndSwap(false, true) {
+		mode, _ := model.ParseAutoGroupSettingValue(setting.Value)
+		if mode != model.AutoGroupTypeNone && projectedAutoGroupQueued.CompareAndSwap(false, true) {
 			safe.Go("projected-channel-auto-group-all", func() {
 				defer projectedAutoGroupQueued.Store(false)
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

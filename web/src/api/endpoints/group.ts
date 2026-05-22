@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../client';
 import { logger } from '@/lib/logger';
+import { AutoGroupType } from './channel';
 
 /**
  * 分组项信息
@@ -73,6 +74,45 @@ export interface GroupUpdateRequest {
     items_to_add?: GroupItemAddRequest[];    // 新增的 items
     items_to_update?: GroupItemUpdateRequest[]; // 更新的 items (priority 变更)
     items_to_delete?: number[];              // 删除的 item IDs
+}
+
+export interface GroupAutoGroupSource {
+    channel_id: number;
+    channel_name: string;
+    enabled: boolean;
+    managed: boolean;
+    auto_group: AutoGroupType;
+    effective_auto_group: AutoGroupType;
+    global_override: boolean;
+    model_count: number;
+    models: string[];
+    site_id?: number | null;
+    site_name?: string;
+    site_account_id?: number | null;
+    site_account_name?: string;
+    site_group_key?: string;
+    site_group_name?: string;
+    endpoint_type?: string;
+}
+
+export interface GroupAutoGroupConfig {
+    projected_global_auto_group: AutoGroupType;
+    sources: GroupAutoGroupSource[];
+}
+
+export interface GroupAutoGroupSourceUpdateRequest {
+    channel_id: number;
+    auto_group: AutoGroupType;
+}
+
+export interface GroupAutoGroupConfigUpdateRequest {
+    projected_global_auto_group?: AutoGroupType;
+    items?: GroupAutoGroupSourceUpdateRequest[];
+    run_now?: boolean;
+}
+
+export interface GroupAutoGroupRunRequest {
+    channel_ids?: number[];
 }
 
 /**
@@ -178,6 +218,56 @@ export function useDeleteGroup() {
         },
         onError: (error) => {
             logger.error('分组删除失败:', error);
+        },
+    });
+}
+
+export function useGroupAutoGroupConfig() {
+    return useQuery({
+        queryKey: ['groups', 'auto-group', 'config'],
+        queryFn: async () => apiClient.get<GroupAutoGroupConfig>('/api/v1/group/auto-group/config'),
+        refetchInterval: 30000,
+    });
+}
+
+function invalidateAutoGroupRelated(queryClient: ReturnType<typeof useQueryClient>) {
+    queryClient.invalidateQueries({ queryKey: ['groups', 'auto-group', 'config'] });
+    queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
+    queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
+    queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+    queryClient.invalidateQueries({ queryKey: ['site-channel', 'list'] });
+    queryClient.invalidateQueries({ queryKey: ['settings', 'list'] });
+}
+
+export function useUpdateGroupAutoGroupConfig() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (data: GroupAutoGroupConfigUpdateRequest) =>
+            apiClient.put<GroupAutoGroupConfig>('/api/v1/group/auto-group/config', data),
+        onSuccess: (data) => {
+            logger.log('自动分组配置已更新:', data);
+            queryClient.setQueryData(['groups', 'auto-group', 'config'], data);
+            invalidateAutoGroupRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('自动分组配置更新失败:', error);
+        },
+    });
+}
+
+export function useRunGroupAutoGroup() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (data: GroupAutoGroupRunRequest = {}) =>
+            apiClient.post<null>('/api/v1/group/auto-group/run', data),
+        onSuccess: () => {
+            logger.log('自动分组执行成功');
+            invalidateAutoGroupRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('自动分组执行失败:', error);
         },
     });
 }
