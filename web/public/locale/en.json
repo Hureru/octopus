@@ -520,7 +520,11 @@
                 "siteGroup": "Site group",
                 "disabled": "Disabled",
                 "globalActive": "Global",
-                "modelCount": "{count} models"
+                "modelCount": "{count} models",
+                "moreModels": "+{count}",
+                "noModels": "No models",
+                "unknownSite": "Unknown site",
+                "manualGroup": "Manual channels"
             },
             "mode": {
                 "none": "Off",
@@ -541,7 +545,8 @@
                 "saveFailed": "Failed to save auto group configuration",
                 "runSuccess": "Auto grouping has run",
                 "runFailed": "Failed to run auto grouping"
-            }
+            },
+            "remove": "Remove"
         }
     },
     "model": {

@@ -1,13 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Globe2, Plus, RefreshCw, Search, Sparkles, X } from 'lucide-react';
+import { Check, ChevronDown, Globe2, HelpCircle, Plus, Search, Sparkles, X } from 'lucide-react';
 import { AutoGroupType } from '@/api/endpoints/channel';
 import {
     type GroupAutoGroupSource,
     useGroupAutoGroupConfig,
-    useRunGroupAutoGroup,
     useUpdateGroupAutoGroupConfig,
 } from '@/api/endpoints/group';
 import {
@@ -17,7 +16,6 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
     Select,
@@ -26,6 +24,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { toast } from '@/components/common/Toast';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +35,15 @@ const AUTO_GROUP_VALUES = [
     AutoGroupType.Exact,
     AutoGroupType.Regex,
 ] as const;
+const MODEL_PREVIEW_LIMIT = 24;
+const MANUAL_GROUP_KEY = '__manual__';
+
+type SourceTreeGroup = {
+    key: string;
+    label: string;
+    sources: GroupAutoGroupSource[];
+    manual: boolean;
+};
 
 function modeKey(value: AutoGroupType) {
     switch (value) {
@@ -50,19 +59,9 @@ function modeKey(value: AutoGroupType) {
     }
 }
 
-function sourceTitle(source: GroupAutoGroupSource) {
+function selectedSourceLabel(source: GroupAutoGroupSource) {
     if (!source.managed) return source.channel_name;
-    return [source.site_name, source.site_account_name, source.site_group_name]
-        .map((item) => item?.trim())
-        .filter(Boolean)
-        .join(' / ') || source.channel_name;
-}
-
-function sourceSubtitle(source: GroupAutoGroupSource) {
-    const parts = source.managed
-        ? [source.endpoint_type, `#${source.channel_id}`, source.channel_name]
-        : [`#${source.channel_id}`, source.endpoint_type];
-    return parts.map((item) => item?.trim()).filter(Boolean).join(' · ');
+    return [source.site_name, source.channel_name].map((item) => item?.trim()).filter(Boolean).join(' / ') || source.channel_name;
 }
 
 function matchesKeyword(source: GroupAutoGroupSource, keyword: string) {
@@ -79,65 +78,109 @@ function matchesKeyword(source: GroupAutoGroupSource, keyword: string) {
     return haystack.includes(keyword);
 }
 
-function SourceCard({
+function ModelPreview({ source }: { source: GroupAutoGroupSource }) {
+    const t = useTranslations('group.autoGroup');
+    const models = source.models.slice(0, MODEL_PREVIEW_LIMIT);
+    const extraCount = Math.max(0, source.models.length - MODEL_PREVIEW_LIMIT);
+
+    return (
+        <HoverCard openDelay={120} closeDelay={150}>
+            <HoverCardTrigger asChild>
+                <button
+                    type="button"
+                    className="h-5 rounded-md px-1.5 text-[10px] tabular-nums text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label={t('source.modelCount', { count: source.model_count })}
+                >
+                    {source.model_count}
+                </button>
+            </HoverCardTrigger>
+            <HoverCardContent side="top" align="center" sideOffset={8} className="w-72 rounded-xl p-3">
+                <div className="mb-2 text-xs font-medium text-foreground">
+                    {t('source.modelCount', { count: source.model_count })}
+                </div>
+                {models.length > 0 ? (
+                    <div className="flex max-h-56 flex-wrap gap-1 overflow-y-auto">
+                        {models.map((model) => (
+                            <Badge key={model} variant="secondary" className="max-w-64 truncate px-1.5 text-[10px] font-normal">
+                                {model}
+                            </Badge>
+                        ))}
+                        {extraCount > 0 ? (
+                            <Badge variant="secondary" className="px-1.5 text-[10px] font-normal">
+                                {t('source.moreModels', { count: extraCount })}
+                            </Badge>
+                        ) : null}
+                    </div>
+                ) : (
+                    <div className="text-xs text-muted-foreground">{t('source.noModels')}</div>
+                )}
+            </HoverCardContent>
+        </HoverCard>
+    );
+}
+
+function AvailableSourceRow({ source, onAdd }: { source: GroupAutoGroupSource; onAdd: (source: GroupAutoGroupSource) => void }) {
+    const t = useTranslations('group.autoGroup');
+
+    return (
+        <div className="flex h-8 items-center gap-2 px-2 pl-8 text-left hover:bg-muted/40">
+            <button type="button" onClick={() => onAdd(source)} className="min-w-0 flex-1 truncate text-left text-xs text-foreground">
+                {source.channel_name}
+            </button>
+            {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
+            <ModelPreview source={source} />
+            <button
+                type="button"
+                onClick={() => onAdd(source)}
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label={t('add')}
+            >
+                <Plus className="size-3.5" />
+            </button>
+        </div>
+    );
+}
+
+function SelectedSourceRow({
     source,
-    action,
     mode,
     onModeChange,
-    muted,
+    onRemove,
 }: {
     source: GroupAutoGroupSource;
-    action: ReactNode;
-    mode?: AutoGroupType;
-    onModeChange?: (mode: AutoGroupType) => void;
-    muted?: boolean;
+    mode: AutoGroupType;
+    onModeChange: (mode: AutoGroupType) => void;
+    onRemove: () => void;
 }) {
     const t = useTranslations('group.autoGroup');
 
     return (
-        <div className={cn('rounded-2xl border border-border/60 bg-background p-3', muted && 'opacity-70')}>
-            <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <span className="truncate text-sm font-medium text-foreground">{sourceTitle(source)}</span>
-                        {source.managed ? <Badge variant="outline" className="px-1.5 text-[10px]">{t('source.siteGroup')}</Badge> : null}
-                        {!source.enabled ? <Badge variant="outline" className="px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
-                        {source.global_override ? <Badge variant="outline" className="border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">{t('source.globalActive')}</Badge> : null}
-                    </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">{sourceSubtitle(source)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{t('source.modelCount', { count: source.model_count })}</div>
-                </div>
-                <div className="shrink-0">{action}</div>
-            </div>
-
-            {source.models.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-1">
-                    {source.models.slice(0, 6).map((model) => (
-                        <Badge key={model} variant="secondary" className="max-w-40 truncate px-1.5 text-[10px] font-normal">
-                            {model}
-                        </Badge>
+        <div className="flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-background px-2 text-left">
+            <Check className="size-3.5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                {selectedSourceLabel(source)}
+            </span>
+            {source.global_override ? <Badge variant="outline" className="h-5 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">{t('source.globalActive')}</Badge> : null}
+            {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
+            <ModelPreview source={source} />
+            <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
+                <SelectTrigger className="h-7 w-28 rounded-lg bg-background text-xs shadow-none">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                    {AUTO_GROUP_VALUES.filter((value) => value !== AutoGroupType.None).map((value) => (
+                        <SelectItem key={value} value={String(value)}>{t(`mode.${modeKey(value)}`)}</SelectItem>
                     ))}
-                    {source.models.length > 6 ? (
-                        <Badge variant="secondary" className="px-1.5 text-[10px] font-normal">+{source.models.length - 6}</Badge>
-                    ) : null}
-                </div>
-            ) : null}
-
-            {mode !== undefined && onModeChange ? (
-                <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/50 pt-3">
-                    <span className="text-xs text-muted-foreground">{t('matchMode')}</span>
-                    <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
-                        <SelectTrigger className="h-8 w-32 rounded-xl bg-background text-xs">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl">
-                            {AUTO_GROUP_VALUES.filter((value) => value !== AutoGroupType.None).map((value) => (
-                                <SelectItem key={value} value={String(value)}>{t(`mode.${modeKey(value)}`)}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-            ) : null}
+                </SelectContent>
+            </Select>
+            <button
+                type="button"
+                onClick={onRemove}
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                aria-label={t('remove')}
+            >
+                <X className="size-3.5" />
+            </button>
         </div>
     );
 }
@@ -147,10 +190,10 @@ export function GroupAutoGroupDialogContent() {
     const { setIsOpen } = useMorphingDialog();
     const { data: config, isLoading, error } = useGroupAutoGroupConfig();
     const updateConfig = useUpdateGroupAutoGroupConfig();
-    const runAutoGroup = useRunGroupAutoGroup();
     const [keyword, setKeyword] = useState('');
     const [selectedModes, setSelectedModes] = useState<Record<number, AutoGroupType>>({});
     const [projectedGlobalMode, setProjectedGlobalMode] = useState<AutoGroupType>(AutoGroupType.None);
+    const [expanded, setExpanded] = useState<Set<string>>(new Set([MANUAL_GROUP_KEY]));
 
     useEffect(() => {
         if (!config) return;
@@ -175,12 +218,44 @@ export function GroupAutoGroupDialogContent() {
         [sources, selectedModes, normalizedKeyword],
     );
 
+    const availableGroups = useMemo<SourceTreeGroup[]>(() => {
+        const siteBuckets = new Map<string, SourceTreeGroup>();
+        const manualSources: GroupAutoGroupSource[] = [];
+
+        for (const source of availableSources) {
+            if (!source.managed) {
+                manualSources.push(source);
+                continue;
+            }
+            const key = source.site_id ? `site:${source.site_id}` : `site:${source.site_name || 'unknown'}`;
+            const existing = siteBuckets.get(key);
+            if (existing) {
+                existing.sources.push(source);
+                continue;
+            }
+            siteBuckets.set(key, {
+                key,
+                label: source.site_name || t('source.unknownSite'),
+                sources: [source],
+                manual: false,
+            });
+        }
+
+        const groups = Array.from(siteBuckets.values()).sort((a, b) => a.label.localeCompare(b.label));
+        if (manualSources.length > 0) {
+            groups.push({ key: MANUAL_GROUP_KEY, label: t('source.manualGroup'), sources: manualSources, manual: true });
+        }
+        for (const group of groups) {
+            group.sources.sort((a, b) => a.channel_name.localeCompare(b.channel_name));
+        }
+        return groups;
+    }, [availableSources, t]);
+
     const selectedSources = useMemo(
         () => Object.keys(selectedModes)
             .map((id) => sourceById.get(Number(id)))
-            .filter((source): source is GroupAutoGroupSource => !!source)
-            .filter((source) => matchesKeyword(source, normalizedKeyword)),
-        [selectedModes, sourceById, normalizedKeyword],
+            .filter((source): source is GroupAutoGroupSource => !!source),
+        [selectedModes, sourceById],
     );
 
     const dirtyItems = useMemo(() => {
@@ -197,8 +272,7 @@ export function GroupAutoGroupDialogContent() {
 
     const globalDirty = !!config && projectedGlobalMode !== config.projected_global_auto_group;
     const hasChanges = globalDirty || dirtyItems.length > 0;
-    const isPending = updateConfig.isPending || runAutoGroup.isPending;
-    const globalModeLabel = t(`mode.${modeKey(projectedGlobalMode)}`);
+    const isPending = updateConfig.isPending;
 
     const handleAdd = (source: GroupAutoGroupSource) => {
         setSelectedModes((current) => ({
@@ -211,6 +285,15 @@ export function GroupAutoGroupDialogContent() {
         setSelectedModes((current) => {
             const next = { ...current };
             delete next[channelId];
+            return next;
+        });
+    };
+
+    const toggleExpanded = (key: string) => {
+        setExpanded((current) => {
+            const next = new Set(current);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
             return next;
         });
     };
@@ -230,26 +313,14 @@ export function GroupAutoGroupDialogContent() {
         });
     };
 
-    const handleRunAll = () => {
-        runAutoGroup.mutate({}, {
-            onSuccess: () => toast.success(t('toast.runSuccess')),
-            onError: (err) => toast.error(t('toast.runFailed'), { description: err.message }),
-        });
-    };
-
     return (
-        <div className="flex h-[calc(100vh-2rem)] w-screen max-w-full flex-col md:max-w-5xl">
+        <div className="flex h-[calc(100vh-2rem)] w-screen max-w-full flex-col md:max-w-4xl">
             <MorphingDialogTitle className="shrink-0">
-                <header className="mb-4 flex items-start justify-between gap-4">
-                    <div>
-                        <h2 className="flex items-center gap-2 text-2xl font-bold text-card-foreground">
-                            <Sparkles className="size-5 text-primary" />
-                            {t('title')}
-                        </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {t('description')}
-                        </p>
-                    </div>
+                <header className="mb-3 flex items-center justify-between gap-4">
+                    <h2 className="flex items-center gap-2 text-2xl font-bold text-card-foreground">
+                        <Sparkles className="size-5 text-primary" />
+                        {t('title')}
+                    </h2>
                     <MorphingDialogClose className="relative right-0 top-0" />
                 </header>
             </MorphingDialogTitle>
@@ -261,19 +332,24 @@ export function GroupAutoGroupDialogContent() {
                     </div>
                 ) : (
                     <>
-                        <div className="mb-4 rounded-2xl border border-border/60 bg-muted/20 p-4">
-                            <div className="flex flex-wrap items-center justify-between gap-4">
-                                <div className="flex min-w-0 items-start gap-3">
-                                    <Globe2 className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-medium text-foreground">{t('global.title')}</div>
-                                        <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                                            {t('global.description')}
-                                        </div>
-                                    </div>
+                        <div className="mb-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <Globe2 className="size-4 shrink-0 text-muted-foreground" />
+                                    <span className="text-sm font-medium text-foreground">{t('global.title')}</span>
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <HelpCircle className="size-4 cursor-help text-muted-foreground" />
+                                            </TooltipTrigger>
+                                            <TooltipContent className="max-w-xs">
+                                                {t('global.description')}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
                                 </div>
                                 <Select value={String(projectedGlobalMode)} onValueChange={(value) => setProjectedGlobalMode(Number(value) as AutoGroupType)} disabled={isLoading || isPending}>
-                                    <SelectTrigger className="w-40 rounded-xl bg-background">
+                                    <SelectTrigger className="h-8 w-36 rounded-xl bg-background text-xs">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className="rounded-xl">
@@ -285,75 +361,71 @@ export function GroupAutoGroupDialogContent() {
                             </div>
                         </div>
 
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                            <div className="relative w-full sm:w-72">
-                                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                <Input
-                                    value={keyword}
-                                    onChange={(event) => setKeyword(event.target.value)}
-                                    placeholder={t('searchPlaceholder')}
-                                    className="rounded-xl pl-9"
-                                />
-                            </div>
-                            <Button type="button" variant="outline" className="rounded-xl" onClick={handleRunAll} disabled={isPending || isLoading}>
-                                <RefreshCw className={cn('size-4', runAutoGroup.isPending && 'animate-spin')} />
-                                {t('runAll')}
-                            </Button>
-                        </div>
-
                         <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-2">
-                            <section className="flex min-h-0 flex-col rounded-2xl border border-border/60 bg-muted/20">
-                                <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
-                                    <span className="text-sm font-medium text-foreground">{t('sections.available')}</span>
-                                    <span className="text-xs text-muted-foreground">{availableSources.length}</span>
+                            <section className="flex min-h-0 flex-col rounded-xl border border-border/60 bg-muted/20">
+                                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/50 px-3 py-2">
+                                    <span className="min-w-0 truncate text-sm font-medium text-foreground">{t('sections.available')}</span>
+                                    <div className="relative w-36 sm:w-44">
+                                        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                                        <input
+                                            value={keyword}
+                                            onChange={(event) => setKeyword(event.target.value)}
+                                            placeholder={t('searchPlaceholder')}
+                                            className="h-7 w-full rounded-lg border border-border/60 bg-background/70 pl-7 pr-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <span className="text-xs tabular-nums text-muted-foreground">{availableSources.length}</span>
                                 </div>
-                                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+                                <div className="min-h-0 flex-1 overflow-y-auto rounded-b-xl">
                                     {isLoading ? (
                                         <div className="p-6 text-center text-sm text-muted-foreground">{t('loading')}</div>
-                                    ) : availableSources.length === 0 ? (
+                                    ) : availableGroups.length === 0 ? (
                                         <div className="p-6 text-center text-sm text-muted-foreground">{t('emptyAvailable')}</div>
-                                    ) : availableSources.map((source) => (
-                                        <SourceCard
-                                            key={source.channel_id}
-                                            source={source}
-                                            action={(
-                                                <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl" onClick={() => handleAdd(source)}>
-                                                    <Plus className="size-3.5" />
-                                                    {t('add')}
-                                                </Button>
-                                            )}
-                                        />
-                                    ))}
+                                    ) : availableGroups.map((group) => {
+                                        const isExpanded = expanded.has(group.key) || !!normalizedKeyword;
+                                        return (
+                                            <div key={group.key} className="border-b border-border/40 last:border-b-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleExpanded(group.key)}
+                                                    className="flex h-8 w-full items-center gap-2 px-2 text-left hover:bg-muted/30"
+                                                >
+                                                    <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isExpanded ? '' : '-rotate-90')} />
+                                                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{group.label}</span>
+                                                    <span className="text-[10px] tabular-nums text-muted-foreground">{group.sources.length}</span>
+                                                </button>
+                                                {isExpanded ? (
+                                                    <div className="flex flex-col">
+                                                        {group.sources.map((source) => (
+                                                            <AvailableSourceRow key={source.channel_id} source={source} onAdd={handleAdd} />
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </section>
 
-                            <section className="flex min-h-0 flex-col rounded-2xl border border-border/60 bg-muted/20">
-                                <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
+                            <section className="flex min-h-0 flex-col rounded-xl border border-border/60 bg-muted/20">
+                                <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
                                     <span className="text-sm font-medium text-foreground">{t('sections.selected')}</span>
-                                    <span className="text-xs text-muted-foreground">{Object.keys(selectedModes).length}</span>
+                                    <span className="text-xs tabular-nums text-muted-foreground">{Object.keys(selectedModes).length}</span>
                                 </div>
-                                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+                                <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
                                     {selectedSources.length === 0 ? (
                                         <div className="p-6 text-center text-sm text-muted-foreground">{t('emptySelected')}</div>
                                     ) : selectedSources.map((source) => (
-                                        <SourceCard
+                                        <SelectedSourceRow
                                             key={source.channel_id}
                                             source={source}
                                             mode={selectedModes[source.channel_id] ?? AutoGroupType.Fuzzy}
                                             onModeChange={(mode) => setSelectedModes((current) => ({ ...current, [source.channel_id]: mode }))}
-                                            action={(
-                                                <Button type="button" variant="ghost" size="sm" className="h-8 rounded-xl text-muted-foreground hover:text-destructive" onClick={() => handleRemove(source.channel_id)}>
-                                                    <X className="size-4" />
-                                                </Button>
-                                            )}
+                                            onRemove={() => handleRemove(source.channel_id)}
                                         />
                                     ))}
                                 </div>
                             </section>
-                        </div>
-
-                        <div className="mt-4 rounded-2xl border border-border/60 bg-muted/20 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-                            {t('notice', { mode: globalModeLabel })}
                         </div>
 
                         <div className="mt-4 flex shrink-0 flex-col gap-2 sm:flex-row">

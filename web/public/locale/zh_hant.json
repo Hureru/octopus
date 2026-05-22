@@ -520,7 +520,11 @@
                 "siteGroup": "站點組",
                 "disabled": "停用",
                 "globalActive": "全域生效",
-                "modelCount": "{count} 個模型"
+                "modelCount": "{count} 個模型",
+                "moreModels": "+{count} 個",
+                "noModels": "暫無模型",
+                "unknownSite": "未知站點",
+                "manualGroup": "普通供應源"
             },
             "mode": {
                 "none": "關閉",
@@ -541,7 +545,8 @@
                 "saveFailed": "儲存自動分組配置失敗",
                 "runSuccess": "已執行自動分組",
                 "runFailed": "執行自動分組失敗"
-            }
+            },
+            "remove": "移除"
         }
     },
     "model": {
