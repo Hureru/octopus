@@ -314,7 +314,7 @@ export function GroupAutoGroupDialogContent() {
     };
 
     return (
-        <div className="flex h-[calc(100vh-2rem)] w-screen max-w-full flex-col md:max-w-4xl">
+        <div className="flex h-[calc(100vh-6rem)] max-h-[42rem] w-screen max-w-full flex-col overflow-hidden md:max-w-4xl">
             <MorphingDialogTitle className="shrink-0">
                 <header className="mb-3 flex items-center justify-between gap-4">
                     <h2 className="flex items-center gap-2 text-2xl font-bold text-card-foreground">
@@ -332,7 +332,7 @@ export function GroupAutoGroupDialogContent() {
                     </div>
                 ) : (
                     <>
-                        <div className="mb-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+                        <div className="mb-3 shrink-0 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex min-w-0 items-center gap-2">
                                     <Globe2 className="size-4 shrink-0 text-muted-foreground" />
@@ -361,8 +361,8 @@ export function GroupAutoGroupDialogContent() {
                             </div>
                         </div>
 
-                        <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-2">
-                            <section className="flex min-h-0 flex-col rounded-xl border border-border/60 bg-muted/20">
+                        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-2">
+                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
                                 <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/50 px-3 py-2">
                                     <span className="min-w-0 truncate text-sm font-medium text-foreground">{t('sections.available')}</span>
                                     <div className="relative w-36 sm:w-44">
@@ -407,7 +407,7 @@ export function GroupAutoGroupDialogContent() {
                                 </div>
                             </section>
 
-                            <section className="flex min-h-0 flex-col rounded-xl border border-border/60 bg-muted/20">
+                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20">
                                 <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
                                     <div className="flex min-w-0 items-center gap-2">
                                         <span className="truncate text-sm font-medium text-foreground">{t('sections.selected')}</span>

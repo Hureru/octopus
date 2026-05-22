@@ -500,7 +500,7 @@
             "title": "Auto Group Configuration",
             "description": "Add channels or site groups to the list, and the system will automatically add models to matching model groups by group name or regex.",
             "loadFailed": "Failed to load auto group configuration: {message}",
-            "searchPlaceholder": "Search channels, sites, accounts, groups, or models",
+            "searchPlaceholder": "Search...",
             "runAll": "Run all enabled now",
             "loading": "Loading...",
             "emptyAvailable": "No sources available",
@@ -509,7 +509,7 @@
             "matchMode": "Match mode",
             "notice": "Removing a source or disabling the global setting will not delete existing model group members. Remove them manually in each model group if needed. Current global site-projected channel mode: {mode}.",
             "global": {
-                "title": "All site-projected channels auto group",
+                "title": "Global Site Channel Auto Group Mode",
                 "description": "This is the former global site-projected channel auto group setting. When enabled, all site-projected channels use the selected match mode. Per-channel settings are kept and take effect after the global mode is disabled."
             },
             "sections": {
