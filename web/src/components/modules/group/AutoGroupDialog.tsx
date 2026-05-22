@@ -363,7 +363,7 @@ export function GroupAutoGroupDialogContent() {
 
                         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-2">
                             <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
-                                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
+                                <div className="grid h-10 grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
                                     <span className="min-w-0 truncate text-sm font-medium text-foreground">{t('sections.available')}</span>
                                     <div className="relative w-40 sm:w-48">
                                         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -408,7 +408,7 @@ export function GroupAutoGroupDialogContent() {
                             </section>
 
                             <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
-                                <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
+                                <div className="flex h-10 items-center justify-between gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
                                     <div className="flex min-w-0 items-center gap-2">
                                         <span className="truncate text-sm font-medium text-foreground">{t('sections.selected')}</span>
                                         {globalOverrideCount > 0 ? (
