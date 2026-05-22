@@ -1,6 +1,7 @@
 package op
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -110,8 +111,8 @@ func TestRelayLogListContainsKeywordRequiresMinLength(t *testing.T) {
 	resetRelayLogStateForTest()
 
 	_, err := RelayLogListWithFilter(ctx, RelayLogListFilter{Keyword: "ab", KeywordMode: RelayLogKeywordModeContains, Page: 1, PageSize: 10})
-	if err == nil {
-		t.Fatalf("expected ErrRelayLogContainsKeywordTooShort, got nil")
+	if !errors.Is(err, ErrRelayLogContainsKeywordTooShort) {
+		t.Fatalf("expected ErrRelayLogContainsKeywordTooShort, got %v", err)
 	}
 }
 

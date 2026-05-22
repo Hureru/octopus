@@ -164,7 +164,7 @@ export function useLogPage(params: LogListParams) {
             search.set('include_content', String(params.include_content ?? false));
             search.set('with_total', String(params.with_total ?? true));
             appendLogListParams(search, params);
-            const result = await apiClient.get<{ logs: RelayLog[] | null; total: number; has_more?: boolean; next_cursor?: LogCursor | null } | null>(
+            const result = await apiClient.get<{ logs: RelayLog[] | null; total: number; has_more?: boolean; next_cursor?: LogCursor | null; warning?: string; search_mode?: string } | null>(
                 `/api/v1/log/list?${search.toString()}`,
             );
             return {
@@ -172,6 +172,8 @@ export function useLogPage(params: LogListParams) {
                 total: result?.total ?? 0,
                 has_more: result?.has_more ?? false,
                 next_cursor: result?.next_cursor ?? null,
+                warning: result?.warning,
+                search_mode: result?.search_mode,
             };
         },
         placeholderData: keepPreviousData,

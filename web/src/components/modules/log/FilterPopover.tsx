@@ -14,6 +14,7 @@ import { useChannelList } from '@/api/endpoints/channel';
 import { useSiteChannelList } from '@/api/endpoints/site-channel';
 import { SettingKey, useSettingValue } from '@/api/endpoints/setting';
 import { useToolbarViewOptionsStore } from '@/components/modules/toolbar/view-options-store';
+import { useSearchStore } from '@/components/modules/toolbar/search-store';
 
 type ChannelEntry = {
     id: number;
@@ -279,8 +280,10 @@ export function LogFilterPopover() {
     };
 
     const dateActive = !!logDateRange.start || !!logDateRange.end;
-    const keywordModeActive = logKeywordMode !== 'default' && logKeywordMode !== 'prefix';
-    const keywordScopeActive = logKeywordScope === 'content';
+    const logKeyword = useSearchStore((s) => s.getSearchTerm('log'));
+    const hasKeyword = logKeyword.trim().length > 0;
+    const keywordModeActive = hasKeyword && logKeywordMode !== 'default' && logKeywordMode !== 'prefix';
+    const keywordScopeActive = hasKeyword && logKeywordScope === 'content';
     const activeCount =
         (dateActive ? 1 : 0) +
         (logChannelIds.length > 0 ? 1 : 0) +

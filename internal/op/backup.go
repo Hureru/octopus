@@ -764,9 +764,13 @@ func createUpsertSettings(tx *gorm.DB, rows []model.Setting) (int64, error) {
 // JSON files, relay_logs become NDJSON to avoid building a giant in-memory
 // slice. The writer is consumed once; failures partway through cannot return a
 // JSON error to the client, so callers should validate inputs before invoking.
-func DBExportZip(ctx context.Context, w io.Writer, includeLogs, includeStats bool) error {
+func DBExportZip(ctx context.Context, w io.Writer, includeLogs, includeStats bool) (err error) {
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer func() {
+		if closeErr := zw.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	conn := db.GetDB().WithContext(ctx)
 

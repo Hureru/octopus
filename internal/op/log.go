@@ -868,28 +868,40 @@ func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB 
 			keyword, keyword, keyword, keyword,
 		)
 	case RelayLogKeywordModeContains:
-		like := "%" + keyword + "%"
+		escaped := escapeLikeKeyword(keyword)
+		like := "%" + escaped + "%"
 		if filter.KeywordScope == RelayLogKeywordScopeContent {
 			query = query.Where(
-				"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(channel_name) LIKE ? OR LOWER(request_content) LIKE ? OR LOWER(response_content) LIKE ? OR LOWER(error) LIKE ?",
+				"LOWER(request_model_name) LIKE ? ESCAPE '#' OR LOWER(actual_model_name) LIKE ? ESCAPE '#' OR LOWER(request_api_key_name) LIKE ? ESCAPE '#' OR LOWER(channel_name) LIKE ? ESCAPE '#' OR LOWER(request_content) LIKE ? ESCAPE '#' OR LOWER(response_content) LIKE ? ESCAPE '#' OR LOWER(error) LIKE ? ESCAPE '#'",
 				like, like, like, like, like, like, like,
 			)
 		} else {
 			query = query.Where(
-				"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(channel_name) LIKE ? OR LOWER(error) LIKE ?",
+				"LOWER(request_model_name) LIKE ? ESCAPE '#' OR LOWER(actual_model_name) LIKE ? ESCAPE '#' OR LOWER(request_api_key_name) LIKE ? ESCAPE '#' OR LOWER(channel_name) LIKE ? ESCAPE '#' OR LOWER(error) LIKE ? ESCAPE '#'",
 				like, like, like, like, like,
 			)
 		}
 	default:
 		// prefix is the default fast path: anchored LIKE 'kw%' can leverage
 		// indexes where available, and avoids the worst leading-wildcard scans.
-		like := keyword + "%"
+		like := escapeLikeKeyword(keyword) + "%"
 		query = query.Where(
-			"LOWER(request_model_name) LIKE ? OR LOWER(actual_model_name) LIKE ? OR LOWER(request_api_key_name) LIKE ? OR LOWER(channel_name) LIKE ?",
+			"LOWER(request_model_name) LIKE ? ESCAPE '#' OR LOWER(actual_model_name) LIKE ? ESCAPE '#' OR LOWER(request_api_key_name) LIKE ? ESCAPE '#' OR LOWER(channel_name) LIKE ? ESCAPE '#'",
 			like, like, like, like,
 		)
 	}
 	return query
+}
+
+// escapeLikeKeyword escapes SQL LIKE wildcards (and the escape char itself) so
+// callers can match user input literally. Pair with `ESCAPE '#'` in the LIKE
+// clause. A non-special ASCII char is used so the same SQL parses identically
+// across SQLite, MySQL, and PostgreSQL string literals.
+func escapeLikeKeyword(s string) string {
+	s = strings.ReplaceAll(s, "#", "##")
+	s = strings.ReplaceAll(s, "%", "#%")
+	s = strings.ReplaceAll(s, "_", "#_")
+	return s
 }
 
 // logMatchesChannels 检查日志是否属于指定的渠道集合。
@@ -964,13 +976,22 @@ func resolveRelayLogKeywordMode(filter *RelayLogListFilter) (RelayLogKeywordMode
 			filter.StartTime = &start
 			warning = "applied default 24h time window for contains search"
 		} else {
-			start := int64(0)
-			if filter.StartTime != nil {
-				start = int64(*filter.StartTime)
-			}
 			end := now
 			if filter.EndTime != nil {
 				end = int64(*filter.EndTime)
+			}
+			var start int64
+			if filter.StartTime != nil {
+				start = int64(*filter.StartTime)
+			} else {
+				// EndTime set but StartTime not: anchor the window to EndTime
+				// so end-only queries stay within the contains-search budget.
+				start = end - relayLogKeywordContainsMaxWindow
+				if start < 0 {
+					start = 0
+				}
+				startInt := int(start)
+				filter.StartTime = &startInt
 			}
 			if end-start > relayLogKeywordContainsMaxWindow {
 				return mode, "", ErrRelayLogContainsWindowTooWide
