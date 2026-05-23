@@ -89,8 +89,8 @@ type GroupAutoGroupSource struct {
 }
 
 type GroupAutoGroupSourceUpdateRequest struct {
-	ChannelID int           `json:"channel_id" binding:"required"`
-	AutoGroup AutoGroupType `json:"auto_group"`
+	ChannelID int            `json:"channel_id" binding:"required"`
+	AutoGroup *AutoGroupType `json:"auto_group,omitempty"`
 }
 
 type GroupAutoGroupConfigUpdateRequest struct {

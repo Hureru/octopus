@@ -72,13 +72,13 @@ func GroupAutoGroupConfigGet(ctx context.Context) (*model.GroupAutoGroupConfig, 
 
 func GroupAutoGroupConfigUpdate(req *model.GroupAutoGroupConfigUpdateRequest, ctx context.Context) (*model.GroupAutoGroupConfig, error) {
 	if req == nil {
-		return nil, fmt.Errorf("auto group config request is nil")
+		return nil, newGroupAutoGroupBadRequestError("auto group config request is nil")
 	}
 
 	if req.ProjectedGlobalAutoGroup != nil {
 		mode := *req.ProjectedGlobalAutoGroup
 		if !mode.Valid() {
-			return nil, fmt.Errorf("invalid projected global auto group type")
+			return nil, newGroupAutoGroupBadRequestError("invalid projected global auto group type")
 		}
 		if err := SettingSetString(model.SettingKeyProjectedChannelAutoGroupEnabled, strconv.Itoa(int(mode))); err != nil {
 			return nil, err
@@ -95,16 +95,20 @@ func GroupAutoGroupConfigUpdate(req *model.GroupAutoGroupConfigUpdateRequest, ct
 	seen := make(map[int]struct{}, len(req.Items))
 	for _, item := range req.Items {
 		if item.ChannelID <= 0 {
-			return nil, fmt.Errorf("channel id is required")
+			return nil, newGroupAutoGroupBadRequestError("channel id is required")
 		}
 		if _, ok := seen[item.ChannelID]; ok {
-			return nil, fmt.Errorf("duplicate channel: %d", item.ChannelID)
+			return nil, newGroupAutoGroupBadRequestError(fmt.Sprintf("duplicate channel: %d", item.ChannelID))
 		}
 		seen[item.ChannelID] = struct{}{}
-		if !item.AutoGroup.Valid() {
-			return nil, fmt.Errorf("invalid auto group type")
+		if item.AutoGroup == nil {
+			continue
 		}
-		if err := ChannelAutoGroupUpdate(item.ChannelID, item.AutoGroup, ctx); err != nil {
+		mode := *item.AutoGroup
+		if !mode.Valid() {
+			return nil, newGroupAutoGroupBadRequestError("invalid auto group type")
+		}
+		if err := ChannelAutoGroupUpdate(item.ChannelID, mode, ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -120,13 +124,13 @@ func GroupAutoGroupConfigUpdate(req *model.GroupAutoGroupConfigUpdateRequest, ct
 
 func ChannelAutoGroupUpdate(channelID int, mode model.AutoGroupType, ctx context.Context) error {
 	if channelID <= 0 {
-		return fmt.Errorf("channel id is required")
+		return newGroupAutoGroupBadRequestError("channel id is required")
 	}
 	if !mode.Valid() {
-		return fmt.Errorf("invalid auto group type")
+		return newGroupAutoGroupBadRequestError("invalid auto group type")
 	}
 	if _, ok := channelCache.Get(channelID); !ok {
-		return fmt.Errorf("channel not found")
+		return newGroupAutoGroupNotFoundError("channel not found")
 	}
 	if err := db.GetDB().WithContext(ctx).Model(&model.Channel{}).Where("id = ?", channelID).Update("auto_group", mode).Error; err != nil {
 		return err
@@ -152,7 +156,7 @@ func RunGroupAutoGroup(channelIDs []int, ctx context.Context) error {
 			}
 			channel, ok := allChannels[id]
 			if !ok {
-				return fmt.Errorf("channel not found: %d", id)
+				return newGroupAutoGroupNotFoundError(fmt.Sprintf("channel not found: %d", id))
 			}
 			targets[id] = channel
 		}

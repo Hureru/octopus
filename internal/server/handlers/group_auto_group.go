@@ -37,7 +37,7 @@ func updateGroupAutoGroupConfig(c *gin.Context) {
 	}
 	config, err := op.GroupAutoGroupConfigUpdate(&req, c.Request.Context())
 	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, err)
 		return
 	}
 	resp.Success(c, config)
@@ -50,7 +50,7 @@ func runGroupAutoGroup(c *gin.Context) {
 		return
 	}
 	if err := op.RunGroupAutoGroup(req.ChannelIDs, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, err)
 		return
 	}
 	resp.Success(c, nil)
