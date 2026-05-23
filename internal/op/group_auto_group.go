@@ -76,22 +76,10 @@ func GroupAutoGroupConfigUpdate(req *model.GroupAutoGroupConfigUpdateRequest, ct
 	}
 
 	if req.ProjectedGlobalAutoGroup != nil {
-		mode := *req.ProjectedGlobalAutoGroup
-		if !mode.Valid() {
+		if !req.ProjectedGlobalAutoGroup.Valid() {
 			return nil, newGroupAutoGroupBadRequestError("invalid projected global auto group type")
 		}
-		if err := SettingSetString(model.SettingKeyProjectedChannelAutoGroupEnabled, strconv.Itoa(int(mode))); err != nil {
-			return nil, err
-		}
-		// Preserve the old global-setting behavior: enabling a global projected-channel
-		// mode immediately applies auto grouping to existing projected channels.
-		if mode != model.AutoGroupTypeNone {
-			if err := AutoGroupAllProjectedChannels(ctx); err != nil {
-				return nil, err
-			}
-		}
 	}
-
 	seen := make(map[int]struct{}, len(req.Items))
 	for _, item := range req.Items {
 		if item.ChannelID <= 0 {
@@ -104,11 +92,29 @@ func GroupAutoGroupConfigUpdate(req *model.GroupAutoGroupConfigUpdateRequest, ct
 		if item.AutoGroup == nil {
 			continue
 		}
-		mode := *item.AutoGroup
-		if !mode.Valid() {
+		if !item.AutoGroup.Valid() {
 			return nil, newGroupAutoGroupBadRequestError("invalid auto group type")
 		}
-		if err := ChannelAutoGroupUpdate(item.ChannelID, mode, ctx); err != nil {
+	}
+
+	if req.ProjectedGlobalAutoGroup != nil {
+		mode := *req.ProjectedGlobalAutoGroup
+		if err := SettingSetString(model.SettingKeyProjectedChannelAutoGroupEnabled, strconv.Itoa(int(mode))); err != nil {
+			return nil, err
+		}
+		// Preserve the old global-setting behavior: enabling a global projected-channel
+		// mode immediately applies auto grouping to existing projected channels.
+		if mode != model.AutoGroupTypeNone {
+			if err := AutoGroupAllProjectedChannels(ctx); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, item := range req.Items {
+		if item.AutoGroup == nil {
+			continue
+		}
+		if err := ChannelAutoGroupUpdate(item.ChannelID, *item.AutoGroup, ctx); err != nil {
 			return nil, err
 		}
 	}
