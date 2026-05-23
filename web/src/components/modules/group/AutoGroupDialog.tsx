@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { AnimatePresence, motion } from 'motion/react';
 import { ChevronDown, Globe2, HelpCircle, Search, Sparkles, X } from 'lucide-react';
 import { AutoGroupType } from '@/api/endpoints/channel';
 import {
@@ -535,29 +536,40 @@ export function GroupAutoGroupDialogContent() {
                                                         )}
                                                     </button>
                                                 </div>
-                                                {isExpanded ? (
-                                                    <div className="flex flex-col">
-                                                        {group.sources.map((source) => (
-                                                            <ChannelRow
-                                                                key={source.channel_id}
-                                                                source={source}
-                                                                mode={modes[source.channel_id] ?? AutoGroupType.None}
-                                                                overridden={globalModeEnabled && source.managed}
-                                                                globalMode={projectedGlobalMode}
-                                                                selected={selection.has(source.channel_id)}
-                                                                onSelectedChange={(next) =>
-                                                                    toggleSelected(source.channel_id, next)
-                                                                }
-                                                                onModeChange={(mode) =>
-                                                                    setModes((current) => ({
-                                                                        ...current,
-                                                                        [source.channel_id]: mode,
-                                                                    }))
-                                                                }
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                ) : null}
+                                                <AnimatePresence initial={false}>
+                                                    {isExpanded ? (
+                                                        <motion.div
+                                                            key="content"
+                                                            initial={{ height: 0, opacity: 0 }}
+                                                            animate={{ height: 'auto', opacity: 1 }}
+                                                            exit={{ height: 0, opacity: 0 }}
+                                                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                                                            className="overflow-hidden"
+                                                        >
+                                                            <div className="flex flex-col">
+                                                                {group.sources.map((source) => (
+                                                                    <ChannelRow
+                                                                        key={source.channel_id}
+                                                                        source={source}
+                                                                        mode={modes[source.channel_id] ?? AutoGroupType.None}
+                                                                        overridden={globalModeEnabled && source.managed}
+                                                                        globalMode={projectedGlobalMode}
+                                                                        selected={selection.has(source.channel_id)}
+                                                                        onSelectedChange={(next) =>
+                                                                            toggleSelected(source.channel_id, next)
+                                                                        }
+                                                                        onModeChange={(mode) =>
+                                                                            setModes((current) => ({
+                                                                                ...current,
+                                                                                [source.channel_id]: mode,
+                                                                            }))
+                                                                        }
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </motion.div>
+                                                    ) : null}
+                                                </AnimatePresence>
                                             </div>
                                         );
                                     })
