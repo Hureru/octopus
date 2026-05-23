@@ -61,6 +61,17 @@ func InitDB(dbType, dsn string, debug bool) error {
 	if err := migrate.BeforeAutoMigrate(db); err != nil {
 		return err
 	}
+	// relay_logs 是表里行最大、最容易踩 OOM 的表。这里只在表完全不存在时
+	// 用 CreateTable 一次性建出来（新装路径，无历史数据，无内存风险）；表已存在
+	// 的升级路径上严格绕开 GORM 的 smart-migrate，所有 schema 变更都交给
+	// migrate/013.go 等显式 SQL 迁移，索引创建由 op.RelayLogEnsureIndexes 异步完成。
+	// 这样既不会触发 glebarez 的 AlterColumn → recreateTable 全表拷贝，又能保留
+	// 首次启动建表的便利。
+	if !db.Migrator().HasTable(&model.RelayLog{}) {
+		if err := db.Migrator().CreateTable(&model.RelayLog{}); err != nil {
+			return err
+		}
+	}
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.Channel{},
@@ -87,7 +98,6 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.StatsSiteModelHourly{},
 		&model.GroupHealthSnapshot{},
 		&model.GroupHealthAttempt{},
-		&model.RelayLog{},
 		&model.WSResponseAffinity{},
 		&migrate.MigrationRecord{},
 	); err != nil {

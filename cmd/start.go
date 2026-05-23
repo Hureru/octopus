@@ -77,6 +77,9 @@ var startCmd = &cobra.Command{
 		safe.Go("stats-site-model-backfill", func() {
 			op.StatsSiteModelBackfill(cmd.Context())
 		})
+		safe.Go("relay-log-ensure-indexes", func() {
+			op.RelayLogEnsureIndexes(cmd.Context())
+		})
 	},
 }
 
