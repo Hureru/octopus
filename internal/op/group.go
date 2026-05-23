@@ -241,6 +241,11 @@ func GroupDel(id int, ctx context.Context) error {
 		return fmt.Errorf("failed to delete group items: %w", err)
 	}
 
+	if err := tx.Where("group_id = ?", id).Delete(&model.GroupPreset{}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete group presets: %w", err)
+	}
+
 	if err := tx.Delete(&model.Group{}, id).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to delete group: %w", err)

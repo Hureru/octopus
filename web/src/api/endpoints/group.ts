@@ -37,7 +37,53 @@ export interface Group {
     session_keep_time?: number;
     retry_enabled?: boolean;
     max_retries?: number;
+    pinned?: boolean;
+    pinned_at?: string | null;
+    active_preset_id?: number | null;
     items?: GroupItem[];
+}
+
+/**
+ * 预设中的渠道-模型条目（JSON 快照内容）
+ */
+export interface GroupPresetItem {
+    channel_id: number;
+    model_name: string;
+    priority: number;
+    weight: number;
+}
+
+/**
+ * 分组预设：命名快照，包含 Mode/超时/重试/regex + items
+ */
+export interface GroupPreset {
+    id: number;
+    group_id: number;
+    name: string;
+    mode: GroupMode;
+    match_regex: string;
+    first_token_time_out: number;
+    session_keep_time: number;
+    retry_enabled: boolean;
+    max_retries: number;
+    items: GroupPresetItem[];
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * 预设直接编辑请求（仅非活动预设可调）
+ * Items 为整体替换语义
+ */
+export interface GroupPresetUpdateRequest {
+    name?: string;
+    mode?: GroupMode;
+    match_regex?: string;
+    first_token_time_out?: number;
+    session_keep_time?: number;
+    retry_enabled?: boolean;
+    max_retries?: number;
+    items?: GroupPresetItem[];
 }
 
 /**
@@ -298,4 +344,131 @@ export function useRunGroupAutoGroup() {
 //         },
 //     });
 // }
+
+/**
+ * 获取某个分组的预设列表
+ */
+export function useGroupPresetList(groupID: number | undefined) {
+    return useQuery({
+        queryKey: ['groups', 'presets', groupID],
+        queryFn: async () => apiClient.get<GroupPreset[]>(`/api/v1/group/preset/list/${groupID}`),
+        enabled: typeof groupID === 'number' && groupID > 0,
+    });
+}
+
+/**
+ * 创建预设：服务端从分组当前实时状态取快照
+ */
+export function useCreateGroupPreset() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ groupID, name }: { groupID: number; name: string }) =>
+            apiClient.post<GroupPreset>(`/api/v1/group/preset/create/${groupID}`, { name }),
+        onSuccess: (_, vars) => {
+            queryClient.invalidateQueries({ queryKey: ['groups', 'presets', vars.groupID] });
+        },
+        onError: (error) => logger.error('预设创建失败:', error),
+    });
+}
+
+/**
+ * 激活预设：用预设覆盖分组的实时配置
+ */
+export function useActivateGroupPreset() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ presetID }: { presetID: number; groupID?: number }) =>
+            apiClient.post<string>(`/api/v1/group/preset/activate/${presetID}`, {}),
+        onSuccess: (_, vars) => {
+            queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
+            if (vars.groupID) {
+                queryClient.invalidateQueries({ queryKey: ['groups', 'presets', vars.groupID] });
+            }
+        },
+        onError: (error) => logger.error('预设激活失败:', error),
+    });
+}
+
+/**
+ * 用当前实时配置覆盖已有预设
+ */
+export function useOverwriteGroupPreset() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ presetID }: { presetID: number; groupID?: number }) =>
+            apiClient.post<GroupPreset>(`/api/v1/group/preset/overwrite/${presetID}`, {}),
+        onSuccess: (_, vars) => {
+            if (vars.groupID) {
+                queryClient.invalidateQueries({ queryKey: ['groups', 'presets', vars.groupID] });
+            }
+        },
+        onError: (error) => logger.error('预设覆盖失败:', error),
+    });
+}
+
+/**
+ * 直接编辑预设内容（活动预设会被后端拒绝）
+ */
+export function useUpdateGroupPreset() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ presetID, data }: { presetID: number; groupID?: number; data: GroupPresetUpdateRequest }) =>
+            apiClient.put<GroupPreset>(`/api/v1/group/preset/update/${presetID}`, data),
+        onSuccess: (_, vars) => {
+            if (vars.groupID) {
+                queryClient.invalidateQueries({ queryKey: ['groups', 'presets', vars.groupID] });
+            }
+        },
+        onError: (error) => logger.error('预设编辑失败:', error),
+    });
+}
+
+/**
+ * 重命名预设
+ */
+export function useRenameGroupPreset() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ presetID, name }: { presetID: number; groupID?: number; name: string }) =>
+            apiClient.put<string>(`/api/v1/group/preset/rename/${presetID}`, { name }),
+        onSuccess: (_, vars) => {
+            if (vars.groupID) {
+                queryClient.invalidateQueries({ queryKey: ['groups', 'presets', vars.groupID] });
+            }
+        },
+        onError: (error) => logger.error('预设重命名失败:', error),
+    });
+}
+
+/**
+ * 删除预设（活动预设会被后端拒绝）
+ */
+export function useDeleteGroupPreset() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ presetID }: { presetID: number; groupID?: number }) =>
+            apiClient.delete<string>(`/api/v1/group/preset/delete/${presetID}`),
+        onSuccess: (_, vars) => {
+            if (vars.groupID) {
+                queryClient.invalidateQueries({ queryKey: ['groups', 'presets', vars.groupID] });
+            }
+        },
+        onError: (error) => logger.error('预设删除失败:', error),
+    });
+}
+
+/**
+ * 切换分组置顶
+ */
+export function useToggleGroupPin() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ groupID, pinned }: { groupID: number; pinned: boolean }) =>
+            apiClient.post<string>(`/api/v1/group/pin/${groupID}`, { pinned }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
+        },
+        onError: (error) => logger.error('置顶切换失败:', error),
+    });
+}
 

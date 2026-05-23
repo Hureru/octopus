@@ -416,7 +416,47 @@
             "updated": "Updated successfully",
             "updateFailed": "Update failed",
             "deleted": "Deleted successfully",
-            "autoAddFailed": "Auto add failed"
+            "autoAddFailed": "Auto add failed",
+            "pinned": "Pinned",
+            "unpinned": "Unpinned",
+            "pinFailed": "Pin toggle failed"
+        },
+        "pin": {
+            "pin": "Pin to top",
+            "unpin": "Unpin"
+        },
+        "preset": {
+            "title": "Presets",
+            "saveAs": "Save as new preset",
+            "namePlaceholder": "Preset name",
+            "loading": "Loading...",
+            "empty": "No presets yet",
+            "activeBadge": "Active",
+            "edit": "Edit",
+            "overwrite": "Overwrite with current",
+            "confirmOverwrite": "Overwrite preset {name}?",
+            "rename": "Rename",
+            "renameShort": "Aa",
+            "delete": "Delete",
+            "confirmDelete": "Delete preset {name}?",
+            "confirm": "Confirm",
+            "editorTitle": "Edit preset: {name}",
+            "save": "Save",
+            "saving": "Saving...",
+            "toast": {
+                "created": "Preset saved",
+                "createFailed": "Preset save failed",
+                "activated": "Preset activated",
+                "activateFailed": "Activate failed",
+                "overwritten": "Preset overwritten",
+                "overwriteFailed": "Overwrite failed",
+                "renamed": "Preset renamed",
+                "renameFailed": "Rename failed",
+                "deleted": "Preset deleted",
+                "deleteFailed": "Delete failed",
+                "updated": "Preset updated",
+                "updateFailed": "Preset update failed"
+            }
         },
         "create": {
             "title": "Create Group",

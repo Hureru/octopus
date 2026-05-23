@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Trash2, X, Pencil } from 'lucide-react';
+import { Trash2, X, Pencil, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { type Group, useDeleteGroup, useUpdateGroup } from '@/api/endpoints/group';
+import { type Group, useDeleteGroup, useUpdateGroup, useToggleGroupPin } from '@/api/endpoints/group';
 import { useModelChannelList } from '@/api/endpoints/model';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ import { GroupEditor, type GroupEditorValues } from './Editor';
 import { GroupHealthBadge } from './health';
 import { modelChannelKey, MODE_LABELS } from './utils';
 import { GroupMode, type GroupUpdateRequest } from '@/api/endpoints/group';
+import { PresetPopover } from './PresetPopover';
 import {
     MorphingDialog,
     MorphingDialogClose,
@@ -75,6 +76,7 @@ export function GroupCard({ group }: { group: Group }) {
     const t = useTranslations('group');
     const updateGroup = useUpdateGroup();
     const deleteGroup = useDeleteGroup();
+    const togglePin = useToggleGroupPin();
     const { data: modelChannels = [] } = useModelChannelList();
 
     const [confirmDelete, setConfirmDelete] = useState(false);
@@ -297,6 +299,33 @@ export function GroupCard({ group }: { group: Group }) {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                    <PresetPopover group={group} />
+
+                    <Tooltip side="top" sideOffset={10} align="center">
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!group.id) return;
+                                    togglePin.mutate(
+                                        { groupID: group.id, pinned: !group.pinned },
+                                        {
+                                            onSuccess: () => toast.success(group.pinned ? t('toast.unpinned') : t('toast.pinned')),
+                                            onError: (e) => toast.error(t('toast.pinFailed'), { description: e.message }),
+                                        },
+                                    );
+                                }}
+                                className={cn(
+                                    'p-1.5 rounded-lg transition-colors hover:bg-muted',
+                                    group.pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                                )}
+                            >
+                                {group.pinned ? <Pin className="size-4 fill-current" /> : <PinOff className="size-4" />}
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{group.pinned ? t('pin.unpin') : t('pin.pin')}</TooltipContent>
+                    </Tooltip>
+
                     <MorphingDialog>
                         <MorphingDialogTrigger className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground">
                             <Tooltip side="top" sideOffset={10} align="center">

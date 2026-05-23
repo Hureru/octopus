@@ -17,6 +17,13 @@ export function Group() {
     const sortedGroups = useMemo(() => {
         if (!groups) return [];
         return [...groups].sort((a, b) => {
+            // 置顶优先：pinned 组排在前面，组内按 pinned_at desc
+            if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+            if (a.pinned && b.pinned) {
+                const ta = a.pinned_at ? new Date(a.pinned_at).getTime() : 0;
+                const tb = b.pinned_at ? new Date(b.pinned_at).getTime() : 0;
+                if (ta !== tb) return tb - ta;
+            }
             const diff = sortField === 'name'
                 ? a.name.localeCompare(b.name)
                 : (a.id || 0) - (b.id || 0);

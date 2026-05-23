@@ -75,6 +75,7 @@ func InitDB(dbType, dsn string, debug bool) error {
 		&model.SitePrice{},
 		&model.Group{},
 		&model.GroupItem{},
+		&model.GroupPreset{},
 		&model.LLMInfo{},
 		&model.APIKey{},
 		&model.Setting{},
