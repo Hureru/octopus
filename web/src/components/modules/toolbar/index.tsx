@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, WandSparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     MorphingDialog,
@@ -424,7 +424,7 @@ export function Toolbar() {
                 {toolbarItem === 'group' && (
                     <MorphingDialog>
                         <MorphingDialogTrigger className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}>
-                            <Sparkles className="size-4 transition-colors duration-300" />
+                            <WandSparkles className="size-4 transition-colors duration-300" />
                         </MorphingDialogTrigger>
 
                         <MorphingDialogContainer>

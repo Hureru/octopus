@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion } from 'motion/react';
-import { ChevronDown, Globe2, HelpCircle, Search, Sparkles, X } from 'lucide-react';
+import { ChevronDown, Globe2, HelpCircle, Search, WandSparkles, X } from 'lucide-react';
 import { AutoGroupType } from '@/api/endpoints/channel';
 import {
     type GroupAutoGroupSource,
@@ -384,7 +384,7 @@ export function GroupAutoGroupDialogContent() {
             <MorphingDialogTitle className="shrink-0">
                 <header className="mb-3 flex items-center justify-between gap-4">
                     <h2 className="flex items-center gap-2 text-2xl font-bold text-card-foreground">
-                        <Sparkles className="size-5 text-primary" />
+                        <WandSparkles className="size-5 text-primary" />
                         {t('title')}
                     </h2>
                     <MorphingDialogClose className="relative right-0 top-0" />
