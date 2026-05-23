@@ -455,36 +455,47 @@ export function GroupAutoGroupDialogContent() {
                                     </div>
                                 </div>
                             </div>
-                            {selection.size > 0 ? (
-                                <div className="flex h-10 shrink-0 items-center gap-2 border-b border-primary/20 bg-primary/5 px-3 text-xs">
-                                    <span className="font-medium text-primary">
-                                        {t('bulk.selected', { count: selection.size })}
-                                    </span>
-                                    <Select onValueChange={(value) => applyBulkMode(Number(value) as AutoGroupType)}>
-                                        <SelectTrigger
-                                            size="sm"
-                                            className="!h-7 ml-auto w-36 rounded-lg border-primary/30 bg-background text-xs"
-                                        >
-                                            <SelectValue placeholder={t('bulk.placeholder')} />
-                                        </SelectTrigger>
-                                        <SelectContent className="rounded-xl">
-                                            {AUTO_GROUP_VALUES.map((value) => (
-                                                <SelectItem key={value} value={String(value)}>
-                                                    {t(`mode.${modeKey(value)}`)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <button
-                                        type="button"
-                                        onClick={clearSelection}
-                                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                        aria-label={t('bulk.clear')}
+                            <AnimatePresence initial={false}>
+                                {selection.size > 0 ? (
+                                    <motion.div
+                                        key="bulk-bar"
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.22, ease: 'easeOut' }}
+                                        className="overflow-hidden"
                                     >
-                                        <X className="size-3.5" />
-                                    </button>
-                                </div>
-                            ) : null}
+                                        <div className="flex h-10 items-center gap-2 border-b border-primary/20 bg-primary/5 px-3 text-xs">
+                                            <span className="font-medium text-primary">
+                                                {t('bulk.selected', { count: selection.size })}
+                                            </span>
+                                            <Select onValueChange={(value) => applyBulkMode(Number(value) as AutoGroupType)}>
+                                                <SelectTrigger
+                                                    size="sm"
+                                                    className="!h-7 ml-auto w-36 rounded-lg border-primary/30 bg-background text-xs"
+                                                >
+                                                    <SelectValue placeholder={t('bulk.placeholder')} />
+                                                </SelectTrigger>
+                                                <SelectContent className="rounded-xl">
+                                                    {AUTO_GROUP_VALUES.map((value) => (
+                                                        <SelectItem key={value} value={String(value)}>
+                                                            {t(`mode.${modeKey(value)}`)}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <button
+                                                type="button"
+                                                onClick={clearSelection}
+                                                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                aria-label={t('bulk.clear')}
+                                            >
+                                                <X className="size-3.5" />
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                ) : null}
+                            </AnimatePresence>
                             <div className="min-h-0 flex-1 overflow-y-auto rounded-b-xl">
                                 {isLoading ? (
                                     <div className="p-6 text-center text-sm text-muted-foreground">{t('loading')}</div>
