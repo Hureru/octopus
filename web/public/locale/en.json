@@ -503,30 +503,31 @@
             "searchPlaceholder": "Search...",
             "runAll": "Run all enabled now",
             "loading": "Loading...",
-            "emptyAvailable": "No sources available",
-            "emptySelected": "Add channels or site groups from the left, then configure the match mode here.",
-            "add": "Add",
+            "emptyChannels": "No channels",
             "matchMode": "Match mode",
-            "notice": "Removing a source or disabling the global setting will not delete existing model group members. Remove them manually in each model group if needed. Current global site-projected channel mode: {mode}.",
+            "notice": "Turning a channel off or disabling the global setting will not delete existing model group members. Remove them manually in each model group if needed.",
             "global": {
-                "title": "Global Site Channel Auto Group Mode",
-                "description": "This is the former global site-projected channel auto group setting. When enabled, all site-projected channels use the selected match mode. Per-channel settings are kept and take effect after the global mode is disabled."
+                "title": "Global default mode",
+                "description": "When enabled, all site-projected channels use the selected match mode. Per-channel settings below are kept and take effect after the global mode is disabled."
             },
             "sections": {
-                "available": "Available channels / site groups",
-                "selected": "Enabled auto group list"
+                "channels": "Channels"
             },
             "source": {
                 "siteGroup": "Site group",
                 "disabled": "Disabled",
-                "globalActive": "Global",
                 "modelCount": "{count} models",
                 "moreModels": "+{count}",
                 "noModels": "No models",
                 "unknownSite": "Unknown site",
                 "manualGroup": "Manual channels",
-                "globalActiveCount": "Global {count}",
-                "globalActiveTip": "All site-projected channels are using the global auto group mode above. Per-channel settings are kept and take effect after the global mode is disabled."
+                "followingGlobalTip": "Global is on; this channel is currently grouped by the global mode. The per-channel mode below takes effect after the global mode is disabled."
+            },
+            "bulk": {
+                "selected": "{count} selected",
+                "apply": "Apply",
+                "clear": "Clear",
+                "placeholder": "Set selected to..."
             },
             "mode": {
                 "none": "Off",
@@ -547,8 +548,7 @@
                 "saveFailed": "Failed to save auto group configuration",
                 "runSuccess": "Auto grouping has run",
                 "runFailed": "Failed to run auto grouping"
-            },
-            "remove": "Remove"
+            }
         }
     },
     "model": {

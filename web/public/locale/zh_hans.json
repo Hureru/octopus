@@ -503,30 +503,31 @@
             "searchPlaceholder": "搜索...",
             "runAll": "立即执行全部已启用",
             "loading": "加载中...",
-            "emptyAvailable": "暂无可加入项",
-            "emptySelected": "将左侧渠道或站点组加入列表后，在这里配置匹配方式。",
-            "add": "加入",
+            "emptyChannels": "暂无渠道",
             "matchMode": "匹配方式",
-            "notice": "移出列表或关闭全局设置后，不会删除已存在的模型组成员；如需清理，请在具体模型组中手动移除。当前全局站点投影渠道模式：{mode}。",
+            "notice": "关闭某渠道的自动分组或全局设置后，不会删除已存在的模型组成员；如需清理，请在具体模型组中手动移除。",
             "global": {
-                "title": "全局站点渠道自动分组模式",
-                "description": "这是原全局站点投影渠道自动分组设置。开启后，所有站点投影渠道会统一使用所选匹配方式；单独渠道设置会保留，并在全局关闭后生效。"
+                "title": "全局默认模式",
+                "description": "开启后，所有站点投影渠道会统一使用所选匹配方式；下方单独渠道设置会保留，并在全局关闭后生效。"
             },
             "sections": {
-                "available": "可选渠道 / 站点组",
-                "selected": "已启用自动分组列表"
+                "channels": "渠道列表"
             },
             "source": {
                 "siteGroup": "站点组",
                 "disabled": "停用",
-                "globalActive": "全局生效",
                 "modelCount": "{count} 个模型",
                 "moreModels": "+{count} 个",
                 "noModels": "暂无模型",
                 "unknownSite": "未知站点",
                 "manualGroup": "普通渠道",
-                "globalActiveCount": "全局 {count}",
-                "globalActiveTip": "全部站点投影渠道正在使用上方全局自动分组模式；单独渠道设置会保留，并在全局关闭后生效。"
+                "followingGlobalTip": "全局已开启，此渠道当前按全局模式分组；下方单独模式将在全局关闭后生效。"
+            },
+            "bulk": {
+                "selected": "已选 {count} 项",
+                "apply": "应用",
+                "clear": "清除",
+                "placeholder": "批量设为..."
             },
             "mode": {
                 "none": "关闭",
@@ -547,8 +548,7 @@
                 "saveFailed": "保存自动分组配置失败",
                 "runSuccess": "已执行自动分组",
                 "runFailed": "执行自动分组失败"
-            },
-            "remove": "移除"
+            }
         }
     },
     "model": {

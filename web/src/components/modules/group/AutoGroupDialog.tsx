@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Globe2, HelpCircle, Plus, Search, Sparkles, X } from 'lucide-react';
+import { ChevronDown, Globe2, HelpCircle, Search, Sparkles, X } from 'lucide-react';
 import { AutoGroupType } from '@/api/endpoints/channel';
 import {
     type GroupAutoGroupSource,
@@ -73,6 +73,37 @@ function matchesKeyword(source: GroupAutoGroupSource, keyword: string) {
     return haystack.includes(keyword);
 }
 
+function TristateCheckbox({
+    state,
+    onChange,
+    ariaLabel,
+    className,
+}: {
+    state: 'unchecked' | 'partial' | 'checked';
+    onChange: (next: boolean) => void;
+    ariaLabel: string;
+    className?: string;
+}) {
+    const ref = useRef<HTMLInputElement>(null);
+    useEffect(() => {
+        if (ref.current) ref.current.indeterminate = state === 'partial';
+    }, [state]);
+    return (
+        <input
+            ref={ref}
+            type="checkbox"
+            checked={state === 'checked'}
+            aria-label={ariaLabel}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => onChange(event.target.checked)}
+            className={cn(
+                'size-3.5 shrink-0 rounded border-border bg-background accent-primary',
+                className,
+            )}
+        />
+    );
+}
+
 function ModelPreview({ source }: { source: GroupAutoGroupSource }) {
     const t = useTranslations('group.autoGroup');
     const models = source.models.slice(0, MODEL_PREVIEW_LIMIT);
@@ -114,76 +145,89 @@ function ModelPreview({ source }: { source: GroupAutoGroupSource }) {
     );
 }
 
-function AvailableSourceRow({ source, onAdd }: { source: GroupAutoGroupSource; onAdd: (source: GroupAutoGroupSource) => void }) {
-    const t = useTranslations('group.autoGroup');
-
-    return (
-        <div className="mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border border-border/50 bg-background px-2 text-left transition-colors hover:bg-muted">
-            <button type="button" onClick={() => onAdd(source)} className="min-w-0 flex-1 truncate text-left text-xs text-foreground">
-                {source.channel_name}
-            </button>
-            {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
-            <ModelPreview source={source} />
-            <button
-                type="button"
-                onClick={() => onAdd(source)}
-                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label={t('add')}
-            >
-                <Plus className="size-3.5" />
-            </button>
-        </div>
-    );
-}
-
-function SelectedSourceRow({
+function ChannelRow({
     source,
     mode,
+    overridden,
+    globalMode,
+    selected,
+    onSelectedChange,
     onModeChange,
-    onRemove,
 }: {
     source: GroupAutoGroupSource;
     mode: AutoGroupType;
+    overridden: boolean;
+    globalMode: AutoGroupType;
+    selected: boolean;
+    onSelectedChange: (next: boolean) => void;
     onModeChange: (mode: AutoGroupType) => void;
-    onRemove: () => void;
 }) {
     const t = useTranslations('group.autoGroup');
+    const configured = mode !== AutoGroupType.None;
 
     return (
-        <div className="mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border border-border/50 bg-background px-2 text-left transition-colors hover:bg-muted">
-            <TooltipProvider>
-                <Tooltip side="top" sideOffset={10} align="center">
-                    <TooltipTrigger asChild>
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                            {source.channel_name}
-                        </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{source.channel_name}</TooltipContent>
-                </Tooltip>
-            </TooltipProvider>
-            {!source.enabled ? <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">{t('source.disabled')}</Badge> : null}
+        <div
+            className={cn(
+                'mx-2 mb-1 flex h-8 items-center gap-2 rounded-lg border px-2 text-left transition-colors',
+                selected
+                    ? 'border-primary/40 bg-primary/5 hover:bg-primary/10'
+                    : 'border-border/40 bg-background hover:bg-muted/60',
+            )}
+        >
+            <TristateCheckbox
+                state={selected ? 'checked' : 'unchecked'}
+                onChange={onSelectedChange}
+                ariaLabel={source.channel_name}
+            />
+            <span
+                className={cn(
+                    'min-w-0 flex-1 truncate text-xs',
+                    configured ? 'font-medium text-foreground' : 'text-muted-foreground',
+                )}
+            >
+                {source.channel_name}
+            </span>
+            {!source.enabled ? (
+                <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-muted-foreground">
+                    {t('source.disabled')}
+                </Badge>
+            ) : null}
+            {overridden ? (
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Badge
+                                variant="outline"
+                                className="h-5 cursor-help gap-1 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary"
+                            >
+                                <Globe2 className="size-3" />
+                                {t(`mode.${modeKey(globalMode)}`)}
+                            </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">{t('source.followingGlobalTip')}</TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            ) : null}
             <ModelPreview source={source} />
             <Select value={String(mode)} onValueChange={(value) => onModeChange(Number(value) as AutoGroupType)}>
                 <SelectTrigger
                     size="sm"
-                    className="!h-6 w-auto min-w-18 justify-end rounded-md border-transparent bg-transparent px-1 py-0 text-xs font-medium text-foreground shadow-none hover:text-primary focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent"
+                    className={cn(
+                        '!h-6 w-auto min-w-18 justify-end rounded-md border-transparent bg-transparent px-1 py-0 text-xs shadow-none hover:text-primary focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent',
+                        configured ? 'font-medium text-foreground' : 'text-muted-foreground',
+                        overridden ? 'opacity-60' : '',
+                    )}
                 >
                     <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                    {AUTO_GROUP_VALUES.filter((value) => value !== AutoGroupType.None).map((value) => (
-                        <SelectItem key={value} value={String(value)}>{t(`mode.${modeKey(value)}`)}</SelectItem>
+                    {AUTO_GROUP_VALUES.map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                            {t(`mode.${modeKey(value)}`)}
+                        </SelectItem>
                     ))}
                 </SelectContent>
             </Select>
-            <button
-                type="button"
-                onClick={onRemove}
-                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                aria-label={t('remove')}
-            >
-                <X className="size-3.5" />
-            </button>
         </div>
     );
 }
@@ -194,38 +238,32 @@ export function GroupAutoGroupDialogContent() {
     const { data: config, isLoading, error } = useGroupAutoGroupConfig();
     const updateConfig = useUpdateGroupAutoGroupConfig();
     const [keyword, setKeyword] = useState('');
-    const [selectedModes, setSelectedModes] = useState<Record<number, AutoGroupType>>({});
+    const [modes, setModes] = useState<Record<number, AutoGroupType>>({});
     const [projectedGlobalMode, setProjectedGlobalMode] = useState<AutoGroupType>(AutoGroupType.None);
-    const [expanded, setExpanded] = useState<Set<string>>(new Set([MANUAL_GROUP_KEY]));
+    const [expanded, setExpanded] = useState<Set<string>>(new Set());
+    const [selection, setSelection] = useState<Set<number>>(new Set());
 
     useEffect(() => {
         if (!config) return;
         const next: Record<number, AutoGroupType> = {};
         for (const source of config.sources) {
-            if (source.auto_group !== AutoGroupType.None) {
-                next[source.channel_id] = source.auto_group;
-            }
+            next[source.channel_id] = source.auto_group;
         }
         queueMicrotask(() => {
-            setSelectedModes(next);
+            setModes(next);
             setProjectedGlobalMode(config.projected_global_auto_group);
         });
     }, [config]);
 
     const normalizedKeyword = keyword.trim().toLowerCase();
     const sources = useMemo(() => config?.sources ?? [], [config?.sources]);
-    const sourceById = useMemo(() => new Map(sources.map((source) => [source.channel_id, source])), [sources]);
 
-    const availableSources = useMemo(
-        () => sources.filter((source) => !(source.channel_id in selectedModes) && matchesKeyword(source, normalizedKeyword)),
-        [sources, selectedModes, normalizedKeyword],
-    );
-
-    const availableGroups = useMemo<SourceTreeGroup[]>(() => {
+    const groups = useMemo<SourceTreeGroup[]>(() => {
         const siteBuckets = new Map<string, SourceTreeGroup>();
         const manualSources: GroupAutoGroupSource[] = [];
 
-        for (const source of availableSources) {
+        for (const source of sources) {
+            if (!matchesKeyword(source, normalizedKeyword)) continue;
             if (!source.managed) {
                 manualSources.push(source);
                 continue;
@@ -244,21 +282,19 @@ export function GroupAutoGroupDialogContent() {
             });
         }
 
-        const groups = Array.from(siteBuckets.values()).sort((a, b) => a.label.localeCompare(b.label));
+        const list = Array.from(siteBuckets.values()).sort((a, b) => a.label.localeCompare(b.label));
         if (manualSources.length > 0) {
-            groups.push({ key: MANUAL_GROUP_KEY, label: t('source.manualGroup'), sources: manualSources, manual: true });
+            list.push({ key: MANUAL_GROUP_KEY, label: t('source.manualGroup'), sources: manualSources, manual: true });
         }
-        for (const group of groups) {
+        for (const group of list) {
             group.sources.sort((a, b) => a.channel_name.localeCompare(b.channel_name));
         }
-        return groups;
-    }, [availableSources, t]);
+        return list;
+    }, [sources, normalizedKeyword, t]);
 
-    const selectedSources = useMemo(
-        () => Object.keys(selectedModes)
-            .map((id) => sourceById.get(Number(id)))
-            .filter((source): source is GroupAutoGroupSource => !!source),
-        [selectedModes, sourceById],
+    const configuredCount = useMemo(
+        () => sources.filter((s) => (modes[s.channel_id] ?? AutoGroupType.None) !== AutoGroupType.None).length,
+        [sources, modes],
     );
 
     const dirtyItems = useMemo(() => {
@@ -266,16 +302,15 @@ export function GroupAutoGroupDialogContent() {
         return sources
             .map((source) => ({
                 channel_id: source.channel_id,
-                auto_group: selectedModes[source.channel_id] ?? AutoGroupType.None,
+                auto_group: modes[source.channel_id] ?? AutoGroupType.None,
                 original: source.auto_group,
             }))
             .filter((item) => item.auto_group !== item.original)
             .map(({ channel_id, auto_group }) => ({ channel_id, auto_group }));
-    }, [config, selectedModes, sources]);
+    }, [config, modes, sources]);
 
     const globalDirty = !!config && projectedGlobalMode !== config.projected_global_auto_group;
     const globalModeEnabled = projectedGlobalMode !== AutoGroupType.None;
-    const globalOverrideCount = useMemo(() => sources.filter((source) => source.global_override).length, [sources]);
     const shouldRunAfterSave = useMemo(() => {
         if (!config) return false;
         if (globalDirty && projectedGlobalMode !== AutoGroupType.None) return true;
@@ -284,22 +319,7 @@ export function GroupAutoGroupDialogContent() {
     const hasChanges = globalDirty || dirtyItems.length > 0;
     const isPending = updateConfig.isPending;
 
-    const handleAdd = (source: GroupAutoGroupSource) => {
-        setSelectedModes((current) => ({
-            ...current,
-            [source.channel_id]: source.auto_group === AutoGroupType.None ? AutoGroupType.Fuzzy : source.auto_group,
-        }));
-    };
-
-    const handleRemove = (channelId: number) => {
-        setSelectedModes((current) => {
-            const next = { ...current };
-            delete next[channelId];
-            return next;
-        });
-    };
-
-    const toggleExpanded = (key: string) => {
+    const toggleCollapsed = (key: string) => {
         setExpanded((current) => {
             const next = new Set(current);
             if (next.has(key)) next.delete(key);
@@ -308,23 +328,58 @@ export function GroupAutoGroupDialogContent() {
         });
     };
 
-    const handleSave = () => {
-        if (!config) return;
-        updateConfig.mutate({
-            projected_global_auto_group: globalDirty ? projectedGlobalMode : undefined,
-            items: dirtyItems,
-            run_now: shouldRunAfterSave,
-        }, {
-            onSuccess: () => {
-                toast.success(shouldRunAfterSave ? t('toast.savedAndRun') : t('toast.saved'));
-                setIsOpen(false);
-            },
-            onError: (err) => toast.error(t('toast.saveFailed'), { description: err.message }),
+    const toggleSelected = (channelId: number, next: boolean) => {
+        setSelection((current) => {
+            const updated = new Set(current);
+            if (next) updated.add(channelId);
+            else updated.delete(channelId);
+            return updated;
         });
     };
 
+    const setGroupSelection = (group: SourceTreeGroup, next: boolean) => {
+        setSelection((current) => {
+            const updated = new Set(current);
+            for (const source of group.sources) {
+                if (next) updated.add(source.channel_id);
+                else updated.delete(source.channel_id);
+            }
+            return updated;
+        });
+    };
+
+    const applyBulkMode = (mode: AutoGroupType) => {
+        if (selection.size === 0) return;
+        setModes((current) => {
+            const updated = { ...current };
+            for (const id of selection) updated[id] = mode;
+            return updated;
+        });
+        setSelection(new Set());
+    };
+
+    const clearSelection = () => setSelection(new Set());
+
+    const handleSave = () => {
+        if (!config) return;
+        updateConfig.mutate(
+            {
+                projected_global_auto_group: globalDirty ? projectedGlobalMode : undefined,
+                items: dirtyItems,
+                run_now: shouldRunAfterSave,
+            },
+            {
+                onSuccess: () => {
+                    toast.success(shouldRunAfterSave ? t('toast.savedAndRun') : t('toast.saved'));
+                    setIsOpen(false);
+                },
+                onError: (err) => toast.error(t('toast.saveFailed'), { description: err.message }),
+            },
+        );
+    };
+
     return (
-        <div className="flex h-[calc(100vh-2rem)] min-h-0 w-screen max-w-full flex-col overflow-hidden md:max-w-4xl">
+        <div className="flex h-[calc(100vh-2rem)] min-h-0 w-screen max-w-full flex-col overflow-hidden md:max-w-2xl">
             <MorphingDialogTitle className="shrink-0">
                 <header className="mb-3 flex items-center justify-between gap-4">
                     <h2 className="flex items-center gap-2 text-2xl font-bold text-card-foreground">
@@ -358,23 +413,36 @@ export function GroupAutoGroupDialogContent() {
                                         </Tooltip>
                                     </TooltipProvider>
                                 </div>
-                                <Select value={String(projectedGlobalMode)} onValueChange={(value) => setProjectedGlobalMode(Number(value) as AutoGroupType)} disabled={isLoading || isPending}>
+                                <Select
+                                    value={String(projectedGlobalMode)}
+                                    onValueChange={(value) => setProjectedGlobalMode(Number(value) as AutoGroupType)}
+                                    disabled={isLoading || isPending}
+                                >
                                     <SelectTrigger className="h-8 w-36 rounded-xl bg-background text-xs">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent className="rounded-xl">
                                         {AUTO_GROUP_VALUES.map((value) => (
-                                            <SelectItem key={value} value={String(value)}>{t(`mode.${modeKey(value)}`)}</SelectItem>
+                                            <SelectItem key={value} value={String(value)}>
+                                                {t(`mode.${modeKey(value)}`)}
+                                            </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
                         </div>
 
-                        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden md:grid-cols-2">
-                            <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
-                                <div className="grid h-10 grid-cols-[1fr_auto_auto] items-center gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
-                                    <span className="min-w-0 truncate text-sm font-medium text-foreground">{t('sections.available')}</span>
+                        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/30">
+                            <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/30 bg-muted/50 px-3 py-2">
+                                <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                                    {t('sections.channels')}
+                                </span>
+                                {configuredCount > 0 ? (
+                                    <Badge variant="outline" className="h-5 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">
+                                        {configuredCount}
+                                    </Badge>
+                                ) : null}
+                                <div className="ml-auto flex items-center gap-2">
                                     <div className="relative w-40 sm:w-48">
                                         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                                         <input
@@ -384,85 +452,135 @@ export function GroupAutoGroupDialogContent() {
                                             className="h-6 w-full rounded-lg border border-border/60 bg-background/70 pl-7 pr-2 text-xs shadow-none outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                         />
                                     </div>
-                                    <span className="text-xs tabular-nums text-muted-foreground">{availableSources.length}</span>
                                 </div>
-                                <div className="min-h-0 flex-1 overflow-y-auto rounded-b-xl">
-                                    {isLoading ? (
-                                        <div className="p-6 text-center text-sm text-muted-foreground">{t('loading')}</div>
-                                    ) : availableGroups.length === 0 ? (
-                                        <div className="p-6 text-center text-sm text-muted-foreground">{t('emptyAvailable')}</div>
-                                    ) : availableGroups.map((group) => {
+                            </div>
+                            {selection.size > 0 ? (
+                                <div className="flex h-10 shrink-0 items-center gap-2 border-b border-primary/20 bg-primary/5 px-3 text-xs">
+                                    <span className="font-medium text-primary">
+                                        {t('bulk.selected', { count: selection.size })}
+                                    </span>
+                                    <Select onValueChange={(value) => applyBulkMode(Number(value) as AutoGroupType)}>
+                                        <SelectTrigger
+                                            size="sm"
+                                            className="!h-7 ml-auto w-36 rounded-lg border-primary/30 bg-background text-xs"
+                                        >
+                                            <SelectValue placeholder={t('bulk.placeholder')} />
+                                        </SelectTrigger>
+                                        <SelectContent className="rounded-xl">
+                                            {AUTO_GROUP_VALUES.map((value) => (
+                                                <SelectItem key={value} value={String(value)}>
+                                                    {t(`mode.${modeKey(value)}`)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <button
+                                        type="button"
+                                        onClick={clearSelection}
+                                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                        aria-label={t('bulk.clear')}
+                                    >
+                                        <X className="size-3.5" />
+                                    </button>
+                                </div>
+                            ) : null}
+                            <div className="min-h-0 flex-1 overflow-y-auto rounded-b-xl">
+                                {isLoading ? (
+                                    <div className="p-6 text-center text-sm text-muted-foreground">{t('loading')}</div>
+                                ) : groups.length === 0 ? (
+                                    <div className="p-6 text-center text-sm text-muted-foreground">{t('emptyChannels')}</div>
+                                ) : (
+                                    groups.map((group) => {
                                         const isExpanded = expanded.has(group.key) || !!normalizedKeyword;
+                                        const groupConfigured = group.sources.filter(
+                                            (s) => (modes[s.channel_id] ?? AutoGroupType.None) !== AutoGroupType.None,
+                                        ).length;
+                                        const groupSelected = group.sources.filter((s) => selection.has(s.channel_id)).length;
+                                        const groupState: 'unchecked' | 'partial' | 'checked' =
+                                            groupSelected === 0
+                                                ? 'unchecked'
+                                                : groupSelected === group.sources.length
+                                                    ? 'checked'
+                                                    : 'partial';
                                         return (
                                             <div key={group.key} className="border-b border-border/40 last:border-b-0">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => toggleExpanded(group.key)}
-                                                    className="mx-2 my-1 flex h-8 w-[calc(100%-1rem)] items-center gap-2 rounded-lg bg-muted px-2 text-left transition-colors hover:bg-muted/80"
-                                                >
-                                                    <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', isExpanded ? '' : '-rotate-90')} />
-                                                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{group.label}</span>
-                                                    <span className="text-[10px] tabular-nums text-muted-foreground">{group.sources.length}</span>
-                                                </button>
+                                                <div className="mx-2 my-1 flex h-8 w-[calc(100%-1rem)] items-center gap-2 rounded-lg bg-muted px-2 transition-colors hover:bg-muted/80">
+                                                    <TristateCheckbox
+                                                        state={groupState}
+                                                        onChange={(next) => setGroupSelection(group, next)}
+                                                        ariaLabel={group.label}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleCollapsed(group.key)}
+                                                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                                    >
+                                                        <ChevronDown
+                                                            className={cn(
+                                                                'size-3.5 shrink-0 text-muted-foreground transition-transform',
+                                                                isExpanded ? '' : '-rotate-90',
+                                                            )}
+                                                        />
+                                                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                                                            {group.label}
+                                                        </span>
+                                                        {groupConfigured > 0 ? (
+                                                            <span className="text-[10px] tabular-nums text-primary">
+                                                                {groupConfigured}/{group.sources.length}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] tabular-nums text-muted-foreground">
+                                                                {group.sources.length}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                </div>
                                                 {isExpanded ? (
                                                     <div className="flex flex-col">
                                                         {group.sources.map((source) => (
-                                                            <AvailableSourceRow key={source.channel_id} source={source} onAdd={handleAdd} />
+                                                            <ChannelRow
+                                                                key={source.channel_id}
+                                                                source={source}
+                                                                mode={modes[source.channel_id] ?? AutoGroupType.None}
+                                                                overridden={globalModeEnabled && source.managed}
+                                                                globalMode={projectedGlobalMode}
+                                                                selected={selection.has(source.channel_id)}
+                                                                onSelectedChange={(next) =>
+                                                                    toggleSelected(source.channel_id, next)
+                                                                }
+                                                                onModeChange={(mode) =>
+                                                                    setModes((current) => ({
+                                                                        ...current,
+                                                                        [source.channel_id]: mode,
+                                                                    }))
+                                                                }
+                                                            />
                                                         ))}
                                                     </div>
                                                 ) : null}
                                             </div>
                                         );
-                                    })}
-                                </div>
-                            </section>
-
-                            <section className={cn(
-                                'flex min-h-0 flex-col overflow-hidden rounded-xl border transition-opacity',
-                                globalModeEnabled ? 'border-muted-foreground/20 bg-muted/20 opacity-60' : 'border-border/50 bg-muted/30',
-                            )}>
-                                <div className={cn(
-                                    'flex h-10 items-center justify-between gap-2 border-b px-3 py-2',
-                                    globalModeEnabled ? 'border-muted-foreground/20 bg-muted/30' : 'border-border/30 bg-muted/50',
-                                )}>
-                                    <div className="flex min-w-0 items-center gap-2">
-                                        <span className="truncate text-sm font-medium text-foreground">{t('sections.selected')}</span>
-                                        {globalOverrideCount > 0 ? (
-                                            <TooltipProvider>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <Badge variant="outline" className="h-5 cursor-help border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">
-                                                            {t('source.globalActiveCount', { count: globalOverrideCount })}
-                                                        </Badge>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent className="max-w-xs">
-                                                        {t('source.globalActiveTip')}
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </TooltipProvider>
-                                        ) : null}
-                                    </div>
-                                    <span className="text-xs tabular-nums text-muted-foreground">{Object.keys(selectedModes).length}</span>
-                                </div>
-                                <div className="min-h-0 flex-1 overflow-y-auto py-1">
-                                    {selectedSources.length === 0 ? (
-                                        <div className="p-6 text-center text-sm text-muted-foreground">{t('emptySelected')}</div>
-                                    ) : selectedSources.map((source) => (
-                                        <SelectedSourceRow
-                                            key={source.channel_id}
-                                            source={source}
-                                            mode={selectedModes[source.channel_id] ?? AutoGroupType.Fuzzy}
-                                            onModeChange={(mode) => setSelectedModes((current) => ({ ...current, [source.channel_id]: mode }))}
-                                            onRemove={() => handleRemove(source.channel_id)}
-                                        />
-                                    ))}
-                                </div>
-                            </section>
-                        </div>
+                                    })
+                                )}
+                            </div>
+                        </section>
 
                         <div className="mt-4 flex shrink-0 flex-col gap-2 sm:flex-row">
-                            <Button type="button" variant="secondary" className="h-11 flex-1 rounded-xl" onClick={() => setIsOpen(false)} disabled={isPending}>{t('buttons.cancel')}</Button>
-                            <Button type="button" className="h-11 flex-1 rounded-xl" onClick={handleSave} disabled={isPending || isLoading || !hasChanges}>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                className="h-11 flex-1 rounded-xl"
+                                onClick={() => setIsOpen(false)}
+                                disabled={isPending}
+                            >
+                                {t('buttons.cancel')}
+                            </Button>
+                            <Button
+                                type="button"
+                                className="h-11 flex-1 rounded-xl"
+                                onClick={handleSave}
+                                disabled={isPending || isLoading || !hasChanges}
+                            >
                                 {updateConfig.isPending ? t('buttons.saving') : t('buttons.save')}
                             </Button>
                         </div>
