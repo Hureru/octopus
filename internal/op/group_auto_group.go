@@ -89,6 +89,9 @@ func GroupAutoGroupConfigUpdate(req *model.GroupAutoGroupConfigUpdateRequest, ct
 			return nil, newGroupAutoGroupBadRequestError(fmt.Sprintf("duplicate channel: %d", item.ChannelID))
 		}
 		seen[item.ChannelID] = struct{}{}
+		if _, ok := channelCache.Get(item.ChannelID); !ok {
+			return nil, newGroupAutoGroupNotFoundError(fmt.Sprintf("channel not found: %d", item.ChannelID))
+		}
 		if item.AutoGroup == nil {
 			continue
 		}
