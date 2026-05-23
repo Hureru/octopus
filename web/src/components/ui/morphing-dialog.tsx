@@ -24,6 +24,7 @@ import useClickOutside from '@/hooks/useClickOutside';
 const PORTAL_IGNORED_SLOTS = [
   'select-content',
   'popover-content',
+  'hover-card-content',
   'dialog-content',
   'dialog-overlay',
   'alert-dialog-content',
