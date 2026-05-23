@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"testing"
+	"time"
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 )
@@ -46,16 +47,32 @@ func TestRelayLogEnsureIndexesCreatesAndIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestRelayLogEnsureIndexesAsyncRespectsContext 验证异步入口在 ctx 取消时
-// 能干净退出，不会在容器关停时仍然继续跑长尾的 CREATE INDEX。
-func TestRelayLogEnsureIndexesAsyncRespectsContext(t *testing.T) {
+// TestRelayLogEnsureIndexesAsyncCancelsImmediately 验证：异步入口在 ctx 已经
+// 取消的情况下立刻返回，且 5s 的 warmup sleep 不会让它白等。
+//
+// 这条测试同时验证 shutdown 路径——容器停机时 ctx 被 cancel，goroutine 必须
+// 在 100ms 量级退出，否则 db.Close() 会被卡住。
+func TestRelayLogEnsureIndexesAsyncCancelsImmediately(t *testing.T) {
 	_ = setupSiteOpTestDB(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // 提前取消
+	cancel() // 进入函数前已取消
 
-	// 不应 panic，也不应该阻塞——直接 return。
-	RelayLogEnsureIndexes(ctx)
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		RelayLogEnsureIndexes(ctx)
+	}()
+	select {
+	case <-done:
+		// 必须远低于 relayLogIndexStartupDelay (5s)：sleepWithCtx 应该立刻看到 ctx.Done。
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Fatalf("RelayLogEnsureIndexes took %s after canceled ctx; warmup sleep is not honoring cancellation", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("RelayLogEnsureIndexes did not return within 2s after ctx cancel")
+	}
 
 	// 取消的 ctx 下不应该建出索引。
 	for _, name := range []string{
@@ -68,3 +85,33 @@ func TestRelayLogEnsureIndexesAsyncRespectsContext(t *testing.T) {
 		}
 	}
 }
+
+// TestRelayLogEnsureIndexesAsyncCancelsDuringWarmup 验证：刚启动还在 warmup
+// sleep 里就被 cancel，goroutine 同样要立刻退出（这是 docker stop 落在 server
+// 刚起来 5s 内的真实场景）。
+func TestRelayLogEnsureIndexesAsyncCancelsDuringWarmup(t *testing.T) {
+	_ = setupSiteOpTestDB(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		RelayLogEnsureIndexes(ctx)
+	}()
+
+	// 进入 warmup sleep 后再取消，模拟 docker stop 落在启动后没几秒。
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Fatalf("RelayLogEnsureIndexes took %s to exit after ctx cancel during warmup", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("RelayLogEnsureIndexes blocked through warmup despite ctx cancel")
+	}
+}
+

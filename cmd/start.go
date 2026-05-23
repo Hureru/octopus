@@ -18,6 +18,12 @@ import (
 
 var cfgFile string
 
+// ensureIndexShutdownGrace 是 shutdown 时给 relay-log-ensure-indexes goroutine
+// 自我退出留的最长时间。docker stop 默认 grace period 10s，给 SQLite 的
+// sqlite3_interrupt 留出 ~3s 应对正在进行的 CREATE INDEX，其它时间留给后续
+// shutdown hook（db.Close 等）。
+const ensureIndexShutdownGrace = 3 * time.Second
+
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start " + conf.APP_NAME,
@@ -79,15 +85,27 @@ var startCmd = &cobra.Command{
 		})
 
 		// relay-log-ensure-indexes 是一个有限任务，但 CREATE INDEX 期间会持有
-		// SQLite 唯一的写连接。如果容器在建索引时被 stop，必须让 goroutine
-		// 看到取消信号、立刻让出连接，否则 db.Close() 会在写锁上阻塞，
-		// 拖到 docker stop 的 grace timeout 后被 SIGKILL，下次启动还得做 WAL recovery。
+		// SQLite 唯一的写连接。容器在建索引时被 stop 必须做到：
+		//   1. 立刻取消 warmup sleep / cooldown，让 goroutine 退出 wait。
+		//   2. 进行中的 CREATE INDEX 通过 GORM/database/sql 的 ctx 链路传到
+		//      modernc.org/sqlite 的 sqlite3_interrupt，SQLite 在下一个安全检查点
+		//      放弃当前操作。
+		//   3. shutdown.Register 等 goroutine 真正 return，再让 db.Close 关连接。
+		//      最多等 ensureIndexShutdownGrace；超时只 warn 不挂，避免 docker stop 被卡。
 		ensureIndexCtx, stopEnsureIndexes := context.WithCancel(context.Background())
+		ensureIndexDone := make(chan struct{})
 		shutdown.Register(func() error {
 			stopEnsureIndexes()
-			return nil
+			select {
+			case <-ensureIndexDone:
+				return nil
+			case <-time.After(ensureIndexShutdownGrace):
+				log.Warnf("relay-log-ensure-indexes did not exit within %s; continuing shutdown anyway", ensureIndexShutdownGrace)
+				return nil
+			}
 		})
 		safe.Go("relay-log-ensure-indexes", func() {
+			defer close(ensureIndexDone)
 			op.RelayLogEnsureIndexes(ensureIndexCtx)
 		})
 	},

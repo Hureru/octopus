@@ -140,25 +140,22 @@ func backfillRelayLogSuccessOther(db *gorm.DB) error {
 	return nil
 }
 
-// hasRelayLogColumn 不走 glebarez 的 HasColumn —— 后者用正则 LIKE 在 CREATE TABLE
-// 文本里搜索列名，对名字短/常见的列容易撞误报。这里 SQLite 直接查
-// pragma_table_info；其它 dialect 走 information_schema，行为精确。
+// hasRelayLogColumn 按 dialect 选择最稳的列存在性查询：
+//   - SQLite：glebarez 的 HasColumn 用正则 LIKE 扫 CREATE TABLE 文本，
+//     遇到短/常见列名会误报；这里直接查 pragma_table_info 精确匹配。
+//   - MySQL/Postgres：委托给 GORM 的 dialect-aware Migrator().HasColumn，
+//     它会用各自驱动里正确的 information_schema 查询并按 DATABASE() /
+//     current_schema() 过滤当前 schema —— 直接拼 information_schema.columns
+//     而不限定 schema 会跨库/跨 schema 误判，比如同名 relay_logs 在
+//     另一个数据库里也存在时会被算进来。
 func hasRelayLogColumn(db *gorm.DB, column string) bool {
 	if db == nil || strings.TrimSpace(column) == "" {
 		return false
 	}
-	dialect := db.Dialector.Name()
-	if dialect == "sqlite" {
+	if db.Dialector != nil && db.Dialector.Name() == "sqlite" {
 		var name string
 		_ = db.Raw("SELECT name FROM pragma_table_info('relay_logs') WHERE name = ? LIMIT 1", column).Scan(&name).Error
 		return name == column
 	}
-	var count int64
-	if err := db.Raw(
-		"SELECT COUNT(*) FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
-		"relay_logs", column,
-	).Scan(&count).Error; err != nil {
-		return false
-	}
-	return count > 0
+	return db.Migrator().HasColumn(&model.RelayLog{}, column)
 }
