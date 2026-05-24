@@ -970,7 +970,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			// 此时优先消费 results 中已就绪的终止信号，避免把正常结束的流误判为断连。
 			select {
 			case r, ok := <-results:
-				if !ok {
+				if !ok || (r.err != nil && r.err == io.EOF) {
 					log.Debugf("stream end")
 					return nil
 				}
