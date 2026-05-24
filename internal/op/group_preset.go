@@ -76,71 +76,104 @@ func GroupPresetCreate(groupID int, name string, ctx context.Context) (*model.Gr
 	return &preset, nil
 }
 
+// presetIsActiveTx 在事务内检查指定预设是否被任何 Group 当作活动预设引用
+// 用 DB 而非 groupCache，避免缓存延迟造成的竞态绕过
+func presetIsActiveTx(tx *gorm.DB, presetID int) (bool, error) {
+	var count int64
+	if err := tx.Model(&model.Group{}).
+		Where("active_preset_id = ?", presetID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // GroupPresetOverwrite 用 Group 当前实时状态覆盖已有预设
 func GroupPresetOverwrite(presetID int, ctx context.Context) (*model.GroupPreset, error) {
 	var preset model.GroupPreset
-	if err := db.GetDB().WithContext(ctx).First(&preset, presetID).Error; err != nil {
-		return nil, fmt.Errorf("preset not found")
-	}
-	mode, matchRegex, fto, skt, mr, re, items, err := groupPresetSnapshotFromCache(preset.GroupID)
+	err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&preset, presetID).Error; err != nil {
+			return fmt.Errorf("preset not found")
+		}
+		active, err := presetIsActiveTx(tx, presetID)
+		if err != nil {
+			return fmt.Errorf("failed to check active preset: %w", err)
+		}
+		if active {
+			return fmt.Errorf("cannot overwrite active preset; switch to another preset first")
+		}
+		mode, matchRegex, fto, skt, mr, re, items, err := groupPresetSnapshotFromCache(preset.GroupID)
+		if err != nil {
+			return err
+		}
+		preset.Mode = mode
+		preset.MatchRegex = matchRegex
+		preset.FirstTokenTimeOut = fto
+		preset.SessionKeepTime = skt
+		preset.RetryEnabled = re
+		preset.MaxRetries = mr
+		preset.Items = items
+		if err := tx.Save(&preset).Error; err != nil {
+			return fmt.Errorf("failed to overwrite preset: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	preset.Mode = mode
-	preset.MatchRegex = matchRegex
-	preset.FirstTokenTimeOut = fto
-	preset.SessionKeepTime = skt
-	preset.RetryEnabled = re
-	preset.MaxRetries = mr
-	preset.Items = items
-	if err := db.GetDB().WithContext(ctx).Save(&preset).Error; err != nil {
-		return nil, fmt.Errorf("failed to overwrite preset: %w", err)
 	}
 	return &preset, nil
 }
 
-// GroupPresetUpdate 直接编辑预设内容（仅允许非活动预设；handler 层先做拦截）
+// GroupPresetUpdate 直接编辑预设内容（仅允许非活动预设）
 // 不动 group_items、不刷 group 缓存、不重置熔断/粘性
 func GroupPresetUpdate(presetID int, req *model.GroupPresetUpdateRequest, ctx context.Context) (*model.GroupPreset, error) {
 	var preset model.GroupPreset
-	if err := db.GetDB().WithContext(ctx).First(&preset, presetID).Error; err != nil {
-		return nil, fmt.Errorf("preset not found")
-	}
-	if group, ok := groupCache.Get(preset.GroupID); ok {
-		if group.ActivePresetID != nil && *group.ActivePresetID == presetID {
-			return nil, fmt.Errorf("cannot edit active preset; switch to another preset first")
+	err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&preset, presetID).Error; err != nil {
+			return fmt.Errorf("preset not found")
 		}
-	}
-	if req.Name != nil {
-		preset.Name = *req.Name
-	}
-	if req.Mode != nil {
-		preset.Mode = *req.Mode
-	}
-	if req.MatchRegex != nil {
-		preset.MatchRegex = *req.MatchRegex
-	}
-	if req.FirstTokenTimeOut != nil {
-		preset.FirstTokenTimeOut = *req.FirstTokenTimeOut
-	}
-	if req.SessionKeepTime != nil {
-		preset.SessionKeepTime = *req.SessionKeepTime
-	}
-	if req.RetryEnabled != nil {
-		preset.RetryEnabled = *req.RetryEnabled
-	}
-	if req.MaxRetries != nil {
-		v := *req.MaxRetries
-		if v <= 0 {
-			v = 3
+		active, err := presetIsActiveTx(tx, presetID)
+		if err != nil {
+			return fmt.Errorf("failed to check active preset: %w", err)
 		}
-		preset.MaxRetries = v
-	}
-	if req.Items != nil {
-		preset.Items = *req.Items
-	}
-	if err := db.GetDB().WithContext(ctx).Save(&preset).Error; err != nil {
-		return nil, fmt.Errorf("failed to update preset: %w", err)
+		if active {
+			return fmt.Errorf("cannot edit active preset; switch to another preset first")
+		}
+		if req.Name != nil {
+			preset.Name = *req.Name
+		}
+		if req.Mode != nil {
+			preset.Mode = *req.Mode
+		}
+		if req.MatchRegex != nil {
+			preset.MatchRegex = *req.MatchRegex
+		}
+		if req.FirstTokenTimeOut != nil {
+			preset.FirstTokenTimeOut = *req.FirstTokenTimeOut
+		}
+		if req.SessionKeepTime != nil {
+			preset.SessionKeepTime = *req.SessionKeepTime
+		}
+		if req.RetryEnabled != nil {
+			preset.RetryEnabled = *req.RetryEnabled
+		}
+		if req.MaxRetries != nil {
+			v := *req.MaxRetries
+			if v <= 0 {
+				v = 3
+			}
+			preset.MaxRetries = v
+		}
+		if req.Items != nil {
+			preset.Items = *req.Items
+		}
+		if err := tx.Save(&preset).Error; err != nil {
+			return fmt.Errorf("failed to update preset: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return &preset, nil
 }
@@ -150,30 +183,38 @@ func GroupPresetRename(presetID int, name string, ctx context.Context) error {
 	if name == "" {
 		return fmt.Errorf("preset name required")
 	}
-	if err := db.GetDB().WithContext(ctx).
+	res := db.GetDB().WithContext(ctx).
 		Model(&model.GroupPreset{}).
 		Where("id = ?", presetID).
-		Update("name", name).Error; err != nil {
-		return fmt.Errorf("failed to rename preset: %w", err)
+		Update("name", name)
+	if res.Error != nil {
+		return fmt.Errorf("failed to rename preset: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("preset not found")
 	}
 	return nil
 }
 
 // GroupPresetDelete 删除预设。若是当前活动预设则拒绝
 func GroupPresetDelete(presetID int, ctx context.Context) error {
-	var preset model.GroupPreset
-	if err := db.GetDB().WithContext(ctx).First(&preset, presetID).Error; err != nil {
-		return fmt.Errorf("preset not found")
-	}
-	if group, ok := groupCache.Get(preset.GroupID); ok {
-		if group.ActivePresetID != nil && *group.ActivePresetID == presetID {
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var preset model.GroupPreset
+		if err := tx.First(&preset, presetID).Error; err != nil {
+			return fmt.Errorf("preset not found")
+		}
+		active, err := presetIsActiveTx(tx, presetID)
+		if err != nil {
+			return fmt.Errorf("failed to check active preset: %w", err)
+		}
+		if active {
 			return fmt.Errorf("cannot delete active preset; switch to another preset first")
 		}
-	}
-	if err := db.GetDB().WithContext(ctx).Delete(&model.GroupPreset{}, presetID).Error; err != nil {
-		return fmt.Errorf("failed to delete preset: %w", err)
-	}
-	return nil
+		if err := tx.Delete(&model.GroupPreset{}, presetID).Error; err != nil {
+			return fmt.Errorf("failed to delete preset: %w", err)
+		}
+		return nil
+	})
 }
 
 // GroupPresetActivate 用预设覆盖 Group 的实时 Mode + Items + 路由参数；写 ActivePresetID

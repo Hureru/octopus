@@ -181,7 +181,11 @@ func setGroupPin(c *gin.Context) {
 		resp.InvalidJSON(c)
 		return
 	}
-	if err := op.GroupSetPinned(id, req.Pinned, c.Request.Context()); err != nil {
+	if req.Pinned == nil {
+		resp.InvalidParam(c)
+		return
+	}
+	if err := op.GroupSetPinned(id, *req.Pinned, c.Request.Context()); err != nil {
 		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupPinFailed, "group pin failed", err))
 		return
 	}

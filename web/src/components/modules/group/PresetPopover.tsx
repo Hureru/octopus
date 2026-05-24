@@ -328,8 +328,18 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                             <TooltipTrigger asChild>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setPending({ kind: 'overwrite', presetID: preset.id })}
-                                                    className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                                                    disabled={isActive}
+                                                    aria-disabled={isActive}
+                                                    onClick={() => {
+                                                        if (isActive) return;
+                                                        setPending({ kind: 'overwrite', presetID: preset.id });
+                                                    }}
+                                                    className={cn(
+                                                        'p-1 rounded-md',
+                                                        isActive
+                                                            ? 'text-muted-foreground/40 cursor-not-allowed'
+                                                            : 'hover:bg-muted text-muted-foreground hover:text-foreground',
+                                                    )}
                                                 >
                                                     <ArrowDownToLine className="size-3.5" />
                                                 </button>
@@ -340,8 +350,19 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                             <TooltipTrigger asChild>
                                                 <button
                                                     type="button"
-                                                    onClick={() => { setPending({ kind: 'rename', presetID: preset.id, current: preset.name }); setNameDraft(preset.name); }}
-                                                    className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                                                    disabled={isActive}
+                                                    aria-disabled={isActive}
+                                                    onClick={() => {
+                                                        if (isActive) return;
+                                                        setPending({ kind: 'rename', presetID: preset.id, current: preset.name });
+                                                        setNameDraft(preset.name);
+                                                    }}
+                                                    className={cn(
+                                                        'p-1 rounded-md',
+                                                        isActive
+                                                            ? 'text-muted-foreground/40 cursor-not-allowed'
+                                                            : 'hover:bg-muted text-muted-foreground hover:text-foreground',
+                                                    )}
                                                 >
                                                     <Type className="size-3.5" />
                                                 </button>

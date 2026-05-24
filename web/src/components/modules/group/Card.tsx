@@ -305,8 +305,9 @@ export function GroupCard({ group }: { group: Group }) {
                         <TooltipTrigger asChild>
                             <button
                                 type="button"
+                                disabled={togglePin.isPending || !group.id}
                                 onClick={() => {
-                                    if (!group.id) return;
+                                    if (!group.id || togglePin.isPending) return;
                                     togglePin.mutate(
                                         { groupID: group.id, pinned: !group.pinned },
                                         {
@@ -316,7 +317,7 @@ export function GroupCard({ group }: { group: Group }) {
                                     );
                                 }}
                                 className={cn(
-                                    'p-1.5 rounded-lg transition-colors hover:bg-muted',
+                                    'p-1.5 rounded-lg transition-colors hover:bg-muted disabled:opacity-50 disabled:pointer-events-none',
                                     group.pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
                                 )}
                             >

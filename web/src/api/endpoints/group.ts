@@ -353,6 +353,7 @@ export function useGroupPresetList(groupID: number | undefined) {
         queryKey: ['groups', 'presets', groupID],
         queryFn: async () => apiClient.get<GroupPreset[]>(`/api/v1/group/preset/list/${groupID}`),
         enabled: typeof groupID === 'number' && groupID > 0,
+        refetchInterval: 30000,
     });
 }
 

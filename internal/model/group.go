@@ -120,7 +120,7 @@ type GroupPresetUpdateRequest struct {
 
 // GroupPinRequest 置顶/取消置顶
 type GroupPinRequest struct {
-	Pinned bool `json:"pinned"`
+	Pinned *bool `json:"pinned" binding:"required"`
 }
 
 type GroupAutoGroupConfig struct {
