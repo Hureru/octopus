@@ -1,0 +1,150 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'build'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          NEXT_PUBLIC_APP_VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo 'dev')" pnpm build
+
+      - name: Embed frontend into static
+        run: |
+          rm -rf static/out
+          mv web/out static/out
+
+      - name: Build binaries
+        run: |
+          set -e
+          mkdir -p build/bin build/docker/linux/amd64 build/docker/linux/arm64
+          BUILD_TIME="$(TZ='Asia/Shanghai' date +'%F %T %z')"
+          GIT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null || echo 'dev')"
+          COMMIT_ID="$(git rev-parse --short HEAD)"
+          LDFLAGS="-X 'github.com/bestruirui/octopus/internal/conf.Version=${GIT_VERSION}' \
+                   -X 'github.com/bestruirui/octopus/internal/conf.BuildTime=${BUILD_TIME}' \
+                   -X 'github.com/bestruirui/octopus/internal/conf.Author=hureru' \
+                   -X 'github.com/bestruirui/octopus/internal/conf.Commit=${COMMIT_ID}' \
+                   -s -w"
+
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -o build/bin/octopus-linux-x86_64        -ldflags="${LDFLAGS}" -tags=jsoniter ./
+          GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -o build/bin/octopus-linux-arm64         -ldflags="${LDFLAGS}" -tags=jsoniter ./
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o build/bin/octopus-windows-x86_64.exe  -ldflags="${LDFLAGS}" -tags=jsoniter ./
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -o build/bin/octopus-darwin-arm64        -ldflags="${LDFLAGS}" -tags=jsoniter ./
+
+          cp build/bin/octopus-linux-x86_64 build/docker/linux/amd64/octopus
+          cp build/bin/octopus-linux-arm64  build/docker/linux/arm64/octopus
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: octopus-binaries-${{ github.sha }}
+          path: build/bin/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (Alpine amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./scripts/dockerfiles/Dockerfile.alpine
+          platforms: linux/amd64
+          load: true
+          tags: octopus:ci-${{ github.sha }}-alpine-amd64
+          build-args: |
+            TARGETPLATFORM=linux/amd64
+
+      - name: Build Docker image (Alpine arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./scripts/dockerfiles/Dockerfile.alpine
+          platforms: linux/arm64
+          load: true
+          tags: octopus:ci-${{ github.sha }}-alpine-arm64
+          build-args: |
+            TARGETPLATFORM=linux/arm64
+
+      - name: Build Docker image (Debian amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./scripts/dockerfiles/Dockerfile.debian
+          platforms: linux/amd64
+          load: true
+          tags: octopus:ci-${{ github.sha }}-debian-amd64
+          build-args: |
+            TARGETPLATFORM=linux/amd64
+
+      - name: Build Docker image (Debian arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./scripts/dockerfiles/Dockerfile.debian
+          platforms: linux/arm64
+          load: true
+          tags: octopus:ci-${{ github.sha }}-debian-arm64
+          build-args: |
+            TARGETPLATFORM=linux/arm64
+
+      - name: Export Docker images
+        run: |
+          set -e
+          mkdir -p build/docker-images
+          docker save octopus:ci-${{ github.sha }}-alpine-amd64 | gzip > build/docker-images/octopus-alpine-amd64.tar.gz
+          docker save octopus:ci-${{ github.sha }}-alpine-arm64 | gzip > build/docker-images/octopus-alpine-arm64.tar.gz
+          docker save octopus:ci-${{ github.sha }}-debian-amd64 | gzip > build/docker-images/octopus-debian-amd64.tar.gz
+          docker save octopus:ci-${{ github.sha }}-debian-arm64 | gzip > build/docker-images/octopus-debian-arm64.tar.gz
+
+      - name: Upload Docker images
+        uses: actions/upload-artifact@v4
+        with:
+          name: octopus-docker-${{ github.sha }}
+          path: build/docker-images/
+          retention-days: 7
+          if-no-files-found: error
