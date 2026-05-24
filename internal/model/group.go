@@ -95,18 +95,15 @@ type GroupIDAndLLMName struct {
 	ModelName string
 }
 
-// GroupPresetCreateRequest 新增预设：服务端从 Group 当前实时状态取快照
+// GroupPresetCreateRequest 新增预设：服务端从 Group 当前实时状态取快照；
+// 也用于 create-blank 和 clone 接口（均只需 Name）
 type GroupPresetCreateRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
-// GroupPresetRenameRequest 重命名预设
-type GroupPresetRenameRequest struct {
-	Name string `json:"name" binding:"required"`
-}
-
-// GroupPresetUpdateRequest 直接编辑非活动预设的 JSON 内容
+// GroupPresetUpdateRequest 直接编辑预设的 JSON 内容
 // Items 为整体替换语义（非增量），nil 表示不变
+// 若该预设是 active，编辑结果会同步镜像到所属 Group（live binding）
 type GroupPresetUpdateRequest struct {
 	Name              *string            `json:"name,omitempty"`
 	Mode              *GroupMode         `json:"mode,omitempty"`

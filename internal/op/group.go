@@ -177,6 +177,12 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 		}
 	}
 
+	// 若该 Group 有 active preset，把当前实时状态回写到 preset（live binding）
+	if err := syncActivePresetTx(tx, req.ID); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to sync active preset: %w", err)
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}

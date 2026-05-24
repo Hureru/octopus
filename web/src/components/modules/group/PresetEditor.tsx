@@ -2,10 +2,11 @@
 
 import { useCallback, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
+import { XIcon } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
-    DialogHeader,
+    DialogDescription,
     DialogTitle,
 } from '@/components/ui/dialog';
 import { useModelChannelList } from '@/api/endpoints/model';
@@ -26,8 +27,9 @@ interface PresetEditorProps {
 }
 
 /**
- * 直接编辑非活动预设。复用 GroupEditor 的表单，提交时调用 useUpdateGroupPreset。
- * 活动预设由 Popover 层做入口隐藏；后端也会拒绝。
+ * 编辑预设内容。视觉上对齐分组卡片里的 MorphingDialog 编辑面板
+ * （bg-card / rounded-3xl / px-6 py-4 / text-2xl 标题）。因为是受控弹出
+ * （PresetPopover 触发），用 Dialog 而非 MorphingDialog；MorphingDialog 必须有 trigger 元素。
  */
 export function PresetEditor({ preset, open, onOpenChange }: PresetEditorProps) {
     const t = useTranslations('group');
@@ -94,12 +96,28 @@ export function PresetEditor({ preset, open, onOpenChange }: PresetEditorProps) 
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="w-screen max-w-full md:max-w-4xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden p-6">
-                <DialogHeader className="shrink-0">
-                    <DialogTitle>
-                        {t('preset.editorTitle', { name: preset.name })}
-                    </DialogTitle>
-                </DialogHeader>
+            <DialogContent
+                showCloseButton={false}
+                className="w-screen max-w-full md:max-w-4xl bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden gap-0 border-0 sm:max-w-4xl"
+            >
+                <DialogTitle asChild>
+                    <header className="mb-3 flex items-center justify-between shrink-0">
+                        <h2 className="text-2xl font-bold text-card-foreground truncate pr-4">
+                            {t('preset.editorTitle')}
+                        </h2>
+                        <button
+                            type="button"
+                            onClick={() => onOpenChange(false)}
+                            aria-label="Close"
+                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                        >
+                            <XIcon className="size-5" />
+                        </button>
+                    </header>
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                    {t('preset.editorTitle')}
+                </DialogDescription>
                 <div className="flex-1 min-h-0 overflow-hidden">
                     <GroupEditor
                         key={`preset-${preset.id}`}
@@ -118,6 +136,7 @@ export function PresetEditor({ preset, open, onOpenChange }: PresetEditorProps) 
                         isSubmitting={updatePreset.isPending}
                         onCancel={() => onOpenChange(false)}
                         onSubmit={handleSubmit}
+                        nameLabel={t('preset.name')}
                     />
                 </div>
             </DialogContent>

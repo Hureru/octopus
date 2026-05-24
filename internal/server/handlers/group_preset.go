@@ -27,20 +27,20 @@ func init() {
 				Handle(createGroupPreset),
 		).
 		AddRoute(
+			router.NewRoute("/preset/create-blank/:groupID", http.MethodPost).
+				Handle(createBlankGroupPreset),
+		).
+		AddRoute(
+			router.NewRoute("/preset/clone/:id", http.MethodPost).
+				Handle(cloneGroupPreset),
+		).
+		AddRoute(
 			router.NewRoute("/preset/activate/:id", http.MethodPost).
 				Handle(activateGroupPreset),
 		).
 		AddRoute(
-			router.NewRoute("/preset/overwrite/:id", http.MethodPost).
-				Handle(overwriteGroupPreset),
-		).
-		AddRoute(
 			router.NewRoute("/preset/update/:id", http.MethodPut).
 				Handle(updateGroupPreset),
-		).
-		AddRoute(
-			router.NewRoute("/preset/rename/:id", http.MethodPut).
-				Handle(renameGroupPreset),
 		).
 		AddRoute(
 			router.NewRoute("/preset/delete/:id", http.MethodDelete).
@@ -93,6 +93,42 @@ func createGroupPreset(c *gin.Context) {
 	resp.Success(c, preset)
 }
 
+func createBlankGroupPreset(c *gin.Context) {
+	groupID, ok := parseIDParam(c, "groupID")
+	if !ok {
+		return
+	}
+	var req model.GroupPresetCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	preset, err := op.GroupPresetCreateBlank(groupID, req.Name, c.Request.Context())
+	if err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupPresetCreateBlankFailed, "group preset create blank failed", err))
+		return
+	}
+	resp.Success(c, preset)
+}
+
+func cloneGroupPreset(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req model.GroupPresetCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	preset, err := op.GroupPresetClone(id, req.Name, c.Request.Context())
+	if err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupPresetCloneFailed, "group preset clone failed", err))
+		return
+	}
+	resp.Success(c, preset)
+}
+
 func activateGroupPreset(c *gin.Context) {
 	id, ok := parseIDParam(c, "id")
 	if !ok {
@@ -103,19 +139,6 @@ func activateGroupPreset(c *gin.Context) {
 		return
 	}
 	resp.Success(c, "group preset activated")
-}
-
-func overwriteGroupPreset(c *gin.Context) {
-	id, ok := parseIDParam(c, "id")
-	if !ok {
-		return
-	}
-	preset, err := op.GroupPresetOverwrite(id, c.Request.Context())
-	if err != nil {
-		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupPresetOverwriteFailed, "group preset overwrite failed", err))
-		return
-	}
-	resp.Success(c, preset)
 }
 
 func updateGroupPreset(c *gin.Context) {
@@ -140,23 +163,6 @@ func updateGroupPreset(c *gin.Context) {
 		return
 	}
 	resp.Success(c, preset)
-}
-
-func renameGroupPreset(c *gin.Context) {
-	id, ok := parseIDParam(c, "id")
-	if !ok {
-		return
-	}
-	var req model.GroupPresetRenameRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.InvalidJSON(c)
-		return
-	}
-	if err := op.GroupPresetRename(id, req.Name, c.Request.Context()); err != nil {
-		resp.ErrorWithAppError(c, http.StatusInternalServerError, groupError(codeGroupPresetRenameFailed, "group preset rename failed", err))
-		return
-	}
-	resp.Success(c, "group preset renamed")
 }
 
 func deleteGroupPreset(c *gin.Context) {

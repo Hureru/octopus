@@ -7,11 +7,10 @@ import {
     Pencil,
     Plus,
     Trash2,
-    ArrowDownToLine,
+    Copy,
     X,
     CheckCircle2,
     Layers,
-    Type,
 } from 'lucide-react';
 import {
     Popover,
@@ -28,9 +27,9 @@ import {
 import {
     useGroupPresetList,
     useCreateGroupPreset,
+    useCreateBlankGroupPreset,
+    useCloneGroupPreset,
     useActivateGroupPreset,
-    useOverwriteGroupPreset,
-    useRenameGroupPreset,
     useDeleteGroupPreset,
     type Group,
     type GroupPreset,
@@ -46,9 +45,7 @@ interface PresetPopoverProps {
 type PendingAction =
     | { kind: 'none' }
     | { kind: 'create' }
-    | { kind: 'rename'; presetID: number; current: string }
-    | { kind: 'delete'; presetID: number }
-    | { kind: 'overwrite'; presetID: number };
+    | { kind: 'delete'; presetID: number };
 
 export function PresetPopover({ group }: PresetPopoverProps) {
     const t = useTranslations('group');
@@ -59,9 +56,9 @@ export function PresetPopover({ group }: PresetPopoverProps) {
 
     const { data: presets = [], isLoading } = useGroupPresetList(open ? group.id : undefined);
     const createPreset = useCreateGroupPreset();
+    const createBlankPreset = useCreateBlankGroupPreset();
+    const clonePreset = useCloneGroupPreset();
     const activatePreset = useActivateGroupPreset();
-    const overwritePreset = useOverwriteGroupPreset();
-    const renamePreset = useRenameGroupPreset();
     const deletePreset = useDeleteGroupPreset();
 
     const activeID = group.active_preset_id ?? null;
@@ -87,6 +84,21 @@ export function PresetPopover({ group }: PresetPopoverProps) {
         );
     }, [group.id, nameDraft, createPreset, t, resetPending]);
 
+    const handleCreateBlank = useCallback(() => {
+        if (!group.id) return;
+        const name = `${t('preset.autoNamePrefix')} ${presets.length + 1}`;
+        createBlankPreset.mutate(
+            { groupID: group.id, name },
+            {
+                onSuccess: (preset) => {
+                    toast.success(t('preset.toast.created'));
+                    setEditingPreset(preset);
+                },
+                onError: (e) => toast.error(t('preset.toast.createBlankFailed'), { description: e.message }),
+            },
+        );
+    }, [group.id, presets.length, createBlankPreset, t]);
+
     const handleActivate = useCallback((presetID: number) => {
         if (!group.id || presetID === activeID) return;
         activatePreset.mutate(
@@ -98,33 +110,20 @@ export function PresetPopover({ group }: PresetPopoverProps) {
         );
     }, [group.id, activeID, activatePreset, t]);
 
-    const handleOverwriteSubmit = useCallback((presetID: number) => {
-        overwritePreset.mutate(
-            { presetID, groupID: group.id },
+    const handleClone = useCallback((preset: GroupPreset) => {
+        if (!group.id) return;
+        const name = `${preset.name} ${t('preset.cloneSuffix')}`;
+        clonePreset.mutate(
+            { presetID: preset.id, groupID: group.id, name },
             {
-                onSuccess: () => {
-                    toast.success(t('preset.toast.overwritten'));
-                    resetPending();
+                onSuccess: (cloned) => {
+                    toast.success(t('preset.toast.cloned'));
+                    setEditingPreset(cloned);
                 },
-                onError: (e) => toast.error(t('preset.toast.overwriteFailed'), { description: e.message }),
+                onError: (e) => toast.error(t('preset.toast.cloneFailed'), { description: e.message }),
             },
         );
-    }, [overwritePreset, group.id, t, resetPending]);
-
-    const handleRenameSubmit = useCallback((presetID: number) => {
-        const name = nameDraft.trim();
-        if (!name) return;
-        renamePreset.mutate(
-            { presetID, groupID: group.id, name },
-            {
-                onSuccess: () => {
-                    toast.success(t('preset.toast.renamed'));
-                    resetPending();
-                },
-                onError: (e) => toast.error(t('preset.toast.renameFailed'), { description: e.message }),
-            },
-        );
-    }, [nameDraft, renamePreset, group.id, t, resetPending]);
+    }, [group.id, clonePreset, t]);
 
     const handleDeleteSubmit = useCallback((presetID: number) => {
         deletePreset.mutate(
@@ -138,6 +137,8 @@ export function PresetPopover({ group }: PresetPopoverProps) {
             },
         );
     }, [deletePreset, group.id, t, resetPending]);
+
+    const hasPresets = presets.length > 0;
 
     return (
         <>
@@ -156,161 +157,141 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                     </button>
                 </PopoverTrigger>
 
-                <PopoverContent align="end" sideOffset={6} className="w-80 p-0">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-                        <span className="text-sm font-semibold">{t('preset.title')}</span>
-                        {pending.kind === 'none' && (
-                            <button
-                                type="button"
-                                onClick={() => { setPending({ kind: 'create' }); setNameDraft(''); }}
-                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                                <Plus className="size-3.5" />
-                                {t('preset.saveAs')}
-                            </button>
-                        )}
-                    </div>
-
-                    {pending.kind === 'create' && (
-                        <div className="p-3 border-b border-border/40 flex items-center gap-2">
-                            <Input
-                                autoFocus
-                                value={nameDraft}
-                                onChange={(e) => setNameDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleCreateSubmit();
-                                    if (e.key === 'Escape') resetPending();
-                                }}
-                                placeholder={t('preset.namePlaceholder')}
-                                className="h-8 rounded-lg text-sm"
-                            />
-                            <Button
-                                type="button"
-                                size="sm"
-                                onClick={handleCreateSubmit}
-                                disabled={!nameDraft.trim() || createPreset.isPending}
-                                className="h-8 rounded-lg"
-                            >
-                                <Check className="size-3.5" />
-                            </Button>
-                            <button
-                                type="button"
-                                onClick={resetPending}
-                                className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
-                            >
-                                <X className="size-4" />
-                            </button>
-                        </div>
-                    )}
-
-                    <div className="max-h-80 overflow-y-auto py-1">
-                        {isLoading && (
-                            <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                                {t('preset.loading')}
-                            </div>
-                        )}
-                        {!isLoading && presets.length === 0 && pending.kind !== 'create' && (
-                            <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                                {t('preset.empty')}
-                            </div>
-                        )}
-                        {presets.map((preset) => {
-                            const isActive = activeID === preset.id;
-                            const isRenamingThis = pending.kind === 'rename' && pending.presetID === preset.id;
-                            const isDeletingThis = pending.kind === 'delete' && pending.presetID === preset.id;
-                            const isOverwritingThis = pending.kind === 'overwrite' && pending.presetID === preset.id;
-
-                            if (isRenamingThis) {
-                                return (
-                                    <div key={preset.id} className="px-3 py-2 flex items-center gap-2 bg-muted/40">
-                                        <Input
-                                            autoFocus
-                                            value={nameDraft}
-                                            onChange={(e) => setNameDraft(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter') handleRenameSubmit(preset.id);
-                                                if (e.key === 'Escape') resetPending();
-                                            }}
-                                            className="h-7 rounded-lg text-sm"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => handleRenameSubmit(preset.id)}
-                                            disabled={!nameDraft.trim() || renamePreset.isPending}
-                                            className="p-1 rounded-lg hover:bg-muted disabled:opacity-50"
-                                        >
-                                            <Check className="size-4" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={resetPending}
-                                            className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
-                                        >
-                                            <X className="size-4" />
-                                        </button>
-                                    </div>
-                                );
-                            }
-
-                            if (isDeletingThis || isOverwritingThis) {
-                                const isDel = isDeletingThis;
-                                return (
-                                    <div key={preset.id} className="px-3 py-2 flex items-center gap-2 bg-destructive/10">
-                                        <span className="flex-1 text-xs">
-                                            {isDel ? t('preset.confirmDelete', { name: preset.name }) : t('preset.confirmOverwrite', { name: preset.name })}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => isDel ? handleDeleteSubmit(preset.id) : handleOverwriteSubmit(preset.id)}
-                                            className={cn(
-                                                'px-2 py-1 rounded-lg text-xs font-medium',
-                                                isDel
-                                                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                                                    : 'bg-primary text-primary-foreground hover:bg-primary/90',
-                                            )}
-                                        >
-                                            {t('preset.confirm')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={resetPending}
-                                            className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
-                                        >
-                                            <X className="size-4" />
-                                        </button>
-                                    </div>
-                                );
-                            }
-
-                            return (
-                                <div
-                                    key={preset.id}
-                                    className={cn(
-                                        'group/preset px-3 py-2 flex items-center gap-2 hover:bg-muted/40 transition-colors',
-                                        isActive && 'bg-primary/5',
-                                    )}
-                                >
+                <PopoverContent
+                    align="end"
+                    side="bottom"
+                    sideOffset={8}
+                    className="w-[20rem] rounded-2xl border border-border/60 bg-card p-3 shadow-xl"
+                >
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold">{t('preset.title')}</p>
+                            {pending.kind === 'none' && (
+                                hasPresets ? (
                                     <button
                                         type="button"
-                                        onClick={() => handleActivate(preset.id)}
-                                        disabled={isActive || activatePreset.isPending}
-                                        className="flex-1 flex items-center gap-2 min-w-0 text-left"
+                                        onClick={handleCreateBlank}
+                                        disabled={createBlankPreset.isPending}
+                                        className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
                                     >
-                                        {isActive ? (
-                                            <CheckCircle2 className="size-3.5 shrink-0 text-primary" />
-                                        ) : (
-                                            <span className="size-3.5 shrink-0 rounded-full border border-border" />
-                                        )}
-                                        <span className={cn('text-sm truncate', isActive && 'font-medium')}>{preset.name}</span>
-                                        {isActive && (
-                                            <span className="text-[10px] text-primary shrink-0">
-                                                {t('preset.activeBadge')}
-                                            </span>
-                                        )}
+                                        <Plus className="size-3.5" />
+                                        {t('preset.createBlank')}
                                     </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setPending({ kind: 'create' }); setNameDraft(''); }}
+                                        className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                                    >
+                                        <Plus className="size-3.5" />
+                                        {t('preset.saveCurrent')}
+                                    </button>
+                                )
+                            )}
+                        </div>
 
-                                    <div className="flex items-center gap-0.5 opacity-0 group-hover/preset:opacity-100 transition-opacity">
-                                        {!isActive && (
+                        {pending.kind === 'create' && (
+                            <div className="flex items-center gap-1.5">
+                                <Input
+                                    autoFocus
+                                    value={nameDraft}
+                                    onChange={(e) => setNameDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleCreateSubmit();
+                                        if (e.key === 'Escape') resetPending();
+                                    }}
+                                    placeholder={t('preset.namePlaceholder')}
+                                    className="h-8 rounded-lg text-sm"
+                                />
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={handleCreateSubmit}
+                                    disabled={!nameDraft.trim() || createPreset.isPending}
+                                    className="h-8 rounded-lg shrink-0"
+                                >
+                                    <Check className="size-3.5" />
+                                </Button>
+                                <button
+                                    type="button"
+                                    onClick={resetPending}
+                                    className="p-1 rounded-lg hover:bg-muted text-muted-foreground shrink-0"
+                                >
+                                    <X className="size-4" />
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="max-h-72 overflow-y-auto -mx-1 px-1 flex flex-col gap-0.5">
+                            {isLoading && (
+                                <div className="py-6 text-xs text-muted-foreground text-center">
+                                    {t('preset.loading')}
+                                </div>
+                            )}
+                            {!isLoading && presets.length === 0 && pending.kind !== 'create' && (
+                                <div className="py-6 text-xs text-muted-foreground text-center">
+                                    {t('preset.empty')}
+                                </div>
+                            )}
+                            {presets.map((preset) => {
+                                const isActive = activeID === preset.id;
+                                const isDeletingThis = pending.kind === 'delete' && pending.presetID === preset.id;
+
+                                if (isDeletingThis) {
+                                    return (
+                                        <div
+                                            key={preset.id}
+                                            className="flex items-center gap-2 rounded-lg bg-destructive/10 px-2.5 py-2 border border-destructive/20"
+                                        >
+                                            <span className="flex-1 text-xs text-foreground">
+                                                {t('preset.confirmDelete', { name: preset.name })}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteSubmit(preset.id)}
+                                                className="h-6 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors shrink-0"
+                                            >
+                                                {t('preset.confirm')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={resetPending}
+                                                className="p-1 rounded-md hover:bg-muted text-muted-foreground shrink-0"
+                                            >
+                                                <X className="size-4" />
+                                            </button>
+                                        </div>
+                                    );
+                                }
+
+                                return (
+                                    <div
+                                        key={preset.id}
+                                        className={cn(
+                                            'group/preset flex items-center gap-2 rounded-lg px-2.5 py-2 transition-colors',
+                                            isActive ? 'bg-primary/5' : 'hover:bg-muted/60',
+                                        )}
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={() => handleActivate(preset.id)}
+                                            disabled={isActive || activatePreset.isPending}
+                                            className="flex-1 flex items-center gap-2 min-w-0 text-left"
+                                        >
+                                            {isActive ? (
+                                                <CheckCircle2 className="size-3.5 shrink-0 text-primary" />
+                                            ) : (
+                                                <span className="size-3.5 shrink-0 rounded-full border border-border" />
+                                            )}
+                                            <span className={cn('text-sm truncate', isActive && 'font-medium')}>{preset.name}</span>
+                                            {isActive && (
+                                                <span className="text-[10px] uppercase tracking-wide text-primary shrink-0">
+                                                    {t('preset.activeBadge')}
+                                                </span>
+                                            )}
+                                        </button>
+
+                                        <div className="flex items-center gap-0.5 opacity-0 group-hover/preset:opacity-100 transition-opacity">
                                             <Tooltip side="top" sideOffset={6} align="center">
                                                 <TooltipTrigger asChild>
                                                     <button
@@ -323,70 +304,38 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                                 </TooltipTrigger>
                                                 <TooltipContent>{t('preset.edit')}</TooltipContent>
                                             </Tooltip>
-                                        )}
-                                        <Tooltip side="top" sideOffset={6} align="center">
-                                            <TooltipTrigger asChild>
-                                                <button
-                                                    type="button"
-                                                    disabled={isActive}
-                                                    aria-disabled={isActive}
-                                                    onClick={() => {
-                                                        if (isActive) return;
-                                                        setPending({ kind: 'overwrite', presetID: preset.id });
-                                                    }}
-                                                    className={cn(
-                                                        'p-1 rounded-md',
-                                                        isActive
-                                                            ? 'text-muted-foreground/40 cursor-not-allowed'
-                                                            : 'hover:bg-muted text-muted-foreground hover:text-foreground',
-                                                    )}
-                                                >
-                                                    <ArrowDownToLine className="size-3.5" />
-                                                </button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>{t('preset.overwrite')}</TooltipContent>
-                                        </Tooltip>
-                                        <Tooltip side="top" sideOffset={6} align="center">
-                                            <TooltipTrigger asChild>
-                                                <button
-                                                    type="button"
-                                                    disabled={isActive}
-                                                    aria-disabled={isActive}
-                                                    onClick={() => {
-                                                        if (isActive) return;
-                                                        setPending({ kind: 'rename', presetID: preset.id, current: preset.name });
-                                                        setNameDraft(preset.name);
-                                                    }}
-                                                    className={cn(
-                                                        'p-1 rounded-md',
-                                                        isActive
-                                                            ? 'text-muted-foreground/40 cursor-not-allowed'
-                                                            : 'hover:bg-muted text-muted-foreground hover:text-foreground',
-                                                    )}
-                                                >
-                                                    <Type className="size-3.5" />
-                                                </button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>{t('preset.rename')}</TooltipContent>
-                                        </Tooltip>
-                                        {!isActive && (
                                             <Tooltip side="top" sideOffset={6} align="center">
                                                 <TooltipTrigger asChild>
                                                     <button
                                                         type="button"
-                                                        onClick={() => setPending({ kind: 'delete', presetID: preset.id })}
-                                                        className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                                                        onClick={() => handleClone(preset)}
+                                                        disabled={clonePreset.isPending}
+                                                        className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50"
                                                     >
-                                                        <Trash2 className="size-3.5" />
+                                                        <Copy className="size-3.5" />
                                                     </button>
                                                 </TooltipTrigger>
-                                                <TooltipContent>{t('preset.delete')}</TooltipContent>
+                                                <TooltipContent>{t('preset.clone')}</TooltipContent>
                                             </Tooltip>
-                                        )}
+                                            {!isActive && (
+                                                <Tooltip side="top" sideOffset={6} align="center">
+                                                    <TooltipTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPending({ kind: 'delete', presetID: preset.id })}
+                                                            className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                                                        >
+                                                            <Trash2 className="size-3.5" />
+                                                        </button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>{t('preset.delete')}</TooltipContent>
+                                                </Tooltip>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
                     </div>
                 </PopoverContent>
             </Popover>

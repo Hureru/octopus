@@ -257,6 +257,7 @@ export function GroupEditor({
     isSubmitting,
     onSubmit,
     onCancel,
+    nameLabel,
 }: {
     initial?: Partial<GroupEditorValues>;
     submitText: string;
@@ -264,6 +265,7 @@ export function GroupEditor({
     isSubmitting: boolean;
     onSubmit: (values: GroupEditorValues) => void;
     onCancel?: () => void;
+    nameLabel?: string;
 }) {
     const t = useTranslations('group');
     const { data: modelChannels = [] } = useModelChannelList();
@@ -371,7 +373,7 @@ export function GroupEditor({
                 <FieldGroup className="gap-4 flex flex-col min-h-0 h-full">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <Field>
-                            <FieldLabel htmlFor="group-name">{t('form.name')}</FieldLabel>
+                            <FieldLabel htmlFor="group-name">{nameLabel ?? t('form.name')}</FieldLabel>
                             <Input
                                 id="group-name"
                                 value={groupName}
