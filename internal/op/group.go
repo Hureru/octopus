@@ -177,6 +177,12 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 		}
 	}
 
+	// 若该 Group 有 active preset，把当前实时状态回写到 preset（live binding）
+	if err := syncActivePresetTx(tx, req.ID); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to sync active preset: %w", err)
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -239,6 +245,11 @@ func GroupDel(id int, ctx context.Context) error {
 	if err := tx.Where("group_id = ?", id).Delete(&model.GroupItem{}).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to delete group items: %w", err)
+	}
+
+	if err := tx.Where("group_id = ?", id).Delete(&model.GroupPreset{}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to delete group presets: %w", err)
 	}
 
 	if err := tx.Delete(&model.Group{}, id).Error; err != nil {

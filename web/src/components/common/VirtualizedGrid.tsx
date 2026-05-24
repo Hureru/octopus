@@ -186,9 +186,9 @@ export function VirtualizedGrid<T>({
                                         key={virtualRow.key}
                                         data-index={virtualRow.index}
                                         ref={rowVirtualizer.measureElement}
-                                        className="absolute left-0 top-0 w-full"
+                                        className="absolute left-0 w-full"
                                         style={{
-                                            transform: `translateY(${virtualRow.start}px)`,
+                                            top: `${virtualRow.start}px`,
                                         }}
                                     >
                                         {header}
@@ -204,9 +204,9 @@ export function VirtualizedGrid<T>({
                                         key={virtualRow.key}
                                         data-index={virtualRow.index}
                                         ref={rowVirtualizer.measureElement}
-                                        className="absolute left-0 top-0 w-full"
+                                        className="absolute left-0 w-full"
                                         style={{
-                                            transform: `translateY(${virtualRow.start}px)`,
+                                            top: `${virtualRow.start}px`,
                                         }}
                                     >
                                         {footer}
@@ -224,9 +224,14 @@ export function VirtualizedGrid<T>({
                                     key={virtualRow.key}
                                     data-index={virtualRow.index}
                                     ref={rowVirtualizer.measureElement}
-                                    className="absolute left-0 top-0 w-full"
+                                    className="absolute left-0 w-full"
                                     style={{
-                                        transform: `translateY(${virtualRow.start}px)`,
+                                        // Use `top` instead of `transform: translateY` so the row
+                                        // does NOT establish a containing block for fixed-positioned
+                                        // descendants. Otherwise @hello-pangea/dnd's drag clone
+                                        // (position: fixed) gets re-anchored to the row and shifts
+                                        // by the row's viewport left offset.
+                                        top: `${virtualRow.start}px`,
                                     }}
                                 >
                                     <div

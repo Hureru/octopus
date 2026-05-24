@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 type GroupMode int
 
 const (
@@ -18,6 +20,9 @@ type Group struct {
 	SessionKeepTime   int         `json:"session_keep_time"`                  // 会话保持时间(秒) 0 为禁用
 	RetryEnabled      bool        `json:"retry_enabled" gorm:"default:false"` // 启用同通道重试+透传429/503
 	MaxRetries        int         `json:"max_retries" gorm:"default:3"`       // 同通道最大重试次数(RetryEnabled启用时生效)
+	Pinned            bool        `json:"pinned" gorm:"default:false;index"`  // 置顶
+	PinnedAt          *time.Time  `json:"pinned_at,omitempty"`                // 置顶时间，置顶时写入，取消置顶时置空
+	ActivePresetID    *int        `json:"active_preset_id,omitempty"`         // 当前激活的预设ID，仅 UI 标记，不参与路由
 	Items             []GroupItem `json:"items,omitempty" gorm:"foreignKey:GroupID"`
 }
 
@@ -26,6 +31,32 @@ type GroupItem struct {
 	GroupID   int    `json:"group_id" gorm:"not null;index:idx_group_channel_model,unique"` // 创建时不携带此字段,更新时需要
 	ChannelID int    `json:"channel_id" gorm:"not null;index:idx_group_channel_model,unique"`
 	ModelName string `json:"model_name" gorm:"not null;index:idx_group_channel_model,unique"`
+	Priority  int    `json:"priority"`
+	Weight    int    `json:"weight"`
+}
+
+// GroupPreset 分组的路由配置预设（命名快照）
+// 切换预设 = 用此快照覆盖 Group 的实时 Mode/超时/重试/regex + group_items 表
+type GroupPreset struct {
+	ID                int               `json:"id" gorm:"primaryKey"`
+	GroupID           int               `json:"group_id" gorm:"not null;index:idx_group_preset_name,unique"`
+	Name              string            `json:"name" gorm:"not null;index:idx_group_preset_name,unique"`
+	Mode              GroupMode         `json:"mode" gorm:"not null"`
+	MatchRegex        string            `json:"match_regex"`
+	FirstTokenTimeOut int               `json:"first_token_time_out"`
+	SessionKeepTime   int               `json:"session_keep_time"`
+	RetryEnabled      bool              `json:"retry_enabled"`
+	MaxRetries        int               `json:"max_retries"`
+	Items             []GroupPresetItem `json:"items" gorm:"serializer:json;type:text"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+}
+
+// GroupPresetItem 预设中的渠道-模型条目（JSON 序列化为 Items 字段）
+// 不含 ID/GroupID，激活时重新生成
+type GroupPresetItem struct {
+	ChannelID int    `json:"channel_id"`
+	ModelName string `json:"model_name"`
 	Priority  int    `json:"priority"`
 	Weight    int    `json:"weight"`
 }
@@ -62,6 +93,31 @@ type GroupItemUpdateRequest struct {
 type GroupIDAndLLMName struct {
 	ChannelID int
 	ModelName string
+}
+
+// GroupPresetCreateRequest 新增预设：服务端从 Group 当前实时状态取快照；
+// 也用于 create-blank 和 clone 接口（均只需 Name）
+type GroupPresetCreateRequest struct {
+	Name string `json:"name" binding:"required"`
+}
+
+// GroupPresetUpdateRequest 直接编辑预设的 JSON 内容
+// Items 为整体替换语义（非增量），nil 表示不变
+// 若该预设是 active，编辑结果会同步镜像到所属 Group（live binding）
+type GroupPresetUpdateRequest struct {
+	Name              *string            `json:"name,omitempty"`
+	Mode              *GroupMode         `json:"mode,omitempty"`
+	MatchRegex        *string            `json:"match_regex,omitempty"`
+	FirstTokenTimeOut *int               `json:"first_token_time_out,omitempty"`
+	SessionKeepTime   *int               `json:"session_keep_time,omitempty"`
+	RetryEnabled      *bool              `json:"retry_enabled,omitempty"`
+	MaxRetries        *int               `json:"max_retries,omitempty"`
+	Items             *[]GroupPresetItem `json:"items,omitempty"`
+}
+
+// GroupPinRequest 置顶/取消置顶
+type GroupPinRequest struct {
+	Pinned *bool `json:"pinned" binding:"required"`
 }
 
 type GroupAutoGroupConfig struct {

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Trash2, X, Pencil } from 'lucide-react';
+import { Trash2, X, Pencil, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { type Group, useDeleteGroup, useUpdateGroup } from '@/api/endpoints/group';
+import { type Group, useDeleteGroup, useUpdateGroup, useToggleGroupPin } from '@/api/endpoints/group';
 import { useModelChannelList } from '@/api/endpoints/model';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ import { GroupEditor, type GroupEditorValues } from './Editor';
 import { GroupHealthBadge } from './health';
 import { modelChannelKey, MODE_LABELS } from './utils';
 import { GroupMode, type GroupUpdateRequest } from '@/api/endpoints/group';
+import { PresetPopover } from './PresetPopover';
 import {
     MorphingDialog,
     MorphingDialogClose,
@@ -75,6 +76,7 @@ export function GroupCard({ group }: { group: Group }) {
     const t = useTranslations('group');
     const updateGroup = useUpdateGroup();
     const deleteGroup = useDeleteGroup();
+    const togglePin = useToggleGroupPin();
     const { data: modelChannels = [] } = useModelChannelList();
 
     const [confirmDelete, setConfirmDelete] = useState(false);
@@ -121,8 +123,8 @@ export function GroupCard({ group }: { group: Group }) {
     );
 
     const renderedMembers = useMemo(
-        () => isDragging ? members : effectiveDisplayMembers,
-        [effectiveDisplayMembers, isDragging, members]
+        () => isDragging || updateGroup.isPending ? members : effectiveDisplayMembers,
+        [effectiveDisplayMembers, isDragging, updateGroup.isPending, members]
     );
 
     useEffect(() => {
@@ -285,7 +287,7 @@ export function GroupCard({ group }: { group: Group }) {
     }, [group.first_token_time_out, group.session_keep_time, group.retry_enabled, group.max_retries, group.id, group.items, group.match_regex, group.mode, group.name, onSuccess, onError, updateGroup]);
 
     return (
-        <article className="flex flex-col rounded-3xl border border-border bg-card text-card-foreground p-4 custom-shadow">
+        <article className="relative group/card flex flex-col rounded-3xl border border-border bg-card text-card-foreground p-4 custom-shadow">
             <header className="flex items-start justify-between mb-3 relative overflow-visible rounded-xl -mx-1 px-1 -my-1 py-1">
                 <div className="relative flex-1 mr-2 min-w-0 group/title">
                     <Tooltip side="top" sideOffset={10} align="center">
@@ -297,6 +299,20 @@ export function GroupCard({ group }: { group: Group }) {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                    <Tooltip side="top" sideOffset={10} align="center">
+                        <TooltipTrigger>
+                            <CopyIconButton
+                                text={group.name}
+                                className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground"
+                                copyIconClassName="size-4"
+                                checkIconClassName="size-4 text-primary"
+                            />
+                        </TooltipTrigger>
+                        <TooltipContent>{t('detail.actions.copyName')}</TooltipContent>
+                    </Tooltip>
+
+                    <PresetPopover group={group} />
+
                     <MorphingDialog>
                         <MorphingDialogTrigger className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground">
                             <Tooltip side="top" sideOffset={10} align="center">
@@ -318,43 +334,7 @@ export function GroupCard({ group }: { group: Group }) {
                             </MorphingDialogContent>
                         </MorphingDialogContainer>
                     </MorphingDialog>
-
-                    <Tooltip side="top" sideOffset={10} align="center">
-                        <TooltipTrigger>
-                            <CopyIconButton
-                                text={group.name}
-                                className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground"
-                                copyIconClassName="size-4"
-                                checkIconClassName="size-4 text-primary"
-                            />
-                        </TooltipTrigger>
-                        <TooltipContent>{t('detail.actions.copyName')}</TooltipContent>
-                    </Tooltip>
-                    {!confirmDelete && (
-                        <Tooltip side="top" sideOffset={10} align="center">
-                            <TooltipTrigger>
-                                <motion.button layoutId={`delete-btn-group-${group.id}`} type="button" onClick={() => setConfirmDelete(true)} className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
-                                    <Trash2 className="size-4" />
-                                </motion.button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t('detail.actions.delete')}</TooltipContent>
-                        </Tooltip>
-                    )}
                 </div>
-
-                <AnimatePresence>
-                    {confirmDelete && (
-                        <motion.div layoutId={`delete-btn-group-${group.id}`} className="absolute inset-0 flex items-center justify-center gap-2 bg-destructive p-2 rounded-xl" transition={{ type: 'spring', stiffness: 400, damping: 30 }}>
-                            <button type="button" onClick={() => setConfirmDelete(false)} className="flex h-7 w-7 items-center justify-center rounded-lg bg-destructive-foreground/20 text-destructive-foreground transition-all hover:bg-destructive-foreground/30 active:scale-95">
-                                <X className="size-4" />
-                            </button>
-                            <button type="button" onClick={() => group.id && deleteGroup.mutate(group.id, { onSuccess: () => toast.success(t('toast.deleted')) })} disabled={deleteGroup.isPending} className="flex-1 h-7 flex items-center justify-center gap-2 rounded-lg bg-destructive-foreground text-destructive text-sm font-semibold transition-all hover:bg-destructive-foreground/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
-                                <Trash2 className="size-3.5" />
-                                {t('detail.actions.confirmDelete')}
-                            </button>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
             </header>
 
             {/* Mode: quick switch (no need to enter Edit) */}
@@ -397,6 +377,86 @@ export function GroupCard({ group }: { group: Group }) {
                     layoutScope={`card-${group.id ?? 'unknown'}`}
                 />
             </section>
+
+            {/* Floating secondary actions: hidden by default, appear on card hover/focus */}
+            {!confirmDelete && (
+                <div
+                    className={cn(
+                        'absolute left-3 bottom-3 z-10 flex items-center gap-0.5 rounded-xl bg-card/95 backdrop-blur-sm border border-border/40 shadow-sm p-0.5 transition-opacity duration-200',
+                        'opacity-0 pointer-events-none group-hover/card:opacity-100 group-hover/card:pointer-events-auto group-focus-within/card:opacity-100 group-focus-within/card:pointer-events-auto',
+                    )}
+                >
+                    <Tooltip side="top" sideOffset={6} align="center">
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                disabled={togglePin.isPending || !group.id}
+                                onClick={() => {
+                                    if (!group.id || togglePin.isPending) return;
+                                    togglePin.mutate(
+                                        { groupID: group.id, pinned: !group.pinned },
+                                        {
+                                            onSuccess: () => toast.success(group.pinned ? t('toast.unpinned') : t('toast.pinned')),
+                                            onError: (e) => toast.error(t('toast.pinFailed'), { description: e.message }),
+                                        },
+                                    );
+                                }}
+                                className={cn(
+                                    'p-1.5 rounded-lg transition-colors hover:bg-muted disabled:opacity-50 disabled:pointer-events-none',
+                                    group.pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                                )}
+                            >
+                                {group.pinned ? <Pin className="size-4 fill-current" /> : <PinOff className="size-4" />}
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{group.pinned ? t('pin.unpin') : t('pin.pin')}</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip side="top" sideOffset={6} align="center">
+                        <TooltipTrigger asChild>
+                            <motion.button
+                                layoutId={`delete-btn-group-${group.id}`}
+                                type="button"
+                                onClick={() => setConfirmDelete(true)}
+                                className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                            >
+                                <Trash2 className="size-4" />
+                            </motion.button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('detail.actions.delete')}</TooltipContent>
+                    </Tooltip>
+                </div>
+            )}
+
+            <AnimatePresence>
+                {confirmDelete && (
+                    <motion.div
+                        layoutId={`delete-btn-group-${group.id}`}
+                        className="absolute left-3 bottom-3 z-10 flex items-center gap-2 bg-destructive p-2 rounded-xl shadow-md"
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setConfirmDelete(false)}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg bg-destructive-foreground/20 text-destructive-foreground transition-all hover:bg-destructive-foreground/30 active:scale-95"
+                        >
+                            <X className="size-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => group.id && deleteGroup.mutate(group.id, {
+                                onSuccess: () => toast.success(t('toast.deleted')),
+                                onError: (e) => toast.error(t('toast.deleteFailed'), { description: e.message }),
+                            })}
+                            disabled={deleteGroup.isPending}
+                            className="h-7 px-3 flex items-center justify-center gap-2 rounded-lg bg-destructive-foreground text-destructive text-sm font-semibold transition-all hover:bg-destructive-foreground/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Trash2 className="size-3.5" />
+                            {t('detail.actions.confirmDelete')}
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </article >
     );
 }

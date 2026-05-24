@@ -416,7 +416,49 @@
             "updated": "Updated successfully",
             "updateFailed": "Update failed",
             "deleted": "Deleted successfully",
-            "autoAddFailed": "Auto add failed"
+            "deleteFailed": "Delete failed",
+            "autoAddFailed": "Auto add failed",
+            "pinned": "Pinned",
+            "unpinned": "Unpinned",
+            "pinFailed": "Pin toggle failed"
+        },
+        "pin": {
+            "pin": "Pin to top",
+            "unpin": "Unpin"
+        },
+        "preset": {
+            "title": "Presets",
+            "saveCurrent": "Save current",
+            "createBlank": "Create blank",
+            "autoNamePrefix": "New preset",
+            "cloneSuffix": "copy",
+            "namePlaceholder": "Preset name",
+            "name": "Preset Name",
+            "close": "Close",
+            "loading": "Loading...",
+            "empty": "No presets yet",
+            "activeBadge": "Active",
+            "edit": "Edit",
+            "clone": "Clone",
+            "delete": "Delete",
+            "confirmDelete": "Delete preset {name}?",
+            "confirm": "Confirm",
+            "editorTitle": "Edit Preset",
+            "save": "Save",
+            "saving": "Saving...",
+            "toast": {
+                "created": "Preset saved",
+                "createFailed": "Preset save failed",
+                "createBlankFailed": "Blank preset creation failed",
+                "cloned": "Preset cloned",
+                "cloneFailed": "Clone failed",
+                "activated": "Preset activated",
+                "activateFailed": "Activate failed",
+                "deleted": "Preset deleted",
+                "deleteFailed": "Delete failed",
+                "updated": "Preset updated",
+                "updateFailed": "Preset update failed"
+            }
         },
         "create": {
             "title": "Create Group",

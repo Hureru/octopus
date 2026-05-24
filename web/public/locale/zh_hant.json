@@ -416,7 +416,49 @@
             "updated": "更新成功",
             "updateFailed": "更新失敗",
             "deleted": "刪除成功",
-            "autoAddFailed": "自動新增失敗"
+            "deleteFailed": "刪除失敗",
+            "autoAddFailed": "自動新增失敗",
+            "pinned": "已置頂",
+            "unpinned": "已取消置頂",
+            "pinFailed": "置頂操作失敗"
+        },
+        "pin": {
+            "pin": "置頂",
+            "unpin": "取消置頂"
+        },
+        "preset": {
+            "title": "預設",
+            "saveCurrent": "儲存目前",
+            "createBlank": "建立空白",
+            "autoNamePrefix": "新預設",
+            "cloneSuffix": "副本",
+            "namePlaceholder": "為預設命名",
+            "name": "預設名稱",
+            "close": "關閉",
+            "loading": "載入中...",
+            "empty": "暫無預設",
+            "activeBadge": "目前",
+            "edit": "編輯",
+            "clone": "複製",
+            "delete": "刪除",
+            "confirmDelete": "刪除預設 {name}？",
+            "confirm": "確定",
+            "editorTitle": "編輯預設",
+            "save": "儲存",
+            "saving": "儲存中...",
+            "toast": {
+                "created": "預設已儲存",
+                "createFailed": "預設儲存失敗",
+                "createBlankFailed": "空白預設建立失敗",
+                "cloned": "預設已複製",
+                "cloneFailed": "複製失敗",
+                "activated": "預設已套用",
+                "activateFailed": "套用預設失敗",
+                "deleted": "預設已刪除",
+                "deleteFailed": "刪除失敗",
+                "updated": "預設已更新",
+                "updateFailed": "預設更新失敗"
+            }
         },
         "create": {
             "title": "建立分組",
