@@ -126,6 +126,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
     }, [group.id, clonePreset, t]);
 
     const handleDeleteSubmit = useCallback((presetID: number) => {
+        if (deletePreset.isPending) return;
         deletePreset.mutate(
             { presetID, groupID: group.id },
             {
@@ -249,7 +250,8 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                             <button
                                                 type="button"
                                                 onClick={() => handleDeleteSubmit(preset.id)}
-                                                className="h-6 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors shrink-0"
+                                                disabled={deletePreset.isPending}
+                                                className="h-6 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 {t('preset.confirm')}
                                             </button>

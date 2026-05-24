@@ -378,12 +378,12 @@ export function GroupCard({ group }: { group: Group }) {
                 />
             </section>
 
-            {/* Floating secondary actions: hidden by default, appear on card hover */}
+            {/* Floating secondary actions: hidden by default, appear on card hover/focus */}
             {!confirmDelete && (
                 <div
                     className={cn(
                         'absolute left-3 bottom-3 z-10 flex items-center gap-0.5 rounded-xl bg-card/95 backdrop-blur-sm border border-border/40 shadow-sm p-0.5 transition-opacity duration-200',
-                        'opacity-0 pointer-events-none group-hover/card:opacity-100 group-hover/card:pointer-events-auto',
+                        'opacity-0 pointer-events-none group-hover/card:opacity-100 group-hover/card:pointer-events-auto group-focus-within/card:opacity-100 group-focus-within/card:pointer-events-auto',
                     )}
                 >
                     <Tooltip side="top" sideOffset={6} align="center">
@@ -444,7 +444,10 @@ export function GroupCard({ group }: { group: Group }) {
                         </button>
                         <button
                             type="button"
-                            onClick={() => group.id && deleteGroup.mutate(group.id, { onSuccess: () => toast.success(t('toast.deleted')) })}
+                            onClick={() => group.id && deleteGroup.mutate(group.id, {
+                                onSuccess: () => toast.success(t('toast.deleted')),
+                                onError: (e) => toast.error(t('toast.deleteFailed'), { description: e.message }),
+                            })}
                             disabled={deleteGroup.isPending}
                             className="h-7 px-3 flex items-center justify-center gap-2 rounded-lg bg-destructive-foreground text-destructive text-sm font-semibold transition-all hover:bg-destructive-foreground/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                         >

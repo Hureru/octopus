@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -53,6 +54,7 @@ func groupPresetSnapshotFromCache(groupID int) (mode model.GroupMode, matchRegex
 
 // GroupPresetCreate 抓取 Group 当前 Mode + Items + 其他路由参数快照成新预设
 func GroupPresetCreate(groupID int, name string, ctx context.Context) (*model.GroupPreset, error) {
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("preset name required")
 	}
@@ -80,6 +82,7 @@ func GroupPresetCreate(groupID int, name string, ctx context.Context) (*model.Gr
 // GroupPresetCreateBlank 创建空白预设：使用默认 Mode + 空 items
 // 用于"基于零起步设计一份新预设"的场景，不读取 Group 当前状态
 func GroupPresetCreateBlank(groupID int, name string, ctx context.Context) (*model.GroupPreset, error) {
+	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("preset name required")
 	}
@@ -101,6 +104,7 @@ func GroupPresetCreateBlank(groupID int, name string, ctx context.Context) (*mod
 
 // GroupPresetClone 克隆已有预设为副本，碰到同名冲突时自动追加 " 2"/" 3" 后缀
 func GroupPresetClone(presetID int, newName string, ctx context.Context) (*model.GroupPreset, error) {
+	newName = strings.TrimSpace(newName)
 	if newName == "" {
 		return nil, fmt.Errorf("preset name required")
 	}
@@ -238,10 +242,11 @@ func syncActivePresetTx(tx *gorm.DB, groupID int) error {
 	presetID := *group.ActivePresetID
 
 	var preset model.GroupPreset
-	if err := tx.First(&preset, presetID).Error; err != nil {
+	if err := tx.Where("id = ? AND group_id = ?", presetID, groupID).First(&preset).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// active_preset_id 指向不存在或不属于本 group 的预设：清空，仅在仍指向我们认为的 presetID 时
 			return tx.Model(&model.Group{}).
-				Where("id = ?", groupID).
+				Where("id = ? AND active_preset_id = ?", groupID, presetID).
 				Update("active_preset_id", gorm.Expr("NULL")).Error
 		}
 		return fmt.Errorf("failed to load active preset: %w", err)

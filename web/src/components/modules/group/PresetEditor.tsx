@@ -108,7 +108,7 @@ export function PresetEditor({ preset, open, onOpenChange }: PresetEditorProps) 
                         <button
                             type="button"
                             onClick={() => onOpenChange(false)}
-                            aria-label="Close"
+                            aria-label={t('preset.close')}
                             className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                         >
                             <XIcon className="size-5" />
