@@ -150,10 +150,17 @@ export function VirtualizedGrid<T>({
 
     useEffect(() => {
         if (!onReachEnd || !reachEndEnabled || itemRowCount === 0) return;
+        const el = containerRef.current;
+        if (!el) return;
 
-        const lastVirtualIndex = virtualRows.length > 0 ? virtualRows[virtualRows.length - 1]!.index - headerRowCount : -1;
-        const triggerIndex = Math.max(0, itemRowCount - 1 - reachEndOffset);
-        if (lastVirtualIndex < triggerIndex) {
+        // 用真实 scrollTop / scrollHeight / clientHeight 判定"到底",而不是 virtualRows
+        // 的最后 index。virtualRows 受 overscan 和 footer 行影响,会让 lastVirtualIndex
+        // 在用户停在底部时永远 >= triggerIndex,导致 loadMore 完成后触发锁卡死,
+        // 必须用户主动向上滚远才能解锁(用户视角的"滚到底没反应")。
+        const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+        const threshold = (estimateItemHeight + gap) * reachEndOffset;
+
+        if (distance > threshold) {
             reachEndTriggeredRef.current = false;
             return;
         }
@@ -161,7 +168,7 @@ export function VirtualizedGrid<T>({
 
         reachEndTriggeredRef.current = true;
         onReachEnd();
-    }, [onReachEnd, reachEndEnabled, itemRowCount, reachEndOffset, virtualRows, headerRowCount]);
+    }, [onReachEnd, reachEndEnabled, itemRowCount, reachEndOffset, virtualRows, estimateItemHeight, gap]);
 
     return (
         <div className="relative h-full min-h-0 w-full">
