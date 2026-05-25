@@ -16,14 +16,12 @@ type syncSnapshot struct {
 	groups       []model.SiteUserGroup
 	tokens       []model.SiteToken
 	models       []model.SiteModel
-	prices       []model.SitePrice
 	groupResults []siteGroupSyncResult
 	status       model.SiteExecutionStatus
 	balance      float64
 	balanceUsed  float64
 	todayIncome  float64
 	message      string
-	warnings     []siteSyncWarning
 }
 
 type siteBatchAccount struct {
@@ -157,8 +155,7 @@ func syncBatchAccounts(ctx context.Context, items []siteBatchAccount, opts SiteB
 			}
 			continue
 		}
-		warnings := accountSyncWarnings(result)
-		summary.recordResult(item.site.ID, item.site.Platform, item.account.ID, result.Status, result.Message, warnings)
+		summary.recordResult(item.site.ID, item.site.Platform, item.account.ID, result.Status, result.Message)
 	}
 	return *summary
 }
@@ -208,7 +205,7 @@ func CheckinAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatch
 			summary.recordSkip(item.site.ID, item.site.Platform, SiteBatchReasonUnsupportedCheckin, 1)
 			continue
 		}
-		summary.recordResult(item.site.ID, item.site.Platform, item.account.ID, result.Status, result.Message, nil)
+		summary.recordResult(item.site.ID, item.site.Platform, item.account.ID, result.Status, result.Message)
 	}
 	return *summary
 }
@@ -267,16 +264,6 @@ func recordBatchCanceledSkips(summary *SiteBatchSummary, items []siteBatchAccoun
 	for _, item := range items {
 		summary.recordSkip(item.site.ID, item.site.Platform, SiteBatchReasonBatchCanceled, 1)
 	}
-}
-
-func accountSyncWarnings(result *model.SiteSyncResult) []siteSyncWarning {
-	if result == nil || result.Status != model.SiteExecutionStatusPartial {
-		return nil
-	}
-	if strings.Contains(result.Message, "价格") {
-		return []siteSyncWarning{{Reason: SiteBatchReasonPricingFetchFailed, Message: result.Message}}
-	}
-	return nil
 }
 
 func waitSiteBatchInterval(ctx context.Context, delay time.Duration) bool {

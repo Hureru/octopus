@@ -265,19 +265,9 @@ func intPtr(value int) *int {
 	return &value
 }
 
-// resolveModelPrice 优先从站点 (账号, 分组) 维度查价；缺失时回退到 models.dev 全局价格。
-// 保证与原 price.GetLLMPrice 相同的签名（*model.LLMPrice），不改变调用方计费数学。
+// resolveModelPrice 统一从全局模型价格查价。
+// 站点上游价格不可手动维护，且可能以 0 价覆盖全局价格；计费只认价格页维护的全局价格。
 func resolveModelPrice(channelID int, actualModel string) *model.LLMPrice {
-	if channelID > 0 {
-		binding, err := op.SiteChannelBindingGetByChannelID(channelID, context.Background())
-		if err == nil && binding != nil {
-			baseGroupKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
-			if sitePrice, ok := op.SitePriceGet(binding.SiteAccountID, baseGroupKey, actualModel); ok {
-				resolved := sitePrice
-				return &resolved
-			}
-		}
-	}
 	return price.GetLLMPrice(actualModel)
 }
 
