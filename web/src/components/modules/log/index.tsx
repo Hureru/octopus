@@ -123,14 +123,14 @@ export function Log() {
     }, [handleRefresh, refreshRequestId]);
 
     const footer = useMemo(() => {
-        if (hasMore && (isLoading || isLoadingMore)) {
+        if (hasMore) {
             return (
                 <div className="flex justify-center py-4">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
             );
         }
-        if (!hasMore && logs.length > 0) {
+        if (logs.length > 0) {
             return (
                 <div className="flex justify-center py-4">
                     <span className="text-sm text-muted-foreground">{t('list.noMore')}</span>
@@ -138,7 +138,7 @@ export function Log() {
             );
         }
         return null;
-    }, [hasMore, isLoading, isLoadingMore, logs.length, t]);
+    }, [hasMore, logs.length, t]);
 
     return (
         <div className="flex h-full min-h-0 flex-col gap-3">
