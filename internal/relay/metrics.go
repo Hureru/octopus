@@ -29,13 +29,12 @@ type RelayMetrics struct {
 	InternalResponse *transformerModel.InternalLLMResponse
 
 	// 统计指标
-	ActualModel       string
-	Stats             model.StatsMetrics
-	UsedWS            bool
-	WSMode            *model.RelayLogWSMode
-	WSExecMode        *model.RelayLogWSExecMode
-	WSRecovery        *model.RelayLogWSRecovery
-	SelectedChannelID int
+	ActualModel string
+	Stats       model.StatsMetrics
+	UsedWS      bool
+	WSMode      *model.RelayLogWSMode
+	WSExecMode  *model.RelayLogWSExecMode
+	WSRecovery  *model.RelayLogWSRecovery
 
 	TransportInputTokens *int
 	BillInputTokens      *int
@@ -86,11 +85,6 @@ func (m *RelayMetrics) SetWSRecovery(recovery model.RelayLogWSRecovery) {
 	m.WSRecovery = wsRecoveryPtr(recovery)
 }
 
-// SetSelectedChannel 记录此次命中的通道 ID，用于 SetInternalResponse 时按站点 (账号, 分组) 查询价格。
-func (m *RelayMetrics) SetSelectedChannel(channelID int) {
-	m.SelectedChannelID = channelID
-}
-
 func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMResponse, actualModel string) {
 	m.InternalResponse = resp
 	m.ActualModel = actualModel
@@ -110,7 +104,7 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	m.Stats.InputToken = usage.PromptTokens
 	m.Stats.OutputToken = usage.CompletionTokens
 
-	modelPrice := resolveModelPrice(m.SelectedChannelID, actualModel)
+	modelPrice := resolveModelPrice(actualModel)
 	if modelPrice == nil {
 		return
 	}
@@ -265,9 +259,8 @@ func intPtr(value int) *int {
 	return &value
 }
 
-// resolveModelPrice 统一从全局模型价格查价。
-// 站点上游价格不可手动维护，且可能以 0 价覆盖全局价格；计费只认价格页维护的全局价格。
-func resolveModelPrice(channelID int, actualModel string) *model.LLMPrice {
+// resolveModelPrice returns the global price configured for the actual model.
+func resolveModelPrice(actualModel string) *model.LLMPrice {
 	return price.GetLLMPrice(actualModel)
 }
 
