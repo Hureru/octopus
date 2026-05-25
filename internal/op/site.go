@@ -257,9 +257,6 @@ func SiteDel(id int, ctx context.Context) error {
 			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SitePrice{}).Error; err != nil {
-				return err
-			}
 			if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
 				return err
 			}
@@ -268,9 +265,7 @@ func SiteDel(id int, ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	for _, accountID := range affectedAccountIDs {
-		sitePriceClearCacheForAccount(accountID)
-	}
+	_ = affectedAccountIDs
 	return nil
 }
 
@@ -505,14 +500,10 @@ func SiteAccountDel(id int, ctx context.Context) error {
 		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteChannelBinding{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("site_account_id = ?", id).Delete(&model.SitePrice{}).Error; err != nil {
-			return err
-		}
 		return tx.Delete(&model.SiteAccount{}, id).Error
 	}); err != nil {
 		return err
 	}
-	sitePriceClearCacheForAccount(id)
 	return nil
 }
 

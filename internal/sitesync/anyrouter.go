@@ -111,21 +111,18 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	}
 
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, userID)
-	prices, priceWarnings := fetchPricingWithWarnings(ctx, siteRecord, account, accessToken, groups)
-	status, message := applySyncWarnings(status, buildSyncSnapshotMessage(groupResults), priceWarnings)
+	message := buildSyncSnapshotMessage(groupResults)
 	return &syncSnapshot{
 		accessToken:  accessToken,
 		groups:       groups,
 		tokens:       tokens,
 		models:       siteModels,
-		prices:       prices,
 		groupResults: groupResults,
 		status:       status,
 		balance:      balance,
 		balanceUsed:  balanceUsed,
 		todayIncome:  todayIncome,
 		message:      message,
-		warnings:     priceWarnings,
 	}, nil
 }
 

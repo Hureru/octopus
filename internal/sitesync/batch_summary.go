@@ -43,7 +43,6 @@ const (
 	SiteBatchReasonUpstreamHTTPError       SiteBatchReason = "upstream_http_error"
 	SiteBatchReasonUpstreamDecodeFailed    SiteBatchReason = "upstream_decode_failed"
 	SiteBatchReasonUpstreamHTMLResponse    SiteBatchReason = "upstream_html_response"
-	SiteBatchReasonPricingFetchFailed      SiteBatchReason = "pricing_fetch_failed"
 	SiteBatchReasonScheduledLater          SiteBatchReason = "scheduled_later"
 	SiteBatchReasonBatchCanceled           SiteBatchReason = "batch_canceled"
 	SiteBatchReasonTimeout                 SiteBatchReason = "timeout"
@@ -56,11 +55,6 @@ const (
 
 type SiteBatchOptions struct {
 	Trigger SiteBatchTrigger
-}
-
-type siteSyncWarning struct {
-	Reason  SiteBatchReason
-	Message string
 }
 
 type SiteBatchSummary struct {
@@ -135,7 +129,7 @@ func (s *SiteBatchSummary) finish() {
 	s.Duration = time.Since(s.startedAt)
 }
 
-func (s *SiteBatchSummary) recordResult(siteID int, platform model.SitePlatform, accountID int, status model.SiteExecutionStatus, message string, warnings []siteSyncWarning) {
+func (s *SiteBatchSummary) recordResult(siteID int, platform model.SitePlatform, accountID int, status model.SiteExecutionStatus, message string) {
 	s.Attempted++
 	safeMessage := sanitizeSiteStatusText(message)
 	switch status {
@@ -151,9 +145,6 @@ func (s *SiteBatchSummary) recordResult(siteID int, platform model.SitePlatform,
 		s.addFailure(siteID, platform, accountID, SiteBatchReasonUnknown, safeMessage)
 	default:
 		s.Success++
-	}
-	for _, warning := range warnings {
-		s.addWarning(siteID, platform, accountID, warning.Reason, warning.Message)
 	}
 }
 

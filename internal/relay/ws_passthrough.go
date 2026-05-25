@@ -448,7 +448,4 @@ func (ra *relayAttempt) applyWSPassthroughStats(stats *wsPassthroughStats) {
 		RawResponsesOutputItems: stats.RawOutput,
 	}
 	ra.metrics.SetInternalResponse(resp, modelName)
-	if ra.channel != nil {
-		ra.metrics.SetSelectedChannel(ra.channel.ID)
-	}
 }

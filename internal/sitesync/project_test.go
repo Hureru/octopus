@@ -432,45 +432,6 @@ func TestProjectAccountSyncsProjectedModelPrices(t *testing.T) {
 	}
 }
 
-func TestProjectAccountUsesSiteGroupRatioInManagedChannelName(t *testing.T) {
-	ctx := setupProjectTestDB(t)
-	_, account := createProjectionFixture(t, ctx)
-
-	price := model.SitePrice{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", GroupRatio: 2}
-	if err := dbpkg.GetDB().WithContext(ctx).Create(&price).Error; err != nil {
-		t.Fatalf("create site price failed: %v", err)
-	}
-
-	if _, err := ProjectAccount(ctx, account.ID); err != nil {
-		t.Fatalf("ProjectAccount returned error: %v", err)
-	}
-
-	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
-	channel := channelsByGroup[model.SiteDefaultGroupKey]
-	if channel.Name != "Projection Site/Primary Account/default x2-Chat" {
-		t.Fatalf("expected ratio in projected channel name, got %q", channel.Name)
-	}
-}
-
-func TestProjectAccountFormatsFractionalSiteGroupRatioInManagedChannelName(t *testing.T) {
-	ctx := setupProjectTestDB(t)
-	_, account := createProjectionFixture(t, ctx)
-
-	price := model.SitePrice{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", GroupRatio: 1.5}
-	if err := dbpkg.GetDB().WithContext(ctx).Create(&price).Error; err != nil {
-		t.Fatalf("create site price failed: %v", err)
-	}
-
-	if _, err := ProjectAccount(ctx, account.ID); err != nil {
-		t.Fatalf("ProjectAccount returned error: %v", err)
-	}
-
-	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
-	channel := channelsByGroup[model.SiteDefaultGroupKey]
-	if channel.Name != "Projection Site/Primary Account/default x1.5-Chat" {
-		t.Fatalf("expected fractional ratio in projected channel name, got %q", channel.Name)
-	}
-}
 func TestDeleteSiteAccountRemovesManagedChannelChain(t *testing.T) {
 	ctx := setupProjectTestDB(t)
 	site, account := createProjectionFixture(t, ctx)

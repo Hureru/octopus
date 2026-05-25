@@ -1134,9 +1134,6 @@ func (ra *relayAttempt) collectResponse() {
 	if actualModel == "" && ra.internalRequest != nil {
 		actualModel = strings.TrimSpace(ra.internalRequest.Model)
 	}
-	if ra.channel != nil {
-		ra.metrics.SetSelectedChannel(ra.channel.ID)
-	}
 	ra.metrics.SetInternalResponse(internalResponse, actualModel)
 }
 

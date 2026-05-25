@@ -147,7 +147,6 @@ type SiteAccount struct {
 	UserGroups                 []SiteUserGroup      `json:"user_groups,omitempty" gorm:"foreignKey:SiteAccountID"`
 	Models                     []SiteModel          `json:"models,omitempty" gorm:"foreignKey:SiteAccountID"`
 	ChannelBindings            []SiteChannelBinding `json:"channel_bindings,omitempty" gorm:"foreignKey:SiteAccountID"`
-	Prices                     []SitePrice          `json:"prices,omitempty" gorm:"foreignKey:SiteAccountID"`
 }
 
 func (a *SiteAccount) UnmarshalJSON(data []byte) error {

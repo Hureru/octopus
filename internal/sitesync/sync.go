@@ -166,9 +166,8 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		return nil, buildSyncSnapshotFailure(groupResults)
 	}
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, firstManagedPlatformUserID(account))
-	prices, priceWarnings := fetchPricingWithWarnings(ctx, siteRecord, account, accessToken, groups)
-	status, message := applySyncWarnings(status, buildSyncSnapshotMessage(groupResults), priceWarnings)
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, prices: prices, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: message, warnings: priceWarnings}, nil
+	message := buildSyncSnapshotMessage(groupResults)
+	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: message}, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
