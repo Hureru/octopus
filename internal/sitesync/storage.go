@@ -271,6 +271,7 @@ func mergeReadyIncomingSiteToken(incoming model.SiteToken, existingTokens []mode
 		if existingToken != "" && existingToken != incomingsToken {
 			incoming.Token = existingToken
 		}
+		incoming.Enabled = existing.Enabled
 		if existing.ID != 0 {
 			usedExistingIDs[existing.ID] = struct{}{}
 		}
@@ -292,6 +293,7 @@ func mergeReadyIncomingSiteToken(incoming model.SiteToken, existingTokens []mode
 			continue
 		}
 		incoming.ID = existing.ID
+		incoming.Enabled = existing.Enabled
 		if existing.ID != 0 {
 			usedExistingIDs[existing.ID] = struct{}{}
 		}
@@ -319,7 +321,7 @@ func mergeMaskedIncomingSiteToken(incoming model.SiteToken, existingTokens []mod
 			incoming.ID = existing.ID
 			incoming.Token = existing.Token
 			incoming.ValueStatus = model.SiteTokenValueStatusReady
-			incoming.Enabled = incoming.Enabled && existing.Enabled
+			incoming.Enabled = existing.Enabled
 			usedExistingIDs[existing.ID] = struct{}{}
 			return incoming
 		}
@@ -350,7 +352,7 @@ func mergeMaskedIncomingSiteToken(incoming model.SiteToken, existingTokens []mod
 		incoming.ID = matches[0].ID
 		incoming.Token = matches[0].Token
 		incoming.ValueStatus = model.SiteTokenValueStatusReady
-		incoming.Enabled = incoming.Enabled && matches[0].Enabled
+		incoming.Enabled = matches[0].Enabled
 		usedExistingIDs[matches[0].ID] = struct{}{}
 		return incoming
 	}

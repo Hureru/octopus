@@ -102,6 +102,68 @@ func TestMergePersistedSiteTokensTreatsOptionalSKPrefixAsSameReadyToken(t *testi
 	}
 }
 
+func TestMergePersistedSiteTokensPreservesLocalDisabledStateForReadyToken(t *testing.T) {
+	now := time.Unix(1711929600, 0)
+	existing := []model.SiteToken{{
+		ID:            8,
+		SiteAccountID: 9,
+		Name:          "primary",
+		Token:         "sk-local-disabled",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       false,
+		ValueStatus:   model.SiteTokenValueStatusReady,
+		Source:        "manual",
+	}}
+	incoming := []model.SiteToken{{
+		Name:      "primary",
+		Token:     "sk-local-disabled",
+		GroupKey:  model.SiteDefaultGroupKey,
+		GroupName: model.SiteDefaultGroupName,
+		Enabled:   true,
+		Source:    "sync",
+	}}
+
+	merged := mergePersistedSiteTokens(9, existing, incoming, now)
+	if len(merged) != 1 {
+		t.Fatalf("expected exactly one merged token, got %+v", merged)
+	}
+	if merged[0].Enabled {
+		t.Fatalf("expected local disabled state to be preserved, got enabled token: %+v", merged[0])
+	}
+}
+
+func TestMergePersistedSiteTokensPreservesLocalEnabledStateWhenIncomingDisabled(t *testing.T) {
+	now := time.Unix(1711929600, 0)
+	existing := []model.SiteToken{{
+		ID:            9,
+		SiteAccountID: 9,
+		Name:          "primary",
+		Token:         "sk-local-enabled",
+		GroupKey:      model.SiteDefaultGroupKey,
+		GroupName:     model.SiteDefaultGroupName,
+		Enabled:       true,
+		ValueStatus:   model.SiteTokenValueStatusReady,
+		Source:        "sync",
+	}}
+	incoming := []model.SiteToken{{
+		Name:      "primary",
+		Token:     "sk-local-enabled",
+		GroupKey:  model.SiteDefaultGroupKey,
+		GroupName: model.SiteDefaultGroupName,
+		Enabled:   false,
+		Source:    "sync",
+	}}
+
+	merged := mergePersistedSiteTokens(9, existing, incoming, now)
+	if len(merged) != 1 {
+		t.Fatalf("expected exactly one merged token, got %+v", merged)
+	}
+	if !merged[0].Enabled {
+		t.Fatalf("expected local enabled state to be preserved, got disabled token: %+v", merged[0])
+	}
+}
+
 func TestMergePersistedSiteTokensKeepsMaskedPendingWhenMatchIsAmbiguous(t *testing.T) {
 	now := time.Unix(1711929600, 0)
 	existing := []model.SiteToken{
