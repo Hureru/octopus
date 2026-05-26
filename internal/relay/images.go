@@ -313,6 +313,8 @@ func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success b
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
 	if updateChannelStats {
 		op.StatsChannelUpdate(channelID, globalStats)
+	} else {
+		updateFinalChannelUsageStats(channelID, globalStats)
 	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 

@@ -141,6 +141,8 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
 	if updateChannelStats {
 		op.StatsChannelUpdate(channelID, globalStats)
+	} else {
+		updateFinalChannelUsageStats(channelID, globalStats)
 	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 
@@ -253,6 +255,22 @@ func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, dur
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)
 	}
+}
+
+func updateFinalChannelUsageStats(channelID int, metrics model.StatsMetrics) {
+	if channelID == 0 {
+		return
+	}
+	usageStats := model.StatsMetrics{
+		InputToken:  metrics.InputToken,
+		OutputToken: metrics.OutputToken,
+		InputCost:   metrics.InputCost,
+		OutputCost:  metrics.OutputCost,
+	}
+	if usageStats.InputToken == 0 && usageStats.OutputToken == 0 && usageStats.InputCost == 0 && usageStats.OutputCost == 0 {
+		return
+	}
+	op.StatsChannelUpdate(channelID, usageStats)
 }
 
 func intPtr(value int) *int {
