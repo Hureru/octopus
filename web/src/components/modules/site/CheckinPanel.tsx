@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   buildCheckinSummary,
+  type CheckinActiveFilterStatus,
   type CheckinFilterStatus,
 } from "./checkin-status";
 
@@ -64,6 +65,10 @@ function statusLabel(status: CheckinFilterStatus) {
   return filter?.label ?? "全部";
 }
 
+function statusLabels(statuses: CheckinActiveFilterStatus[]) {
+  return statuses.map(statusLabel).join("、");
+}
+
 function formatCurrency(value: number) {
   const safe = Number.isFinite(value) ? value : 0;
   return `$${safe.toFixed(2)}`;
@@ -107,10 +112,9 @@ export function CheckinPanel({
   visibleSiteCount,
   visibleAccountCount,
   searchTerm,
-  siteFilterLabel,
   hasActiveFilters,
   onClearFilters,
-  filterStatus,
+  activeFilterStatuses,
   onFilterChange,
 }: {
   sites: Site[] | undefined;
@@ -124,10 +128,9 @@ export function CheckinPanel({
   visibleSiteCount: number;
   visibleAccountCount: number;
   searchTerm: string;
-  siteFilterLabel: string | null;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
-  filterStatus: CheckinFilterStatus;
+  activeFilterStatuses: CheckinActiveFilterStatus[];
   onFilterChange: (status: CheckinFilterStatus) => void;
 }) {
   const summaryNow = useMemo(() => {
@@ -140,7 +143,7 @@ export function CheckinPanel({
     () => buildCheckinSummary(sites, summaryNow),
     [sites, summaryNow],
   );
-  const hasContextBadges = Boolean(searchTerm || siteFilterLabel);
+  const hasContextBadges = Boolean(searchTerm);
 
   const manualCheckinUrls = useMemo(
     () =>
@@ -168,9 +171,9 @@ export function CheckinPanel({
             <p className="text-sm text-muted-foreground">
               {summary.total === 0
                 ? "暂无启用签到的账号。"
-                : filterStatus === "all"
+                : activeFilterStatuses.length === 0
                   ? "点击状态标签，直接定位异常站点和账号。"
-                  : `当前按“${statusLabel(filterStatus)}”筛选，命中 ${visibleSiteCount} 个站点 / ${visibleAccountCount} 个账号。`}
+                  : `当前按“${statusLabels(activeFilterStatuses)}”筛选，命中 ${visibleSiteCount} 个站点 / ${visibleAccountCount} 个账号。`}
             </p>
           </div>
 
@@ -221,9 +224,6 @@ export function CheckinPanel({
         {hasActiveFilters && hasContextBadges ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {searchTerm ? <Badge variant="outline">搜索：{searchTerm}</Badge> : null}
-            {siteFilterLabel ? (
-              <Badge variant="outline">站点：{siteFilterLabel}</Badge>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -234,16 +234,15 @@ export function CheckinPanel({
             {FILTERS.map((filter) => {
               const count =
                 filter.key === "all" ? summary.total : summary[filter.key];
-              const active = filterStatus === filter.key;
+              const active =
+                filter.key === "all"
+                  ? activeFilterStatuses.length === 0
+                  : activeFilterStatuses.includes(filter.key);
               return (
                 <button
                   key={filter.key}
                   type="button"
-                  onClick={() =>
-                    onFilterChange(
-                      active && filter.key !== "all" ? "all" : filter.key,
-                    )
-                  }
+                  onClick={() => onFilterChange(filter.key)}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     filterTone(filter.key, active),
