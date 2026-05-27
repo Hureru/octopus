@@ -11,6 +11,7 @@ import (
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func SiteChannelList(ctx context.Context) ([]model.SiteChannelCard, error) {
@@ -551,7 +552,10 @@ func UpdateSiteGroupProjection(siteID int, accountID int, req *model.SiteGroupPr
 			Name:               groupName,
 			ProjectionDisabled: req.ProjectionDisabled,
 		}
-		return tx.Create(&row).Error
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "site_account_id"}, {Name: "group_key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"projection_disabled"}),
+		}).Create(&row).Error
 	})
 }
 
