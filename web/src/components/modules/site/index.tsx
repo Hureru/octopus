@@ -80,7 +80,6 @@ import {
   accountMatchesCheckinFilters,
   deriveCheckinStatus,
   sitePlatformSupportsCheckin,
-  type CheckinActiveFilterStatus,
   type CheckinFilterStatus,
 } from "./checkin-status";
 import { translateSiteMessage } from "./site-message";
@@ -835,8 +834,6 @@ export function Site() {
     id: number;
     name: string;
   } | null>(null);
-  const [checkinFilterStatuses, setCheckinFilterStatuses] =
-    useState<CheckinActiveFilterStatus[]>([]);
   const [expandedSiteIds, setExpandedSiteIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -873,6 +870,12 @@ export function Site() {
   );
   const siteSortOrder = useToolbarViewOptionsStore((state) =>
     state.getSortOrder("site"),
+  );
+  const checkinFilterStatuses = useSiteUIStore(
+    (state) => state.checkinFilterStatuses,
+  );
+  const setCheckinFilterStatuses = useSiteUIStore(
+    (state) => state.setCheckinFilterStatuses,
   );
   const setSiteHandlers = useSiteUIStore((state) => state.setHandlers);
   const resetSiteHandlers = useSiteUIStore((state) => state.resetHandlers);
