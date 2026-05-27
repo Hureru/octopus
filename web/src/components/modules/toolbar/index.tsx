@@ -26,18 +26,9 @@ import {
     useToolbarViewOptionsStore,
     TOOLBAR_PAGES,
     type ToolbarPage,
-    type SiteFilter,
-    type ChannelFilter,
-    type GroupFilter,
-    type ModelFilter,
     type ToolbarSortField,
     type ToolbarSortOrder,
 } from './view-options-store';
-
-const CHANNEL_FILTER_OPTIONS: ChannelFilter[] = ['all', 'enabled', 'disabled'];
-const GROUP_FILTER_OPTIONS: GroupFilter[] = ['all', 'with-members', 'empty'];
-const MODEL_FILTER_OPTIONS: ModelFilter[] = ['all', 'priced', 'free'];
-const SITE_FILTER_OPTIONS: SiteFilter[] = ['all', 'abnormal', 'enabled', 'disabled', 'pinned'];
 type CombinedSortOption = {
     value: `${ToolbarSortField}-${ToolbarSortOrder}`;
     field: ToolbarSortField;
@@ -91,14 +82,6 @@ export function Toolbar() {
     const setLayout = useToolbarViewOptionsStore((s) => s.setLayout);
     const setSortConfig = useToolbarViewOptionsStore((s) => s.setSortConfig);
     const setSortOrder = useToolbarViewOptionsStore((s) => s.setSortOrder);
-    const siteFilter = useToolbarViewOptionsStore((s) => s.siteFilter);
-    const channelFilter = useToolbarViewOptionsStore((s) => s.channelFilter);
-    const groupFilter = useToolbarViewOptionsStore((s) => s.groupFilter);
-    const modelFilter = useToolbarViewOptionsStore((s) => s.modelFilter);
-    const setSiteFilter = useToolbarViewOptionsStore((s) => s.setSiteFilter);
-    const setChannelFilter = useToolbarViewOptionsStore((s) => s.setChannelFilter);
-    const setGroupFilter = useToolbarViewOptionsStore((s) => s.setGroupFilter);
-    const setModelFilter = useToolbarViewOptionsStore((s) => s.setModelFilter);
     const requestOpenCreateSite = useSiteUIStore((s) => s.requestOpenCreateDialog);
     const requestOpenImportDialog = useSiteUIStore((s) => s.requestOpenImportDialog);
     const requestOpenArchivedDialog = useSiteUIStore((s) => s.requestOpenArchivedDialog);
@@ -116,77 +99,6 @@ export function Toolbar() {
     const showCombinedSortOptions = toolbarItem === 'channel' || toolbarItem === 'group';
     const showSortOptions = !isLogToolbar;
 
-    const siteFilterLabelKeys: Record<SiteFilter, string> = {
-        all: '全部站点',
-        abnormal: '异常 / 停用',
-        enabled: '仅启用',
-        disabled: '仅停用',
-        pinned: '仅置顶',
-    };
-    const channelFilterLabelKeys: Record<ChannelFilter, string> = {
-        all: 'popover.filter.channel.all',
-        enabled: 'popover.filter.channel.enabled',
-        disabled: 'popover.filter.channel.disabled',
-    };
-    const groupFilterLabelKeys: Record<GroupFilter, string> = {
-        all: 'popover.filter.group.all',
-        'with-members': 'popover.filter.group.withMembers',
-        empty: 'popover.filter.group.empty',
-    };
-    const modelFilterLabelKeys: Record<ModelFilter, string> = {
-        all: 'popover.filter.model.all',
-        priced: 'popover.filter.model.priced',
-        free: 'popover.filter.model.free',
-    };
-
-    const filterOptions = toolbarItem === 'site'
-        ? SITE_FILTER_OPTIONS.map((value) => ({
-            value,
-            label: siteFilterLabelKeys[value],
-        }))
-        : toolbarItem === 'channel'
-        ? CHANNEL_FILTER_OPTIONS.map((value) => ({
-            value,
-            label: t(channelFilterLabelKeys[value]),
-        }))
-        : toolbarItem === 'group'
-            ? GROUP_FILTER_OPTIONS.map((value) => ({
-                value,
-                label: t(groupFilterLabelKeys[value]),
-            }))
-            : toolbarItem === 'model'
-                ? MODEL_FILTER_OPTIONS.map((value) => ({
-                    value,
-                    label: t(modelFilterLabelKeys[value]),
-                }))
-                : [];
-
-    const activeFilter = toolbarItem === 'site'
-        ? siteFilter
-        : toolbarItem === 'channel'
-        ? channelFilter
-        : toolbarItem === 'group'
-            ? groupFilter
-            : toolbarItem === 'model'
-                ? modelFilter
-                : 'all';
-
-    const handleFilterChange = (value: string) => {
-        switch (toolbarItem) {
-            case 'site':
-                setSiteFilter(value as SiteFilter);
-                break;
-            case 'channel':
-                setChannelFilter(value as ChannelFilter);
-                break;
-            case 'group':
-                setGroupFilter(value as GroupFilter);
-                break;
-            case 'model':
-                setModelFilter(value as ModelFilter);
-                break;
-        }
-    };
 
     return (
         <AnimatePresence mode="wait">
@@ -380,27 +292,6 @@ export function Toolbar() {
                                     )}
                                 </div>
                             )}
-
-                            <div className="grid gap-2">
-                                <p className="text-xs font-medium text-muted-foreground">{t('popover.filter.title')}</p>
-                                <div className="grid gap-2">
-                                    {filterOptions.map((option) => (
-                                        <button
-                                            key={option.value}
-                                            type="button"
-                                            onClick={() => handleFilterChange(option.value)}
-                                            className={cn(
-                                                'h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors',
-                                                activeFilter === option.value
-                                                    ? 'border-primary/30 bg-primary text-primary-foreground'
-                                                    : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
-                                            )}
-                                        >
-                                            {option.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
 
                             {toolbarItem === 'site' && (
                                 <div className="grid gap-2">

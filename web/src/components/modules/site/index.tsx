@@ -72,13 +72,12 @@ import {
   useSearchStore,
   useToolbarViewOptionsStore,
 } from "@/components/modules/toolbar";
-import type { SiteFilter as SiteSurfaceFilter } from "@/components/modules/toolbar/view-options-store";
 import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import {
   accountHasCheckinEnabled,
-  accountMatchesCheckinFilter,
+  accountMatchesCheckinFilters,
   deriveCheckinStatus,
   sitePlatformSupportsCheckin,
   type CheckinFilterStatus,
@@ -196,17 +195,6 @@ type VisibleSite = {
   forceExpanded: boolean;
   hasFilteredAccounts: boolean;
 };
-
-const SITE_SURFACE_FILTERS: Array<{
-  key: SiteSurfaceFilter;
-  label: string;
-}> = [
-  { key: "all", label: "全部站点" },
-  { key: "abnormal", label: "异常 / 停用" },
-  { key: "enabled", label: "仅启用" },
-  { key: "disabled", label: "仅停用" },
-  { key: "pinned", label: "仅置顶" },
-];
 
 const MENU_BUTTON_CLASS =
   "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-left transition-colors hover:bg-muted/60";
@@ -664,31 +652,6 @@ function buildSiteSummary(site: SiteRecord): SiteSummary {
   };
 }
 
-function matchesSiteFilter(
-  site: SiteRecord,
-  summary: SiteSummary,
-  filter: SiteSurfaceFilter,
-) {
-  switch (filter) {
-    case "abnormal":
-      return (
-        summary.failedAccountCount > 0 ||
-        summary.partialAccountCount > 0 ||
-        !site.enabled ||
-        summary.disabledAccountCount > 0
-      );
-    case "enabled":
-      return site.enabled;
-    case "disabled":
-      return !site.enabled || summary.disabledAccountCount > 0;
-    case "pinned":
-      return site.is_pinned;
-    case "all":
-    default:
-      return true;
-  }
-}
-
 function CompactMetric({
   label,
   value,
@@ -871,8 +834,6 @@ export function Site() {
     id: number;
     name: string;
   } | null>(null);
-  const [checkinFilterStatus, setCheckinFilterStatus] =
-    useState<CheckinFilterStatus>("all");
   const [expandedSiteIds, setExpandedSiteIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -904,17 +865,17 @@ export function Site() {
 
   const searchTerm = useSearchStore((state) => state.getSearchTerm("site"));
   const setSearchTerm = useSearchStore((state) => state.setSearchTerm);
-  const siteSurfaceFilter = useToolbarViewOptionsStore(
-    (state) => state.siteFilter,
-  );
   const siteSortField = useToolbarViewOptionsStore((state) =>
     state.getSortField("site"),
   );
   const siteSortOrder = useToolbarViewOptionsStore((state) =>
     state.getSortOrder("site"),
   );
-  const setSiteSurfaceFilter = useToolbarViewOptionsStore(
-    (state) => state.setSiteFilter,
+  const checkinFilterStatuses = useSiteUIStore(
+    (state) => state.checkinFilterStatuses,
+  );
+  const setCheckinFilterStatuses = useSiteUIStore(
+    (state) => state.setCheckinFilterStatuses,
   );
   const setSiteHandlers = useSiteUIStore((state) => state.setHandlers);
   const resetSiteHandlers = useSiteUIStore((state) => state.resetHandlers);
@@ -1056,9 +1017,7 @@ export function Site() {
       const summary = buildSiteSummary(site);
       const isForcedTarget = forcedSiteId === site.id;
 
-      if (!isForcedTarget && !matchesSiteFilter(site, summary, siteSurfaceFilter)) {
-        return [];
-      }
+      const hasCheckinFilters = checkinFilterStatuses.length > 0;
 
       const siteMatchesQuery =
         !hasSearch ||
@@ -1074,16 +1033,12 @@ export function Site() {
         : site.accounts;
 
       let visibleAccounts = site.accounts;
-      let forceExpanded = checkinFilterStatus !== "all" || isForcedTarget;
+      let forceExpanded = hasCheckinFilters || isForcedTarget;
 
-      if (checkinFilterStatus !== "all" && !isForcedTarget) {
+      if (hasCheckinFilters && !isForcedTarget) {
         visibleAccounts = visibleAccounts.filter((account) =>
-          accountMatchesCheckinFilter(site, account, checkinFilterStatus),
+          accountMatchesCheckinFilters(site, account, checkinFilterStatuses),
         );
-
-        if (checkinFilterStatus === "disabled" && !site.enabled) {
-          visibleAccounts = site.accounts;
-        }
       }
 
       if (hasSearch && !siteMatchesQuery && !isForcedTarget) {
@@ -1098,9 +1053,9 @@ export function Site() {
       const visible =
         isForcedTarget
           ? true
-          : checkinFilterStatus !== "all"
-          ? visibleAccounts.length > 0
-          : !hasSearch || siteMatchesQuery || matchedAccountsBySearch.length > 0;
+          : hasCheckinFilters
+            ? visibleAccounts.length > 0
+            : !hasSearch || siteMatchesQuery || matchedAccountsBySearch.length > 0;
 
       if (!visible) {
         return [];
@@ -1142,17 +1097,14 @@ export function Site() {
   }, [
     sites,
     normalizedQuery,
-    siteSurfaceFilter,
-    checkinFilterStatus,
+    checkinFilterStatuses,
     forcedSiteId,
     siteSortField,
     siteSortOrder,
   ]);
 
   const hasActiveFilters =
-    normalizedQuery.length > 0 ||
-    siteSurfaceFilter !== "all" ||
-    checkinFilterStatus !== "all";
+    normalizedQuery.length > 0 || checkinFilterStatuses.length > 0;
   const visibleAccountCount = visibleSites.reduce(
     (sum, item) => sum + item.visibleAccounts.length,
     0,
@@ -1638,10 +1590,22 @@ export function Site() {
     }
   }
 
+  function handleCheckinFilterChange(status: CheckinFilterStatus) {
+    if (status === "all") {
+      setCheckinFilterStatuses([]);
+      return;
+    }
+
+    setCheckinFilterStatuses((current) =>
+      current.includes(status)
+        ? current.filter((item) => item !== status)
+        : [...current, status],
+    );
+  }
+
   function clearFilters() {
     setSearchTerm("site", "");
-    setSiteSurfaceFilter("all");
-    setCheckinFilterStatus("all");
+    setCheckinFilterStatuses([]);
   }
 
   function jumpToSiteChannel(siteId: number) {
@@ -2298,17 +2262,10 @@ export function Site() {
           visibleSiteCount={visibleSites.length}
           visibleAccountCount={visibleAccountCount}
           searchTerm={searchTerm.trim()}
-          siteFilterLabel={
-            siteSurfaceFilter === "all"
-              ? null
-              : SITE_SURFACE_FILTERS.find(
-                  (filter) => filter.key === siteSurfaceFilter,
-                )?.label ?? null
-          }
           hasActiveFilters={hasActiveFilters}
           onClearFilters={clearFilters}
-          filterStatus={checkinFilterStatus}
-          onFilterChange={setCheckinFilterStatus}
+          activeFilterStatuses={checkinFilterStatuses}
+          onFilterChange={handleCheckinFilterChange}
         />
 
         {selectedSiteIds.length > 0 ? (

@@ -12,7 +12,6 @@ export function Model() {
     const searchTerm = useSearchStore((s) => s.getSearchTerm(pageKey));
     const layout = useToolbarViewOptionsStore((s) => s.getLayout(pageKey));
     const sortOrder = useToolbarViewOptionsStore((s) => s.getSortOrder(pageKey));
-    const filter = useToolbarViewOptionsStore((s) => s.modelFilter);
 
     const sortedModels = useMemo(() => {
         if (!models) return [];
@@ -23,19 +22,8 @@ export function Model() {
 
     const visibleModels = useMemo(() => {
         const term = searchTerm.toLowerCase().trim();
-        const byName = !term ? sortedModels : sortedModels.filter((m) => m.name.toLowerCase().includes(term));
-        const hasPricing = (model: (typeof byName)[number]) =>
-            model.input + model.output + model.cache_read + model.cache_write > 0;
-
-        if (filter === 'priced') {
-            return byName.filter(hasPricing);
-        }
-        if (filter === 'free') {
-            return byName.filter((m) => !hasPricing(m));
-        }
-
-        return byName;
-    }, [sortedModels, searchTerm, filter]);
+        return !term ? sortedModels : sortedModels.filter((m) => m.name.toLowerCase().includes(term));
+    }, [sortedModels, searchTerm]);
 
     return (
         <VirtualizedGrid

@@ -68,24 +68,6 @@
             "balanceAsc": "余额低到高",
             "asc": "升序",
             "desc": "降序",
-            "filter": {
-                "title": "筛选",
-                "channel": {
-                    "all": "全部渠道",
-                    "enabled": "仅启用",
-                    "disabled": "仅禁用"
-                },
-                "group": {
-                    "all": "全部分组",
-                    "withMembers": "有成员",
-                    "empty": "空分组"
-                },
-                "model": {
-                    "all": "全部模型",
-                    "priced": "仅收费",
-                    "free": "仅免费"
-                }
-            },
             "logRefresh": {
                 "refresh": "刷新日志"
             },

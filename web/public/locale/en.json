@@ -68,24 +68,6 @@
             "balanceAsc": "Balance Low to High",
             "asc": "Asc",
             "desc": "Desc",
-            "filter": {
-                "title": "Filter",
-                "channel": {
-                    "all": "All channels",
-                    "enabled": "Enabled only",
-                    "disabled": "Disabled only"
-                },
-                "group": {
-                    "all": "All groups",
-                    "withMembers": "With members",
-                    "empty": "Empty groups"
-                },
-                "model": {
-                    "all": "All models",
-                    "priced": "Priced only",
-                    "free": "Free only"
-                }
-            },
             "logRefresh": {
                 "refresh": "Refresh logs"
             },

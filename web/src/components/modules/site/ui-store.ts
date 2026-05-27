@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import type { CheckinActiveFilterStatus } from './checkin-status';
 
 type SiteUIHandlers = {
     openCreateDialog: () => void;
@@ -10,8 +11,14 @@ type SiteUIHandlers = {
     checkinAll: () => void;
 };
 
+type CheckinFilterStatusesUpdate =
+    | CheckinActiveFilterStatus[]
+    | ((current: CheckinActiveFilterStatus[]) => CheckinActiveFilterStatus[]);
+
 interface SiteUIState {
     handlers: SiteUIHandlers;
+    checkinFilterStatuses: CheckinActiveFilterStatus[];
+    setCheckinFilterStatuses: (value: CheckinFilterStatusesUpdate) => void;
     setHandlers: (handlers: Partial<SiteUIHandlers>) => void;
     resetHandlers: () => void;
     requestOpenCreateDialog: () => void;
@@ -33,6 +40,12 @@ const defaultHandlers: SiteUIHandlers = {
 
 export const useSiteUIStore = create<SiteUIState>((set, get) => ({
     handlers: defaultHandlers,
+    checkinFilterStatuses: [],
+    setCheckinFilterStatuses: (value) =>
+        set((state) => ({
+            checkinFilterStatuses:
+                typeof value === 'function' ? value(state.checkinFilterStatuses) : value,
+        })),
     setHandlers: (handlers) =>
         set((state) => ({
             handlers: { ...state.handlers, ...handlers },

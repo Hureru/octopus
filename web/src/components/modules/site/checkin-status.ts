@@ -11,7 +11,8 @@ export type CheckinFilterStatus =
   | "idle"
   | "disabled";
 
-export type DerivedCheckinStatus = Exclude<CheckinFilterStatus, "all">;
+export type CheckinActiveFilterStatus = Exclude<CheckinFilterStatus, "all">;
+export type DerivedCheckinStatus = CheckinActiveFilterStatus;
 
 export type CheckinSummary = {
   total: number;
@@ -107,20 +108,21 @@ export function deriveCheckinStatus(
   }
 }
 
-export function accountMatchesCheckinFilter(
+export function accountMatchesCheckinFilters(
   site: Pick<Site, "enabled" | "platform">,
   account: Pick<
     SiteAccount,
     "enabled" | "auto_checkin" | "last_checkin_at" | "last_checkin_status"
   >,
-  filterStatus: CheckinFilterStatus,
+  filterStatuses: CheckinActiveFilterStatus[],
   now = new Date(),
 ) {
-  if (filterStatus === "all") {
+  if (filterStatuses.length === 0) {
     return true;
   }
 
-  return deriveCheckinStatus(site, account, now) === filterStatus;
+  const status = deriveCheckinStatus(site, account, now);
+  return status ? filterStatuses.includes(status) : false;
 }
 
 export function buildCheckinSummary(

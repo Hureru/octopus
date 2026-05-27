@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   buildCheckinSummary,
+  type CheckinActiveFilterStatus,
   type CheckinFilterStatus,
 } from "./checkin-status";
 
@@ -57,11 +58,6 @@ function filterTone(status: CheckinFilterStatus, active: boolean) {
     default:
       return "border-border bg-background text-foreground";
   }
-}
-
-function statusLabel(status: CheckinFilterStatus) {
-  const filter = FILTERS.find((item) => item.key === status);
-  return filter?.label ?? "全部";
 }
 
 function formatCurrency(value: number) {
@@ -107,10 +103,9 @@ export function CheckinPanel({
   visibleSiteCount,
   visibleAccountCount,
   searchTerm,
-  siteFilterLabel,
   hasActiveFilters,
   onClearFilters,
-  filterStatus,
+  activeFilterStatuses,
   onFilterChange,
 }: {
   sites: Site[] | undefined;
@@ -124,10 +119,9 @@ export function CheckinPanel({
   visibleSiteCount: number;
   visibleAccountCount: number;
   searchTerm: string;
-  siteFilterLabel: string | null;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
-  filterStatus: CheckinFilterStatus;
+  activeFilterStatuses: CheckinActiveFilterStatus[];
   onFilterChange: (status: CheckinFilterStatus) => void;
 }) {
   const summaryNow = useMemo(() => {
@@ -140,7 +134,7 @@ export function CheckinPanel({
     () => buildCheckinSummary(sites, summaryNow),
     [sites, summaryNow],
   );
-  const hasContextBadges = Boolean(searchTerm || siteFilterLabel);
+  const hasContextBadges = Boolean(searchTerm);
 
   const manualCheckinUrls = useMemo(
     () =>
@@ -152,26 +146,17 @@ export function CheckinPanel({
 
   const openAllManualCheckin = useCallback(() => {
     for (const url of manualCheckinUrls) {
-      window.open(url, "_blank");
+      window.open(url, "_blank", "noopener,noreferrer");
     }
   }, [manualCheckinUrls]);
 
   return (
     <section className="overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-[0_18px_60px_-40px_rgba(15,23,42,0.45)]">
       <div className="border-b border-border/60 bg-gradient-to-br from-background via-card to-muted/10 px-5 py-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-base font-semibold">
-              <CalendarCheck2 className="size-5 text-primary" />
-              <span>站点总览</span>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {summary.total === 0
-                ? "暂无启用签到的账号。"
-                : filterStatus === "all"
-                  ? "点击状态标签，直接定位异常站点和账号。"
-                  : `当前按“${statusLabel(filterStatus)}”筛选，命中 ${visibleSiteCount} 个站点 / ${visibleAccountCount} 个账号。`}
-            </p>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            <CalendarCheck2 className="size-5 text-primary" />
+            <span>总览</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -179,18 +164,6 @@ export function CheckinPanel({
             <span className="font-medium text-foreground">
               {visibleSiteCount} 站点 / {visibleAccountCount} 账号
             </span>
-            {hasActiveFilters ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl"
-                onClick={onClearFilters}
-              >
-                <FilterX className="size-4" />
-                清空筛选
-              </Button>
-            ) : null}
           </div>
         </div>
 
@@ -221,9 +194,6 @@ export function CheckinPanel({
         {hasActiveFilters && hasContextBadges ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {searchTerm ? <Badge variant="outline">搜索：{searchTerm}</Badge> : null}
-            {siteFilterLabel ? (
-              <Badge variant="outline">站点：{siteFilterLabel}</Badge>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -234,16 +204,15 @@ export function CheckinPanel({
             {FILTERS.map((filter) => {
               const count =
                 filter.key === "all" ? summary.total : summary[filter.key];
-              const active = filterStatus === filter.key;
+              const active =
+                filter.key === "all"
+                  ? activeFilterStatuses.length === 0
+                  : activeFilterStatuses.includes(filter.key);
               return (
                 <button
                   key={filter.key}
                   type="button"
-                  onClick={() =>
-                    onFilterChange(
-                      active && filter.key !== "all" ? "all" : filter.key,
-                    )
-                  }
+                  onClick={() => onFilterChange(filter.key)}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     filterTone(filter.key, active),
@@ -255,18 +224,32 @@ export function CheckinPanel({
               );
             })}
           </div>
-          {manualCheckinUrls.length > 0 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="rounded-xl text-xs"
-              onClick={openAllManualCheckin}
-            >
-              <ExternalLink className="size-4" />
-              打开手动签到 ({manualCheckinUrls.length})
-            </Button>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl text-xs"
+                onClick={onClearFilters}
+              >
+                <FilterX className="size-4" />
+                清空筛选
+              </Button>
+            ) : null}
+            {manualCheckinUrls.length > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl text-xs"
+                onClick={openAllManualCheckin}
+              >
+                <ExternalLink className="size-4" />
+                打开手动签到 ({manualCheckinUrls.length})
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     </section>
