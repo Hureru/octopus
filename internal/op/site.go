@@ -329,6 +329,9 @@ func SiteAccountCreate(account *model.SiteAccount, ctx context.Context) error {
 		}
 	}
 	if (account.EnabledSet && !account.Enabled) || (account.AutoSyncSet && !account.AutoSync) || (account.AutoCheckinSet && !account.AutoCheckin) {
+		explicitEnabled := account.Enabled
+		explicitAutoSync := account.AutoSync
+		explicitAutoCheckin := account.AutoCheckin
 		updates := map[string]any{}
 		if account.EnabledSet && !account.Enabled {
 			updates["enabled"] = false
@@ -346,13 +349,13 @@ func SiteAccountCreate(account *model.SiteAccount, ctx context.Context) error {
 			return tx.Model(&model.SiteAccount{}).Where("id = ?", account.ID).Updates(updates).Error
 		})
 		if account.EnabledSet {
-			account.Enabled = false
+			account.Enabled = explicitEnabled
 		}
 		if account.AutoSyncSet {
-			account.AutoSync = false
+			account.AutoSync = explicitAutoSync
 		}
 		if account.AutoCheckinSet {
-			account.AutoCheckin = false
+			account.AutoCheckin = explicitAutoCheckin
 		}
 		return err
 	}
