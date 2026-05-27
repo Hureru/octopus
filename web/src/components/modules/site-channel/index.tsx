@@ -1965,7 +1965,7 @@ function SiteAccountPanel({
                             variant="outline"
                             className={cn(
                                 'h-8 rounded-2xl px-3',
-                                activeGroup?.projection_disabled && 'border-amber-500/30 bg-amber-500/10 text-amber-800 hover:bg-amber-500/15 dark:text-amber-200',
+                                activeGroup?.projection_disabled && 'border-amber-500/30 bg-amber-500/10 text-amber-800 hover:bg-amber-500/15 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100',
                             )}
                             onClick={() => activeGroup && handleToggleGroupProjection(activeGroup)}
                             disabled={!activeGroup || groupProjectionMutation.isPending}
