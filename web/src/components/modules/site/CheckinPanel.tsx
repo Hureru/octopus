@@ -146,7 +146,7 @@ export function CheckinPanel({
 
   const openAllManualCheckin = useCallback(() => {
     for (const url of manualCheckinUrls) {
-      window.open(url, "_blank");
+      window.open(url, "_blank", "noopener,noreferrer");
     }
   }, [manualCheckinUrls]);
 
