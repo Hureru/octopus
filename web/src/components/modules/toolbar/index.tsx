@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, WandSparkles, X } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowDownZA, ArrowUpAZ, ArrowUpNarrowWide, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, WandSparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     MorphingDialog,
@@ -51,6 +51,13 @@ const COMBINED_SORT_OPTIONS: readonly CombinedSortOption[] = [
     { value: 'created-desc', field: 'created', order: 'desc', labelKey: 'popover.createdDesc' },
 ] as const;
 
+const SITE_SORT_OPTIONS: readonly CombinedSortOption[] = [
+    { value: 'name-asc', field: 'name', order: 'asc', labelKey: 'popover.nameAsc' },
+    { value: 'name-desc', field: 'name', order: 'desc', labelKey: 'popover.nameDesc' },
+    { value: 'balance-desc', field: 'balance', order: 'desc', labelKey: 'popover.balanceDesc' },
+    { value: 'balance-asc', field: 'balance', order: 'asc', labelKey: 'popover.balanceAsc' },
+] as const;
+
 function isToolbarPage(item: NavItem): item is ToolbarPage {
     return (TOOLBAR_PAGES as readonly NavItem[]).includes(item);
 }
@@ -78,7 +85,7 @@ export function Toolbar() {
     const setSearchTerm = useSearchStore((s) => s.setSearchTerm);
     const layout = useToolbarViewOptionsStore((s) => (toolbarItem ? s.getLayout(toolbarItem) : 'grid'));
     const sortField = useToolbarViewOptionsStore((s) =>
-        toolbarItem === 'channel' || toolbarItem === 'group' ? s.getSortField(toolbarItem) : 'name'
+        toolbarItem === 'site' || toolbarItem === 'channel' || toolbarItem === 'group' ? s.getSortField(toolbarItem) : 'name'
     );
     const sortOrder = useToolbarViewOptionsStore((s) => (toolbarItem ? s.getSortOrder(toolbarItem) : 'asc'));
     const setLayout = useToolbarViewOptionsStore((s) => s.setLayout);
@@ -105,8 +112,9 @@ export function Toolbar() {
     if (!toolbarItem) return null;
     const isLogToolbar = toolbarItem === 'log';
     const showLayoutOptions = toolbarItem === 'channel' || toolbarItem === 'model';
+    const showSiteSortOptions = toolbarItem === 'site';
     const showCombinedSortOptions = toolbarItem === 'channel' || toolbarItem === 'group';
-    const showSortOptions = toolbarItem !== 'site' && !isLogToolbar;
+    const showSortOptions = !isLogToolbar;
 
     const siteFilterLabelKeys: Record<SiteFilter, string> = {
         all: '全部站点',
@@ -285,58 +293,90 @@ export function Toolbar() {
                             {showSortOptions && (
                                 <div className="grid gap-2">
                                     <p className="text-xs font-medium text-muted-foreground">{t('popover.sort')}</p>
-                                    {showCombinedSortOptions ? (
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {COMBINED_SORT_OPTIONS.map((option) => (
+                                    {showSiteSortOptions ? (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {SITE_SORT_OPTIONS.map((option) => (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const active = sortField === option.field && sortOrder === option.order;
+                                                        setSortConfig('site', active ? 'default' : option.field, active ? 'asc' : option.order);
+                                                    }}
+                                                    className={cn(
+                                                        'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
+                                                        sortField === option.field && sortOrder === option.order
+                                                            ? 'border-primary/30 bg-primary text-primary-foreground'
+                                                            : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
+                                                    )}
+                                                >
+                                                    {option.field === 'balance' ? (
+                                                        option.order === 'desc' ? <ArrowDownWideNarrow className="size-3.5" /> : <ArrowUpNarrowWide className="size-3.5" />
+                                                    ) : option.order === 'desc' ? (
+                                                        <ArrowDownZA className="size-3.5" />
+                                                    ) : (
+                                                        <ArrowUpAZ className="size-3.5" />
+                                                    )}
+                                                    {t(option.labelKey)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : showCombinedSortOptions ? (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {COMBINED_SORT_OPTIONS.map((option) => (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (toolbarItem === 'channel' || toolbarItem === 'group') {
+                                                            setSortConfig(toolbarItem, option.field, option.order);
+                                                        }
+                                                    }}
+                                                    className={cn(
+                                                        'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
+                                                        sortField === option.field && sortOrder === option.order
+                                                            ? 'border-primary/30 bg-primary text-primary-foreground'
+                                                            : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
+                                                    )}
+                                                >
+                                                    {option.field === 'name' ? (
+                                                        option.order === 'desc' ? <ArrowDownZA className="size-3.5" /> : <ArrowUpAZ className="size-3.5" />
+                                                    ) : (
+                                                        <Clock3 className="size-3.5" />
+                                                    )}
+                                                    {t(option.labelKey)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 gap-2">
                                             <button
-                                                key={option.value}
                                                 type="button"
-                                                onClick={() => {
-                                                    if (toolbarItem === 'channel' || toolbarItem === 'group') {
-                                                        setSortConfig(toolbarItem, option.field, option.order);
-                                                    }
-                                                }}
+                                                onClick={() => setSortOrder(toolbarItem, 'asc')}
                                                 className={cn(
                                                     'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
-                                                    sortField === option.field && sortOrder === option.order
+                                                    sortOrder === 'asc'
                                                         ? 'border-primary/30 bg-primary text-primary-foreground'
                                                         : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
                                                 )}
                                             >
-                                                {option.field === 'name' ? <ArrowUpAZ className="size-3.5" /> : <Clock3 className="size-3.5" />}
-                                                {t(option.labelKey)}
+                                                <ArrowUpAZ className="size-3.5" />
+                                                {t('popover.nameAsc')}
                                             </button>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortOrder(toolbarItem, 'asc')}
-                                            className={cn(
-                                                'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
-                                                sortOrder === 'asc'
-                                                    ? 'border-primary/30 bg-primary text-primary-foreground'
-                                                    : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
-                                            )}
-                                        >
-                                            <ArrowUpAZ className="size-3.5" />
-                                            {t('popover.nameAsc')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortOrder(toolbarItem, 'desc')}
-                                            className={cn(
-                                                'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
-                                                sortOrder === 'desc'
-                                                    ? 'border-primary/30 bg-primary text-primary-foreground'
-                                                    : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
-                                            )}
-                                        >
-                                            <ArrowUpAZ className="size-3.5" />
-                                            {t('popover.nameDesc')}
-                                        </button>
-                                    </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSortOrder(toolbarItem, 'desc')}
+                                                className={cn(
+                                                    'h-8 rounded-lg border text-xs font-medium inline-flex items-center justify-center gap-1.5 transition-colors',
+                                                    sortOrder === 'desc'
+                                                        ? 'border-primary/30 bg-primary text-primary-foreground'
+                                                        : 'border-border bg-muted/20 text-foreground hover:bg-muted/30'
+                                                )}
+                                            >
+                                                <ArrowDownZA className="size-3.5" />
+                                                {t('popover.nameDesc')}
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                             )}

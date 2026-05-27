@@ -3,8 +3,8 @@ import { persist } from 'zustand/middleware';
 
 export type ToolbarLayout = 'grid' | 'list';
 export type ToolbarSortOrder = 'asc' | 'desc';
-export type ToolbarSortField = 'name' | 'created';
-export type ToolbarCreatedSortablePage = 'channel' | 'group';
+export type ToolbarSortField = 'default' | 'name' | 'created' | 'balance';
+export type ToolbarSortablePage = 'site' | 'channel' | 'group';
 export const TOOLBAR_PAGES = ['site', 'channel', 'group', 'model', 'log'] as const;
 export type ToolbarPage = (typeof TOOLBAR_PAGES)[number];
 export type ChannelFilter = 'all' | 'enabled' | 'disabled';
@@ -17,7 +17,7 @@ export type LogKeywordScope = 'default' | 'content';
 
 interface ToolbarViewOptionsState {
     layouts: Partial<Record<ToolbarPage, ToolbarLayout>>;
-    sortFields: Partial<Record<ToolbarCreatedSortablePage, ToolbarSortField>>;
+    sortFields: Partial<Record<ToolbarSortablePage, ToolbarSortField>>;
     sortOrders: Partial<Record<ToolbarPage, ToolbarSortOrder>>;
     siteFilter: SiteFilter;
     channelFilter: ChannelFilter;
@@ -31,9 +31,9 @@ interface ToolbarViewOptionsState {
     getLayout: (item: ToolbarPage) => ToolbarLayout;
     setLayout: (item: ToolbarPage, value: ToolbarLayout) => void;
 
-    getSortField: (item: ToolbarCreatedSortablePage) => ToolbarSortField;
+    getSortField: (item: ToolbarSortablePage) => ToolbarSortField;
     setSortConfig: (
-        item: ToolbarCreatedSortablePage,
+        item: ToolbarSortablePage,
         field: ToolbarSortField,
         order: ToolbarSortOrder
     ) => void;
@@ -71,7 +71,13 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
                 set((state) => ({ layouts: { ...state.layouts, [item]: value } }));
             },
 
-            getSortField: (item) => get().sortFields[item] || 'name',
+            getSortField: (item) => {
+                const field = get().sortFields[item];
+                if (item === 'site') {
+                    return field === 'balance' || field === 'name' ? field : 'default';
+                }
+                return field === 'created' ? 'created' : 'name';
+            },
             setSortConfig: (item, field, order) => {
                 set((state) => ({
                     sortFields: { ...state.sortFields, [item]: field },
@@ -79,7 +85,12 @@ export const useToolbarViewOptionsStore = create<ToolbarViewOptionsState>()(
                 }));
             },
 
-            getSortOrder: (item) => (get().sortOrders[item] === 'desc' ? 'desc' : 'asc'),
+            getSortOrder: (item) => {
+                if (item === 'site' && get().getSortField('site') === 'default') {
+                    return 'asc';
+                }
+                return get().sortOrders[item] === 'desc' ? 'desc' : 'asc';
+            },
             setSortOrder: (item, value) => {
                 set((state) => ({ sortOrders: { ...state.sortOrders, [item]: value } }));
             },

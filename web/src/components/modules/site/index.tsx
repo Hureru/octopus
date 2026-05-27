@@ -907,6 +907,12 @@ export function Site() {
   const siteSurfaceFilter = useToolbarViewOptionsStore(
     (state) => state.siteFilter,
   );
+  const siteSortField = useToolbarViewOptionsStore((state) =>
+    state.getSortField("site"),
+  );
+  const siteSortOrder = useToolbarViewOptionsStore((state) =>
+    state.getSortOrder("site"),
+  );
   const setSiteSurfaceFilter = useToolbarViewOptionsStore(
     (state) => state.setSiteFilter,
   );
@@ -1046,7 +1052,7 @@ export function Site() {
   const visibleSites = useMemo<VisibleSite[]>(() => {
     const hasSearch = normalizedQuery.length > 0;
 
-    return (sites ?? []).flatMap((site) => {
+    const list = (sites ?? []).flatMap((site) => {
       const summary = buildSiteSummary(site);
       const isForcedTarget = forcedSiteId === site.id;
 
@@ -1110,7 +1116,38 @@ export function Site() {
         },
       ];
     });
-  }, [sites, normalizedQuery, siteSurfaceFilter, checkinFilterStatus, forcedSiteId]);
+
+    if (siteSortField === "default") {
+      return list;
+    }
+
+    return [...list].sort((a, b) => {
+      if (a.site.is_pinned !== b.site.is_pinned) {
+        return a.site.is_pinned ? -1 : 1;
+      }
+
+      let diff = 0;
+      if (siteSortField === "balance") {
+        diff = a.summary.balance - b.summary.balance;
+      } else {
+        diff = a.site.name.localeCompare(b.site.name);
+      }
+
+      if (diff !== 0) {
+        return siteSortOrder === "asc" ? diff : -diff;
+      }
+
+      return a.site.sort_order - b.site.sort_order || a.site.id - b.site.id;
+    });
+  }, [
+    sites,
+    normalizedQuery,
+    siteSurfaceFilter,
+    checkinFilterStatus,
+    forcedSiteId,
+    siteSortField,
+    siteSortOrder,
+  ]);
 
   const hasActiveFilters =
     normalizedQuery.length > 0 ||

@@ -64,6 +64,8 @@
             "nameDesc": "名稱倒序",
             "createdAsc": "時間正序",
             "createdDesc": "時間倒序",
+            "balanceDesc": "餘額高到低",
+            "balanceAsc": "餘額低到高",
             "asc": "升序",
             "desc": "降序",
             "filter": {

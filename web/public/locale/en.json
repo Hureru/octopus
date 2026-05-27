@@ -64,6 +64,8 @@
             "nameDesc": "Name Desc",
             "createdAsc": "Time Asc",
             "createdDesc": "Time Desc",
+            "balanceDesc": "Balance High to Low",
+            "balanceAsc": "Balance Low to High",
             "asc": "Asc",
             "desc": "Desc",
             "filter": {
