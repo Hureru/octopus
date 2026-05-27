@@ -60,15 +60,6 @@ function filterTone(status: CheckinFilterStatus, active: boolean) {
   }
 }
 
-function statusLabel(status: CheckinFilterStatus) {
-  const filter = FILTERS.find((item) => item.key === status);
-  return filter?.label ?? "全部";
-}
-
-function statusLabels(statuses: CheckinActiveFilterStatus[]) {
-  return statuses.map(statusLabel).join("、");
-}
-
 function formatCurrency(value: number) {
   const safe = Number.isFinite(value) ? value : 0;
   return `$${safe.toFixed(2)}`;
@@ -162,19 +153,10 @@ export function CheckinPanel({
   return (
     <section className="overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-[0_18px_60px_-40px_rgba(15,23,42,0.45)]">
       <div className="border-b border-border/60 bg-gradient-to-br from-background via-card to-muted/10 px-5 py-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-base font-semibold">
-              <CalendarCheck2 className="size-5 text-primary" />
-              <span>站点总览</span>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {summary.total === 0
-                ? "暂无启用签到的账号。"
-                : activeFilterStatuses.length === 0
-                  ? "点击状态标签，直接定位异常站点和账号。"
-                  : `当前按“${statusLabels(activeFilterStatuses)}”筛选，命中 ${visibleSiteCount} 个站点 / ${visibleAccountCount} 个账号。`}
-            </p>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2 text-base font-semibold">
+            <CalendarCheck2 className="size-5 text-primary" />
+            <span>总览</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -182,18 +164,6 @@ export function CheckinPanel({
             <span className="font-medium text-foreground">
               {visibleSiteCount} 站点 / {visibleAccountCount} 账号
             </span>
-            {hasActiveFilters ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl"
-                onClick={onClearFilters}
-              >
-                <FilterX className="size-4" />
-                清空筛选
-              </Button>
-            ) : null}
           </div>
         </div>
 
@@ -254,18 +224,32 @@ export function CheckinPanel({
               );
             })}
           </div>
-          {manualCheckinUrls.length > 0 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="rounded-xl text-xs"
-              onClick={openAllManualCheckin}
-            >
-              <ExternalLink className="size-4" />
-              打开手动签到 ({manualCheckinUrls.length})
-            </Button>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl text-xs"
+                onClick={onClearFilters}
+              >
+                <FilterX className="size-4" />
+                清空筛选
+              </Button>
+            ) : null}
+            {manualCheckinUrls.length > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl text-xs"
+                onClick={openAllManualCheckin}
+              >
+                <ExternalLink className="size-4" />
+                打开手动签到 ({manualCheckinUrls.length})
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     </section>
