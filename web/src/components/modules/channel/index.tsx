@@ -27,7 +27,6 @@ export function Channel() {
     const layout = useToolbarViewOptionsStore((s) => s.getLayout(pageKey));
     const sortField = useToolbarViewOptionsStore((s) => s.getSortField(pageKey));
     const sortOrder = useToolbarViewOptionsStore((s) => s.getSortOrder(pageKey));
-    const filter = useToolbarViewOptionsStore((s) => s.channelFilter);
     const [highlightedChannelId, setHighlightedChannelId] = useState<number | null>(null);
     const activeTab = useChannelTabStore((s) => s.activeTab);
     const channelCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -75,12 +74,9 @@ export function Channel() {
                 return false;
             }
 
-            if (filter === 'enabled') return channel.raw.enabled;
-            if (filter === 'disabled') return !channel.raw.enabled;
-
             return true;
         });
-    }, [sortedChannels, searchTerm, filter, targetedChannelId]);
+    }, [sortedChannels, searchTerm, targetedChannelId]);
 
     const visibleManualChannels = useMemo(
         () => visibleChannels.filter((channel) => !channel.raw.managed),
@@ -172,7 +168,6 @@ export function Channel() {
                         {activeTab === 'site' ? (
                             <SiteChannelSection
                                 searchTerm={searchTerm}
-                                filter={filter}
                                 sortField={sortField}
                                 sortOrder={sortOrder}
                                 layout={layout}

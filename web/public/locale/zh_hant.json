@@ -68,24 +68,6 @@
             "balanceAsc": "餘額低到高",
             "asc": "升序",
             "desc": "降序",
-            "filter": {
-                "title": "篩選",
-                "channel": {
-                    "all": "全部供應源",
-                    "enabled": "僅啟用",
-                    "disabled": "僅停用"
-                },
-                "group": {
-                    "all": "全部分組",
-                    "withMembers": "有成員",
-                    "empty": "空分組"
-                },
-                "model": {
-                    "all": "全部模型",
-                    "priced": "僅收費",
-                    "free": "僅免費"
-                }
-            },
             "logRefresh": {
                 "refresh": "刷新日誌"
             },

@@ -108,22 +108,6 @@ export function deriveCheckinStatus(
   }
 }
 
-export function accountMatchesCheckinFilter(
-  site: Pick<Site, "enabled" | "platform">,
-  account: Pick<
-    SiteAccount,
-    "enabled" | "auto_checkin" | "last_checkin_at" | "last_checkin_status"
-  >,
-  filterStatus: CheckinFilterStatus,
-  now = new Date(),
-) {
-  if (filterStatus === "all") {
-    return true;
-  }
-
-  return deriveCheckinStatus(site, account, now) === filterStatus;
-}
-
 export function accountMatchesCheckinFilters(
   site: Pick<Site, "enabled" | "platform">,
   account: Pick<

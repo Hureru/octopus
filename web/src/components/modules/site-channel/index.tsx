@@ -141,7 +141,6 @@ import {
     useSiteChannelPanelViewStore,
 } from './ui-store';
 
-type ChannelFilter = 'all' | 'enabled' | 'disabled';
 type ToolbarSortField = 'name' | 'created';
 type ToolbarSortOrder = 'asc' | 'desc';
 type SiteChannelPendingJump = PendingJump & { target: SiteChannelJumpTarget };
@@ -3064,13 +3063,11 @@ export function SiteChannelCompletionAction() {
 
 export function SiteChannelSection({
     searchTerm,
-    filter,
     sortField,
     sortOrder,
     layout,
 }: {
     searchTerm: string;
-    filter: ChannelFilter;
     sortField: ToolbarSortField;
     sortOrder: ToolbarSortOrder;
     layout: 'grid' | 'list';
@@ -3108,12 +3105,6 @@ export function SiteChannelSection({
                 const accountNames = card.accounts.map((account) => account.account_name.toLowerCase());
                 return card.site_name.toLowerCase().includes(term) || accountNames.some((name) => name.includes(term));
             })
-            .filter((card) => {
-                if (card.site_id === forcedSiteId) return true;
-                if (filter === 'enabled') return card.enabled;
-                if (filter === 'disabled') return !card.enabled;
-                return true;
-            })
             .sort((a, b) => {
                 // Pin the jump target to the top so the virtualized list keeps
                 // it mounted in the initial overscan window. Without this, the
@@ -3129,8 +3120,7 @@ export function SiteChannelSection({
                     : a.site_id - b.site_id;
                 return sortOrder === 'asc' ? diff : -diff;
             });
-    }, [data, searchTerm, filter, sortField, sortOrder, forcedSiteId]);
-
+    }, [data, searchTerm, sortField, sortOrder, forcedSiteId]);
     useEffect(() => {
         if (!pendingSiteChannelJump) return;
         const node = siteCardRefs.current.get(pendingSiteChannelJump.target.siteId);
