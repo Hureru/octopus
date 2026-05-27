@@ -74,6 +74,7 @@ type Site struct {
 	Platform           SitePlatform   `json:"platform" gorm:"type:varchar(32);not null"`
 	BaseURL            string         `json:"base_url" gorm:"not null"`
 	Enabled            bool           `json:"enabled" gorm:"default:true"`
+	EnabledSet         bool           `json:"-" gorm:"-"`
 	ProxyMode          ProxyUsageMode `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'direct'"`
 	ProxyConfigID      *int           `json:"proxy_config_id"`
 	Proxy              bool           `json:"-" gorm:"default:false"`
@@ -100,6 +101,11 @@ func (s *Site) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	_, s.EnabledSet = raw["enabled"]
 	if aux.Proxy != nil {
 		s.Proxy = *aux.Proxy
 	}
@@ -128,8 +134,11 @@ type SiteAccount struct {
 	ProxyConfigID              *int                 `json:"proxy_config_id"`
 	AccountProxy               *string              `json:"-" gorm:"column:account_proxy"`
 	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
+	EnabledSet                 bool                 `json:"-" gorm:"-"`
 	AutoSync                   bool                 `json:"auto_sync" gorm:"default:true"`
+	AutoSyncSet                bool                 `json:"-" gorm:"-"`
 	AutoCheckin                bool                 `json:"auto_checkin" gorm:"default:true"`
+	AutoCheckinSet             bool                 `json:"-" gorm:"-"`
 	RandomCheckin              bool                 `json:"random_checkin" gorm:"default:false"`
 	CheckinIntervalHours       int                  `json:"checkin_interval_hours" gorm:"default:24"`
 	CheckinRandomWindowMinutes int                  `json:"checkin_random_window_minutes" gorm:"default:120"`
@@ -158,6 +167,13 @@ func (a *SiteAccount) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	_, a.EnabledSet = raw["enabled"]
+	_, a.AutoSyncSet = raw["auto_sync"]
+	_, a.AutoCheckinSet = raw["auto_checkin"]
 	if aux.AccountProxy != nil {
 		a.AccountProxy = aux.AccountProxy
 	}
@@ -225,14 +241,33 @@ type SiteUpdateRequest struct {
 	Enabled            *bool           `json:"enabled,omitempty"`
 	ProxyMode          *ProxyUsageMode `json:"proxy_mode,omitempty"`
 	ProxyConfigID      *int            `json:"proxy_config_id,omitempty"`
+	ProxyConfigIDSet   bool            `json:"-"`
 	Proxy              *bool           `json:"-"`
 	SiteProxy          *string         `json:"-"`
 	UseSystemProxy     *bool           `json:"-"`
 	ExternalCheckinURL *string         `json:"external_checkin_url,omitempty"`
+	ExternalCheckinSet bool            `json:"-"`
 	IsPinned           *bool           `json:"is_pinned,omitempty"`
 	SortOrder          *int            `json:"sort_order,omitempty"`
 	GlobalWeight       *float64        `json:"global_weight,omitempty"`
 	CustomHeader       *[]CustomHeader `json:"custom_header,omitempty"`
+}
+
+func (r *SiteUpdateRequest) UnmarshalJSON(data []byte) error {
+	type alias SiteUpdateRequest
+	var aux alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*r = SiteUpdateRequest(aux)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	_, r.ProxyConfigIDSet = raw["proxy_config_id"]
+	_, r.ExternalCheckinSet = raw["external_checkin_url"]
+	return nil
 }
 
 type SiteAccountUpdateRequest struct {
@@ -246,8 +281,10 @@ type SiteAccountUpdateRequest struct {
 	RefreshToken               *string             `json:"refresh_token,omitempty"`
 	TokenExpiresAt             *int64              `json:"token_expires_at,omitempty"`
 	PlatformUserID             *int                `json:"platform_user_id,omitempty"`
+	PlatformUserIDSet          bool                `json:"-"`
 	ProxyMode                  *ProxyUsageMode     `json:"proxy_mode,omitempty"`
 	ProxyConfigID              *int                `json:"proxy_config_id,omitempty"`
+	ProxyConfigIDSet           bool                `json:"-"`
 	AccountProxy               *string             `json:"-"`
 	Enabled                    *bool               `json:"enabled,omitempty"`
 	AutoSync                   *bool               `json:"auto_sync,omitempty"`
@@ -255,6 +292,23 @@ type SiteAccountUpdateRequest struct {
 	RandomCheckin              *bool               `json:"random_checkin,omitempty"`
 	CheckinIntervalHours       *int                `json:"checkin_interval_hours,omitempty"`
 	CheckinRandomWindowMinutes *int                `json:"checkin_random_window_minutes,omitempty"`
+}
+
+func (r *SiteAccountUpdateRequest) UnmarshalJSON(data []byte) error {
+	type alias SiteAccountUpdateRequest
+	var aux alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*r = SiteAccountUpdateRequest(aux)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	_, r.PlatformUserIDSet = raw["platform_user_id"]
+	_, r.ProxyConfigIDSet = raw["proxy_config_id"]
+	return nil
 }
 
 type SiteSyncResult struct {
