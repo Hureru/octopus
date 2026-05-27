@@ -108,6 +108,16 @@ func SiteCreate(site *model.Site, ctx context.Context) error {
 			return err
 		}
 	}
+	if site.EnabledSet && !site.Enabled {
+		err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(site).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.Site{}).Where("id = ?", site.ID).Update("enabled", false).Error
+		})
+		site.Enabled = false
+		return err
+	}
 	return db.GetDB().WithContext(ctx).Create(site).Error
 }
 
@@ -144,7 +154,7 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.ProxyMode = *req.ProxyMode
 		selectFields = append(selectFields, "proxy_mode")
 	}
-	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+	if req.ProxyConfigIDSet || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
 		if req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool {
 			merged.ProxyConfigID = nil
 		} else {
@@ -152,7 +162,7 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		}
 		selectFields = append(selectFields, "proxy_config_id")
 	}
-	if req.ExternalCheckinURL != nil {
+	if req.ExternalCheckinSet {
 		merged.ExternalCheckinURL = req.ExternalCheckinURL
 		selectFields = append(selectFields, "external_checkin_url")
 	}
@@ -197,10 +207,10 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	if req.ProxyMode != nil {
 		updates.ProxyMode = merged.ProxyMode
 	}
-	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+	if req.ProxyConfigIDSet || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
 		updates.ProxyConfigID = merged.ProxyConfigID
 	}
-	if req.ExternalCheckinURL != nil {
+	if req.ExternalCheckinSet {
 		updates.ExternalCheckinURL = merged.ExternalCheckinURL
 	}
 	if req.IsPinned != nil {
@@ -318,6 +328,34 @@ func SiteAccountCreate(account *model.SiteAccount, ctx context.Context) error {
 			return err
 		}
 	}
+	if (account.EnabledSet && !account.Enabled) || (account.AutoSyncSet && !account.AutoSync) || (account.AutoCheckinSet && !account.AutoCheckin) {
+		updates := map[string]any{}
+		if account.EnabledSet && !account.Enabled {
+			updates["enabled"] = false
+		}
+		if account.AutoSyncSet && !account.AutoSync {
+			updates["auto_sync"] = false
+		}
+		if account.AutoCheckinSet && !account.AutoCheckin {
+			updates["auto_checkin"] = false
+		}
+		err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(account).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.SiteAccount{}).Where("id = ?", account.ID).Updates(updates).Error
+		})
+		if account.EnabledSet {
+			account.Enabled = false
+		}
+		if account.AutoSyncSet {
+			account.AutoSync = false
+		}
+		if account.AutoCheckinSet {
+			account.AutoCheckin = false
+		}
+		return err
+	}
 	return db.GetDB().WithContext(ctx).Create(account).Error
 }
 
@@ -367,7 +405,7 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		merged.TokenExpiresAt = *req.TokenExpiresAt
 		selectFields = append(selectFields, "token_expires_at")
 	}
-	if req.PlatformUserID != nil {
+	if req.PlatformUserIDSet {
 		merged.PlatformUserID = req.PlatformUserID
 		selectFields = append(selectFields, "platform_user_id")
 	}
@@ -375,7 +413,7 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		merged.ProxyMode = *req.ProxyMode
 		selectFields = append(selectFields, "proxy_mode")
 	}
-	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+	if req.ProxyConfigIDSet || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
 		if req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool {
 			merged.ProxyConfigID = nil
 		} else {
@@ -442,13 +480,13 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 	if req.TokenExpiresAt != nil {
 		updates.TokenExpiresAt = merged.TokenExpiresAt
 	}
-	if req.PlatformUserID != nil {
+	if req.PlatformUserIDSet {
 		updates.PlatformUserID = merged.PlatformUserID
 	}
 	if req.ProxyMode != nil {
 		updates.ProxyMode = merged.ProxyMode
 	}
-	if req.ProxyConfigID != nil || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
+	if req.ProxyConfigIDSet || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
 		updates.ProxyConfigID = merged.ProxyConfigID
 	}
 	if req.Enabled != nil {

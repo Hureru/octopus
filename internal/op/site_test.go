@@ -3,6 +3,7 @@ package op
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,6 +29,148 @@ func setupSiteOpTestDB(t *testing.T) context.Context {
 	})
 
 	return context.Background()
+}
+
+func TestSiteCreateAndAccountCreatePersistExplicitFalseValues(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	var site model.Site
+	if err := json.Unmarshal([]byte(`{"name":"disabled-site","platform":"new-api","base_url":"https://example.com","enabled":false}`), &site); err != nil {
+		t.Fatalf("json.Unmarshal Site failed: %v", err)
+	}
+	if !site.EnabledSet {
+		t.Fatalf("expected enabled presence flag to be set")
+	}
+	if err := SiteCreate(&site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	reloadedSite, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if reloadedSite.Enabled {
+		t.Fatalf("expected explicitly disabled site to stay disabled")
+	}
+
+	var account model.SiteAccount
+	if err := json.Unmarshal([]byte(`{"site_id":`+fmt.Sprint(site.ID)+`,"name":"manual-account","credential_type":"access_token","access_token":"token","enabled":false,"auto_sync":false,"auto_checkin":false}`), &account); err != nil {
+		t.Fatalf("json.Unmarshal SiteAccount failed: %v", err)
+	}
+	if !account.EnabledSet || !account.AutoSyncSet || !account.AutoCheckinSet {
+		t.Fatalf("expected account boolean presence flags to be set")
+	}
+	if err := SiteAccountCreate(&account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	reloadedAccount, err := SiteAccountGet(account.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteAccountGet failed: %v", err)
+	}
+	if reloadedAccount.Enabled || reloadedAccount.AutoSync || reloadedAccount.AutoCheckin {
+		t.Fatalf("expected explicit false flags to persist, got enabled=%v auto_sync=%v auto_checkin=%v", reloadedAccount.Enabled, reloadedAccount.AutoSync, reloadedAccount.AutoCheckin)
+	}
+}
+
+func TestSiteUpdateCanClearNullableFields(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	checkinURL := "https://example.com/signin"
+	proxyConfigID := 123
+	site := &model.Site{
+		Name:               "checkin-site",
+		Platform:           model.SitePlatformNewAPI,
+		BaseURL:            "https://example.com",
+		Enabled:            true,
+		ExternalCheckinURL: &checkinURL,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	// Simulate an existing pool config without requiring a proxy config row, then switch away from pool and clear it.
+	if err := dbpkg.GetDB().Model(&model.Site{}).Where("id = ?", site.ID).Updates(map[string]any{
+		"proxy_mode":      model.ProxyUsageModePool,
+		"proxy_config_id": proxyConfigID,
+	}).Error; err != nil {
+		t.Fatalf("seed proxy config failed: %v", err)
+	}
+
+	var req model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"external_checkin_url":null,"proxy_mode":"direct","proxy_config_id":null}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	if !req.ExternalCheckinSet || !req.ProxyConfigIDSet {
+		t.Fatalf("expected nullable field presence flags to be set")
+	}
+
+	updated, err := SiteUpdate(&req, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if updated.ExternalCheckinURL != nil {
+		t.Fatalf("expected external checkin url to be cleared, got %#v", *updated.ExternalCheckinURL)
+	}
+	if updated.ProxyConfigID != nil {
+		t.Fatalf("expected proxy config id to be cleared, got %#v", *updated.ProxyConfigID)
+	}
+}
+
+func TestSiteAccountUpdateCanClearNullableFields(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "account-nullable-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	platformUserID := 456
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "nullable-account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		PlatformUserID: &platformUserID,
+		Enabled:        true,
+		AutoSync:       true,
+		AutoCheckin:    true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+
+	proxyConfigID := 123
+	if err := dbpkg.GetDB().Model(&model.SiteAccount{}).Where("id = ?", account.ID).Updates(map[string]any{
+		"proxy_mode":      model.ProxyUsageModePool,
+		"proxy_config_id": proxyConfigID,
+	}).Error; err != nil {
+		t.Fatalf("seed account proxy config failed: %v", err)
+	}
+
+	var req model.SiteAccountUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(account.ID)+`,"platform_user_id":null,"proxy_mode":"inherit","proxy_config_id":null}`), &req); err != nil {
+		t.Fatalf("json.Unmarshal SiteAccountUpdateRequest failed: %v", err)
+	}
+	if !req.PlatformUserIDSet || !req.ProxyConfigIDSet {
+		t.Fatalf("expected nullable field presence flags to be set")
+	}
+
+	updated, err := SiteAccountUpdate(&req, ctx)
+	if err != nil {
+		t.Fatalf("SiteAccountUpdate failed: %v", err)
+	}
+	if updated.PlatformUserID != nil {
+		t.Fatalf("expected platform user id to be cleared, got %#v", *updated.PlatformUserID)
+	}
+	if updated.ProxyConfigID != nil {
+		t.Fatalf("expected proxy config id to be cleared, got %#v", *updated.ProxyConfigID)
+	}
 }
 
 func TestSiteUpdateRejectsInvalidMergedSite(t *testing.T) {
