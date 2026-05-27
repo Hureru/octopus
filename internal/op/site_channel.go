@@ -2,6 +2,7 @@ package op
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -182,7 +183,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 	projectedChannels := make(map[int]*model.Channel)
 	for _, group := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(group.GroupKey)
-		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectedChannelIDs: make([]int, 0), ProjectedChannels: make([]model.SiteProjectedChannelSettings, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectionDisabled: group.ProjectionDisabled, ProjectedChannelIDs: make([]int, 0), ProjectedChannels: make([]model.SiteProjectedChannelSettings, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
 	}
 	for _, token := range account.Tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
@@ -519,6 +520,39 @@ func isValidAutoGroupType(value model.AutoGroupType) bool {
 	default:
 		return false
 	}
+}
+
+func UpdateSiteGroupProjection(siteID int, accountID int, req *model.SiteGroupProjectionUpdateRequest, ctx context.Context) error {
+	if req == nil {
+		return fmt.Errorf("site group projection update request is nil")
+	}
+	if _, err := siteChannelAccount(siteID, accountID, ctx); err != nil {
+		return err
+	}
+	groupKey := model.NormalizeSiteGroupKey(req.GroupKey)
+	groupName := model.NormalizeSiteGroupName(groupKey, groupKey)
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing model.SiteUserGroup
+		result := tx.Where("site_account_id = ? AND group_key = ?", accountID, groupKey).First(&existing)
+		if result.Error == nil {
+			return tx.Model(&model.SiteUserGroup{}).
+				Where("id = ?", existing.ID).
+				Update("projection_disabled", req.ProjectionDisabled).Error
+		}
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return result.Error
+		}
+		if !req.ProjectionDisabled {
+			return nil
+		}
+		row := model.SiteUserGroup{
+			SiteAccountID:      accountID,
+			GroupKey:           groupKey,
+			Name:               groupName,
+			ProjectionDisabled: req.ProjectionDisabled,
+		}
+		return tx.Create(&row).Error
+	})
 }
 
 func UpdateSiteSourceKeys(siteID int, accountID int, req *model.SiteSourceKeyUpdateRequest, ctx context.Context) error {

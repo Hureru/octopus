@@ -30,6 +30,7 @@ type SiteRouteSummary struct {
 type SiteChannelGroup struct {
 	GroupKey              string                         `json:"group_key"`
 	GroupName             string                         `json:"group_name"`
+	ProjectionDisabled    bool                           `json:"projection_disabled"`
 	KeyCount              int                            `json:"key_count"`
 	EnabledKeyCount       int                            `json:"enabled_key_count"`
 	MaskedPendingKeyCount int                            `json:"masked_pending_key_count"`
@@ -180,4 +181,9 @@ type SiteSourceKeyUpdateRequest struct {
 	KeysToAdd    []SiteSourceKeyAddRequest `json:"keys_to_add,omitempty"`
 	KeysToUpdate []SiteSourceKeyUpdateItem `json:"keys_to_update,omitempty"`
 	KeysToDelete []int                     `json:"keys_to_delete,omitempty"`
+}
+
+type SiteGroupProjectionUpdateRequest struct {
+	GroupKey           string `json:"group_key" binding:"required"`
+	ProjectionDisabled bool   `json:"projection_disabled"`
 }

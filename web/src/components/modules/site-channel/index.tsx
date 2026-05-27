@@ -93,6 +93,7 @@ import {
     useResetSiteChannelModelRoutes,
     useSiteChannelList,
     useUpdateSiteProjectedChannelSettings,
+    useUpdateSiteGroupProjection,
     useUpdateAnySiteSourceKeys,
     useUpdateSiteSourceKeys,
     useUpdateSiteChannelModelDisabled,
@@ -1254,6 +1255,7 @@ function SiteAccountPanel({
     const createKeyMutation = useCreateSiteChannelKey(siteId, account.account_id);
     const sourceKeyMutation = useUpdateSiteSourceKeys(siteId, account.account_id);
     const advancedMutation = useUpdateSiteProjectedChannelSettings(siteId, account.account_id);
+    const groupProjectionMutation = useUpdateSiteGroupProjection(siteId, account.account_id);
     const addManualModelsMutation = useAddSiteManualModels(siteId, account.account_id);
     const deleteManualModelMutation = useDeleteSiteManualModel(siteId, account.account_id);
     const routeMutation = useUpdateSiteChannelModelRoutes(siteId, account.account_id);
@@ -1502,6 +1504,21 @@ function SiteAccountPanel({
     const handleOpenCreateKey = (group: SiteChannelGroup) => {
         setCreatingGroup(group);
         setQuickCreateName('');
+    };
+
+    const handleToggleGroupProjection = (group: SiteChannelGroup) => {
+        const nextDisabled = !group.projection_disabled;
+        groupProjectionMutation.mutate({
+            group_key: group.group_key,
+            projection_disabled: nextDisabled,
+        }, {
+            onSuccess: () => {
+                toast.success(nextDisabled ? '已停止生成该分组的投影渠道' : '已恢复生成该分组的投影渠道');
+            },
+            onError: (error) => {
+                toast.error(translateSiteError(error, '更新分组投影状态失败'));
+            },
+        });
     };
 
     const handleCloseCreateKey = () => {
@@ -1899,6 +1916,7 @@ function SiteAccountPanel({
                                                 <div className="truncate">{group.group_name || group.group_key}</div>
                                                 <div className="text-[11px] text-muted-foreground">
                                                     {group.models.length} 模型 · Key {group.enabled_key_count}/{group.key_count}
+                                                    {group.projection_disabled ? ' · 不投影' : ''}
                                                     {group.masked_pending_key_count > 0 ? ` · 待补全 ${group.masked_pending_key_count}` : ''}
                                                     {group.has_projected_channel ? ` · 投影 ${group.projected_keys.length}` : ''}
                                                 </div>
@@ -1940,6 +1958,21 @@ function SiteAccountPanel({
                         >
                             <Plus className="size-4" />
                             添加
+                        </Button>
+
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(
+                                'h-8 rounded-2xl px-3',
+                                activeGroup?.projection_disabled && 'border-amber-500/30 bg-amber-500/10 text-amber-800 hover:bg-amber-500/15 dark:text-amber-200',
+                            )}
+                            onClick={() => activeGroup && handleToggleGroupProjection(activeGroup)}
+                            disabled={!activeGroup || groupProjectionMutation.isPending}
+                            title={!activeGroup ? '请先选择具体分组' : activeGroup.projection_disabled ? '恢复生成投影渠道并显示到分组编辑' : '停止生成投影渠道并从分组编辑中移除'}
+                        >
+                            <Waypoints className={cn('size-4', groupProjectionMutation.isPending && 'animate-spin')} />
+                            {activeGroup?.projection_disabled ? '不投影' : '投影'}
                         </Button>
 
                         <Popover>

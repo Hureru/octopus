@@ -76,6 +76,7 @@ export type SiteProjectedChannelSettings = {
 export type SiteChannelGroup = {
     group_key: string;
     group_name: string;
+    projection_disabled: boolean;
     key_count: number;
     enabled_key_count: number;
     masked_pending_key_count: number;
@@ -261,6 +262,7 @@ function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteCha
         ...account,
         groups: (account.groups ?? []).map((group) => ({
             ...group,
+            projection_disabled: group.projection_disabled === true,
             masked_pending_key_count: typeof group.masked_pending_key_count === 'number' ? group.masked_pending_key_count : 0,
             projected_channel_ids: (group.projected_channel_ids ?? []).filter((id) => typeof id === 'number' && id > 0),
             projected_channels: (group.projected_channels ?? []).map(normalizeProjectedChannel).filter((channel) => channel.channel_id > 0),
@@ -362,6 +364,11 @@ export type SiteSourceKeyUpdateRequest = {
     keys_to_add?: SiteSourceKeyAddRequest[];
     keys_to_update?: SiteSourceKeyUpdateItem[];
     keys_to_delete?: number[];
+};
+
+export type SiteGroupProjectionUpdateRequest = {
+    group_key: string;
+    projection_disabled: boolean;
 };
 
 function getAccountPath(siteId: number, accountId: number, suffix: string) {
@@ -506,6 +513,25 @@ export function useUpdateAnySiteSourceKeys() {
         },
         onError: (error) => {
             logger.error('site source key update failed:', error);
+        },
+    });
+}
+
+export function useUpdateSiteGroupProjection(siteId: number, accountId: number) {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: async (payload: SiteGroupProjectionUpdateRequest) =>
+            apiClient.put<SiteChannelAccountServer>(getAccountPath(siteId, accountId, '/group-projection'), payload),
+        onSuccess: (account) => {
+            const normalizedAccount = normalizeSiteChannelAccount(account);
+            queryClient.setQueryData<SiteChannelCard[]>(['site-channel', 'list'], (cards) =>
+                replaceSiteChannelAccount(cards, siteId, normalizedAccount),
+            );
+            invalidateSiteChannelAndRelated(queryClient);
+        },
+        onError: (error) => {
+            logger.error('site group projection update failed:', error);
         },
     });
 }

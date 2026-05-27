@@ -259,6 +259,43 @@ func TestMergePersistedSiteTokensDemotesReadyTokenWhenMaskedPatternMismatches(t 
 	}
 }
 
+func TestPersistSyncSnapshotPreservesGroupProjectionDisabled(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	vipGroup := model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: "vip", Name: "VIP", ProjectionDisabled: true}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&vipGroup).Error; err != nil {
+		t.Fatalf("create vip group failed: %v", err)
+	}
+
+	snapshot := &syncSnapshot{
+		accessToken: account.AccessToken,
+		groups: []model.SiteUserGroup{
+			{GroupKey: "vip", Name: "VIP Renamed"},
+		},
+		tokens: []model.SiteToken{
+			{Name: "vip", Token: "key-vip", GroupKey: "vip", GroupName: "VIP", Enabled: true, Source: "sync"},
+		},
+		status:  model.SiteExecutionStatusSuccess,
+		message: "ok",
+	}
+
+	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
+		t.Fatalf("persistSyncSnapshot returned error: %v", err)
+	}
+
+	var reloaded model.SiteUserGroup
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND group_key = ?", account.ID, "vip").First(&reloaded).Error; err != nil {
+		t.Fatalf("query reloaded group failed: %v", err)
+	}
+	if !reloaded.ProjectionDisabled {
+		t.Fatalf("expected projection_disabled to be preserved")
+	}
+	if reloaded.Name != "VIP Renamed" {
+		t.Fatalf("expected synced group metadata to be updated, got %q", reloaded.Name)
+	}
+}
+
 func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 	ctx := setupProjectTestDB(t)
 	_, account := createProjectionFixture(t, ctx)

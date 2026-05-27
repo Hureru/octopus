@@ -53,6 +53,15 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 	}
 	now := time.Now()
 	err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existingGroups []model.SiteUserGroup
+		if err := tx.Where("site_account_id = ?", accountID).Find(&existingGroups).Error; err != nil {
+			return err
+		}
+		existingGroupMap := make(map[string]model.SiteUserGroup, len(existingGroups))
+		for _, group := range existingGroups {
+			existingGroupMap[model.NormalizeSiteGroupKey(group.GroupKey)] = group
+		}
+
 		if err := tx.Where("site_account_id = ?", accountID).Delete(&model.SiteUserGroup{}).Error; err != nil {
 			return err
 		}
@@ -89,6 +98,10 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 
 		for i := range snapshot.groups {
 			snapshot.groups[i].SiteAccountID = accountID
+			snapshot.groups[i].GroupKey = model.NormalizeSiteGroupKey(snapshot.groups[i].GroupKey)
+			if existing, ok := existingGroupMap[snapshot.groups[i].GroupKey]; ok {
+				snapshot.groups[i].ProjectionDisabled = existing.ProjectionDisabled
+			}
 		}
 		mergedTokens := mergePersistedSiteTokens(accountID, existingTokens, snapshot.tokens, now)
 		incomingModels := preparePersistedSyncModels(accountID, snapshot.models, existingModelMap, now)

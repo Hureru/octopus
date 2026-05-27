@@ -40,7 +40,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	groupMap := make(map[string]model.SiteUserGroup)
 	for _, item := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(item.GroupKey)
-		groupMap[key] = model.SiteUserGroup{ID: item.ID, SiteAccountID: account.ID, GroupKey: key, Name: model.NormalizeSiteGroupName(key, item.Name), RawPayload: item.RawPayload}
+		groupMap[key] = model.SiteUserGroup{ID: item.ID, SiteAccountID: account.ID, GroupKey: key, Name: model.NormalizeSiteGroupName(key, item.Name), RawPayload: item.RawPayload, ProjectionDisabled: item.ProjectionDisabled}
 	}
 	if len(groupMap) == 0 {
 		groupMap[model.SiteDefaultGroupKey] = model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
@@ -96,8 +96,8 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	}
 
 	desiredKeys := make([]string, 0, len(groupMap))
-	for groupKey := range groupMap {
-		if len(tokenGroups[groupKey]) > 0 {
+	for groupKey, group := range groupMap {
+		if len(tokenGroups[groupKey]) > 0 && !group.ProjectionDisabled {
 			desiredKeys = append(desiredKeys, groupKey)
 		}
 	}

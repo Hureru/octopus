@@ -633,6 +633,70 @@ func TestProjectAccountSkipsMaskedPendingTokens(t *testing.T) {
 	}
 }
 
+func TestProjectAccountSkipsProjectionDisabledGroup(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	group := model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName, ProjectionDisabled: true}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
+		t.Fatalf("create projection disabled group failed: %v", err)
+	}
+
+	managedIDs, err := ProjectAccount(ctx, account.ID)
+	if err != nil {
+		t.Fatalf("ProjectAccount failed: %v", err)
+	}
+	if len(managedIDs) != 0 {
+		t.Fatalf("expected no managed channels for projection disabled group, got %+v", managedIDs)
+	}
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	if len(channelsByGroup) != 0 {
+		t.Fatalf("expected no projected channels for projection disabled group, got %+v", channelsByGroup)
+	}
+}
+
+func TestProjectAccountRemovesProjectionDisabledManagedChannel(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("initial ProjectAccount failed: %v", err)
+	}
+	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	channel := channelsByGroup[model.SiteDefaultGroupKey]
+	if channel.ID == 0 {
+		t.Fatalf("expected initial projected channel")
+	}
+
+	group := model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName, ProjectionDisabled: true}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
+		t.Fatalf("create projection disabled group failed: %v", err)
+	}
+	groupRecord := model.Group{Name: "consumer", MatchRegex: "consumer", Mode: model.GroupModeRoundRobin}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&groupRecord).Error; err != nil {
+		t.Fatalf("create group failed: %v", err)
+	}
+	groupItem := model.GroupItem{GroupID: groupRecord.ID, ChannelID: channel.ID, ModelName: "gpt-4o-mini", Priority: 1, Weight: 1}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&groupItem).Error; err != nil {
+		t.Fatalf("create group item failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount after disabling projection failed: %v", err)
+	}
+	channelsByGroup = loadProjectedChannelsByGroupKey(t, ctx, account.ID)
+	if len(channelsByGroup) != 0 {
+		t.Fatalf("expected projected channel to be removed, got %+v", channelsByGroup)
+	}
+	var count int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.GroupItem{}).Where("channel_id = ?", channel.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count group items failed: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected group items for removed projected channel to be deleted, got %d", count)
+	}
+}
+
 func loadProjectedChannelsByGroupKey(t *testing.T, ctx context.Context, accountID int) map[string]model.Channel {
 	t.Helper()
 
