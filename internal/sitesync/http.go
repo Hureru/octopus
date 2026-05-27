@@ -405,11 +405,10 @@ func normalizeModelNames(names []string) []string {
 		if trimmed == "" {
 			continue
 		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[trimmed]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[trimmed] = struct{}{}
 		result = append(result, trimmed)
 	}
 	slices.Sort(result)

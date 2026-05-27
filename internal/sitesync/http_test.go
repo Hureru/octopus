@@ -137,6 +137,24 @@ func TestRequestJSONKeepsJSONForbiddenMessage(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelNamesPreservesCaseDistinctVariants(t *testing.T) {
+	models := normalizeModelNames([]string{" GPT-5.5 ", "gpt-5.5", "gpt-5.5", ""})
+
+	if len(models) != 2 {
+		t.Fatalf("expected case-distinct model names to be preserved, got %+v", models)
+	}
+	seen := make(map[string]struct{}, len(models))
+	for _, item := range models {
+		seen[item] = struct{}{}
+	}
+	if _, ok := seen["GPT-5.5"]; !ok {
+		t.Fatalf("expected GPT-5.5 to be preserved, got %+v", models)
+	}
+	if _, ok := seen["gpt-5.5"]; !ok {
+		t.Fatalf("expected gpt-5.5 to be preserved, got %+v", models)
+	}
+}
+
 func TestParseGroupItemsPreservesScalarMapLabels(t *testing.T) {
 	groups := parseGroupItems(map[string]any{
 		"data": map[string]any{
