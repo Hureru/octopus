@@ -2000,6 +2000,7 @@ export function Site() {
       </PageWrapper>
 
       <SiteEditDialog
+        key={editingSite ? `edit-site-${editingSite.id}` : "create-site"}
         open={siteDialogOpen}
         onOpenChange={closeSiteDialog}
         site={editingSite}
@@ -2007,6 +2008,13 @@ export function Site() {
       />
 
       <AccountEditDialog
+        key={
+          editingAccount
+            ? `edit-site-account-${editingAccount.id}`
+            : accountSite
+              ? `create-site-account-${accountSite.id}`
+              : "site-account"
+        }
         open={accountDialogOpen}
         onOpenChange={closeAccountDialog}
         site={accountSite}

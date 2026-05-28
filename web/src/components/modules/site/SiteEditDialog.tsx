@@ -17,6 +17,12 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from '@/components/ui/accordion';
 import { ProxySelector } from '@/components/modules/proxy-pool/ProxySelector';
 import { toast } from '@/components/common/Toast';
 import { useSettingStore } from '@/stores/setting';
@@ -71,7 +77,7 @@ function createEmptySiteForm(): SiteFormState {
         is_pinned: false,
         sort_order: 0,
         global_weight: 1,
-        custom_header: [],
+        custom_header: [{ header_key: '', header_value: '' }],
     };
 }
 
@@ -87,7 +93,9 @@ function createSiteForm(site: SiteRecord): SiteFormState {
         is_pinned: site.is_pinned,
         sort_order: site.sort_order,
         global_weight: site.global_weight,
-        custom_header: site.custom_header.map((item) => ({ ...item })),
+        custom_header: site.custom_header.length > 0
+            ? site.custom_header.map((item) => ({ ...item }))
+            : [{ header_key: '', header_value: '' }],
     };
 }
 
@@ -254,16 +262,13 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
                 showCloseButton={false}
-                className="w-screen max-w-full md:max-w-4xl bg-card text-card-foreground px-6 py-4 rounded-3xl flex flex-col gap-0 border-0 sm:max-w-4xl h-[min(calc(100vh-2rem),52rem)] overflow-hidden"
+                className="w-screen max-w-full md:max-w-xl bg-card text-card-foreground px-6 py-4 rounded-3xl flex flex-col gap-0 border-0 sm:max-w-xl max-h-[min(calc(100vh-2rem),52rem)] overflow-hidden"
             >
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
                         <h2 className="text-2xl font-bold text-card-foreground truncate">
                             {site ? '编辑站点' : '新增站点'}
                         </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            配置站点平台、代理和自定义 Header。站点账号会基于这里的基础信息进行同步。
-                        </p>
                     </div>
                     <button
                         type="button"
@@ -276,7 +281,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                 </header>
 
                 <form className="flex flex-1 min-h-0 flex-col" onSubmit={handleSubmit}>
-                    <div className="flex-1 min-h-0 space-y-5 overflow-y-auto pr-1">
+                    <div className="flex-1 min-h-0 space-y-5 overflow-y-auto px-1">
                         <div className="grid gap-4 md:grid-cols-2">
                             <label className="grid gap-2 text-sm">
                                 <span className="font-medium">站点名称</span>
@@ -310,10 +315,10 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                                     <SelectTrigger className="w-full rounded-xl">
                                         <SelectValue placeholder="自动检测" />
                                     </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value={AUTO_DETECT_VALUE}>自动检测</SelectItem>
+                                    <SelectContent className="rounded-xl">
+                                        <SelectItem className="rounded-xl" value={AUTO_DETECT_VALUE}>自动检测</SelectItem>
                                         {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
-                                            <SelectItem key={value} value={value}>
+                                            <SelectItem className="rounded-xl" key={value} value={value}>
                                                 {label}
                                             </SelectItem>
                                         ))}
@@ -337,30 +342,6 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                             />
                         </label>
 
-                        <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                            <div>
-                                <div className="text-sm font-medium">启用站点</div>
-                                <div className="text-xs text-muted-foreground">
-                                    停用后不再投影托管渠道
-                                </div>
-                            </div>
-                            <Switch
-                                checked={siteForm.enabled}
-                                onCheckedChange={(checked) =>
-                                    setSiteForm((current) => ({ ...current, enabled: checked }))
-                                }
-                            />
-                        </div>
-
-                        <ProxySelector
-                            value={{ proxy_mode: siteForm.proxy_mode, proxy_config_id: siteForm.proxy_config_id }}
-                            onChange={(next) => setSiteForm((current) => ({
-                                ...current,
-                                proxy_mode: next.proxy_mode as Exclude<ProxyMode, 'inherit'>,
-                                proxy_config_id: next.proxy_config_id ?? null,
-                            }))}
-                        />
-
                         <label className="grid gap-2 text-sm">
                             <span className="font-medium">手动签到 URL</span>
                             <Input
@@ -375,121 +356,144 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                                 className="rounded-xl"
                             />
                             <span className="text-xs text-muted-foreground">
-                                配置后可在站点总览中一键打开此页面进行手动签到，适用于有验证码等无法自动化签到的场景。
+                                配置后可在站点总览中一键打开此页面进行手动签到。
                             </span>
                         </label>
 
-                        <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <div className="text-sm font-medium">自定义 Header</div>
-                                    <div className="text-xs text-muted-foreground">
-                                        会透传到站点接口请求，可用于附加鉴权或租户信息
-                                    </div>
-                                </div>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="rounded-xl"
-                                    onClick={() =>
-                                        setSiteForm((current) => ({
-                                            ...current,
-                                            custom_header: [
-                                                ...current.custom_header,
-                                                { header_key: '', header_value: '' },
-                                            ],
-                                        }))
-                                    }
-                                >
-                                    <Plus className="size-4" />
-                                    添加 Header
-                                </Button>
-                            </div>
+                        <ProxySelector
+                            value={{ proxy_mode: siteForm.proxy_mode, proxy_config_id: siteForm.proxy_config_id }}
+                            onChange={(next) => setSiteForm((current) => ({
+                                ...current,
+                                proxy_mode: next.proxy_mode as Exclude<ProxyMode, 'inherit'>,
+                                proxy_config_id: next.proxy_config_id ?? null,
+                            }))}
+                        />
 
-                            {siteForm.custom_header.length === 0 ? (
-                                <div className="text-sm text-muted-foreground">
-                                    暂无自定义 Header
+                        <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+                            <div>
+                                <div className="text-sm font-medium">启用站点</div>
+                                <div className="text-xs text-muted-foreground">
+                                    停用后不再投影托管渠道
                                 </div>
-                            ) : null}
-                            <div className="space-y-3">
-                                {siteForm.custom_header.map((item, index) => (
-                                    <div
-                                        key={`${index}-${item.header_key}`}
-                                        className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
-                                    >
-                                        <Input
-                                            value={item.header_key}
-                                            onChange={(event) =>
-                                                setSiteForm((current) => ({
-                                                    ...current,
-                                                    custom_header: current.custom_header.map(
-                                                        (header, headerIndex) =>
-                                                            headerIndex === index
-                                                                ? { ...header, header_key: event.target.value }
-                                                                : header,
-                                                    ),
-                                                }))
-                                            }
-                                            placeholder="Header Key"
-                                            className="rounded-xl"
-                                        />
-                                        <Input
-                                            value={item.header_value}
-                                            onChange={(event) =>
-                                                setSiteForm((current) => ({
-                                                    ...current,
-                                                    custom_header: current.custom_header.map(
-                                                        (header, headerIndex) =>
-                                                            headerIndex === index
-                                                                ? {
-                                                                      ...header,
-                                                                      header_value: event.target.value,
-                                                                  }
-                                                                : header,
-                                                    ),
-                                                }))
-                                            }
-                                            placeholder="Header Value"
-                                            className="rounded-xl"
-                                        />
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="icon"
-                                            className="rounded-xl"
-                                            onClick={() =>
-                                                setSiteForm((current) => ({
-                                                    ...current,
-                                                    custom_header: current.custom_header.filter(
-                                                        (_, headerIndex) => headerIndex !== index,
-                                                    ),
-                                                }))
-                                            }
-                                        >
-                                            <X className="size-4" />
-                                        </Button>
-                                    </div>
-                                ))}
                             </div>
+                            <Switch
+                                checked={siteForm.enabled}
+                                onCheckedChange={(checked) =>
+                                    setSiteForm((current) => ({ ...current, enabled: checked }))
+                                }
+                            />
                         </div>
+
+                        <Accordion type="single" collapsible className="w-full rounded-xl border bg-card">
+                            <AccordionItem value="advanced" className="border-none">
+                                <AccordionTrigger className="rounded-xl px-4 py-3 text-sm font-medium text-card-foreground transition-colors hover:bg-muted/30 hover:no-underline">
+                                    高级设置
+                                </AccordionTrigger>
+                                <AccordionContent className="space-y-4 border-t px-4 pb-4 pt-4">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-sm font-medium text-card-foreground">
+                                                自定义 Header {siteForm.custom_header.length > 0 ? `(${siteForm.custom_header.length})` : ''}
+                                            </label>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() =>
+                                                    setSiteForm((current) => ({
+                                                        ...current,
+                                                        custom_header: [
+                                                            ...current.custom_header,
+                                                            { header_key: '', header_value: '' },
+                                                        ],
+                                                    }))
+                                                }
+                                                className="h-6 px-2 text-xs text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
+                                            >
+                                                <Plus className="mr-1 h-3 w-3" />
+                                                添加
+                                            </Button>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {siteForm.custom_header.map((item, index) => (
+                                                <div key={`site-hdr-${index}`} className="flex items-center gap-2">
+                                                    <Input
+                                                        value={item.header_key}
+                                                        onChange={(event) =>
+                                                            setSiteForm((current) => ({
+                                                                ...current,
+                                                                custom_header: current.custom_header.map(
+                                                                    (header, headerIndex) =>
+                                                                        headerIndex === index
+                                                                            ? { ...header, header_key: event.target.value }
+                                                                            : header,
+                                                                ),
+                                                            }))
+                                                        }
+                                                        placeholder="Header Key"
+                                                        className="flex-1 rounded-xl"
+                                                    />
+                                                    <Input
+                                                        value={item.header_value}
+                                                        onChange={(event) =>
+                                                            setSiteForm((current) => ({
+                                                                ...current,
+                                                                custom_header: current.custom_header.map(
+                                                                    (header, headerIndex) =>
+                                                                        headerIndex === index
+                                                                            ? {
+                                                                                  ...header,
+                                                                                  header_value: event.target.value,
+                                                                              }
+                                                                            : header,
+                                                                ),
+                                                            }))
+                                                        }
+                                                        placeholder="Header Value"
+                                                        className="flex-1 rounded-xl"
+                                                    />
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            setSiteForm((current) => ({
+                                                                ...current,
+                                                                custom_header: current.custom_header.filter(
+                                                                    (_, headerIndex) => headerIndex !== index,
+                                                                ),
+                                                            }))
+                                                        }
+                                                        disabled={siteForm.custom_header.length <= 1}
+                                                        className="h-8 w-8 rounded-xl p-0 text-muted-foreground hover:bg-transparent hover:text-destructive disabled:opacity-40"
+                                                        title="Remove"
+                                                    >
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </AccordionContent>
+                            </AccordionItem>
+                        </Accordion>
                     </div>
 
-                    <footer className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end shrink-0 border-t border-border/60 pt-4">
+                    <footer className="mt-5 flex shrink-0 flex-col gap-3 px-1 pt-2 sm:flex-row">
                         <Button
                             type="button"
-                            variant="outline"
-                            className="rounded-xl"
+                            variant="secondary"
+                            className="h-12 w-full rounded-2xl sm:flex-1"
                             onClick={() => onOpenChange(false)}
                         >
                             取消
                         </Button>
                         <Button
                             type="submit"
-                            className="rounded-xl"
+                            className="h-12 w-full rounded-2xl sm:flex-1"
                             disabled={isPending}
                         >
-                            {isPending ? '保存中...' : '保存'}
+                            {isPending ? '保存中...' : site ? '保存修改' : '创建站点'}
                         </Button>
                     </footer>
                 </form>

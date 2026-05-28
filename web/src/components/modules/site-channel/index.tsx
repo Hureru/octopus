@@ -2197,9 +2197,9 @@ function SiteAccountPanel({
             </div>
 
             <Dialog open={!!creatingGroup} onOpenChange={(open) => !open && handleCloseCreateKey()}>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="rounded-3xl sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>快捷创建站点 Key</DialogTitle>
+                        <DialogTitle className="text-lg font-semibold">快捷创建站点 Key</DialogTitle>
                         <DialogDescription>
                             为分组 {creatingGroup?.group_name || creatingGroup?.group_key || '-'} 在账号 {account.account_name} 下创建新 Key，并在创建后立即同步当前卡片。
                         </DialogDescription>
@@ -2248,7 +2248,7 @@ function SiteAccountPanel({
             <Dialog open={!!editingAdvancedGroup} onOpenChange={(open) => !open && handleCloseAdvancedSettings()}>
                 <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-4xl">
                     <DialogHeader>
-                        <DialogTitle>{t('siteChannel.advanced.title')}</DialogTitle>
+                        <DialogTitle className="text-lg font-semibold">{t('siteChannel.advanced.title')}</DialogTitle>
                         <DialogDescription>
                             {t('siteChannel.advanced.description', { group: editingAdvancedGroup?.group_name || editingAdvancedGroup?.group_key || '-' })}
                         </DialogDescription>
@@ -2326,7 +2326,7 @@ function SiteAccountPanel({
             <Dialog open={!!addingManualGroup} onOpenChange={(open) => !open && handleCloseAddManualModels()}>
                 <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-2xl">
+                        <DialogTitle className="text-lg font-semibold">
                             添加自定义模型
                         </DialogTitle>
                         <DialogDescription>
@@ -2367,7 +2367,7 @@ function SiteAccountPanel({
             <Dialog open={!!editingProjectedGroup} onOpenChange={(open) => !open && handleCloseProjectedKeys()}>
                 <DialogContent className="flex h-[min(85vh,42rem)] max-w-3xl flex-col overflow-hidden rounded-3xl border-border/70 p-0 sm:max-w-3xl">
                     <DialogHeader className="shrink-0 border-b border-border/60 px-6 py-4">
-                        <DialogTitle>管理站点 Key</DialogTitle>
+                        <DialogTitle className="text-lg font-semibold">管理站点 Key</DialogTitle>
                         <DialogDescription>
                             分组 {editingProjectedGroup?.group_name || editingProjectedGroup?.group_key || '-'} 的站点 Key 真源会在保存后更新，并重新投影到所有托管渠道。
                         </DialogDescription>
