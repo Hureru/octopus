@@ -1,8 +1,17 @@
 'use client';
 
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import {
+    useCallback,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type FormEvent,
+    type ReactNode,
+} from 'react';
 import { useTranslations } from 'next-intl';
-import { CalendarCheck2, RefreshCw, UserRound, Waypoints, XIcon } from 'lucide-react';
+import { CalendarCheck2, RefreshCw, UserRound, XIcon } from 'lucide-react';
+import { AnimatePresence, motion, type Transition } from 'motion/react';
 import {
     Dialog,
     DialogContent,
@@ -57,6 +66,48 @@ const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {
     [SiteCredentialType.AccessToken]: 'Access Token',
     [SiteCredentialType.APIKey]: 'API Key',
 };
+
+const FORM_SECTION_TRANSITION: Transition = {
+    duration: 0.2,
+    ease: 'easeOut',
+};
+
+function AnimatedFormSection({ children }: { children: ReactNode }) {
+    const contentRef = useRef<HTMLDivElement>(null);
+    const [height, setHeight] = useState<number | 'auto'>('auto');
+
+    const updateHeight = useCallback(() => {
+        const node = contentRef.current;
+        if (!node) return;
+
+        const nextHeight = node.offsetHeight;
+        setHeight((current) => (current === nextHeight ? current : nextHeight));
+    }, []);
+
+    useLayoutEffect(() => {
+        updateHeight();
+    });
+
+    useLayoutEffect(() => {
+        const node = contentRef.current;
+        if (!node || typeof ResizeObserver === 'undefined') return;
+
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [updateHeight]);
+
+    return (
+        <motion.div
+            initial={false}
+            animate={{ height }}
+            transition={FORM_SECTION_TRANSITION}
+            className="overflow-hidden"
+        >
+            <div ref={contentRef}>{children}</div>
+        </motion.div>
+    );
+}
 
 function defaultCredentialType(platform: SitePlatform): SiteCredentialType {
     switch (platform) {
@@ -246,8 +297,14 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 }
             }
 
-            const parsedPlatformUserID = accountForm.platform_user_id.trim()
-                ? Number(accountForm.platform_user_id.trim())
+            const platformUserIDInput = accountForm.platform_user_id.trim();
+            if (currentPlatform === SitePlatform.NewAPI && !platformUserIDInput) {
+                toast.error('请输入 Platform User ID');
+                return;
+            }
+
+            const parsedPlatformUserID = platformUserIDInput
+                ? Number(platformUserIDInput)
                 : null;
             if (
                 parsedPlatformUserID !== null &&
@@ -324,6 +381,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
             site,
             account,
             accountForm,
+            currentPlatform,
             tProxy,
             updateSiteAccount,
             createSiteAccount,
@@ -349,18 +407,13 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
                 showCloseButton={false}
-                className="w-screen max-w-full md:max-w-3xl bg-card text-card-foreground px-6 py-4 rounded-3xl flex flex-col gap-0 border-0 sm:max-w-3xl h-[min(calc(100vh-2rem),52rem)] overflow-hidden"
+                className="w-screen max-w-full md:max-w-xl bg-card text-card-foreground px-6 py-4 rounded-3xl flex flex-col gap-0 border-0 sm:max-w-xl max-h-[min(calc(100vh-2rem),52rem)] overflow-hidden"
             >
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
                         <h2 className="text-2xl font-bold text-card-foreground truncate">
                             {account ? '编辑站点账号' : '新增站点账号'}
                         </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            {site
-                                ? `账号会挂载到站点「${site.name}」下，并按同步结果自动投影 channel。`
-                                : '配置站点账号后，可自动同步分组、模型和托管渠道。'}
-                        </p>
                     </div>
                     <button
                         type="button"
@@ -373,7 +426,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 </header>
 
                 <form className="flex flex-1 min-h-0 flex-col" onSubmit={handleSubmit}>
-                    <div className="flex-1 min-h-0 space-y-5 overflow-y-auto pr-1">
+                    <div className="flex-1 min-h-0 space-y-5 overflow-y-auto px-1">
                         <div className="grid gap-4 md:grid-cols-2">
                             <label className="grid gap-2 text-sm">
                                 <span className="font-medium">账号名称</span>
@@ -417,9 +470,9 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                     <SelectTrigger className="w-full rounded-xl">
                                         <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent>
+                                    <SelectContent className="rounded-xl">
                                         {currentCredentialOptions.map((value) => (
-                                            <SelectItem key={value} value={value}>
+                                            <SelectItem className="rounded-xl" key={value} value={value}>
                                                 {CREDENTIAL_LABELS[value]}
                                             </SelectItem>
                                         ))}
@@ -428,129 +481,153 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                             </label>
                         </div>
 
-                        {accountForm.credential_type === SiteCredentialType.UsernamePassword ? (
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <label className="grid gap-2 text-sm">
-                                    <span className="font-medium">用户名</span>
-                                    <Input
-                                        value={accountForm.username}
-                                        onChange={(event) =>
-                                            setAccountForm((current) =>
-                                                current
-                                                    ? { ...current, username: event.target.value }
-                                                    : current,
-                                            )
-                                        }
-                                        placeholder="请输入用户名"
-                                        className="rounded-xl"
-                                    />
-                                </label>
-
-                                <label className="grid gap-2 text-sm">
-                                    <span className="font-medium">密码</span>
-                                    <Input
-                                        type="password"
-                                        value={accountForm.password}
-                                        onChange={(event) =>
-                                            setAccountForm((current) =>
-                                                current
-                                                    ? { ...current, password: event.target.value }
-                                                    : current,
-                                            )
-                                        }
-                                        placeholder="请输入密码"
-                                        className="rounded-xl"
-                                    />
-                                </label>
-                            </div>
-                        ) : null}
-
-                        {accountForm.credential_type === SiteCredentialType.AccessToken ? (
-                            <div className="grid gap-4">
-                                <label className="grid gap-2 text-sm">
-                                    <span className="font-medium">Access Token</span>
-                                    <Input
-                                        value={accountForm.access_token}
-                                        onChange={(event) =>
-                                            setAccountForm((current) =>
-                                                current
-                                                    ? { ...current, access_token: event.target.value }
-                                                    : current,
-                                            )
-                                        }
-                                        placeholder="请输入 Access Token"
-                                        className="rounded-xl"
-                                    />
-                                </label>
-
-                                {currentPlatform === SitePlatform.Sub2API ? (
-                                    <div className="grid gap-2">
+                        <AnimatedFormSection>
+                            <AnimatePresence initial={false} mode="popLayout">
+                                {accountForm.credential_type === SiteCredentialType.UsernamePassword ? (
+                                    <motion.div
+                                        key={SiteCredentialType.UsernamePassword}
+                                        initial={{ opacity: 0, y: -6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -6 }}
+                                        transition={FORM_SECTION_TRANSITION}
+                                    >
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <label className="grid gap-2 text-sm">
-                                                <span className="font-medium">Refresh Token</span>
+                                                <span className="font-medium">用户名</span>
                                                 <Input
-                                                    value={accountForm.refresh_token}
+                                                    value={accountForm.username}
                                                     onChange={(event) =>
                                                         setAccountForm((current) =>
                                                             current
-                                                                ? {
-                                                                      ...current,
-                                                                      refresh_token: event.target.value,
-                                                                  }
+                                                                ? { ...current, username: event.target.value }
                                                                 : current,
                                                         )
                                                     }
-                                                    placeholder="可选：请输入 refresh_token"
+                                                    placeholder="请输入用户名"
                                                     className="rounded-xl"
                                                 />
                                             </label>
 
                                             <label className="grid gap-2 text-sm">
-                                                <span className="font-medium">token_expires_at</span>
+                                                <span className="font-medium">密码</span>
                                                 <Input
-                                                    value={accountForm.token_expires_at}
+                                                    type="password"
+                                                    value={accountForm.password}
                                                     onChange={(event) =>
                                                         setAccountForm((current) =>
                                                             current
-                                                                ? {
-                                                                      ...current,
-                                                                      token_expires_at: event.target.value,
-                                                                  }
+                                                                ? { ...current, password: event.target.value }
                                                                 : current,
                                                         )
                                                     }
-                                                    placeholder="可选：F12 中的时间戳或时间字符串"
+                                                    placeholder="请输入密码"
                                                     className="rounded-xl"
                                                 />
                                             </label>
                                         </div>
-                                        <span className="text-xs text-muted-foreground">
-                                            Sub2API 推荐同时填写 F12 里的 <code>refresh_token</code>{' '}
-                                            与 <code>token_expires_at</code>，会在快过期或 401
-                                            时自动续期。
-                                        </span>
-                                    </div>
-                                ) : null}
-                            </div>
-                        ) : null}
+                                    </motion.div>
+                                ) : accountForm.credential_type === SiteCredentialType.AccessToken ? (
+                                    <motion.div
+                                        key={SiteCredentialType.AccessToken}
+                                        initial={{ opacity: 0, y: -6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -6 }}
+                                        transition={FORM_SECTION_TRANSITION}
+                                    >
+                                        <div className="grid gap-4">
+                                            <label className="grid gap-2 text-sm">
+                                                <span className="font-medium">Access Token</span>
+                                                <Input
+                                                    value={accountForm.access_token}
+                                                    onChange={(event) =>
+                                                        setAccountForm((current) =>
+                                                            current
+                                                                ? { ...current, access_token: event.target.value }
+                                                                : current,
+                                                        )
+                                                    }
+                                                    placeholder="请输入 Access Token"
+                                                    className="rounded-xl"
+                                                />
+                                            </label>
 
-                        {accountForm.credential_type === SiteCredentialType.APIKey ? (
-                            <label className="grid gap-2 text-sm">
-                                <span className="font-medium">API Key</span>
-                                <Input
-                                    value={accountForm.api_key}
-                                    onChange={(event) =>
-                                        setAccountForm((current) =>
-                                            current
-                                                ? { ...current, api_key: event.target.value }
-                                                : current,
-                                        )
-                                    }
-                                    placeholder="请输入 API Key"
-                                    className="rounded-xl"
-                                />
-                            </label>
-                        ) : null}
+                                            {currentPlatform === SitePlatform.Sub2API ? (
+                                                <div className="grid gap-2">
+                                                    <div className="grid gap-4 md:grid-cols-2">
+                                                        <label className="grid gap-2 text-sm">
+                                                            <span className="font-medium">Refresh Token</span>
+                                                            <Input
+                                                                value={accountForm.refresh_token}
+                                                                onChange={(event) =>
+                                                                    setAccountForm((current) =>
+                                                                        current
+                                                                            ? {
+                                                                                  ...current,
+                                                                                  refresh_token: event.target.value,
+                                                                              }
+                                                                            : current,
+                                                                    )
+                                                                }
+                                                                placeholder="可选：请输入 refresh_token"
+                                                                className="rounded-xl"
+                                                            />
+                                                        </label>
+
+                                                        <label className="grid gap-2 text-sm">
+                                                            <span className="font-medium">token_expires_at</span>
+                                                            <Input
+                                                                value={accountForm.token_expires_at}
+                                                                onChange={(event) =>
+                                                                    setAccountForm((current) =>
+                                                                        current
+                                                                            ? {
+                                                                                  ...current,
+                                                                                  token_expires_at: event.target.value,
+                                                                              }
+                                                                            : current,
+                                                                    )
+                                                                }
+                                                                placeholder="可选：F12 中的时间戳或时间字符串"
+                                                                className="rounded-xl"
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        Sub2API 推荐同时填写 F12 里的 <code>refresh_token</code>{' '}
+                                                        与 <code>token_expires_at</code>，会在快过期或 401
+                                                        时自动续期。
+                                                    </span>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </motion.div>
+                                ) : (
+                                    <motion.div
+                                        key={SiteCredentialType.APIKey}
+                                        initial={{ opacity: 0, y: -6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -6 }}
+                                        transition={FORM_SECTION_TRANSITION}
+                                    >
+                                        <label className="grid gap-2 text-sm">
+                                            <span className="font-medium">API Key</span>
+                                            <Input
+                                                value={accountForm.api_key}
+                                                onChange={(event) =>
+                                                    setAccountForm((current) =>
+                                                        current
+                                                            ? { ...current, api_key: event.target.value }
+                                                            : current,
+                                                    )
+                                                }
+                                                placeholder="请输入 API Key"
+                                                className="rounded-xl"
+                                            />
+                                        </label>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </AnimatedFormSection>
 
                         {currentPlatform === SitePlatform.NewAPI ? (
                             <label className="grid gap-2 text-sm">
@@ -564,15 +641,147 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                 : current,
                                         )
                                     }
-                                    placeholder="可选：例如 11494"
+                                    placeholder="例如 11494"
                                     className="rounded-xl"
+                                    required
                                 />
                                 <span className="text-xs text-muted-foreground">
-                                    部分 New API 站点同步 token、分组和签到时要求额外提供用户
-                                    ID。导入数据会尽量自动填充该值。
+                                    New API 站点同步 token、分组和签到时需要用户 ID。导入数据会尽量自动填充该值。
                                 </span>
                             </label>
                         ) : null}
+
+                        <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
+                            <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+                                <label className="flex cursor-pointer items-center justify-between gap-3">
+                                    <span className="flex items-center gap-2 text-sm font-medium text-card-foreground">
+                                        <UserRound className="size-4 text-muted-foreground" />
+                                        启用账号
+                                    </span>
+                                    <Switch
+                                        checked={accountForm.enabled}
+                                        onCheckedChange={(checked) =>
+                                            setAccountForm((current) =>
+                                                current ? { ...current, enabled: checked } : current,
+                                            )
+                                        }
+                                    />
+                                </label>
+                                <label className="flex cursor-pointer items-center justify-between gap-3">
+                                    <span className="flex items-center gap-2 text-sm text-card-foreground">
+                                        <RefreshCw className="size-4 text-muted-foreground" />
+                                        自动同步
+                                    </span>
+                                    <Switch
+                                        checked={accountForm.auto_sync}
+                                        onCheckedChange={(checked) =>
+                                            setAccountForm((current) =>
+                                                current ? { ...current, auto_sync: checked } : current,
+                                            )
+                                        }
+                                    />
+                                </label>
+                                <label className="flex cursor-pointer items-center justify-between gap-3">
+                                    <span className="flex items-center gap-2 text-sm text-card-foreground">
+                                        <CalendarCheck2 className="size-4 text-muted-foreground" />
+                                        自动签到
+                                    </span>
+                                    <Switch
+                                        checked={accountForm.auto_checkin}
+                                        onCheckedChange={(checked) =>
+                                            setAccountForm((current) =>
+                                                current
+                                                    ? { ...current, auto_checkin: checked }
+                                                    : current,
+                                            )
+                                        }
+                                    />
+                                </label>
+                                <label className="flex cursor-pointer items-center justify-between gap-3">
+                                    <span className="flex items-center gap-2 text-sm text-card-foreground">
+                                        <CalendarCheck2 className="size-4 text-muted-foreground" />
+                                        随机签到
+                                    </span>
+                                    <Switch
+                                        checked={accountForm.random_checkin}
+                                        onCheckedChange={(checked) =>
+                                            setAccountForm((current) =>
+                                                current
+                                                    ? { ...current, random_checkin: checked }
+                                                    : current,
+                                            )
+                                        }
+                                    />
+                                </label>
+                            </div>
+
+                            <AnimatePresence initial={false}>
+                                {accountForm.auto_checkin && accountForm.random_checkin ? (
+                                    <motion.div
+                                        key="random-checkin-options"
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={FORM_SECTION_TRANSITION}
+                                        className="overflow-hidden"
+                                    >
+                                        <motion.div
+                                            initial={{ y: -6 }}
+                                            animate={{ y: 0 }}
+                                            exit={{ y: -6 }}
+                                            transition={FORM_SECTION_TRANSITION}
+                                            className="mt-4 grid gap-4 border-t border-border/50 pt-4 md:grid-cols-2"
+                                        >
+                                            <label className="grid gap-2 text-sm">
+                                                <span className="font-medium">最小签到间隔（小时）</span>
+                                                <Input
+                                                    type="number"
+                                                    min={1}
+                                                    max={720}
+                                                    value={accountForm.checkin_interval_hours}
+                                                    onChange={(event) =>
+                                                        setAccountForm((current) =>
+                                                            current
+                                                                ? {
+                                                                      ...current,
+                                                                      checkin_interval_hours: Number(event.target.value),
+                                                                  }
+                                                                : current,
+                                                        )
+                                                    }
+                                                    placeholder="24"
+                                                    className="rounded-xl"
+                                                />
+                                            </label>
+
+                                            <label className="grid gap-2 text-sm">
+                                                <span className="font-medium">随机延迟窗口（分钟）</span>
+                                                <Input
+                                                    type="number"
+                                                    min={0}
+                                                    max={1440}
+                                                    value={accountForm.checkin_random_window_minutes}
+                                                    onChange={(event) =>
+                                                        setAccountForm((current) =>
+                                                            current
+                                                                ? {
+                                                                      ...current,
+                                                                      checkin_random_window_minutes: Number(
+                                                                          event.target.value,
+                                                                      ),
+                                                                  }
+                                                                : current,
+                                                        )
+                                                    }
+                                                    placeholder="120"
+                                                    className="rounded-xl"
+                                                />
+                                            </label>
+                                        </motion.div>
+                                    </motion.div>
+                                ) : null}
+                            </AnimatePresence>
+                        </div>
 
                         <div className="grid gap-2 text-sm">
                             <ProxySelector
@@ -594,182 +803,26 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                 }
                             />
                             <span className="text-xs text-muted-foreground">
-                                用于该账号的同步、签到和模型拉取；自动投影的 channel 会跟随这里解析后的代理。
+                                用于该账号的同步、签到和模型拉取；自动投影的渠道会跟随这里解析后的代理。
                             </span>
-                        </div>
-
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <UserRound className="size-4 text-muted-foreground" />
-                                        <span className="text-sm font-medium">启用账号</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        停用后不参与同步和签到
-                                    </div>
-                                </div>
-                                <Switch
-                                    checked={accountForm.enabled}
-                                    onCheckedChange={(checked) =>
-                                        setAccountForm((current) =>
-                                            current ? { ...current, enabled: checked } : current,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <RefreshCw className="size-4 text-muted-foreground" />
-                                        <span className="text-sm font-medium">自动同步</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        定时拉取分组、模型和 key
-                                    </div>
-                                </div>
-                                <Switch
-                                    checked={accountForm.auto_sync}
-                                    onCheckedChange={(checked) =>
-                                        setAccountForm((current) =>
-                                            current ? { ...current, auto_sync: checked } : current,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <CalendarCheck2 className="size-4 text-muted-foreground" />
-                                        <span className="text-sm font-medium">自动签到</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        定时执行平台签到
-                                    </div>
-                                </div>
-                                <Switch
-                                    checked={accountForm.auto_checkin}
-                                    onCheckedChange={(checked) =>
-                                        setAccountForm((current) =>
-                                            current
-                                                ? { ...current, auto_checkin: checked }
-                                                : current,
-                                        )
-                                    }
-                                />
-                            </div>
-
-                            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <CalendarCheck2 className="size-4 text-muted-foreground" />
-                                        <span className="text-sm font-medium">随机签到</span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        在间隔基础上添加随机延迟
-                                    </div>
-                                </div>
-                                <Switch
-                                    checked={accountForm.random_checkin}
-                                    onCheckedChange={(checked) =>
-                                        setAccountForm((current) =>
-                                            current
-                                                ? { ...current, random_checkin: checked }
-                                                : current,
-                                        )
-                                    }
-                                />
-                            </div>
-                        </div>
-
-                        {accountForm.auto_checkin && accountForm.random_checkin ? (
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <label className="grid gap-2 text-sm">
-                                    <span className="font-medium">最小签到间隔（小时）</span>
-                                    <Input
-                                        type="number"
-                                        min={1}
-                                        max={720}
-                                        value={accountForm.checkin_interval_hours}
-                                        onChange={(event) =>
-                                            setAccountForm((current) =>
-                                                current
-                                                    ? {
-                                                          ...current,
-                                                          checkin_interval_hours: Number(event.target.value),
-                                                      }
-                                                    : current,
-                                            )
-                                        }
-                                        placeholder="24"
-                                        className="rounded-xl"
-                                    />
-                                </label>
-
-                                <label className="grid gap-2 text-sm">
-                                    <span className="font-medium">随机延迟窗口（分钟）</span>
-                                    <Input
-                                        type="number"
-                                        min={0}
-                                        max={1440}
-                                        value={accountForm.checkin_random_window_minutes}
-                                        onChange={(event) =>
-                                            setAccountForm((current) =>
-                                                current
-                                                    ? {
-                                                          ...current,
-                                                          checkin_random_window_minutes: Number(
-                                                              event.target.value,
-                                                          ),
-                                                      }
-                                                    : current,
-                                            )
-                                        }
-                                        placeholder="120"
-                                        className="rounded-xl"
-                                    />
-                                </label>
-                            </div>
-                        ) : null}
-
-                        <div className="grid gap-3 rounded-2xl border border-border/60 bg-muted/10 p-4 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                                <Waypoints className="size-4" />
-                                <span>投影规则说明</span>
-                            </div>
-                            <p>
-                                同步后会以 <code>site_user_group</code> 为主维度生成托管
-                                channel；无分组时使用 <code>default</code>。同一分组下的多个
-                                key 会聚合到同一个 channel；多端点兼容站点会按模型已归属的
-                                请求端点格式继续拆成独立托管 channel。
-                            </p>
-                            {accountForm.auto_checkin && accountForm.random_checkin ? (
-                                <p>
-                                    随机签到会基于&ldquo;上次成功签到时间 + 最小间隔 + 0
-                                    到随机延迟窗口&rdquo;的规则生成下次执行时间，适合需要接近 24
-                                    小时间隔的站点。
-                                </p>
-                            ) : null}
                         </div>
                     </div>
 
-                    <footer className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end shrink-0 border-t border-border/60 pt-4">
+                    <footer className="mt-5 flex shrink-0 flex-col gap-3 px-1 pt-2 sm:flex-row">
                         <Button
                             type="button"
-                            variant="outline"
-                            className="rounded-xl"
+                            variant="secondary"
+                            className="h-12 w-full rounded-2xl sm:flex-1"
                             onClick={() => onOpenChange(false)}
                         >
                             取消
                         </Button>
                         <Button
                             type="submit"
-                            className="rounded-xl"
+                            className="h-12 w-full rounded-2xl sm:flex-1"
                             disabled={isPending}
                         >
-                            {isPending ? '保存中...' : '保存'}
+                            {isPending ? '保存中...' : account ? '保存修改' : '创建账号'}
                         </Button>
                     </footer>
                 </form>
