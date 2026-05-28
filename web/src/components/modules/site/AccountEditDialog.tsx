@@ -598,6 +598,32 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                     </span>
                                                 </div>
                                             ) : null}
+
+                                            {currentPlatform === SitePlatform.NewAPI ? (
+                                                <label className="grid gap-2 text-sm">
+                                                    <span className="font-medium">Platform User ID</span>
+                                                    <Input
+                                                        value={accountForm.platform_user_id}
+                                                        onChange={(event) =>
+                                                            setAccountForm((current) =>
+                                                                current
+                                                                    ? {
+                                                                          ...current,
+                                                                          platform_user_id: event.target.value,
+                                                                      }
+                                                                    : current,
+                                                            )
+                                                        }
+                                                        placeholder="例如 11494"
+                                                        className="rounded-xl"
+                                                        required
+                                                    />
+                                                    <span className="text-xs text-muted-foreground">
+                                                        New API 站点同步 token、分组和签到时需要用户
+                                                        ID。导入数据会尽量自动填充该值。
+                                                    </span>
+                                                </label>
+                                            ) : null}
                                         </div>
                                     </motion.div>
                                 ) : (
@@ -627,45 +653,6 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                 )}
                             </AnimatePresence>
                         </AnimatedFormSection>
-
-                        {currentPlatform === SitePlatform.NewAPI &&
-                        accountForm.credential_type === SiteCredentialType.AccessToken ? (
-                            <AnimatedFormSection>
-                                <AnimatePresence initial={false}>
-                                    <motion.div
-                                        key="platform-user-id"
-                                        initial={{ opacity: 0, y: -6 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: -6 }}
-                                        transition={FORM_SECTION_TRANSITION}
-                                    >
-                                        <label className="grid gap-2 text-sm">
-                                            <span className="font-medium">Platform User ID</span>
-                                            <Input
-                                                value={accountForm.platform_user_id}
-                                                onChange={(event) =>
-                                                    setAccountForm((current) =>
-                                                        current
-                                                            ? {
-                                                                  ...current,
-                                                                  platform_user_id: event.target.value,
-                                                              }
-                                                            : current,
-                                                    )
-                                                }
-                                                placeholder="例如 11494"
-                                                className="rounded-xl"
-                                                required
-                                            />
-                                            <span className="text-xs text-muted-foreground">
-                                                New API 站点同步
-                                                token、分组和签到时需要用户 ID。导入数据会尽量自动填充该值。
-                                            </span>
-                                        </label>
-                                    </motion.div>
-                                </AnimatePresence>
-                            </AnimatedFormSection>
-                        ) : null}
 
                         <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
                             <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
