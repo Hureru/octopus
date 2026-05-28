@@ -899,6 +899,38 @@ func TestMarkAccountProjectionStaleKeepsManagedChannelsEnabled(t *testing.T) {
 	}
 }
 
+func TestProjectAccountRefreshesPausedBindingGroupID(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("initial ProjectAccount failed: %v", err)
+	}
+	var binding model.SiteChannelBinding
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND group_key = ?", account.ID, model.SiteDefaultGroupKey).First(&binding).Error; err != nil {
+		t.Fatalf("query initial binding failed: %v", err)
+	}
+	oldGroupID := 999999
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{}).Where("id = ?", binding.ID).Update("site_user_group_id", oldGroupID).Error; err != nil {
+		t.Fatalf("seed stale binding group id failed: %v", err)
+	}
+	group := model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName, ProjectionSuspended: true, ProjectionSuspendReason: "missing key", ModelSyncStatus: model.SiteGroupModelSyncStatusMissingKey}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
+		t.Fatalf("create suspended group failed: %v", err)
+	}
+
+	if _, err := ProjectAccount(ctx, account.ID); err != nil {
+		t.Fatalf("ProjectAccount while suspended failed: %v", err)
+	}
+	var refreshed model.SiteChannelBinding
+	if err := dbpkg.GetDB().WithContext(ctx).First(&refreshed, binding.ID).Error; err != nil {
+		t.Fatalf("query refreshed binding failed: %v", err)
+	}
+	if refreshed.SiteUserGroupID == nil || *refreshed.SiteUserGroupID != group.ID {
+		t.Fatalf("expected paused binding group id %d, got %+v", group.ID, refreshed.SiteUserGroupID)
+	}
+}
+
 func loadProjectedChannelsByGroupKey(t *testing.T, ctx context.Context, accountID int) map[string]model.Channel {
 	t.Helper()
 

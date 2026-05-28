@@ -206,7 +206,6 @@ func applyPersistedGroupSyncState(group *model.SiteUserGroup, existing *model.Si
 		group.ProjectionSuspended = true
 		group.ProjectionSuspendReason = firstNonEmptyString(group.ModelSyncMessage, "上游当前无可用模型，已暂停投影")
 		group.ProjectionSuspendedAt = &now
-		group.LastModelSyncSuccessAt = &now
 		group.ModelSyncFailureCount = 0
 	case siteGroupSyncStatusRemoved:
 		group.ProjectionSuspended = false

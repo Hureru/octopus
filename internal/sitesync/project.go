@@ -248,6 +248,9 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		}
 		baseGroupKey, _ := parseCompositeBindingKey(bindingKey)
 		if group, ok := groupMap[baseGroupKey]; ok && isSiteGroupProjectionSystemPaused(group) {
+			if err := updateSiteChannelBindingGroup(ctx, binding.ID, group); err != nil {
+				return nil, err
+			}
 			if err := op.ChannelEnabledManaged(binding.ChannelID, false, ctx); err != nil {
 				log.Warnf("failed to disable system-paused managed channel %d: %v", binding.ChannelID, err)
 			}
@@ -302,6 +305,19 @@ func isSiteGroupProjectionSystemPaused(group model.SiteUserGroup) bool {
 	default:
 		return false
 	}
+}
+
+func updateSiteChannelBindingGroup(ctx context.Context, bindingID int, group model.SiteUserGroup) error {
+	updates := map[string]any{}
+	if group.ID != 0 {
+		updates["site_user_group_id"] = group.ID
+	} else {
+		updates["site_user_group_id"] = nil
+	}
+	if err := db.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{}).Where("id = ?", bindingID).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update paused site channel binding: %w", err)
+	}
+	return nil
 }
 
 func ProjectSite(ctx context.Context, siteID int) error {
