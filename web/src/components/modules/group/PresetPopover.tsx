@@ -36,7 +36,13 @@ import {
 } from '@/api/endpoints/group';
 import { toast } from '@/components/common/Toast';
 import { cn } from '@/lib/utils';
-import { PresetEditor } from './PresetEditor';
+import { PresetEditorAutoOpener, PresetEditorContent } from './PresetEditor';
+import {
+    MorphingDialog,
+    MorphingDialogContainer,
+    MorphingDialogContent,
+    MorphingDialogTrigger,
+} from '@/components/ui/morphing-dialog';
 
 interface PresetPopoverProps {
     group: Group;
@@ -52,7 +58,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
     const [open, setOpen] = useState(false);
     const [pending, setPending] = useState<PendingAction>({ kind: 'none' });
     const [nameDraft, setNameDraft] = useState('');
-    const [editingPreset, setEditingPreset] = useState<GroupPreset | null>(null);
+    const [pendingEditId, setPendingEditId] = useState<number | null>(null);
 
     const { data: presets = [], isLoading } = useGroupPresetList(open ? group.id : undefined);
     const createPreset = useCreateGroupPreset();
@@ -66,6 +72,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
     const resetPending = useCallback(() => {
         setPending({ kind: 'none' });
         setNameDraft('');
+        setPendingEditId(null);
     }, []);
 
     const handleCreateSubmit = useCallback(() => {
@@ -92,7 +99,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
             {
                 onSuccess: (preset) => {
                     toast.success(t('preset.toast.created'));
-                    setEditingPreset(preset);
+                    setPendingEditId(preset.id);
                 },
                 onError: (e) => toast.error(t('preset.toast.createBlankFailed'), { description: e.message }),
             },
@@ -118,7 +125,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
             {
                 onSuccess: (cloned) => {
                     toast.success(t('preset.toast.cloned'));
-                    setEditingPreset(cloned);
+                    setPendingEditId(cloned.id);
                 },
                 onError: (e) => toast.error(t('preset.toast.cloneFailed'), { description: e.message }),
             },
@@ -294,18 +301,28 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                         </button>
 
                                         <div className="flex items-center gap-0.5 opacity-0 group-hover/preset:opacity-100 transition-opacity">
-                                            <Tooltip side="top" sideOffset={6} align="center">
-                                                <TooltipTrigger asChild>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setEditingPreset(preset)}
-                                                        className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
-                                                    >
-                                                        <Pencil className="size-3.5" />
-                                                    </button>
-                                                </TooltipTrigger>
-                                                <TooltipContent>{t('preset.edit')}</TooltipContent>
-                                            </Tooltip>
+                                            <MorphingDialog key={`preset-edit-${preset.id}`}>
+                                                <MorphingDialogTrigger
+                                                    aria-label={t('preset.edit')}
+                                                    className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <Tooltip side="top" sideOffset={6} align="center">
+                                                        <TooltipTrigger asChild>
+                                                            <Pencil className="size-3.5" />
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>{t('preset.edit')}</TooltipContent>
+                                                    </Tooltip>
+                                                </MorphingDialogTrigger>
+                                                <PresetEditorAutoOpener
+                                                    active={pendingEditId === preset.id}
+                                                    onOpened={() => setPendingEditId(null)}
+                                                />
+                                                <MorphingDialogContainer>
+                                                    <MorphingDialogContent className="relative w-screen max-w-full md:max-w-4xl bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden">
+                                                        <PresetEditorContent preset={preset} />
+                                                    </MorphingDialogContent>
+                                                </MorphingDialogContainer>
+                                            </MorphingDialog>
                                             <Tooltip side="top" sideOffset={6} align="center">
                                                 <TooltipTrigger asChild>
                                                     <button
@@ -341,14 +358,6 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                     </div>
                 </PopoverContent>
             </Popover>
-
-            {editingPreset && (
-                <PresetEditor
-                    preset={editingPreset}
-                    open={!!editingPreset}
-                    onOpenChange={(o) => { if (!o) setEditingPreset(null); }}
-                />
-            )}
         </>
     );
 }

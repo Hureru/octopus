@@ -1,14 +1,13 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
-import { XIcon } from 'lucide-react';
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogTitle,
-} from '@/components/ui/dialog';
+    MorphingDialogClose,
+    MorphingDialogDescription,
+    MorphingDialogTitle,
+    useMorphingDialog,
+} from '@/components/ui/morphing-dialog';
 import { useModelChannelList } from '@/api/endpoints/model';
 import {
     useUpdateGroupPreset,
@@ -20,19 +19,17 @@ import { GroupEditor, type GroupEditorValues } from './Editor';
 import type { SelectedMember } from './ItemList';
 import { modelChannelKey } from './utils';
 
-interface PresetEditorProps {
+interface PresetEditorContentProps {
     preset: GroupPreset;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
 }
 
 /**
- * 编辑预设内容。视觉上对齐分组卡片里的 MorphingDialog 编辑面板
- * （bg-card / rounded-3xl / px-6 py-4 / text-2xl 标题）。因为是受控弹出
- * （PresetPopover 触发），用 Dialog 而非 MorphingDialog；MorphingDialog 必须有 trigger 元素。
+ * 预设编辑面板的内容部分。配合 MorphingDialog 使用，承担与 Channel/Group 卡片
+ * 编辑面板一致的 morph 进入动画与视觉风格（bg-card / rounded-3xl / text-2xl）。
  */
-export function PresetEditor({ preset, open, onOpenChange }: PresetEditorProps) {
+export function PresetEditorContent({ preset }: PresetEditorContentProps) {
     const t = useTranslations('group');
+    const { setIsOpen } = useMorphingDialog();
     const { data: modelChannels = [] } = useModelChannelList();
     const updatePreset = useUpdateGroupPreset();
 
@@ -87,59 +84,82 @@ export function PresetEditor({ preset, open, onOpenChange }: PresetEditorProps) 
             {
                 onSuccess: () => {
                     toast.success(t('preset.toast.updated'));
-                    onOpenChange(false);
+                    setIsOpen(false);
                 },
                 onError: (error) => toast.error(t('preset.toast.updateFailed'), { description: error.message }),
             },
         );
-    }, [preset.id, preset.group_id, updatePreset, t, onOpenChange]);
+    }, [preset.id, preset.group_id, updatePreset, t, setIsOpen]);
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent
-                showCloseButton={false}
-                className="w-screen max-w-full md:max-w-4xl bg-card text-card-foreground px-6 py-4 rounded-3xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden gap-0 border-0 sm:max-w-4xl"
-            >
-                <DialogTitle asChild>
-                    <header className="mb-3 flex items-center justify-between shrink-0">
-                        <h2 className="text-2xl font-bold text-card-foreground truncate pr-4">
-                            {t('preset.editorTitle')}
-                        </h2>
-                        <button
-                            type="button"
-                            onClick={() => onOpenChange(false)}
-                            aria-label={t('preset.close')}
-                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-                        >
-                            <XIcon className="size-5" />
-                        </button>
-                    </header>
-                </DialogTitle>
-                <DialogDescription className="sr-only">
-                    {t('preset.editorTitle')}
-                </DialogDescription>
-                <div className="flex-1 min-h-0 overflow-hidden">
-                    <GroupEditor
-                        key={`preset-${preset.id}`}
-                        initial={{
-                            name: preset.name,
-                            match_regex: preset.match_regex ?? '',
-                            mode: preset.mode,
-                            first_token_time_out: preset.first_token_time_out ?? 0,
-                            session_keep_time: preset.session_keep_time ?? 0,
-                            retry_enabled: preset.retry_enabled ?? false,
-                            max_retries: preset.max_retries ?? 3,
-                            members: initialMembers,
+        <>
+            <MorphingDialogTitle className="shrink-0">
+                <header className="mb-3 flex items-center justify-between">
+                    <h2 className="text-2xl font-bold text-card-foreground truncate pr-4">
+                        {t('preset.editorTitle')}
+                    </h2>
+                    <MorphingDialogClose
+                        className="relative right-0 top-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        variants={{
+                            initial: { opacity: 0, scale: 0.8 },
+                            animate: { opacity: 1, scale: 1 },
+                            exit: { opacity: 0, scale: 0.8 },
                         }}
-                        submitText={t('preset.save')}
-                        submittingText={t('preset.saving')}
-                        isSubmitting={updatePreset.isPending}
-                        onCancel={() => onOpenChange(false)}
-                        onSubmit={handleSubmit}
-                        nameLabel={t('preset.name')}
                     />
-                </div>
-            </DialogContent>
-        </Dialog>
+                </header>
+            </MorphingDialogTitle>
+            <MorphingDialogDescription
+                disableLayoutAnimation
+                className="flex-1 min-h-0 overflow-hidden"
+            >
+                <GroupEditor
+                    key={`preset-${preset.id}`}
+                    initial={{
+                        name: preset.name,
+                        match_regex: preset.match_regex ?? '',
+                        mode: preset.mode,
+                        first_token_time_out: preset.first_token_time_out ?? 0,
+                        session_keep_time: preset.session_keep_time ?? 0,
+                        retry_enabled: preset.retry_enabled ?? false,
+                        max_retries: preset.max_retries ?? 3,
+                        members: initialMembers,
+                    }}
+                    submitText={t('preset.save')}
+                    submittingText={t('preset.saving')}
+                    isSubmitting={updatePreset.isPending}
+                    onCancel={() => setIsOpen(false)}
+                    onSubmit={handleSubmit}
+                    nameLabel={t('preset.name')}
+                />
+            </MorphingDialogDescription>
+        </>
     );
+}
+
+interface PresetEditorAutoOpenerProps {
+    active: boolean;
+    onOpened: () => void;
+}
+
+/**
+ * 在 MorphingDialog 内部用 hook 主动调用 setIsOpen(true)，覆盖
+ * "创建空白预设 / 克隆预设" 后需要自动打开编辑器的链路。
+ */
+export function PresetEditorAutoOpener({ active, onOpened }: PresetEditorAutoOpenerProps) {
+    const { setIsOpen } = useMorphingDialog();
+    const triggered = useRef(false);
+    useEffect(() => {
+        if (!active) {
+            triggered.current = false;
+            return;
+        }
+        if (triggered.current) return;
+        const raf = window.requestAnimationFrame(() => {
+            triggered.current = true;
+            setIsOpen(true);
+            onOpened();
+        });
+        return () => window.cancelAnimationFrame(raf);
+    }, [active, setIsOpen, onOpened]);
+    return null;
 }
