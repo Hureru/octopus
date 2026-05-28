@@ -42,8 +42,8 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		if updateErr != nil {
 			log.Warnf("failed to update site account sync state (account=%d): %v", account.ID, updateErr)
 		}
-		if suspendErr := SuspendAccountProjection(ctx, account.ID, message); suspendErr != nil {
-			log.Warnf("failed to suspend site account projection (account=%d): %v", account.ID, suspendErr)
+		if staleErr := MarkAccountProjectionStale(ctx, account.ID, message); staleErr != nil {
+			log.Warnf("failed to mark site account projection stale (account=%d): %v", account.ID, staleErr)
 		}
 		return nil, sanitizeSiteError(syncErr)
 	}

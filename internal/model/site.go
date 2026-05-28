@@ -48,6 +48,7 @@ const (
 	SiteGroupModelSyncStatusIdle       SiteGroupModelSyncStatus = "idle"
 	SiteGroupModelSyncStatusSynced     SiteGroupModelSyncStatus = "synced"
 	SiteGroupModelSyncStatusEmpty      SiteGroupModelSyncStatus = "empty"
+	SiteGroupModelSyncStatusStale      SiteGroupModelSyncStatus = "stale"
 	SiteGroupModelSyncStatusFailed     SiteGroupModelSyncStatus = "failed"
 	SiteGroupModelSyncStatusUnresolved SiteGroupModelSyncStatus = "unresolved"
 	SiteGroupModelSyncStatusMissingKey SiteGroupModelSyncStatus = "missing_key"

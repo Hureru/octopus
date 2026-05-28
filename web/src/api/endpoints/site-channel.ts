@@ -80,7 +80,7 @@ export type SiteChannelGroup = {
     projection_suspended: boolean;
     projection_suspend_reason?: string;
     projection_suspended_at?: number | null;
-    model_sync_status: 'idle' | 'synced' | 'empty' | 'failed' | 'unresolved' | 'missing_key' | 'removed';
+    model_sync_status: 'idle' | 'synced' | 'empty' | 'stale' | 'failed' | 'unresolved' | 'missing_key' | 'removed';
     model_sync_message?: string;
     model_sync_authoritative: boolean;
     model_sync_model_count: number;
@@ -271,6 +271,7 @@ function normalizeSiteGroupModelSyncStatus(value: unknown): SiteChannelGroup['mo
     switch (value) {
         case 'synced':
         case 'empty':
+        case 'stale':
         case 'failed':
         case 'unresolved':
         case 'missing_key':

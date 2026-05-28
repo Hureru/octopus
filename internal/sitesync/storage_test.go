@@ -331,7 +331,7 @@ func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 			{GroupKey: "vip", GroupName: "VIP", HasKey: true, Status: siteGroupSyncStatusFailed, Authoritative: false, Message: "unauthorized"},
 		},
 		status:  model.SiteExecutionStatusPartial,
-		message: "部分分组同步完成：更新 1 个分组，保留 1 个分组的历史模型",
+		message: "部分分组同步完成：更新 1 个分组，保留 1 个分组的历史投影",
 	}
 
 	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
@@ -371,8 +371,8 @@ func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND group_key = ?", account.ID, "vip").First(&vipReloaded).Error; err != nil {
 		t.Fatalf("query vip group failed: %v", err)
 	}
-	if !vipReloaded.ProjectionSuspended {
-		t.Fatalf("expected failed vip group projection to be suspended")
+	if vipReloaded.ProjectionSuspended {
+		t.Fatalf("expected failed vip group projection to keep historical projection active")
 	}
 	if vipReloaded.ModelSyncStatus != model.SiteGroupModelSyncStatusFailed {
 		t.Fatalf("expected failed vip model sync status, got %q", vipReloaded.ModelSyncStatus)

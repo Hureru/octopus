@@ -242,8 +242,15 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		return nil, err
 	}
 	for _, binding := range existingBindings {
-		groupKey := model.NormalizeSiteGroupKey(binding.GroupKey)
-		if _, ok := desiredSet[groupKey]; ok {
+		bindingKey := model.NormalizeSiteGroupKey(binding.GroupKey)
+		if _, ok := desiredSet[bindingKey]; ok {
+			continue
+		}
+		baseGroupKey, _ := parseCompositeBindingKey(bindingKey)
+		if group, ok := groupMap[baseGroupKey]; ok && isSiteGroupProjectionSystemPaused(group) {
+			if err := op.ChannelEnabledManaged(binding.ChannelID, false, ctx); err != nil {
+				log.Warnf("failed to disable system-paused managed channel %d: %v", binding.ChannelID, err)
+			}
 			continue
 		}
 		if err := op.ChannelDelManaged(binding.ChannelID, ctx); err != nil {
@@ -270,10 +277,31 @@ func isSiteGroupProjectionActive(siteRecord *model.Site, account *model.SiteAcco
 	if group.ProjectionDisabled || group.ProjectionSuspended {
 		return false
 	}
-	if group.ModelSyncStatus == "" || group.ModelSyncStatus == model.SiteGroupModelSyncStatusIdle {
+	switch group.ModelSyncStatus {
+	case "", model.SiteGroupModelSyncStatusIdle,
+		model.SiteGroupModelSyncStatusSynced,
+		model.SiteGroupModelSyncStatusStale,
+		model.SiteGroupModelSyncStatusFailed,
+		model.SiteGroupModelSyncStatusUnresolved:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSiteGroupProjectionSystemPaused(group model.SiteUserGroup) bool {
+	if group.ProjectionDisabled {
+		return false
+	}
+	if group.ProjectionSuspended {
 		return true
 	}
-	return group.ModelSyncStatus == model.SiteGroupModelSyncStatusSynced
+	switch group.ModelSyncStatus {
+	case model.SiteGroupModelSyncStatusEmpty, model.SiteGroupModelSyncStatusMissingKey:
+		return true
+	default:
+		return false
+	}
 }
 
 func ProjectSite(ctx context.Context, siteID int) error {
@@ -630,6 +658,9 @@ func rewriteManagedGroupItemsForAccount(ctx context.Context, siteRecord *model.S
 			continue
 		}
 		baseGroupKey, _ := parseCompositeBindingKey(binding.GroupKey)
+		if group, ok := groupMap[baseGroupKey]; ok && isSiteGroupProjectionSystemPaused(group) {
+			continue
+		}
 		modelKey := baseGroupKey + "\x00" + strings.TrimSpace(item.ModelName)
 		if _, ok := activeModelKeys[modelKey]; !ok {
 			deleteItemIDs = append(deleteItemIDs, item.ID)

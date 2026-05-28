@@ -196,10 +196,16 @@ func applyPersistedGroupSyncState(group *model.SiteUserGroup, existing *model.Si
 	group.LastModelSyncAt = &now
 
 	switch result.Status {
-	case siteGroupSyncStatusSynced, siteGroupSyncStatusEmpty:
+	case siteGroupSyncStatusSynced:
 		group.ProjectionSuspended = false
 		group.ProjectionSuspendReason = ""
 		group.ProjectionSuspendedAt = nil
+		group.LastModelSyncSuccessAt = &now
+		group.ModelSyncFailureCount = 0
+	case siteGroupSyncStatusEmpty:
+		group.ProjectionSuspended = true
+		group.ProjectionSuspendReason = firstNonEmptyString(group.ModelSyncMessage, "上游当前无可用模型，已暂停投影")
+		group.ProjectionSuspendedAt = &now
 		group.LastModelSyncSuccessAt = &now
 		group.ModelSyncFailureCount = 0
 	case siteGroupSyncStatusRemoved:
@@ -207,10 +213,15 @@ func applyPersistedGroupSyncState(group *model.SiteUserGroup, existing *model.Si
 		group.ProjectionSuspendReason = ""
 		group.ProjectionSuspendedAt = nil
 		group.ModelSyncFailureCount = 0
-	case siteGroupSyncStatusFailed, siteGroupSyncStatusUnresolved, siteGroupSyncStatusMissingKey:
+	case siteGroupSyncStatusMissingKey:
 		group.ProjectionSuspended = true
-		group.ProjectionSuspendReason = group.ModelSyncMessage
+		group.ProjectionSuspendReason = firstNonEmptyString(group.ModelSyncMessage, "该分组没有可用 Key，已暂停投影")
 		group.ProjectionSuspendedAt = &now
+		group.ModelSyncFailureCount++
+	case siteGroupSyncStatusFailed, siteGroupSyncStatusUnresolved:
+		group.ProjectionSuspended = false
+		group.ProjectionSuspendReason = ""
+		group.ProjectionSuspendedAt = nil
 		group.ModelSyncFailureCount++
 	default:
 		if existing != nil {

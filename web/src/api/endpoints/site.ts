@@ -50,7 +50,7 @@ export type SiteUserGroup = {
   projection_suspended?: boolean;
   projection_suspend_reason?: string;
   projection_suspended_at?: string | null;
-  model_sync_status?: 'idle' | 'synced' | 'empty' | 'failed' | 'unresolved' | 'missing_key' | 'removed';
+  model_sync_status?: 'idle' | 'synced' | 'empty' | 'stale' | 'failed' | 'unresolved' | 'missing_key' | 'removed';
   model_sync_message?: string;
   model_sync_authoritative?: boolean;
   model_sync_model_count?: number;
@@ -162,6 +162,8 @@ export type SiteSyncResult = {
     authoritative: boolean;
     model_count: number;
     message?: string;
+    projection_suspended?: boolean;
+    projection_suspend_reason?: string;
   }>;
   message: string;
 };
@@ -432,7 +434,7 @@ export function useSyncSiteAccount() {
   return useMutation({
     mutationFn: async (id: number) =>
       apiClient.post<SiteSyncResult>(`/api/v1/site/account/sync/${id}`, {}),
-    onSuccess: () => invalidateSiteQueries(queryClient),
+    onSettled: () => invalidateSiteQueries(queryClient),
     onError: (error) => logger.error("站点账号同步失败:", error),
   });
 }
