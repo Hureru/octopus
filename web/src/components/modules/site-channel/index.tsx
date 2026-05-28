@@ -141,7 +141,7 @@ import {
     useSiteChannelPanelViewStore,
 } from './ui-store';
 
-type ToolbarSortField = 'name' | 'created';
+type ToolbarSortField = 'default' | 'name' | 'created' | 'balance';
 type ToolbarSortOrder = 'asc' | 'desc';
 type SiteChannelPendingJump = PendingJump & { target: SiteChannelJumpTarget };
 type UnifiedCompletionInputState = Record<number, string>;
@@ -2365,20 +2365,20 @@ function SiteAccountPanel({
             </Dialog>
 
             <Dialog open={!!editingProjectedGroup} onOpenChange={(open) => !open && handleCloseProjectedKeys()}>
-                <DialogContent className="max-w-3xl">
-                    <DialogHeader>
+                <DialogContent className="flex h-[min(85vh,42rem)] max-w-3xl flex-col overflow-hidden rounded-3xl border-border/70 p-0 sm:max-w-3xl">
+                    <DialogHeader className="shrink-0 border-b border-border/60 px-6 py-4">
                         <DialogTitle>管理站点 Key</DialogTitle>
                         <DialogDescription>
                             分组 {editingProjectedGroup?.group_name || editingProjectedGroup?.group_key || '-'} 的站点 Key 真源会在保存后更新，并重新投影到所有托管渠道。
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-3">
-                        <div className="rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-4">
+                        <div className="rounded-2xl border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground shrink-0">
                             投影渠道：{editingProjectedGroup?.projected_channel_ids.join(', ') || '-'}
                         </div>
 
-                        <div className="max-h-[22rem] space-y-3 overflow-y-auto pr-1">
+                        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                             {sourceKeyForm.map((item, index) => (
                                 <div key={projectedKeyRowId(item, index)} className="rounded-2xl border border-border/70 bg-background/80 p-3">
                                     {(() => {
@@ -2468,7 +2468,7 @@ function SiteAccountPanel({
                         <Button
                             type="button"
                             variant="outline"
-                            className="rounded-2xl"
+                            className="rounded-2xl shrink-0"
                             onClick={handleAddProjectedKeyRow}
                             disabled={sourceKeyMutation.isPending}
                         >
@@ -2476,7 +2476,7 @@ function SiteAccountPanel({
                         </Button>
                     </div>
 
-                    <DialogFooter>
+                    <DialogFooter className="shrink-0 border-t border-border/60 px-6 py-4">
                         <Button
                             type="button"
                             variant="outline"

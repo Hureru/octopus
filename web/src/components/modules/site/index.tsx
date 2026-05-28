@@ -8,7 +8,6 @@ import {
   useState,
   type ComponentProps,
   type DragEvent,
-  type FormEvent,
 } from "react";
 import { useTranslations } from "next-intl";
 import { AnimatePresence, motion } from "motion/react";
@@ -17,16 +16,12 @@ import {
   SiteAccount,
   SiteCredentialType,
   SitePlatform,
-  type CustomHeader,
   useCheckinAllSites,
   useCheckinSiteAccount,
-  useCreateSite,
-  useCreateSiteAccount,
   useArchiveSite,
   useArchivedSiteList,
   useDeleteSite,
   useDeleteSiteAccount,
-  useDetectSitePlatform,
   useEnableSite,
   useEnableSiteAccount,
   useImportAllAPIHub,
@@ -37,10 +32,7 @@ import {
   useSyncAllSites,
   useSyncSiteAccount,
   useUpdateSite,
-  useUpdateSiteAccount,
 } from "@/api/endpoints/site";
-import type { ProxyMode } from "@/api/endpoints/proxy-pool";
-import { ProxySelector } from "@/components/modules/proxy-pool/ProxySelector";
 import { PageWrapper } from "@/components/common/PageWrapper";
 import { toast } from "@/components/common/Toast";
 import {
@@ -75,6 +67,8 @@ import {
 import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
+import { SiteEditDialog } from "./SiteEditDialog";
+import { AccountEditDialog } from "./AccountEditDialog";
 import {
   accountHasCheckinEnabled,
   accountMatchesCheckinFilters,
@@ -111,47 +105,9 @@ import {
   Trash2,
   TriangleAlert,
   Upload,
-  UserRound,
   Waypoints,
   X,
 } from "lucide-react";
-
-type SiteFormState = {
-  name: string;
-  platform: SitePlatform | "";
-  base_url: string;
-  enabled: boolean;
-  proxy_mode: Exclude<ProxyMode, "inherit">;
-  proxy_config_id: number | null;
-  external_checkin_url: string;
-  is_pinned: boolean;
-  sort_order: number;
-  global_weight: number;
-  custom_header: CustomHeader[];
-};
-
-type SiteAccountFormState = {
-  site_id: number;
-  name: string;
-  credential_type: SiteCredentialType;
-  username: string;
-  password: string;
-  access_token: string;
-  api_key: string;
-  refresh_token: string;
-  token_expires_at: string;
-  platform_user_id: string;
-  proxy_mode: ProxyMode;
-  proxy_config_id: number | null;
-  enabled: boolean;
-  auto_sync: boolean;
-  auto_checkin: boolean;
-  random_checkin: boolean;
-  checkin_interval_hours: number;
-  checkin_random_window_minutes: number;
-};
-
-const AUTO_DETECT_VALUE = "__auto__";
 
 const PLATFORM_LABELS: Record<SitePlatform, string> = {
   [SitePlatform.NewAPI]: "New API",
@@ -215,159 +171,6 @@ type SiteImportResult = {
   disabled_models?: number;
 };
 
-function createEmptySiteForm(): SiteFormState {
-  return {
-    name: "",
-    platform: "",
-    base_url: "",
-    enabled: true,
-    proxy_mode: "direct",
-    proxy_config_id: null,
-    external_checkin_url: "",
-    is_pinned: false,
-    sort_order: 0,
-    global_weight: 1,
-    custom_header: [],
-  };
-}
-
-function createSiteForm(site: SiteRecord): SiteFormState {
-  return {
-    name: site.name,
-    platform: site.platform,
-    base_url: site.base_url,
-    enabled: site.enabled,
-    proxy_mode: site.proxy_mode ?? "direct",
-    proxy_config_id: site.proxy_config_id ?? null,
-    external_checkin_url: site.external_checkin_url ?? "",
-    is_pinned: site.is_pinned,
-    sort_order: site.sort_order,
-    global_weight: site.global_weight,
-    custom_header: site.custom_header.map((item) => ({ ...item })),
-  };
-}
-
-function normalizeSiteRecord(site: SiteRecord): SiteRecord {
-  return {
-    ...site,
-    custom_header: site.custom_header ?? [],
-    proxy_mode: site.proxy_mode ?? "direct",
-    proxy_config_id: site.proxy_config_id ?? null,
-    external_checkin_url: site.external_checkin_url ?? null,
-    is_pinned: site.is_pinned ?? false,
-    sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
-    global_weight:
-      typeof site.global_weight === "number" && site.global_weight > 0
-        ? site.global_weight
-        : 1,
-    accounts: (site.accounts ?? []).map((account) => ({
-      ...account,
-      proxy_mode: account.proxy_mode ?? "inherit",
-      proxy_config_id: account.proxy_config_id ?? null,
-    })),
-  };
-}
-
-function defaultCredentialType(platform: SitePlatform): SiteCredentialType {
-  switch (platform) {
-    case SitePlatform.Sub2API:
-      return SiteCredentialType.AccessToken;
-    case SitePlatform.OpenAI:
-    case SitePlatform.Claude:
-    case SitePlatform.Gemini:
-      return SiteCredentialType.APIKey;
-    default:
-      return SiteCredentialType.UsernamePassword;
-  }
-}
-
-function credentialOptions(platform: SitePlatform) {
-  switch (platform) {
-    case SitePlatform.Sub2API:
-      return [SiteCredentialType.AccessToken, SiteCredentialType.APIKey];
-    case SitePlatform.OpenAI:
-    case SitePlatform.Claude:
-    case SitePlatform.Gemini:
-      return [SiteCredentialType.APIKey, SiteCredentialType.AccessToken];
-    default:
-      return [
-        SiteCredentialType.UsernamePassword,
-        SiteCredentialType.AccessToken,
-        SiteCredentialType.APIKey,
-      ];
-  }
-}
-
-function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
-  return {
-    site_id: site.id,
-    name: "",
-    credential_type: defaultCredentialType(site.platform),
-    username: "",
-    password: "",
-    access_token: "",
-    api_key: "",
-    refresh_token: "",
-    token_expires_at: "",
-    platform_user_id: "",
-    proxy_mode: "inherit",
-    proxy_config_id: null,
-    enabled: true,
-    auto_sync: true,
-    auto_checkin: true,
-    random_checkin: false,
-    checkin_interval_hours: 24,
-    checkin_random_window_minutes: 120,
-  };
-}
-
-function createAccountForm(account: SiteAccount): SiteAccountFormState {
-  return {
-    site_id: account.site_id,
-    name: account.name,
-    credential_type: account.credential_type,
-    username: account.username,
-    password: account.password,
-    access_token: account.access_token,
-    api_key: account.api_key,
-    refresh_token: account.refresh_token ?? "",
-    token_expires_at:
-      account.token_expires_at > 0 ? String(account.token_expires_at) : "",
-    platform_user_id: account.platform_user_id
-      ? String(account.platform_user_id)
-      : "",
-    proxy_mode: account.proxy_mode ?? "inherit",
-    proxy_config_id: account.proxy_config_id ?? null,
-    enabled: account.enabled,
-    auto_sync: account.auto_sync,
-    auto_checkin: account.auto_checkin,
-    random_checkin: account.random_checkin,
-    checkin_interval_hours: account.checkin_interval_hours,
-    checkin_random_window_minutes: account.checkin_random_window_minutes,
-  };
-}
-
-function parseTokenExpiresAtInput(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return 0;
-  }
-
-  if (/^\d+$/.test(trimmed)) {
-    const parsed = Number(trimmed);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error("token_expires_at 必须是正整数时间戳");
-    }
-    return parsed < 1_000_000_000_000 ? Math.trunc(parsed * 1000) : Math.trunc(parsed);
-  }
-
-  const parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error("token_expires_at 必须是时间戳或可解析时间");
-  }
-  return Math.trunc(parsed);
-}
-
 function formatDateTime(value?: string | null) {
   if (!value) return "从未执行";
   const date = new Date(value);
@@ -391,15 +194,6 @@ function statusLabel(status: string) {
     default:
       return "未执行";
   }
-}
-
-function trimHeaders(items: CustomHeader[]) {
-  return items
-    .map((item) => ({
-      header_key: item.header_key.trim(),
-      header_value: item.header_value.trim(),
-    }))
-    .filter((item) => item.header_key || item.header_value);
 }
 
 function SiteMetric({
@@ -775,14 +569,11 @@ export function Site() {
   const tProxy = useTranslations('proxyPool');
   const locale = useSettingStore((state) => state.locale);
   const { data: sites, isLoading, error } = useSiteList();
-  const createSite = useCreateSite();
   const updateSite = useUpdateSite();
   const enableSite = useEnableSite();
   const deleteSite = useDeleteSite();
   const archiveSite = useArchiveSite();
   const restoreSite = useRestoreSite();
-  const createSiteAccount = useCreateSiteAccount();
-  const updateSiteAccount = useUpdateSiteAccount();
   const enableSiteAccount = useEnableSiteAccount();
   const deleteSiteAccount = useDeleteSiteAccount();
   const syncSiteAccount = useSyncSiteAccount();
@@ -791,7 +582,6 @@ export function Site() {
   const checkinAllSites = useCheckinAllSites();
   const importAllAPIHub = useImportAllAPIHub();
   const importMetAPI = useImportMetAPI();
-  const detectPlatform = useDetectSitePlatform();
   const batchAction = useSiteBatchAction();
 
   const [siteDialogOpen, setSiteDialogOpen] = useState(false);
@@ -812,16 +602,10 @@ export function Site() {
   const [lastImportResult, setLastImportResult] =
     useState<SiteImportResult | null>(null);
   const [editingSite, setEditingSite] = useState<SiteRecord | null>(null);
-  const [siteForm, setSiteForm] = useState<SiteFormState>(
-    createEmptySiteForm(),
-  );
 
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
   const [accountSite, setAccountSite] = useState<SiteRecord | null>(null);
   const [editingAccount, setEditingAccount] = useState<SiteAccount | null>(
-    null,
-  );
-  const [accountForm, setAccountForm] = useState<SiteAccountFormState | null>(
     null,
   );
 
@@ -1110,18 +894,13 @@ export function Site() {
     0,
   );
 
-  const currentPlatform = accountSite?.platform ?? SitePlatform.NewAPI;
-  const currentCredentialOptions = credentialOptions(currentPlatform);
-
   function openCreateSiteDialog() {
     setEditingSite(null);
-    setSiteForm(createEmptySiteForm());
     setSiteDialogOpen(true);
   }
 
   function openEditSiteDialog(site: SiteRecord) {
     setEditingSite(site);
-    setSiteForm(createSiteForm(site));
     setSiteDialogOpen(true);
   }
 
@@ -1129,21 +908,18 @@ export function Site() {
     setSiteDialogOpen(open);
     if (!open) {
       setEditingSite(null);
-      setSiteForm(createEmptySiteForm());
     }
   }
 
   function openCreateAccountDialog(site: SiteRecord) {
     setAccountSite(site);
     setEditingAccount(null);
-    setAccountForm(createEmptyAccountForm(site));
     setAccountDialogOpen(true);
   }
 
   function openEditAccountDialog(site: SiteRecord, account: SiteAccount) {
     setAccountSite(site);
     setEditingAccount(account);
-    setAccountForm(createAccountForm(account));
     setAccountDialogOpen(true);
   }
 
@@ -1152,214 +928,6 @@ export function Site() {
     if (!open) {
       setAccountSite(null);
       setEditingAccount(null);
-      setAccountForm(null);
-    }
-  }
-
-  async function submitSiteForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!siteForm.name.trim()) {
-      toast.error("请输入站点名称");
-      return;
-    }
-    if (!siteForm.base_url.trim()) {
-      toast.error("请输入站点地址");
-      return;
-    }
-
-    let platform = siteForm.platform;
-    if (!platform && !editingSite) {
-      try {
-        const detected = await detectPlatform.mutateAsync(
-          siteForm.base_url.trim(),
-        );
-        platform = detected.platform as SitePlatform;
-        toast.success(
-          `自动检测到平台：${PLATFORM_LABELS[platform] ?? platform}`,
-        );
-      } catch {
-        toast.error("无法自动检测平台类型，请手动选择");
-        return;
-      }
-    }
-    if (!platform) {
-      toast.error("请选择平台类型");
-      return;
-    }
-
-    const customHeader = trimHeaders(siteForm.custom_header);
-    const invalidHeader = customHeader.find(
-      (item) => !item.header_key || !item.header_value,
-    );
-    if (invalidHeader) {
-      toast.error("自定义 Header 的键和值都不能为空");
-      return;
-    }
-
-    if (siteForm.proxy_mode === "pool" && !siteForm.proxy_config_id) {
-      toast.error(tProxy('selectRequired'));
-      return;
-    }
-
-    const payload = {
-      name: siteForm.name.trim(),
-      platform: platform as SitePlatform,
-      base_url: siteForm.base_url.trim(),
-      enabled: siteForm.enabled,
-      proxy_mode: siteForm.proxy_mode,
-      proxy_config_id: siteForm.proxy_mode === "pool" ? siteForm.proxy_config_id : null,
-      external_checkin_url: siteForm.external_checkin_url.trim() || null,
-      is_pinned: siteForm.is_pinned,
-      sort_order: siteForm.sort_order,
-      global_weight: siteForm.global_weight,
-      custom_header: customHeader,
-    };
-
-    try {
-      if (editingSite) {
-        await updateSite.mutateAsync({ id: editingSite.id, ...payload });
-        toast.success("站点已更新");
-        closeSiteDialog(false);
-      } else {
-        const createdSite = normalizeSiteRecord(
-          await createSite.mutateAsync(payload),
-        );
-        toast.success("站点已创建");
-        closeSiteDialog(false);
-        openCreateAccountDialog(createdSite);
-      }
-    } catch (submitError) {
-      toast.error(getSiteErrorMessage(locale, submitError, t));
-    }
-  }
-  async function submitAccountForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!accountSite || !accountForm) {
-      toast.error("站点上下文不存在");
-      return;
-    }
-    if (!accountForm.name.trim()) {
-      toast.error("请输入账号名称");
-      return;
-    }
-
-    if (accountForm.credential_type === SiteCredentialType.UsernamePassword) {
-      if (!accountForm.username.trim() || !accountForm.password.trim()) {
-        toast.error("用户名和密码不能为空");
-        return;
-      }
-    }
-    if (
-      accountForm.credential_type === SiteCredentialType.AccessToken &&
-      !accountForm.access_token.trim()
-    ) {
-      toast.error("请输入 Access Token");
-      return;
-    }
-    if (
-      accountForm.credential_type === SiteCredentialType.APIKey &&
-      !accountForm.api_key.trim()
-    ) {
-      toast.error("请输入 API Key");
-      return;
-    }
-    if (accountForm.auto_checkin && accountForm.random_checkin) {
-      if (
-        !Number.isFinite(accountForm.checkin_interval_hours) ||
-        accountForm.checkin_interval_hours < 1 ||
-        accountForm.checkin_interval_hours > 720
-      ) {
-        toast.error("最小签到间隔必须在 1 到 720 小时之间");
-        return;
-      }
-      if (
-        !Number.isFinite(accountForm.checkin_random_window_minutes) ||
-        accountForm.checkin_random_window_minutes < 0 ||
-        accountForm.checkin_random_window_minutes > 1440
-      ) {
-        toast.error("随机延迟窗口必须在 0 到 1440 分钟之间");
-        return;
-      }
-    }
-
-    const parsedPlatformUserID = accountForm.platform_user_id.trim()
-      ? Number(accountForm.platform_user_id.trim())
-      : null;
-    if (
-      parsedPlatformUserID !== null &&
-      (!Number.isInteger(parsedPlatformUserID) || parsedPlatformUserID <= 0)
-    ) {
-      toast.error("Platform User ID 必须是大于 0 的整数");
-      return;
-    }
-
-    let parsedTokenExpiresAt = 0;
-    try {
-      parsedTokenExpiresAt = parseTokenExpiresAtInput(
-        accountForm.token_expires_at,
-      );
-    } catch (error) {
-      toast.error(getSiteErrorMessage(locale, error, t));
-      return;
-    }
-
-    const trimmedAccessToken =
-      accountForm.credential_type === SiteCredentialType.AccessToken
-        ? accountForm.access_token.trim()
-        : "";
-    const trimmedAPIKey =
-      accountForm.credential_type === SiteCredentialType.APIKey
-        ? accountForm.api_key.trim()
-        : "";
-
-    if (accountForm.proxy_mode === "pool" && !accountForm.proxy_config_id) {
-      toast.error(tProxy('selectRequired'));
-      return;
-    }
-
-    const payload = {
-      site_id: accountForm.site_id,
-      name: accountForm.name.trim(),
-      credential_type: accountForm.credential_type,
-      username: accountForm.username.trim(),
-      password: accountForm.password.trim(),
-      access_token: trimmedAccessToken,
-      api_key: trimmedAPIKey,
-      refresh_token: accountForm.refresh_token.trim(),
-      token_expires_at: parsedTokenExpiresAt,
-      platform_user_id: parsedPlatformUserID,
-      proxy_mode: accountForm.proxy_mode,
-      proxy_config_id: accountForm.proxy_mode === "pool" ? accountForm.proxy_config_id : null,
-      enabled: accountForm.enabled,
-      auto_sync: accountForm.auto_sync,
-      auto_checkin: accountForm.auto_checkin,
-      random_checkin: accountForm.random_checkin,
-      checkin_interval_hours: Math.max(
-        1,
-        Math.trunc(accountForm.checkin_interval_hours || 24),
-      ),
-      checkin_random_window_minutes: Math.max(
-        0,
-        Math.trunc(accountForm.checkin_random_window_minutes || 0),
-      ),
-    };
-
-    try {
-      if (editingAccount) {
-        await updateSiteAccount.mutateAsync({
-          id: editingAccount.id,
-          ...payload,
-        });
-        toast.success("站点账号已更新");
-      } else {
-        await createSiteAccount.mutateAsync(payload);
-        toast.success("站点账号已创建");
-      }
-      closeAccountDialog(false);
-    } catch (submitError) {
-      toast.error(getSiteErrorMessage(locale, submitError, t));
     }
   }
 
@@ -1630,7 +1198,6 @@ export function Site() {
     setSiteHandlers({
       openCreateDialog: () => {
         setEditingSite(null);
-        setSiteForm(createEmptySiteForm());
         setSiteDialogOpen(true);
       },
       openImportDialog: () => setImportDialogOpen(true),
@@ -2432,654 +1999,19 @@ export function Site() {
         ) : null}
       </PageWrapper>
 
-      <Dialog open={siteDialogOpen} onOpenChange={closeSiteDialog}>
-        <DialogContent className="max-w-4xl rounded-3xl">
-          <DialogHeader>
-            <DialogTitle>{editingSite ? "编辑站点" : "新增站点"}</DialogTitle>
-            <DialogDescription>
-              配置站点平台、代理和自定义
-              Header。站点账号会基于这里的基础信息进行同步。
-            </DialogDescription>
-          </DialogHeader>
+      <SiteEditDialog
+        open={siteDialogOpen}
+        onOpenChange={closeSiteDialog}
+        site={editingSite}
+        onCreated={(createdSite) => openCreateAccountDialog(createdSite)}
+      />
 
-          <form className="space-y-5" onSubmit={submitSiteForm}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">站点名称</span>
-                <Input
-                  value={siteForm.name}
-                  onChange={(event) =>
-                    setSiteForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="例如：主站 OneAPI"
-                  className="rounded-xl"
-                />
-              </label>
-
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">平台类型</span>
-                <Select
-                  value={siteForm.platform || AUTO_DETECT_VALUE}
-                  onValueChange={(value) =>
-                    setSiteForm((current) => ({
-                      ...current,
-                      platform:
-                        value === AUTO_DETECT_VALUE
-                          ? ""
-                          : (value as SitePlatform),
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full rounded-xl">
-                    <SelectValue placeholder="自动检测" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={AUTO_DETECT_VALUE}>自动检测</SelectItem>
-                    {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-            </div>
-
-            <label className="grid gap-2 text-sm">
-              <span className="font-medium">站点地址</span>
-              <Input
-                value={siteForm.base_url}
-                onChange={(event) =>
-                  setSiteForm((current) => ({
-                    ...current,
-                    base_url: event.target.value,
-                  }))
-                }
-                placeholder="https://example.com"
-                className="rounded-xl"
-              />
-            </label>
-
-            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-              <div>
-                <div className="text-sm font-medium">启用站点</div>
-                <div className="text-xs text-muted-foreground">
-                  停用后不再投影托管渠道
-                </div>
-              </div>
-              <Switch
-                checked={siteForm.enabled}
-                onCheckedChange={(checked) =>
-                  setSiteForm((current) => ({ ...current, enabled: checked }))
-                }
-              />
-            </div>
-
-            <ProxySelector
-              value={{ proxy_mode: siteForm.proxy_mode, proxy_config_id: siteForm.proxy_config_id }}
-              onChange={(next) => setSiteForm((current) => ({
-                ...current,
-                proxy_mode: next.proxy_mode as Exclude<ProxyMode, "inherit">,
-                proxy_config_id: next.proxy_config_id ?? null,
-              }))}
-            />
-
-            <label className="grid gap-2 text-sm">
-              <span className="font-medium">手动签到 URL</span>
-              <Input
-                value={siteForm.external_checkin_url}
-                onChange={(event) =>
-                  setSiteForm((current) => ({
-                    ...current,
-                    external_checkin_url: event.target.value,
-                  }))
-                }
-                placeholder="可选：例如 https://example.com/signin"
-                className="rounded-xl"
-              />
-              <span className="text-xs text-muted-foreground">
-                配置后可在站点总览中一键打开此页面进行手动签到，适用于有验证码等无法自动化签到的场景。
-              </span>
-            </label>
-
-            <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/10 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium">自定义 Header</div>
-                  <div className="text-xs text-muted-foreground">
-                    会透传到站点接口请求，可用于附加鉴权或租户信息
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() =>
-                    setSiteForm((current) => ({
-                      ...current,
-                      custom_header: [
-                        ...current.custom_header,
-                        { header_key: "", header_value: "" },
-                      ],
-                    }))
-                  }
-                >
-                  <Plus className="size-4" />
-                  添加 Header
-                </Button>
-              </div>
-
-              {siteForm.custom_header.length === 0 ? (
-                <div className="text-sm text-muted-foreground">
-                  暂无自定义 Header
-                </div>
-              ) : null}
-              <div className="space-y-3">
-                {siteForm.custom_header.map((item, index) => (
-                  <div
-                    key={`${index}-${item.header_key}`}
-                    className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
-                  >
-                    <Input
-                      value={item.header_key}
-                      onChange={(event) =>
-                        setSiteForm((current) => ({
-                          ...current,
-                          custom_header: current.custom_header.map(
-                            (header, headerIndex) =>
-                              headerIndex === index
-                                ? { ...header, header_key: event.target.value }
-                                : header,
-                          ),
-                        }))
-                      }
-                      placeholder="Header Key"
-                      className="rounded-xl"
-                    />
-                    <Input
-                      value={item.header_value}
-                      onChange={(event) =>
-                        setSiteForm((current) => ({
-                          ...current,
-                          custom_header: current.custom_header.map(
-                            (header, headerIndex) =>
-                              headerIndex === index
-                                ? {
-                                    ...header,
-                                    header_value: event.target.value,
-                                  }
-                                : header,
-                          ),
-                        }))
-                      }
-                      placeholder="Header Value"
-                      className="rounded-xl"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="rounded-xl"
-                      onClick={() =>
-                        setSiteForm((current) => ({
-                          ...current,
-                          custom_header: current.custom_header.filter(
-                            (_, headerIndex) => headerIndex !== index,
-                          ),
-                        }))
-                      }
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => closeSiteDialog(false)}
-              >
-                取消
-              </Button>
-              <Button
-                type="submit"
-                className="rounded-xl"
-                disabled={createSite.isPending || updateSite.isPending}
-              >
-                {createSite.isPending || updateSite.isPending
-                  ? "保存中..."
-                  : "保存"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={accountDialogOpen} onOpenChange={closeAccountDialog}>
-        <DialogContent className="max-w-3xl rounded-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              {editingAccount ? "编辑站点账号" : "新增站点账号"}
-            </DialogTitle>
-            <DialogDescription>
-              {accountSite
-                ? `账号会挂载到站点「${accountSite.name}」下，并按同步结果自动投影 channel。`
-                : "配置站点账号后，可自动同步分组、模型和托管渠道。"}
-            </DialogDescription>
-          </DialogHeader>
-
-          {accountForm ? (
-            <form className="space-y-5" onSubmit={submitAccountForm}>
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2 text-sm">
-                  <span className="font-medium">账号名称</span>
-                  <Input
-                    value={accountForm.name}
-                    onChange={(event) =>
-                      setAccountForm((current) =>
-                        current
-                          ? { ...current, name: event.target.value }
-                          : current,
-                      )
-                    }
-                    placeholder="例如：主账号"
-                    className="rounded-xl"
-                  />
-                </label>
-
-                <label className="grid gap-2 text-sm">
-                  <span className="font-medium">凭据类型</span>
-                  <Select
-                    value={accountForm.credential_type}
-                    onValueChange={(value) =>
-                      setAccountForm((current) => {
-                        if (!current) {
-                          return current;
-                        }
-                        const nextType = value as SiteCredentialType;
-                        return {
-                          ...current,
-                          credential_type: nextType,
-                          access_token:
-                            nextType === SiteCredentialType.AccessToken
-                              ? current.access_token
-                              : "",
-                          api_key:
-                            nextType === SiteCredentialType.APIKey
-                              ? current.api_key
-                              : "",
-                        };
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {currentCredentialOptions.map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {CREDENTIAL_LABELS[value]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-              </div>
-
-              {accountForm.credential_type ===
-              SiteCredentialType.UsernamePassword ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">用户名</span>
-                    <Input
-                      value={accountForm.username}
-                      onChange={(event) =>
-                        setAccountForm((current) =>
-                          current
-                            ? { ...current, username: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="请输入用户名"
-                      className="rounded-xl"
-                    />
-                  </label>
-
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">密码</span>
-                    <Input
-                      type="password"
-                      value={accountForm.password}
-                      onChange={(event) =>
-                        setAccountForm((current) =>
-                          current
-                            ? { ...current, password: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="请输入密码"
-                      className="rounded-xl"
-                    />
-                  </label>
-                </div>
-              ) : null}
-
-              {accountForm.credential_type ===
-              SiteCredentialType.AccessToken ? (
-                <div className="grid gap-4">
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Access Token</span>
-                    <Input
-                      value={accountForm.access_token}
-                      onChange={(event) =>
-                        setAccountForm((current) =>
-                          current
-                            ? { ...current, access_token: event.target.value }
-                            : current,
-                        )
-                      }
-                      placeholder="请输入 Access Token"
-                      className="rounded-xl"
-                    />
-                  </label>
-
-                  {currentPlatform === SitePlatform.Sub2API ? (
-                    <div className="grid gap-2">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <label className="grid gap-2 text-sm">
-                          <span className="font-medium">Refresh Token</span>
-                          <Input
-                            value={accountForm.refresh_token}
-                            onChange={(event) =>
-                              setAccountForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      refresh_token: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            placeholder="可选：请输入 refresh_token"
-                            className="rounded-xl"
-                          />
-                        </label>
-
-                        <label className="grid gap-2 text-sm">
-                          <span className="font-medium">token_expires_at</span>
-                          <Input
-                            value={accountForm.token_expires_at}
-                            onChange={(event) =>
-                              setAccountForm((current) =>
-                                current
-                                  ? {
-                                      ...current,
-                                      token_expires_at: event.target.value,
-                                    }
-                                  : current,
-                              )
-                            }
-                            placeholder="可选：F12 中的时间戳或时间字符串"
-                            className="rounded-xl"
-                          />
-                        </label>
-                      </div>
-                      <span className="text-xs text-muted-foreground">
-                        Sub2API 推荐同时填写 F12 里的 <code>refresh_token</code>{" "}
-                        与 <code>token_expires_at</code>，会在快过期或 401
-                        时自动续期。
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {accountForm.credential_type === SiteCredentialType.APIKey ? (
-                <label className="grid gap-2 text-sm">
-                  <span className="font-medium">API Key</span>
-                  <Input
-                    value={accountForm.api_key}
-                    onChange={(event) =>
-                      setAccountForm((current) =>
-                        current
-                          ? { ...current, api_key: event.target.value }
-                          : current,
-                      )
-                    }
-                    placeholder="请输入 API Key"
-                    className="rounded-xl"
-                  />
-                </label>
-              ) : null}
-
-              {currentPlatform === SitePlatform.NewAPI ? (
-                <label className="grid gap-2 text-sm">
-                  <span className="font-medium">Platform User ID</span>
-                  <Input
-                    value={accountForm.platform_user_id}
-                    onChange={(event) =>
-                      setAccountForm((current) =>
-                        current
-                          ? { ...current, platform_user_id: event.target.value }
-                          : current,
-                      )
-                    }
-                    placeholder="可选：例如 11494"
-                    className="rounded-xl"
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    部分 New API 站点同步 token、分组和签到时要求额外提供用户
-                    ID。导入数据会尽量自动填充该值。
-                  </span>
-                </label>
-              ) : null}
-
-              <div className="grid gap-2 text-sm">
-                <ProxySelector
-                  allowInherit
-                  value={{ proxy_mode: accountForm.proxy_mode, proxy_config_id: accountForm.proxy_config_id }}
-                  onChange={(next) => setAccountForm((current) => current ? ({
-                    ...current,
-                    proxy_mode: next.proxy_mode,
-                    proxy_config_id: next.proxy_config_id ?? null,
-                  }) : current)}
-                />
-                <span className="text-xs text-muted-foreground">
-                  用于该账号的同步、签到和模型拉取；自动投影的 channel 会跟随这里解析后的代理。
-                </span>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <UserRound className="size-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">启用账号</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      停用后不参与同步和签到
-                    </div>
-                  </div>
-                  <Switch
-                    checked={accountForm.enabled}
-                    onCheckedChange={(checked) =>
-                      setAccountForm((current) =>
-                        current ? { ...current, enabled: checked } : current,
-                      )
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="size-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">自动同步</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      定时拉取分组、模型和 key
-                    </div>
-                  </div>
-                  <Switch
-                    checked={accountForm.auto_sync}
-                    onCheckedChange={(checked) =>
-                      setAccountForm((current) =>
-                        current ? { ...current, auto_sync: checked } : current,
-                      )
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <CalendarCheck2 className="size-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">自动签到</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      定时执行平台签到
-                    </div>
-                  </div>
-                  <Switch
-                    checked={accountForm.auto_checkin}
-                    onCheckedChange={(checked) =>
-                      setAccountForm((current) =>
-                        current
-                          ? { ...current, auto_checkin: checked }
-                          : current,
-                      )
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/20 px-4 py-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <CalendarCheck2 className="size-4 text-muted-foreground" />
-                      <span className="text-sm font-medium">随机签到</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      在间隔基础上添加随机延迟
-                    </div>
-                  </div>
-                  <Switch
-                    checked={accountForm.random_checkin}
-                    onCheckedChange={(checked) =>
-                      setAccountForm((current) =>
-                        current
-                          ? { ...current, random_checkin: checked }
-                          : current,
-                      )
-                    }
-                  />
-                </div>
-              </div>
-
-              {accountForm.auto_checkin && accountForm.random_checkin ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">最小签到间隔（小时）</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={720}
-                      value={accountForm.checkin_interval_hours}
-                      onChange={(event) =>
-                        setAccountForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                checkin_interval_hours: Number(
-                                  event.target.value,
-                                ),
-                              }
-                            : current,
-                        )
-                      }
-                      placeholder="24"
-                      className="rounded-xl"
-                    />
-                  </label>
-
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">随机延迟窗口（分钟）</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={1440}
-                      value={accountForm.checkin_random_window_minutes}
-                      onChange={(event) =>
-                        setAccountForm((current) =>
-                          current
-                            ? {
-                                ...current,
-                                checkin_random_window_minutes: Number(
-                                  event.target.value,
-                                ),
-                              }
-                            : current,
-                        )
-                      }
-                      placeholder="120"
-                      className="rounded-xl"
-                    />
-                  </label>
-                </div>
-              ) : null}
-
-              <div className="grid gap-3 rounded-2xl border border-border/60 bg-muted/10 p-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <Waypoints className="size-4" />
-                  <span>投影规则说明</span>
-                </div>
-                <p>
-                  同步后会以 <code>site_user_group</code> 为主维度生成托管
-                  channel；无分组时使用 <code>default</code>。同一分组下的多个
-                  key 会聚合到同一个 channel；多端点兼容站点会按模型已归属的
-                  请求端点格式继续拆成独立托管 channel。
-                </p>
-                {accountForm.auto_checkin && accountForm.random_checkin ? (
-                  <p>
-                    随机签到会基于“上次成功签到时间 + 最小间隔 + 0
-                    到随机延迟窗口”的规则生成下次执行时间，适合需要接近 24
-                    小时间隔的站点。
-                  </p>
-                ) : null}
-              </div>
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={() => closeAccountDialog(false)}
-                >
-                  取消
-                </Button>
-                <Button
-                  type="submit"
-                  className="rounded-xl"
-                  disabled={
-                    createSiteAccount.isPending || updateSiteAccount.isPending
-                  }
-                >
-                  {createSiteAccount.isPending || updateSiteAccount.isPending
-                    ? "保存中..."
-                    : "保存"}
-                </Button>
-              </DialogFooter>
-            </form>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      <AccountEditDialog
+        open={accountDialogOpen}
+        onOpenChange={closeAccountDialog}
+        site={accountSite}
+        account={editingAccount}
+      />
 
       <Dialog
         open={importDialogOpen}
@@ -3302,14 +2234,14 @@ export function Site() {
       </Dialog>
 
       <Dialog open={archivedDialogOpen} onOpenChange={setArchivedDialogOpen}>
-        <DialogContent className="max-w-3xl rounded-3xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(85vh,42rem)] max-w-3xl flex-col overflow-hidden rounded-3xl border-border/70 p-0 sm:max-w-3xl">
+          <DialogHeader className="shrink-0 border-b border-border/60 px-6 py-4">
             <DialogTitle>归档站点</DialogTitle>
             <DialogDescription>
               归档的站点仍保留账号、Key 和模型配置，托管渠道会被下线。点击恢复会还原到主列表（默认保持禁用状态，启用后会自动重建托管渠道）。
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
             {archivedLoading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
                 正在加载归档站点...
@@ -3365,7 +2297,7 @@ export function Site() {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/60 px-6 py-4">
             <Button
               variant="outline"
               className="rounded-xl"
