@@ -102,9 +102,9 @@ function AnimatedFormSection({ children }: { children: ReactNode }) {
             initial={false}
             animate={{ height }}
             transition={FORM_SECTION_TRANSITION}
-            className="overflow-hidden -mx-1"
+            className="overflow-hidden -m-1"
         >
-            <div ref={contentRef} className="px-1">{children}</div>
+            <div ref={contentRef} className="p-1">{children}</div>
         </motion.div>
     );
 }
