@@ -330,6 +330,10 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 accountForm.credential_type === SiteCredentialType.APIKey
                     ? accountForm.api_key.trim()
                     : '';
+            const isUsernamePassword =
+                accountForm.credential_type === SiteCredentialType.UsernamePassword;
+            const isAccessToken =
+                accountForm.credential_type === SiteCredentialType.AccessToken;
 
             if (accountForm.proxy_mode === 'pool' && !accountForm.proxy_config_id) {
                 toast.error(tProxy('selectRequired'));
@@ -340,12 +344,12 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 site_id: accountForm.site_id,
                 name: accountForm.name.trim(),
                 credential_type: accountForm.credential_type,
-                username: accountForm.username.trim(),
-                password: accountForm.password.trim(),
+                username: isUsernamePassword ? accountForm.username.trim() : '',
+                password: isUsernamePassword ? accountForm.password.trim() : '',
                 access_token: trimmedAccessToken,
                 api_key: trimmedAPIKey,
-                refresh_token: accountForm.refresh_token.trim(),
-                token_expires_at: parsedTokenExpiresAt,
+                refresh_token: isAccessToken ? accountForm.refresh_token.trim() : '',
+                token_expires_at: isAccessToken ? parsedTokenExpiresAt : 0,
                 platform_user_id: parsedPlatformUserID,
                 proxy_mode: accountForm.proxy_mode,
                 proxy_config_id:

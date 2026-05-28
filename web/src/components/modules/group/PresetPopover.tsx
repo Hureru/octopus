@@ -72,6 +72,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
     const resetPending = useCallback(() => {
         setPending({ kind: 'none' });
         setNameDraft('');
+        setPendingEditId(null);
     }, []);
 
     const handleCreateSubmit = useCallback(() => {
@@ -301,7 +302,10 @@ export function PresetPopover({ group }: PresetPopoverProps) {
 
                                         <div className="flex items-center gap-0.5 opacity-0 group-hover/preset:opacity-100 transition-opacity">
                                             <MorphingDialog key={`preset-edit-${preset.id}`}>
-                                                <MorphingDialogTrigger className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground">
+                                                <MorphingDialogTrigger
+                                                    aria-label={t('preset.edit')}
+                                                    className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                                                >
                                                     <Tooltip side="top" sideOffset={6} align="center">
                                                         <TooltipTrigger asChild>
                                                             <Pencil className="size-3.5" />

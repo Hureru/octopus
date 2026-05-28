@@ -316,7 +316,9 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                                         <SelectValue placeholder="自动检测" />
                                     </SelectTrigger>
                                     <SelectContent className="rounded-xl">
-                                        <SelectItem className="rounded-xl" value={AUTO_DETECT_VALUE}>自动检测</SelectItem>
+                                        {!site && (
+                                            <SelectItem className="rounded-xl" value={AUTO_DETECT_VALUE}>自动检测</SelectItem>
+                                        )}
                                         {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
                                             <SelectItem className="rounded-xl" key={value} value={value}>
                                                 {label}

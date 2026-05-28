@@ -149,9 +149,13 @@ export function PresetEditorAutoOpener({ active, onOpened }: PresetEditorAutoOpe
     const { setIsOpen } = useMorphingDialog();
     const triggered = useRef(false);
     useEffect(() => {
-        if (!active || triggered.current) return;
-        triggered.current = true;
+        if (!active) {
+            triggered.current = false;
+            return;
+        }
+        if (triggered.current) return;
         const raf = window.requestAnimationFrame(() => {
+            triggered.current = true;
             setIsOpen(true);
             onOpened();
         });
