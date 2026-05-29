@@ -255,6 +255,11 @@ func SiteDel(id int, ctx context.Context) error {
 		}
 		affectedAccountIDs = accountIDs
 		if len(accountIDs) > 0 {
+			// Delete bindings before groups/accounts so FK-constrained databases do not
+			// reject removing rows that bindings may still reference.
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteToken{}).Error; err != nil {
 				return err
 			}
@@ -264,7 +269,7 @@ func SiteDel(id int, ctx context.Context) error {
 			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteModel{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.StatsSiteModelHourly{}).Error; err != nil {
 				return err
 			}
 			if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
@@ -275,7 +280,10 @@ func SiteDel(id int, ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	_ = affectedAccountIDs
+	if len(affectedAccountIDs) > 0 {
+		invalidateSiteBindingCache()
+		deleteSiteModelHourlyCacheForAccounts(affectedAccountIDs)
+	}
 	return nil
 }
 
@@ -529,6 +537,11 @@ func SiteAccountEnabled(id int, enabled bool, ctx context.Context) error {
 
 func SiteAccountDel(id int, ctx context.Context) error {
 	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete bindings before groups/accounts so FK-constrained databases do not
+		// reject removing rows that bindings may still reference.
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteToken{}).Error; err != nil {
 			return err
 		}
@@ -538,13 +551,15 @@ func SiteAccountDel(id int, ctx context.Context) error {
 		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteModel{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("site_account_id = ?", id).Delete(&model.SiteChannelBinding{}).Error; err != nil {
+		if err := tx.Where("site_account_id = ?", id).Delete(&model.StatsSiteModelHourly{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&model.SiteAccount{}, id).Error
 	}); err != nil {
 		return err
 	}
+	invalidateSiteBindingCache()
+	deleteSiteModelHourlyCacheForAccounts([]int{id})
 	return nil
 }
 

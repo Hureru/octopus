@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -510,6 +511,135 @@ func TestDeleteSiteAccountRemovesManagedChannelChain(t *testing.T) {
 		var statsCount int64
 		if err := dbpkg.GetDB().WithContext(ctx).Model(&model.StatsChannel{}).Where("channel_id = ?", channelID).Count(&statsCount).Error; err != nil {
 			t.Fatalf("count stats failed: %v", err)
+		}
+		if statsCount != 0 {
+			t.Fatalf("expected persisted stats for channel %d to be deleted, got %d", channelID, statsCount)
+		}
+	}
+
+	items, err := op.GroupItemList(group.ID, ctx)
+	if err != nil {
+		t.Fatalf("GroupItemList failed: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected group items referencing managed channels to be deleted, got %d", len(items))
+	}
+}
+
+func TestDeleteSiteRemovesManagedChannelChainForAllAccounts(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	site, primary := createProjectionFixture(t, ctx)
+
+	secondary := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           "Secondary Account",
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "site-access-token-2",
+		Enabled:        true,
+		AutoSync:       false,
+		AutoCheckin:    false,
+	}
+	if err := op.SiteAccountCreate(secondary, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate secondary failed: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&[]model.SiteToken{
+		{SiteAccountID: secondary.ID, Name: "secondary", Token: "key-secondary", GroupKey: "default", GroupName: "default", Enabled: true},
+	}).Error; err != nil {
+		t.Fatalf("create secondary site tokens failed: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&[]model.SiteModel{
+		{SiteAccountID: secondary.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", Source: "sync", RouteType: model.SiteModelRouteTypeOpenAIChat, RouteSource: model.SiteModelRouteSourceSyncInferred},
+	}).Error; err != nil {
+		t.Fatalf("create secondary site models failed: %v", err)
+	}
+
+	primaryChannels, err := ProjectAccount(ctx, primary.ID)
+	if err != nil {
+		t.Fatalf("ProjectAccount primary returned error: %v", err)
+	}
+	secondaryChannels, err := ProjectAccount(ctx, secondary.ID)
+	if err != nil {
+		t.Fatalf("ProjectAccount secondary returned error: %v", err)
+	}
+	channelIDs := append(append([]int{}, primaryChannels...), secondaryChannels...)
+	if len(channelIDs) == 0 {
+		t.Fatalf("expected managed channels to be created")
+	}
+
+	group := &model.Group{Name: "managed-site-delete-group", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{
+		GroupID:   group.ID,
+		ChannelID: channelIDs[0],
+		ModelName: "gpt-4o-mini",
+		Priority:  1,
+		Weight:    1,
+	}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+	for _, channelID := range channelIDs {
+		if err := op.StatsChannelUpdate(channelID, model.StatsMetrics{InputCost: 1, OutputCost: 2, RequestSuccess: 1}); err != nil {
+			t.Fatalf("StatsChannelUpdate failed: %v", err)
+		}
+	}
+	if err := op.StatsSaveDB(ctx); err != nil {
+		t.Fatalf("StatsSaveDB failed: %v", err)
+	}
+
+	now := time.Now()
+	hour := int(now.Unix() / 3600)
+	accountIDs := []int{primary.ID, secondary.ID}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&[]model.StatsSiteModelHourly{
+		{Hour: hour, SiteAccountID: primary.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", Date: now.Format("20060102"), LastRequestAt: now.Unix(), StatsMetrics: model.StatsMetrics{RequestSuccess: 1}},
+		{Hour: hour, SiteAccountID: secondary.ID, GroupKey: model.SiteDefaultGroupKey, ModelName: "gpt-4o-mini", Date: now.Format("20060102"), LastRequestAt: now.Unix(), StatsMetrics: model.StatsMetrics{RequestFailed: 1}},
+	}).Error; err != nil {
+		t.Fatalf("create site model hourly rows failed: %v", err)
+	}
+	// Pending in-memory hourly stats must not be flushed after the account/site is deleted.
+	op.StatsSiteModelHourlyUpdate(channelIDs[0], "gpt-4o-mini", model.StatsMetrics{RequestSuccess: 1})
+
+	if err := DeleteSite(ctx, site.ID); err != nil {
+		t.Fatalf("DeleteSite returned error: %v", err)
+	}
+	if err := op.StatsSiteModelHourlySaveDB(ctx); err != nil {
+		t.Fatalf("StatsSiteModelHourlySaveDB after delete failed: %v", err)
+	}
+
+	if _, err := op.SiteGet(site.ID, ctx); err == nil {
+		t.Fatalf("expected site to be deleted")
+	}
+
+	for _, table := range []struct {
+		name  string
+		model any
+		where string
+		args  []any
+	}{
+		{name: "site accounts", model: &model.SiteAccount{}, where: "id IN ?", args: []any{accountIDs}},
+		{name: "site tokens", model: &model.SiteToken{}, where: "site_account_id IN ?", args: []any{accountIDs}},
+		{name: "site user groups", model: &model.SiteUserGroup{}, where: "site_account_id IN ?", args: []any{accountIDs}},
+		{name: "site models", model: &model.SiteModel{}, where: "site_account_id IN ?", args: []any{accountIDs}},
+		{name: "site channel bindings", model: &model.SiteChannelBinding{}, where: "site_account_id IN ?", args: []any{accountIDs}},
+		{name: "site model hourly stats", model: &model.StatsSiteModelHourly{}, where: "site_account_id IN ?", args: []any{accountIDs}},
+	} {
+		var count int64
+		if err := dbpkg.GetDB().WithContext(ctx).Model(table.model).Where(table.where, table.args...).Count(&count).Error; err != nil {
+			t.Fatalf("count %s failed: %v", table.name, err)
+		}
+		if count != 0 {
+			t.Fatalf("expected %s to be deleted, got %d", table.name, count)
+		}
+	}
+
+	for _, channelID := range channelIDs {
+		if _, err := op.ChannelGet(channelID, ctx); err == nil {
+			t.Fatalf("expected managed channel %d to be deleted", channelID)
+		}
+		var statsCount int64
+		if err := dbpkg.GetDB().WithContext(ctx).Model(&model.StatsChannel{}).Where("channel_id = ?", channelID).Count(&statsCount).Error; err != nil {
+			t.Fatalf("count channel stats failed: %v", err)
 		}
 		if statsCount != 0 {
 			t.Fatalf("expected persisted stats for channel %d to be deleted, got %d", channelID, statsCount)

@@ -41,10 +41,21 @@ func deleteManagedChannelsByAccount(ctx context.Context, accountID int) error {
 	}
 	for _, binding := range bindings {
 		if err := op.ChannelDelManaged(binding.ChannelID, ctx); err != nil {
-			log.Warnf("failed to delete managed channel %d: %v", binding.ChannelID, err)
+			if isMissingManagedChannelError(err) {
+				log.Warnf("managed channel %d already missing; deleting stale site binding", binding.ChannelID)
+				continue
+			}
+			return fmt.Errorf("failed to delete managed channel %d: %w", binding.ChannelID, err)
 		}
 	}
 	return db.GetDB().WithContext(ctx).Where("site_account_id = ?", accountID).Delete(&model.SiteChannelBinding{}).Error
+}
+
+func isMissingManagedChannelError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "channel not found")
 }
 
 func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnapshot) error {
