@@ -102,24 +102,15 @@ function AnimatedFormSection({ children }: { children: ReactNode }) {
             initial={false}
             animate={{ height }}
             transition={FORM_SECTION_TRANSITION}
-            className="overflow-hidden"
+            className="-mx-1 mb-4 overflow-hidden"
         >
-            <div ref={contentRef}>{children}</div>
+            <div ref={contentRef} className="px-1 pb-1">{children}</div>
         </motion.div>
     );
 }
 
-function defaultCredentialType(platform: SitePlatform): SiteCredentialType {
-    switch (platform) {
-        case SitePlatform.Sub2API:
-            return SiteCredentialType.AccessToken;
-        case SitePlatform.OpenAI:
-        case SitePlatform.Claude:
-        case SitePlatform.Gemini:
-            return SiteCredentialType.APIKey;
-        default:
-            return SiteCredentialType.UsernamePassword;
-    }
+function defaultCredentialType(): SiteCredentialType {
+    return SiteCredentialType.AccessToken;
 }
 
 function credentialOptions(platform: SitePlatform) {
@@ -129,11 +120,11 @@ function credentialOptions(platform: SitePlatform) {
         case SitePlatform.OpenAI:
         case SitePlatform.Claude:
         case SitePlatform.Gemini:
-            return [SiteCredentialType.APIKey, SiteCredentialType.AccessToken];
+            return [SiteCredentialType.AccessToken, SiteCredentialType.APIKey];
         default:
             return [
-                SiteCredentialType.UsernamePassword,
                 SiteCredentialType.AccessToken,
+                SiteCredentialType.UsernamePassword,
                 SiteCredentialType.APIKey,
             ];
     }
@@ -143,7 +134,7 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
     return {
         site_id: site.id,
         name: '',
-        credential_type: defaultCredentialType(site.platform),
+        credential_type: defaultCredentialType(),
         username: '',
         password: '',
         access_token: '',
@@ -297,8 +288,13 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 }
             }
 
-            const platformUserIDInput = accountForm.platform_user_id.trim();
-            if (currentPlatform === SitePlatform.NewAPI && !platformUserIDInput) {
+            const shouldIncludePlatformUserID =
+                currentPlatform === SitePlatform.NewAPI &&
+                accountForm.credential_type === SiteCredentialType.AccessToken;
+            const platformUserIDInput = shouldIncludePlatformUserID
+                ? accountForm.platform_user_id.trim()
+                : '';
+            if (shouldIncludePlatformUserID && !platformUserIDInput) {
                 toast.error('请输入 Platform User ID');
                 return;
             }
@@ -307,6 +303,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 ? Number(platformUserIDInput)
                 : null;
             if (
+                shouldIncludePlatformUserID &&
                 parsedPlatformUserID !== null &&
                 (!Number.isInteger(parsedPlatformUserID) || parsedPlatformUserID <= 0)
             ) {
@@ -350,7 +347,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 api_key: trimmedAPIKey,
                 refresh_token: isAccessToken ? accountForm.refresh_token.trim() : '',
                 token_expires_at: isAccessToken ? parsedTokenExpiresAt : 0,
-                platform_user_id: parsedPlatformUserID,
+                platform_user_id: shouldIncludePlatformUserID ? parsedPlatformUserID : null,
                 proxy_mode: accountForm.proxy_mode,
                 proxy_config_id:
                     accountForm.proxy_mode === 'pool' ? accountForm.proxy_config_id : null,
@@ -466,6 +463,11 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                 api_key:
                                                     nextType === SiteCredentialType.APIKey
                                                         ? current.api_key
+                                                        : '',
+                                                platform_user_id:
+                                                    nextType === SiteCredentialType.AccessToken &&
+                                                    currentPlatform === SitePlatform.NewAPI
+                                                        ? current.platform_user_id
                                                         : '',
                                             };
                                         })
@@ -603,6 +605,32 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                     </span>
                                                 </div>
                                             ) : null}
+
+                                            {currentPlatform === SitePlatform.NewAPI ? (
+                                                <label className="grid gap-2 text-sm">
+                                                    <span className="font-medium">Platform User ID</span>
+                                                    <Input
+                                                        value={accountForm.platform_user_id}
+                                                        onChange={(event) =>
+                                                            setAccountForm((current) =>
+                                                                current
+                                                                    ? {
+                                                                          ...current,
+                                                                          platform_user_id: event.target.value,
+                                                                      }
+                                                                    : current,
+                                                            )
+                                                        }
+                                                        placeholder="例如 11494"
+                                                        className="rounded-xl"
+                                                        required
+                                                    />
+                                                    <span className="text-xs text-muted-foreground">
+                                                        New API 站点同步 token、分组和签到时需要用户
+                                                        ID。导入数据会尽量自动填充该值。
+                                                    </span>
+                                                </label>
+                                            ) : null}
                                         </div>
                                     </motion.div>
                                 ) : (
@@ -632,28 +660,6 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                 )}
                             </AnimatePresence>
                         </AnimatedFormSection>
-
-                        {currentPlatform === SitePlatform.NewAPI ? (
-                            <label className="grid gap-2 text-sm">
-                                <span className="font-medium">Platform User ID</span>
-                                <Input
-                                    value={accountForm.platform_user_id}
-                                    onChange={(event) =>
-                                        setAccountForm((current) =>
-                                            current
-                                                ? { ...current, platform_user_id: event.target.value }
-                                                : current,
-                                        )
-                                    }
-                                    placeholder="例如 11494"
-                                    className="rounded-xl"
-                                    required
-                                />
-                                <span className="text-xs text-muted-foreground">
-                                    New API 站点同步 token、分组和签到时需要用户 ID。导入数据会尽量自动填充该值。
-                                </span>
-                            </label>
-                        ) : null}
 
                         <div className="rounded-xl border border-border/50 bg-muted/20 p-4">
                             <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
