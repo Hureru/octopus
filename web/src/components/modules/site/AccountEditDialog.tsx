@@ -109,7 +109,7 @@ function AnimatedFormSection({ children }: { children: ReactNode }) {
     );
 }
 
-function defaultCredentialType(_platform: SitePlatform): SiteCredentialType {
+function defaultCredentialType(): SiteCredentialType {
     return SiteCredentialType.AccessToken;
 }
 
@@ -134,7 +134,7 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
     return {
         site_id: site.id,
         name: '',
-        credential_type: defaultCredentialType(site.platform),
+        credential_type: defaultCredentialType(),
         username: '',
         password: '',
         access_token: '',
@@ -288,12 +288,13 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 }
             }
 
-            const platformUserIDInput = accountForm.platform_user_id.trim();
-            if (
+            const shouldIncludePlatformUserID =
                 currentPlatform === SitePlatform.NewAPI &&
-                accountForm.credential_type === SiteCredentialType.AccessToken &&
-                !platformUserIDInput
-            ) {
+                accountForm.credential_type === SiteCredentialType.AccessToken;
+            const platformUserIDInput = shouldIncludePlatformUserID
+                ? accountForm.platform_user_id.trim()
+                : '';
+            if (shouldIncludePlatformUserID && !platformUserIDInput) {
                 toast.error('请输入 Platform User ID');
                 return;
             }
@@ -302,6 +303,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 ? Number(platformUserIDInput)
                 : null;
             if (
+                shouldIncludePlatformUserID &&
                 parsedPlatformUserID !== null &&
                 (!Number.isInteger(parsedPlatformUserID) || parsedPlatformUserID <= 0)
             ) {
@@ -345,7 +347,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 api_key: trimmedAPIKey,
                 refresh_token: isAccessToken ? accountForm.refresh_token.trim() : '',
                 token_expires_at: isAccessToken ? parsedTokenExpiresAt : 0,
-                platform_user_id: parsedPlatformUserID,
+                platform_user_id: shouldIncludePlatformUserID ? parsedPlatformUserID : null,
                 proxy_mode: accountForm.proxy_mode,
                 proxy_config_id:
                     accountForm.proxy_mode === 'pool' ? accountForm.proxy_config_id : null,
@@ -461,6 +463,11 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                 api_key:
                                                     nextType === SiteCredentialType.APIKey
                                                         ? current.api_key
+                                                        : '',
+                                                platform_user_id:
+                                                    nextType === SiteCredentialType.AccessToken &&
+                                                    currentPlatform === SitePlatform.NewAPI
+                                                        ? current.platform_user_id
                                                         : '',
                                             };
                                         })
