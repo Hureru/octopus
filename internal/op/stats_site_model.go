@@ -365,6 +365,24 @@ func lookupChannelSiteBinding(channelID int) (channelSiteBinding, error) {
 	return result, nil
 }
 
+func deleteSiteModelHourlyCacheForAccounts(accountIDs []int) {
+	if len(accountIDs) == 0 {
+		return
+	}
+	accountSet := make(map[int]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		accountSet[id] = struct{}{}
+	}
+
+	siteModelHourlyCacheLock.Lock()
+	defer siteModelHourlyCacheLock.Unlock()
+	for key := range siteModelHourlyCache {
+		if _, ok := accountSet[key.SiteAccountID]; ok {
+			delete(siteModelHourlyCache, key)
+		}
+	}
+}
+
 // invalidateSiteBindingCache 在站点账号变更时清理映射缓存。
 func invalidateSiteBindingCache() {
 	siteBindingByChannelCache.Clear()
