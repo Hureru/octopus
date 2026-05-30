@@ -31,6 +31,82 @@ func setupSiteOpTestDB(t *testing.T) context.Context {
 	return context.Background()
 }
 
+func createSiteOpTestSiteAccount(t *testing.T, ctx context.Context, siteName, accountName string) (*model.Site, *model.SiteAccount) {
+	t.Helper()
+
+	site := &model.Site{
+		Name:     siteName,
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	account := &model.SiteAccount{
+		SiteID:         site.ID,
+		Name:           accountName,
+		CredentialType: model.SiteCredentialTypeAccessToken,
+		AccessToken:    "token",
+		Enabled:        true,
+	}
+	if err := SiteAccountCreate(account, ctx); err != nil {
+		t.Fatalf("SiteAccountCreate failed: %v", err)
+	}
+	return site, account
+}
+
+func createLegacySitePricesRow(t *testing.T, ctx context.Context, accountID int) {
+	t.Helper()
+	if err := dbpkg.GetDB().WithContext(ctx).Exec(`CREATE TABLE site_prices (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		site_account_id INTEGER NOT NULL,
+		group_key TEXT NOT NULL DEFAULT 'default',
+		model_name TEXT NOT NULL,
+		input_price REAL,
+		CONSTRAINT fk_site_accounts_prices FOREIGN KEY (site_account_id) REFERENCES site_accounts(id)
+	)`).Error; err != nil {
+		t.Fatalf("create legacy site_prices table failed: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Exec("INSERT INTO site_prices (site_account_id, group_key, model_name, input_price) VALUES (?, ?, ?, ?)", accountID, model.SiteDefaultGroupKey, "gpt-4o-mini", 1.23).Error; err != nil {
+		t.Fatalf("insert legacy site_prices row failed: %v", err)
+	}
+}
+
+func assertLegacySitePricesCount(t *testing.T, ctx context.Context, accountID int, want int64) {
+	t.Helper()
+	var count int64
+	if err := dbpkg.GetDB().WithContext(ctx).Table("site_prices").Where("site_account_id = ?", accountID).Count(&count).Error; err != nil {
+		t.Fatalf("count legacy site_prices failed: %v", err)
+	}
+	if count != want {
+		t.Fatalf("expected legacy site_prices count %d, got %d", want, count)
+	}
+}
+
+func TestSiteDelDeletesLegacySitePrices(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	_, account := createSiteOpTestSiteAccount(t, ctx, "legacy-price-site", "legacy-price-account")
+	createLegacySitePricesRow(t, ctx, account.ID)
+
+	if err := SiteDel(account.SiteID, ctx); err != nil {
+		t.Fatalf("SiteDel failed: %v", err)
+	}
+	assertLegacySitePricesCount(t, ctx, account.ID, 0)
+}
+
+func TestSiteAccountDelDeletesLegacySitePrices(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	_, account := createSiteOpTestSiteAccount(t, ctx, "legacy-account-price-site", "legacy-account-price-account")
+	createLegacySitePricesRow(t, ctx, account.ID)
+
+	if err := SiteAccountDel(account.ID, ctx); err != nil {
+		t.Fatalf("SiteAccountDel failed: %v", err)
+	}
+	assertLegacySitePricesCount(t, ctx, account.ID, 0)
+}
+
 func TestSiteCreateAndAccountCreatePersistExplicitFalseValues(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
