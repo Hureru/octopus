@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -16,7 +15,8 @@ type firstTokenBudget struct {
 	ctx     context.Context
 	timer   *time.Timer
 	cancel  context.CancelCauseFunc
-	stopped atomic.Bool
+	mu      sync.Mutex
+	stopped bool
 	once    sync.Once
 }
 
@@ -24,7 +24,12 @@ func (b *firstTokenBudget) stopTimer() {
 	if b == nil {
 		return
 	}
-	b.stopped.Store(true)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.stopped {
+		return
+	}
+	b.stopped = true
 	if b.timer == nil {
 		return
 	}
@@ -51,9 +56,12 @@ func (ra *relayAttempt) attachFirstTokenBudget(req *http.Request) *http.Request 
 	ctx, cancel := context.WithCancelCause(req.Context())
 	budget := &firstTokenBudget{ctx: ctx, cancel: cancel}
 	budget.timer = time.AfterFunc(time.Duration(ra.firstTokenTimeOutSec)*time.Second, func() {
-		if !budget.stopped.Load() {
-			cancel(errFirstTokenTimeout)
+		budget.mu.Lock()
+		defer budget.mu.Unlock()
+		if budget.stopped {
+			return
 		}
+		cancel(errFirstTokenTimeout)
 	})
 	ra.firstTokenBudget = budget
 	return req.WithContext(ctx)

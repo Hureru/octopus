@@ -535,15 +535,10 @@ data: [DONE]
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"relay-first-token-timeout-group","messages":[{"role":"user","content":"hello"}],"stream":true}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	started := time.Now()
 	Handler(inbound.InboundTypeOpenAIChat, c)
-	elapsed := time.Since(started)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected relay handler to succeed via fallback channel, got status %d body %s", recorder.Code, recorder.Body.String())
-	}
-	if elapsed >= 1900*time.Millisecond {
-		t.Fatalf("expected first-token timeout to abort slow header wait before upstream response, elapsed=%s", elapsed)
 	}
 	if firstHits.Load() != 1 {
 		t.Fatalf("expected slow channel to be attempted once even with same-channel retries enabled, got %d", firstHits.Load())

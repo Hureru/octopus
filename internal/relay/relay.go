@@ -668,7 +668,7 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 			return nil
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds) on ws stream, switching channel", ra.firstTokenTimeOutSec)
-			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+			return ra.firstTokenTimeoutError()
 		case <-heartbeatC:
 			if err := writeSSEHeartbeat(writer); err != nil {
 				return err
