@@ -239,7 +239,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			}
 
 			result = ra.attempt()
-			if result.Success || result.Written || result.Canceled || result.ResetConversation || !isRetryableStatus(result.StatusCode) {
+			if result.Success || result.Written || result.Canceled || result.ResetConversation || result.FirstTokenTimeout || !isRetryableStatus(result.StatusCode) {
 				break
 			}
 		}
@@ -378,10 +378,12 @@ func (ra *relayAttempt) attempt() attemptResult {
 	if written {
 		ra.collectResponse()
 	}
+	firstTokenTimeout := isFirstTokenTimeout(nil, fwdErr)
 	return attemptResult{
 		Success:           false,
 		Written:           written,
 		ResetConversation: statusCode == http.StatusConflict && needsConversationRestart(relayErrorMessage(fwdErr)),
+		FirstTokenTimeout: firstTokenTimeout,
 		Err:               fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
 		StatusCode:        statusCode,
 		RetryAfter:        ra.retryAfter,
@@ -666,7 +668,7 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 			return nil
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds) on ws stream, switching channel", ra.firstTokenTimeOutSec)
-			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+			return ra.firstTokenTimeoutError()
 		case <-heartbeatC:
 			if err := writeSSEHeartbeat(writer); err != nil {
 				return err
@@ -896,14 +898,28 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
+	req = ra.attachFirstTokenBudget(req)
+
 	response, err := httpClient.Do(req)
 	if err != nil {
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(req.Context(), err); timeoutErr != nil {
+			ra.closeFirstTokenBudget()
+			return nil, timeoutErr
+		}
 		if isClientCancellation(req.Context(), err) {
 			log.Infof("request canceled before upstream response: %v", err)
 		} else {
 			log.Warnf("failed to send request: %v", err)
 		}
+		ra.closeFirstTokenBudget()
 		return nil, err
+	}
+
+	if response != nil && response.Body != nil && ra.firstTokenBudget != nil {
+		response.Body = &closeWithFuncReadCloser{
+			ReadCloser: response.Body,
+			onClose:    ra.closeFirstTokenBudget,
+		}
 	}
 
 	return response, nil
@@ -911,6 +927,8 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 
 // handleStreamResponse 处理流式响应
 func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http.Response) error {
+	defer ra.closeFirstTokenBudget()
+
 	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
 		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
@@ -953,7 +971,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time
-	if firstToken && ra.firstTokenTimeOutSec > 0 {
+	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
 		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
 		firstTokenC = firstTokenTimer.C
 		defer func() {
@@ -975,12 +993,18 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 					return nil
 				}
 				if r.err != nil {
+					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
+						return timeoutErr
+					}
 					log.Warnf("failed to read event: %v", r.err)
 					return fmt.Errorf("failed to read stream event: %w", r.err)
 				}
 			default:
 			}
 			err := contextError(ctx)
+			if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+				return timeoutErr
+			}
 			if isLocalRelayBudgetExceeded(ctx, err) {
 				return err
 			}
@@ -989,7 +1013,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
-			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+			return ra.firstTokenTimeoutError()
 		case <-heartbeatC:
 			if err := writeSSEHeartbeat(writer); err != nil {
 				return err
@@ -1000,6 +1024,9 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 				return nil
 			}
 			if r.err != nil {
+				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
+					return timeoutErr
+				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
 			}
@@ -1011,6 +1038,7 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			if firstToken {
 				ra.metrics.SetFirstTokenTime(time.Now())
 				firstToken = false
+				ra.stopFirstTokenTimer()
 				if firstTokenTimer != nil {
 					if !firstTokenTimer.Stop() {
 						select {
@@ -1230,6 +1258,8 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughOpenAIResponses(ctx context.Con
 }
 
 func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
+	defer ra.closeFirstTokenBudget()
+
 	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
 		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
@@ -1280,7 +1310,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time
-	if firstToken && ra.firstTokenTimeOutSec > 0 {
+	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
 		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
 		firstTokenC = firstTokenTimer.C
 		defer func() {
@@ -1301,12 +1331,18 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 					return finishStream(context.Background())
 				}
 				if r.err != nil {
+					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
+						return timeoutErr
+					}
 					log.Warnf("failed to read event: %v", r.err)
 					return fmt.Errorf("failed to read stream event: %w", r.err)
 				}
 			default:
 			}
 			err := contextError(ctx)
+			if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+				return timeoutErr
+			}
 			if isLocalRelayBudgetExceeded(ctx, err) {
 				return err
 			}
@@ -1318,7 +1354,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
-			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+			return ra.firstTokenTimeoutError()
 		case <-heartbeatC:
 			if err := writeSSEHeartbeat(writer); err != nil {
 				return err
@@ -1330,6 +1366,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 			if r.err != nil {
 				if r.err == io.EOF {
 					return finishStream(ctx)
+				}
+				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
+					return timeoutErr
 				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
@@ -1347,6 +1386,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 			if firstToken {
 				ra.metrics.SetFirstTokenTime(time.Now())
 				firstToken = false
+				ra.stopFirstTokenTimer()
 				if firstTokenTimer != nil {
 					if !firstTokenTimer.Stop() {
 						select {
@@ -1528,6 +1568,8 @@ func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error)
 // handleStreamResponsePassthroughAnthropic 将上游 SSE 事件**原样**转发给客户端（不经过
 // outbound→inbound 双向转换），同时用 outbound.TransformStream 旁路解析事件供 metrics 聚合使用。
 func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Context, response *http.Response) error {
+	defer ra.closeFirstTokenBudget()
+
 	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
 		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
@@ -1581,7 +1623,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time
-	if firstToken && ra.firstTokenTimeOutSec > 0 {
+	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
 		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
 		firstTokenC = firstTokenTimer.C
 		defer func() {
@@ -1602,12 +1644,18 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 					return finishStream(context.Background())
 				}
 				if r.err != nil {
+					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
+						return timeoutErr
+					}
 					log.Warnf("failed to read event: %v", r.err)
 					return fmt.Errorf("failed to read stream event: %w", r.err)
 				}
 			default:
 			}
 			err := contextError(ctx)
+			if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+				return timeoutErr
+			}
 			if isLocalRelayBudgetExceeded(ctx, err) {
 				return err
 			}
@@ -1620,7 +1668,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
-			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
+			return ra.firstTokenTimeoutError()
 		case <-heartbeatC:
 			if err := writeSSEHeartbeat(writer); err != nil {
 				return err
@@ -1632,6 +1680,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			if r.err != nil {
 				if r.err == io.EOF {
 					return finishStream(ctx)
+				}
+				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
+					return timeoutErr
 				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
@@ -1650,6 +1701,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 			if firstToken {
 				ra.metrics.SetFirstTokenTime(time.Now())
 				firstToken = false
+				ra.stopFirstTokenTimer()
 				if firstTokenTimer != nil {
 					if !firstTokenTimer.Stop() {
 						select {
