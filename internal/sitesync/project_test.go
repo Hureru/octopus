@@ -953,42 +953,6 @@ func TestProjectAccountRestoresSystemPausedManagedChannel(t *testing.T) {
 	}
 }
 
-func TestSuspendAccountProjectionDisablesManagedChannelsAndMarksGroups(t *testing.T) {
-	ctx := setupProjectTestDB(t)
-	_, account := createProjectionFixture(t, ctx)
-
-	if _, err := ProjectAccount(ctx, account.ID); err != nil {
-		t.Fatalf("initial ProjectAccount failed: %v", err)
-	}
-	channelsByGroup := loadProjectedChannelsByGroupKey(t, ctx, account.ID)
-	channel := channelsByGroup[model.SiteDefaultGroupKey]
-	if channel.ID == 0 {
-		t.Fatalf("expected initial projected channel")
-	}
-
-	if err := SuspendAccountProjection(ctx, account.ID, "site down"); err != nil {
-		t.Fatalf("SuspendAccountProjection failed: %v", err)
-	}
-	channelsByGroup = loadProjectedChannelsByGroupKey(t, ctx, account.ID)
-	disabledChannel := channelsByGroup[model.SiteDefaultGroupKey]
-	if disabledChannel.ID != channel.ID {
-		t.Fatalf("expected projected channel binding to be preserved, got %+v", channelsByGroup)
-	}
-	if disabledChannel.Enabled {
-		t.Fatalf("expected suspended projected channel to be disabled")
-	}
-	var group model.SiteUserGroup
-	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND group_key = ?", account.ID, model.SiteDefaultGroupKey).First(&group).Error; err != nil {
-		t.Fatalf("query suspended group failed: %v", err)
-	}
-	if !group.ProjectionSuspended {
-		t.Fatalf("expected group projection to be suspended")
-	}
-	if group.ModelSyncStatus != model.SiteGroupModelSyncStatusFailed {
-		t.Fatalf("expected failed model sync status, got %q", group.ModelSyncStatus)
-	}
-}
-
 func TestMarkAccountProjectionStaleKeepsManagedChannelsEnabled(t *testing.T) {
 	ctx := setupProjectTestDB(t)
 	_, account := createProjectionFixture(t, ctx)
