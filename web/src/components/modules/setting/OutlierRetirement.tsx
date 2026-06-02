@@ -9,17 +9,18 @@ import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setti
 import { toast } from '@/components/common/Toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 
-const NUMBER_FIELDS = [
-    { key: SettingKey.OutlierRetireInterval, labelKey: 'interval' },
-    { key: SettingKey.OutlierFailRatePct, labelKey: 'failRate' },
-    { key: SettingKey.OutlierMinSamples, labelKey: 'minSamples' },
-    { key: SettingKey.OutlierConsecFails, labelKey: 'consecFails' },
-    { key: SettingKey.OutlierWindowMinutes, labelKey: 'windowMinutes' },
-    { key: SettingKey.OutlierWindowCapacity, labelKey: 'windowCapacity' },
-    { key: SettingKey.OutlierRecoverStreak, labelKey: 'recoverStreak' },
-    { key: SettingKey.OutlierReapMinutes, labelKey: 'reapMinutes' },
-    { key: SettingKey.OutlierCFRecoverMinutes, labelKey: 'cfRecoverMinutes' },
-] as const;
+// min/max 与后端 model.Setting.Validate() 的边界保持一致，前端先行约束整数范围。
+const NUMBER_FIELDS: { key: string; labelKey: string; min: number; max?: number }[] = [
+    { key: SettingKey.OutlierRetireInterval, labelKey: 'interval', min: 1 },
+    { key: SettingKey.OutlierFailRatePct, labelKey: 'failRate', min: 1, max: 100 },
+    { key: SettingKey.OutlierMinSamples, labelKey: 'minSamples', min: 1 },
+    { key: SettingKey.OutlierConsecFails, labelKey: 'consecFails', min: 1 },
+    { key: SettingKey.OutlierWindowMinutes, labelKey: 'windowMinutes', min: 1 },
+    { key: SettingKey.OutlierWindowCapacity, labelKey: 'windowCapacity', min: 1, max: 20 },
+    { key: SettingKey.OutlierRecoverStreak, labelKey: 'recoverStreak', min: 1 },
+    { key: SettingKey.OutlierReapMinutes, labelKey: 'reapMinutes', min: 1 },
+    { key: SettingKey.OutlierCFRecoverMinutes, labelKey: 'cfRecoverMinutes', min: 1 },
+];
 
 export function SettingOutlierRetirement() {
     const t = useTranslations('setting');
@@ -99,6 +100,9 @@ export function SettingOutlierRetirement() {
                     <span className="text-sm font-medium">{t(`outlierRetirement.${f.labelKey}.label`)}</span>
                     <Input
                         type="number"
+                        step={1}
+                        min={f.min}
+                        max={f.max}
                         value={values[f.key] ?? ''}
                         onChange={(e) => setValues(prev => ({ ...prev, [f.key]: e.target.value }))}
                         onBlur={() => handleNumberSave(f.key)}
