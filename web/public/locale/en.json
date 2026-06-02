@@ -275,6 +275,7 @@
             }
         },
         "saved": "Saved",
+        "saveFailed": "Save failed",
         "backup": {
             "title": "Backup / Restore",
             "export": {

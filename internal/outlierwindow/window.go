@@ -224,13 +224,14 @@ func Reap(now time.Time, ttl time.Duration) int {
 		if !ok {
 			return true
 		}
+		// 持锁完成「复检 + 删除」：若先解锁再删除，并发 Report 可能在空隙刷新
+		// lastSeen，使刚恢复流量的窗口仍被回收而丢失证据（TOCTOU）。
 		w.mu.Lock()
-		stale := w.lastSeen.Before(cutoff)
-		w.mu.Unlock()
-		if stale {
+		if w.lastSeen.Before(cutoff) {
 			store.Delete(key)
 			reaped++
 		}
+		w.mu.Unlock()
 		return true
 	})
 	return reaped

@@ -30,9 +30,12 @@ export function SettingOutlierRetirement() {
     const initialEnabled = useRef(false);
     const [values, setValues] = useState<Record<string, string>>({});
     const initialValues = useRef<Record<string, string>>({});
+    const initialized = useRef(false);
 
     useEffect(() => {
-        if (!settings) return;
+        // 仅首次拿到数据时回填：useSettingList 每 30s 轮询、保存成功又会 invalidate，
+        // 若每次刷新都重置本地状态，会覆盖用户正在编辑但尚未保存的输入。
+        if (!settings || initialized.current) return;
         const en = settings.find(s => s.key === SettingKey.OutlierRetireEnabled);
         if (en) {
             const v = en.value === 'true';
@@ -46,13 +49,17 @@ export function SettingOutlierRetirement() {
         }
         queueMicrotask(() => setValues(next));
         initialValues.current = { ...next };
+        initialized.current = true;
     }, [settings]);
 
     const handleEnabledChange = (checked: boolean) => {
         setEnabled(checked);
         setSetting.mutate(
             { key: SettingKey.OutlierRetireEnabled, value: checked ? 'true' : 'false' },
-            { onSuccess: () => { toast.success(t('saved')); initialEnabled.current = checked; } }
+            {
+                onSuccess: () => { toast.success(t('saved')); initialEnabled.current = checked; },
+                onError: () => { setEnabled(initialEnabled.current); toast.error(t('saveFailed')); },
+            }
         );
     };
 

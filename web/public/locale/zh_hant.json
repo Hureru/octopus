@@ -275,6 +275,7 @@
             }
         },
         "saved": "已儲存",
+        "saveFailed": "儲存失敗",
         "backup": {
             "title": "備份 / 復原",
             "export": {

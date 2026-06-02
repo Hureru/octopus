@@ -85,15 +85,23 @@ func (s *Setting) Validate() error {
 	switch s.Key {
 	case SettingKeyModelInfoUpdateInterval, SettingKeySyncLLMInterval, SettingKeySiteSyncInterval,
 		SettingKeySiteCheckinInterval, SettingKeyRelayLogKeepPeriod,
-		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown,
-		SettingKeyOutlierRetireInterval, SettingKeyOutlierWindowCapacity, SettingKeyOutlierWindowMinutes,
-		SettingKeyOutlierMinSamples, SettingKeyOutlierFailRatePct, SettingKeyOutlierConsecFails,
-		SettingKeyOutlierRecoverStreak, SettingKeyOutlierReapMinutes, SettingKeyOutlierCFRecoverMinutes:
+		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown:
 		_, err := strconv.Atoi(s.Value)
 		if err != nil {
 			return fmt.Errorf("setting value must be an integer")
 		}
 		return nil
+	case SettingKeyOutlierWindowCapacity:
+		// 评估样本上限受环形缓冲物理容量约束（≤20，见 outlierwindow.physicalCap）。
+		return validateIntRange(s.Value, 1, 20)
+	case SettingKeyOutlierFailRatePct:
+		// 失败率阈值为百分比，超出 [1,100] 会被运行时回退默认值，与展示不符。
+		return validateIntRange(s.Value, 1, 100)
+	case SettingKeyOutlierRetireInterval, SettingKeyOutlierWindowMinutes, SettingKeyOutlierMinSamples,
+		SettingKeyOutlierConsecFails, SettingKeyOutlierRecoverStreak,
+		SettingKeyOutlierReapMinutes, SettingKeyOutlierCFRecoverMinutes:
+		// 时间窗/样本/连击/间隔等：0 或负值无意义，下限为 1。
+		return validateIntMin(s.Value, 1)
 	case SettingKeySSEHeartbeatInterval, SettingKeySSEPreStreamHeartbeatDelay:
 		value, err := strconv.Atoi(s.Value)
 		if err != nil {
@@ -142,5 +150,29 @@ func (s *Setting) Validate() error {
 		return nil
 	}
 
+	return nil
+}
+
+// validateIntRange 校验 v 为整数且落在闭区间 [lo, hi]。
+func validateIntRange(v string, lo, hi int) error {
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fmt.Errorf("setting value must be an integer")
+	}
+	if n < lo || n > hi {
+		return fmt.Errorf("setting value must be between %d and %d", lo, hi)
+	}
+	return nil
+}
+
+// validateIntMin 校验 v 为整数且不小于 lo。
+func validateIntMin(v string, lo int) error {
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fmt.Errorf("setting value must be an integer")
+	}
+	if n < lo {
+		return fmt.Errorf("setting value must be at least %d", lo)
+	}
 	return nil
 }
