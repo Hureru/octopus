@@ -33,6 +33,13 @@ func SiteChannelBindingMapByChannelIDs(channelIDs []int, ctx context.Context) (m
 	return result, nil
 }
 
+// SiteChannelBindingListAll 返回全部站点投影渠道绑定，供 POR 任务按 siteAccountID 分组兄弟渠道。
+func SiteChannelBindingListAll(ctx context.Context) ([]model.SiteChannelBinding, error) {
+	var bindings []model.SiteChannelBinding
+	err := db.GetDB().WithContext(ctx).Find(&bindings).Error
+	return bindings, err
+}
+
 func ChannelManagedBinding(channelID int, ctx context.Context) (*model.SiteChannelBinding, bool, error) {
 	binding, err := SiteChannelBindingGetByChannelID(channelID, ctx)
 	if err == nil {

@@ -264,6 +264,21 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		}
 	}
 
+	// POR 覆盖：本次同步可能把数据面已退役的渠道重新 enabled，按退役状态压回 disabled。
+	// 仅作用于 managedChannelIDs（本轮实际投影/启用的渠道），不影响上面已清理删除的过时绑定。
+	for _, channelID := range managedChannelIDs {
+		retired, err := op.SiteChannelOutlierIsRetired(channelID, ctx)
+		if err != nil {
+			log.Warnf("POR retired check failed for channel %d: %v", channelID, err)
+			continue
+		}
+		if retired {
+			if err := op.ChannelEnabledManaged(channelID, false, ctx); err != nil {
+				log.Warnf("POR keep retired channel %d disabled failed: %v", channelID, err)
+			}
+		}
+	}
+
 	return managedChannelIDs, nil
 }
 
@@ -402,6 +417,7 @@ func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
 	}
 	return baseURL + "/v1"
 }
+
 // isUsableSiteToken reports whether a token can produce a projected channel
 // key: it must be ready, unmasked, and carry a non-empty normalized value.
 func isUsableSiteToken(token model.SiteToken) bool {

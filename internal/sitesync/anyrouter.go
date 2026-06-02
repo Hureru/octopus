@@ -861,7 +861,7 @@ func anyRouterFormatHTTPError(statusCode int, header http.Header, body string) e
 		}
 	}
 	bodyBytes := []byte(body)
-	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+	if IsCloudflareProtectionResponse(statusCode, header, bodyBytes) {
 		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
 	}
 	if summary := anyRouterExtractHTMLErrorSummary(body); summary != "" {

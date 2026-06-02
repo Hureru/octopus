@@ -19,6 +19,7 @@ type ProbeResult struct {
 	HTTPStatus   int
 	DurationMS   int64
 	ErrorMessage string
+	Header       http.Header // 上游响应头，供 POR 门3 做 Cloudflare 指纹识别
 }
 
 type Prober struct {
@@ -73,6 +74,7 @@ func (p *Prober) RunCandidate(ctx context.Context, channel model.Channel, usedKe
 	defer response.Body.Close()
 
 	result.HTTPStatus = response.StatusCode
+	result.Header = response.Header.Clone()
 	result.DurationMS = time.Since(startedAt).Milliseconds()
 
 	if response.StatusCode >= 200 && response.StatusCode < 300 {

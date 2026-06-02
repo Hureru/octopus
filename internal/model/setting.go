@@ -29,6 +29,16 @@ const (
 	SettingKeyProjectedChannelAutoGroupEnabled SettingKey = "projected_channel_auto_group_enabled" // 全局站点投影渠道自动分组模式（0关闭/1模糊/2精确/3正则，兼容旧 true/false）
 	SettingKeyJWTSecret                        SettingKey = "jwt_secret"                           // JWT 签名密钥（自动生成）
 	SettingKeyStatsSiteModelBackfilled         SettingKey = "stats_site_model_backfilled"          // 站点渠道小时聚合是否已回填历史日志
+	SettingKeyOutlierRetireEnabled             SettingKey = "outlier_retire_enabled"               // 被动离群退役(POR)总开关
+	SettingKeyOutlierRetireInterval            SettingKey = "outlier_retire_interval"              // POR 任务轮询间隔(分钟)
+	SettingKeyOutlierWindowCapacity            SettingKey = "outlier_window_capacity"              // POR 滚动窗口评估样本上限(≤20)
+	SettingKeyOutlierWindowMinutes             SettingKey = "outlier_window_minutes"               // POR 滚动窗口时间窗(分钟)
+	SettingKeyOutlierMinSamples                SettingKey = "outlier_min_samples"                  // POR 最小样本数,不足则跳过判定
+	SettingKeyOutlierFailRatePct               SettingKey = "outlier_fail_rate_pct"                // POR 失败率阈值(百分比)
+	SettingKeyOutlierConsecFails               SettingKey = "outlier_consec_fails"                 // POR 连续失败阈值
+	SettingKeyOutlierRecoverStreak             SettingKey = "outlier_recover_streak"               // POR 连续探活成功恢复阈值
+	SettingKeyOutlierReapMinutes               SettingKey = "outlier_reap_minutes"                 // POR 窗口内存回收 TTL(分钟)
+	SettingKeyOutlierCFRecoverMinutes          SettingKey = "outlier_cf_recover_minutes"           // POR CF 退役渠道恢复探活冷却(分钟)
 )
 
 type Setting struct {
@@ -58,6 +68,16 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyProjectedChannelAutoGroupEnabled, Value: "0"}, // 默认不强制站点投影渠道自动分组
 		{Key: SettingKeyJWTSecret, Value: ""},                         // 为空时自动生成
 		{Key: SettingKeyStatsSiteModelBackfilled, Value: "false"},
+		{Key: SettingKeyOutlierRetireEnabled, Value: "false"}, // 默认关闭被动离群退役，保守上线
+		{Key: SettingKeyOutlierRetireInterval, Value: "2"},    // 默认每 2 分钟评估一次
+		{Key: SettingKeyOutlierWindowCapacity, Value: "20"},   // 评估取最近 20 条
+		{Key: SettingKeyOutlierWindowMinutes, Value: "10"},    // 时间窗 10 分钟
+		{Key: SettingKeyOutlierMinSamples, Value: "8"},        // 样本不足 8 条直接 PASS
+		{Key: SettingKeyOutlierFailRatePct, Value: "85"},      // 失败率 ≥85% 才候选
+		{Key: SettingKeyOutlierConsecFails, Value: "10"},      // 连续失败 ≥10 次
+		{Key: SettingKeyOutlierRecoverStreak, Value: "2"},     // 连续探活成功 2 次恢复
+		{Key: SettingKeyOutlierReapMinutes, Value: "30"},      // 窗口 30 分钟无流量回收
+		{Key: SettingKeyOutlierCFRecoverMinutes, Value: "30"}, // CF 退役渠道 30 分钟后才探活恢复
 	}
 }
 
@@ -65,7 +85,10 @@ func (s *Setting) Validate() error {
 	switch s.Key {
 	case SettingKeyModelInfoUpdateInterval, SettingKeySyncLLMInterval, SettingKeySiteSyncInterval,
 		SettingKeySiteCheckinInterval, SettingKeyRelayLogKeepPeriod,
-		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown:
+		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown,
+		SettingKeyOutlierRetireInterval, SettingKeyOutlierWindowCapacity, SettingKeyOutlierWindowMinutes,
+		SettingKeyOutlierMinSamples, SettingKeyOutlierFailRatePct, SettingKeyOutlierConsecFails,
+		SettingKeyOutlierRecoverStreak, SettingKeyOutlierReapMinutes, SettingKeyOutlierCFRecoverMinutes:
 		_, err := strconv.Atoi(s.Value)
 		if err != nil {
 			return fmt.Errorf("setting value must be an integer")
@@ -80,7 +103,7 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyStatsSiteModelBackfilled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyStatsSiteModelBackfilled, SettingKeyOutlierRetireEnabled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")
 		}
