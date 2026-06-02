@@ -272,6 +272,9 @@ func SiteDel(id int, ctx context.Context) error {
 			if err := tx.Where("site_account_id IN ?", accountIDs).Delete(&model.StatsSiteModelHourly{}).Error; err != nil {
 				return err
 			}
+			if err := deleteLegacySitePricesByAccountIDs(tx, accountIDs); err != nil {
+				return err
+			}
 			if err := tx.Where("id IN ?", accountIDs).Delete(&model.SiteAccount{}).Error; err != nil {
 				return err
 			}
@@ -535,6 +538,19 @@ func SiteAccountEnabled(id int, enabled bool, ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Model(&model.SiteAccount{}).Where("id = ?", id).Update("enabled", enabled).Error
 }
 
+func deleteLegacySitePricesByAccountIDs(tx *gorm.DB, accountIDs []int) error {
+	if tx == nil || len(accountIDs) == 0 {
+		return nil
+	}
+	if !tx.Migrator().HasTable("site_prices") {
+		return nil
+	}
+	if err := tx.Exec("DELETE FROM site_prices WHERE site_account_id IN ?", accountIDs).Error; err != nil {
+		return fmt.Errorf("failed to delete legacy site prices: %w", err)
+	}
+	return nil
+}
+
 func SiteAccountDel(id int, ctx context.Context) error {
 	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Delete bindings before groups/accounts so FK-constrained databases do not
@@ -552,6 +568,9 @@ func SiteAccountDel(id int, ctx context.Context) error {
 			return err
 		}
 		if err := tx.Where("site_account_id = ?", id).Delete(&model.StatsSiteModelHourly{}).Error; err != nil {
+			return err
+		}
+		if err := deleteLegacySitePricesByAccountIDs(tx, []int{id}); err != nil {
 			return err
 		}
 		return tx.Delete(&model.SiteAccount{}, id).Error

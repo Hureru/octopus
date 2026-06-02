@@ -459,6 +459,174 @@ func TestHandlerFallsBackToNextChannelAfterFirstFailure(t *testing.T) {
 	}
 }
 
+func TestHandlerFirstTokenTimeoutCoversUpstreamHeaderWaitAndFailsOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	var firstHits atomic.Int32
+	firstServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstHits.Add(1)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"id":"slow","object":"chat.completion.chunk","created":1,"model":"slow-model","choices":[{"index":0,"delta":{"role":"assistant","content":"slow"}}]}
+
+`))
+	}))
+	defer firstServer.Close()
+
+	var secondHits atomic.Int32
+	secondServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondHits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"id":"fast","object":"chat.completion.chunk","created":1,"model":"fast-model","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}
+
+data: [DONE]
+
+`))
+	}))
+	defer secondServer.Close()
+
+	firstChannel := &model.Channel{
+		Name:     "relay-first-token-timeout-slow-header",
+		Type:     outbound.OutboundTypeOpenAIChat,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: firstServer.URL + "/v1"}},
+		Model:    "timeout-model",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "slow-key"}},
+	}
+	if err := op.ChannelCreate(firstChannel, ctx); err != nil {
+		t.Fatalf("ChannelCreate first channel failed: %v", err)
+	}
+	secondChannel := &model.Channel{
+		Name:     "relay-first-token-timeout-fast-fallback",
+		Type:     outbound.OutboundTypeOpenAIChat,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: secondServer.URL + "/v1"}},
+		Model:    "timeout-model",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "fast-key"}},
+	}
+	if err := op.ChannelCreate(secondChannel, ctx); err != nil {
+		t.Fatalf("ChannelCreate second channel failed: %v", err)
+	}
+
+	group := &model.Group{
+		Name:              "relay-first-token-timeout-group",
+		Mode:              model.GroupModeFailover,
+		FirstTokenTimeOut: 1,
+		RetryEnabled:      true,
+		MaxRetries:        3,
+	}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: firstChannel.ID, ModelName: "timeout-model", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd first item failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: secondChannel.ID, ModelName: "timeout-model", Priority: 2, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd second item failed: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"relay-first-token-timeout-group","messages":[{"role":"user","content":"hello"}],"stream":true}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	Handler(inbound.InboundTypeOpenAIChat, c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected relay handler to succeed via fallback channel, got status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if firstHits.Load() != 1 {
+		t.Fatalf("expected slow channel to be attempted once even with same-channel retries enabled, got %d", firstHits.Load())
+	}
+	if secondHits.Load() != 1 {
+		t.Fatalf("expected fallback channel to be attempted once, got %d", secondHits.Load())
+	}
+	if !strings.Contains(recorder.Body.String(), `"content":"ok"`) {
+		t.Fatalf("expected fallback stream response to be returned, got %s", recorder.Body.String())
+	}
+
+	logs, err := op.RelayLogList(ctx, nil, nil, nil, 1, 10)
+	if err != nil {
+		t.Fatalf("RelayLogList failed: %v", err)
+	}
+	if len(logs) == 0 || len(logs[0].Attempts) != 2 {
+		t.Fatalf("expected exactly two attempts in relay log, got %#v", logs)
+	}
+	if logs[0].Attempts[0].Status != model.AttemptFailed || !strings.Contains(logs[0].Attempts[0].Msg, "first token timeout") {
+		t.Fatalf("expected first attempt to fail with first token timeout, got %#v", logs[0].Attempts[0])
+	}
+	if logs[0].Attempts[1].Status != model.AttemptSuccess {
+		t.Fatalf("expected second attempt to succeed, got %#v", logs[0].Attempts[1])
+	}
+}
+
+func TestHandlerFirstTokenTimeoutStopsAfterFirstStreamChunk(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := setupRelayTestDB(t)
+
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = w.Write([]byte(`data: {"id":"stream","object":"chat.completion.chunk","created":1,"model":"stream-model","choices":[{"index":0,"delta":{"role":"assistant","content":"first"}}]}
+
+`))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(1200 * time.Millisecond)
+		_, _ = w.Write([]byte(`data: {"id":"stream","object":"chat.completion.chunk","created":1,"model":"stream-model","choices":[{"index":0,"delta":{"content":" second"}}]}
+
+data: [DONE]
+
+`))
+	}))
+	defer server.Close()
+
+	channel := &model.Channel{
+		Name:     "relay-first-token-timeout-long-stream",
+		Type:     outbound.OutboundTypeOpenAIChat,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: server.URL + "/v1"}},
+		Model:    "timeout-long-stream-model",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "stream-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+	group := &model.Group{Name: "relay-first-token-timeout-long-stream-group", Mode: model.GroupModeFailover, FirstTokenTimeOut: 1}
+	if err := op.GroupCreate(group, ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "timeout-long-stream-model", Priority: 1, Weight: 1}, ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"relay-first-token-timeout-long-stream-group","messages":[{"role":"user","content":"hello"}],"stream":true}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	Handler(inbound.InboundTypeOpenAIChat, c)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected relay handler to succeed, got status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected exactly one upstream request, got %d", hits.Load())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"content":"first"`) || !strings.Contains(body, `"content":" second"`) {
+		t.Fatalf("expected stream to continue after first chunk, got %s", body)
+	}
+}
+
 func TestHandlerAppliesChannelParamOverride(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
