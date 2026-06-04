@@ -331,7 +331,7 @@ func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 			{GroupKey: "vip", GroupName: "VIP", HasKey: true, Status: siteGroupSyncStatusFailed, Authoritative: false, Message: "unauthorized"},
 		},
 		status:  model.SiteExecutionStatusPartial,
-		message: "部分分组同步完成：更新 1 个分组，保留 1 个分组的历史模型",
+		message: "部分分组同步完成：更新 1 个分组，保留 1 个分组的历史投影",
 	}
 
 	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
@@ -365,5 +365,61 @@ func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 	}
 	if reloaded.LastSyncMessage != snapshot.message {
 		t.Fatalf("expected last_sync_message %q, got %q", snapshot.message, reloaded.LastSyncMessage)
+	}
+
+	var vipReloaded model.SiteUserGroup
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND group_key = ?", account.ID, "vip").First(&vipReloaded).Error; err != nil {
+		t.Fatalf("query vip group failed: %v", err)
+	}
+	if vipReloaded.ProjectionSuspended {
+		t.Fatalf("expected failed vip group projection to keep historical projection active")
+	}
+	if vipReloaded.ModelSyncStatus != model.SiteGroupModelSyncStatusFailed {
+		t.Fatalf("expected failed vip model sync status, got %q", vipReloaded.ModelSyncStatus)
+	}
+	if vipReloaded.ModelSyncFailureCount != 1 {
+		t.Fatalf("expected vip failure count 1, got %d", vipReloaded.ModelSyncFailureCount)
+	}
+}
+
+func TestPersistSyncSnapshotEmptySuspendsWithoutAdvancingSuccessTime(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+
+	previousSuccess := time.Unix(1700000000, 0)
+	group := model.SiteUserGroup{
+		SiteAccountID:          account.ID,
+		GroupKey:               model.SiteDefaultGroupKey,
+		Name:                   model.SiteDefaultGroupName,
+		ModelSyncStatus:        model.SiteGroupModelSyncStatusSynced,
+		LastModelSyncSuccessAt: &previousSuccess,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
+		t.Fatalf("create group failed: %v", err)
+	}
+
+	snapshot := &syncSnapshot{
+		accessToken: account.AccessToken,
+		groups:      []model.SiteUserGroup{{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}},
+		tokens:      []model.SiteToken{{Name: "primary", Token: "key-primary", GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "sync"}},
+		groupResults: []siteGroupSyncResult{
+			{GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, HasKey: true, Status: siteGroupSyncStatusEmpty, Authoritative: true, Message: "上游当前没有可用模型"},
+		},
+		status:  model.SiteExecutionStatusSuccess,
+		message: "上游当前无可用模型，已清空历史模型",
+	}
+	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
+		t.Fatalf("persistSyncSnapshot returned error: %v", err)
+	}
+
+	var reloaded model.SiteUserGroup
+	if err := dbpkg.GetDB().WithContext(ctx).Where("site_account_id = ? AND group_key = ?", account.ID, model.SiteDefaultGroupKey).First(&reloaded).Error; err != nil {
+		t.Fatalf("query reloaded group failed: %v", err)
+	}
+	if !reloaded.ProjectionSuspended {
+		t.Fatalf("expected empty group projection to be suspended")
+	}
+	if reloaded.LastModelSyncSuccessAt == nil || !reloaded.LastModelSyncSuccessAt.Equal(previousSuccess) {
+		t.Fatalf("expected empty sync to preserve last success time %v, got %v", previousSuccess, reloaded.LastModelSyncSuccessAt)
 	}
 }

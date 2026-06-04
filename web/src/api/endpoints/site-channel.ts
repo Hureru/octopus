@@ -77,6 +77,16 @@ export type SiteChannelGroup = {
     group_key: string;
     group_name: string;
     projection_disabled: boolean;
+    projection_suspended: boolean;
+    projection_suspend_reason?: string;
+    projection_suspended_at?: number | null;
+    model_sync_status: 'idle' | 'synced' | 'empty' | 'stale' | 'failed' | 'unresolved' | 'missing_key' | 'removed';
+    model_sync_message?: string;
+    model_sync_authoritative: boolean;
+    model_sync_model_count: number;
+    last_model_sync_at?: number | null;
+    last_model_sync_success_at?: number | null;
+    model_sync_failure_count: number;
     key_count: number;
     enabled_key_count: number;
     masked_pending_key_count: number;
@@ -257,12 +267,37 @@ function normalizeProjectedChannel(channel: Partial<SiteProjectedChannelSettings
     };
 }
 
+function normalizeSiteGroupModelSyncStatus(value: unknown): SiteChannelGroup['model_sync_status'] {
+    switch (value) {
+        case 'synced':
+        case 'empty':
+        case 'stale':
+        case 'failed':
+        case 'unresolved':
+        case 'missing_key':
+        case 'removed':
+            return value;
+        default:
+            return 'idle';
+    }
+}
+
 function normalizeSiteChannelAccount(account: SiteChannelAccountServer): SiteChannelAccount {
     return {
         ...account,
         groups: (account.groups ?? []).map((group) => ({
             ...group,
             projection_disabled: group.projection_disabled === true,
+            projection_suspended: group.projection_suspended === true,
+            projection_suspend_reason: typeof group.projection_suspend_reason === 'string' ? group.projection_suspend_reason : undefined,
+            projection_suspended_at: typeof group.projection_suspended_at === 'number' ? group.projection_suspended_at : null,
+            model_sync_status: normalizeSiteGroupModelSyncStatus(group.model_sync_status),
+            model_sync_message: typeof group.model_sync_message === 'string' ? group.model_sync_message : undefined,
+            model_sync_authoritative: group.model_sync_authoritative === true,
+            model_sync_model_count: typeof group.model_sync_model_count === 'number' ? group.model_sync_model_count : 0,
+            last_model_sync_at: typeof group.last_model_sync_at === 'number' ? group.last_model_sync_at : null,
+            last_model_sync_success_at: typeof group.last_model_sync_success_at === 'number' ? group.last_model_sync_success_at : null,
+            model_sync_failure_count: typeof group.model_sync_failure_count === 'number' ? group.model_sync_failure_count : 0,
             masked_pending_key_count: typeof group.masked_pending_key_count === 'number' ? group.masked_pending_key_count : 0,
             projected_channel_ids: (group.projected_channel_ids ?? []).filter((id) => typeof id === 'number' && id > 0),
             projected_channels: (group.projected_channels ?? []).map(normalizeProjectedChannel).filter((channel) => channel.channel_id > 0),

@@ -978,10 +978,15 @@ export function Site() {
     try {
       const result = await syncSiteAccount.mutateAsync(account.id);
       const summary = `${result.message}（${result.group_count} 个分组，${result.token_count} 个 Key，${result.model_count} 个模型）`;
-      if (result.status === "partial") {
+      if (result.status === "failed") {
+        toast.error(summary);
+      } else if (result.status === "partial") {
         toast.warning(summary);
-      } else {
+      } else if (result.status === "success") {
         toast.success(summary);
+      } else {
+        console.warn(`Unexpected site sync status: ${result.status}`);
+        toast.error(summary);
       }
     } catch (syncError) {
       toast.error(translateSiteMessage(locale, getErrorMessage(syncError), t));

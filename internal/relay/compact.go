@@ -15,6 +15,7 @@ import (
 	"github.com/bestruirui/octopus/internal/helper"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/outlierwindow"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
@@ -182,6 +183,7 @@ func HandleResponsesCompact(c *gin.Context) {
 			op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{RequestSuccess: 1})
 			balancer.RecordSuccess(channel.ID, usedKey.ID, requestModel)
 			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
+			outlierwindow.Report(channel.ID, true, statusCode, time.Now())
 			metrics.SaveWithChannelStats(c.Request.Context(), true, nil, iter.Attempts(), false)
 			return
 		}
@@ -189,6 +191,7 @@ func HandleResponsesCompact(c *gin.Context) {
 		op.StatsChannelUpdate(channel.ID, dbmodel.StatsMetrics{RequestFailed: 1})
 		failureKind := circuitFailureKind(group.RetryEnabled, statusCode)
 		balancer.RecordFailure(channel.ID, usedKey.ID, requestModel, failureKind)
+		outlierwindow.Report(channel.ID, false, statusCode, time.Now())
 		lastErr = attemptErr
 		lastStatusCode = statusCode
 		lastRetryAfter = retryAfter

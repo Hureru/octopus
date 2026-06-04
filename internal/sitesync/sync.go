@@ -162,12 +162,13 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
 	groupResults := finalizeSiteGroupSyncResults(account, groups, tokens, siteModels, tokenGroupResults)
 	status := buildSyncSnapshotStatus(groupResults)
-	if status == model.SiteExecutionStatusFailed {
-		return nil, buildSyncSnapshotFailure(groupResults)
-	}
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, firstManagedPlatformUserID(account))
 	message := buildSyncSnapshotMessage(groupResults)
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: message}, nil
+	snapshot := &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: message}
+	if status == model.SiteExecutionStatusFailed {
+		return snapshot, buildSyncSnapshotFailure(groupResults)
+	}
+	return snapshot, nil
 }
 
 func syncSub2API(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -233,11 +234,12 @@ func syncSub2APIWithAccessToken(ctx context.Context, siteRecord *model.Site, acc
 	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
 	groupResults := finalizeSiteGroupSyncResults(account, groups, tokens, siteModels, tokenGroupResults)
 	status := buildSyncSnapshotStatus(groupResults)
-	if status == model.SiteExecutionStatusFailed {
-		return nil, buildSyncSnapshotFailure(groupResults)
-	}
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, 0)
-	return &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: buildSyncSnapshotMessage(groupResults)}, nil
+	snapshot := &syncSnapshot{accessToken: accessToken, groups: groups, tokens: tokens, models: siteModels, groupResults: groupResults, status: status, balance: balance, balanceUsed: balanceUsed, todayIncome: todayIncome, message: buildSyncSnapshotMessage(groupResults)}
+	if status == model.SiteExecutionStatusFailed {
+		return snapshot, buildSyncSnapshotFailure(groupResults)
+	}
+	return snapshot, nil
 }
 
 func syncOfficialPlatform(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*syncSnapshot, error) {
@@ -250,9 +252,6 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 		return nil, newDirectTokenRequiredError()
 	}
 	models, err := fetchModelsForSiteToken(ctx, siteRecord, account, model.SiteToken{Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true})
-	if err != nil {
-		return nil, err
-	}
 	groupToken := model.SiteToken{Name: "default", Token: token, GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: source, IsDefault: true}
 	siteModels := buildSiteModels(models, model.SiteDefaultGroupKey, source)
 	siteModels = applyDetectedRoutesToSiteModels(
@@ -268,10 +267,13 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 		GroupKey:      model.SiteDefaultGroupKey,
 		GroupName:     model.SiteDefaultGroupName,
 		HasKey:        true,
-		Authoritative: true,
+		Authoritative: err == nil,
 		ModelCount:    len(siteModels),
 	}
-	if len(siteModels) > 0 {
+	if err != nil {
+		baseGroupResult.Status = siteGroupSyncStatusFailed
+		baseGroupResult.Message = err.Error()
+	} else if len(siteModels) > 0 {
 		baseGroupResult.Status = siteGroupSyncStatusSynced
 		baseGroupResult.Message = fmt.Sprintf("同步到 %d 个模型", len(siteModels))
 	} else {
@@ -288,7 +290,7 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 		Message:       baseGroupResult.Message,
 	}})
 	status := buildSyncSnapshotStatus(groupResults)
-	return &syncSnapshot{
+	snapshot := &syncSnapshot{
 		accessToken:  strings.TrimSpace(account.AccessToken),
 		groups:       []model.SiteUserGroup{{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}},
 		tokens:       []model.SiteToken{groupToken},
@@ -296,7 +298,11 @@ func syncWithDirectToken(ctx context.Context, siteRecord *model.Site, account *m
 		groupResults: groupResults,
 		status:       status,
 		message:      buildSyncSnapshotMessage(groupResults),
-	}, nil
+	}
+	if err != nil || status == model.SiteExecutionStatusFailed {
+		return snapshot, buildSyncSnapshotFailure(groupResults)
+	}
+	return snapshot, nil
 }
 
 func resolveManagedAccessToken(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (string, error) {

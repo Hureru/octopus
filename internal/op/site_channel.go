@@ -184,7 +184,7 @@ func buildSiteChannelGroups(ctx context.Context, site model.Site, account model.
 	projectedChannels := make(map[int]*model.Channel)
 	for _, group := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(group.GroupKey)
-		groups[key] = &model.SiteChannelGroup{GroupKey: key, GroupName: model.NormalizeSiteGroupName(key, group.Name), ProjectionDisabled: group.ProjectionDisabled, ProjectedChannelIDs: make([]int, 0), ProjectedChannels: make([]model.SiteProjectedChannelSettings, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+		groups[key] = newSiteChannelGroupView(key, model.NormalizeSiteGroupName(key, group.Name), group)
 	}
 	for _, token := range account.Tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
@@ -340,9 +340,51 @@ func ensureSiteChannelGroup(groups map[string]*model.SiteChannelGroup, groupKey 
 		}
 		return item
 	}
-	item := &model.SiteChannelGroup{GroupKey: groupKey, GroupName: model.NormalizeSiteGroupName(groupKey, groupName), ProjectedChannelIDs: make([]int, 0), ProjectedChannels: make([]model.SiteProjectedChannelSettings, 0), SourceKeys: make([]model.SiteSourceKey, 0), ProjectedKeys: make([]model.SiteProjectedKey, 0), Models: make([]model.SiteChannelModel, 0)}
+	item := newSiteChannelGroupView(groupKey, model.NormalizeSiteGroupName(groupKey, groupName), model.SiteUserGroup{})
 	groups[groupKey] = item
 	return item
+}
+
+func newSiteChannelGroupView(groupKey string, groupName string, group model.SiteUserGroup) *model.SiteChannelGroup {
+	var projectionSuspendedAt *int64
+	if group.ProjectionSuspendedAt != nil && !group.ProjectionSuspendedAt.IsZero() {
+		unix := group.ProjectionSuspendedAt.UnixMilli()
+		projectionSuspendedAt = &unix
+	}
+	var lastModelSyncAt *int64
+	if group.LastModelSyncAt != nil && !group.LastModelSyncAt.IsZero() {
+		unix := group.LastModelSyncAt.UnixMilli()
+		lastModelSyncAt = &unix
+	}
+	var lastModelSyncSuccessAt *int64
+	if group.LastModelSyncSuccessAt != nil && !group.LastModelSyncSuccessAt.IsZero() {
+		unix := group.LastModelSyncSuccessAt.UnixMilli()
+		lastModelSyncSuccessAt = &unix
+	}
+	status := group.ModelSyncStatus
+	if status == "" {
+		status = model.SiteGroupModelSyncStatusIdle
+	}
+	return &model.SiteChannelGroup{
+		GroupKey:                groupKey,
+		GroupName:               groupName,
+		ProjectionDisabled:      group.ProjectionDisabled,
+		ProjectionSuspended:     group.ProjectionSuspended,
+		ProjectionSuspendReason: group.ProjectionSuspendReason,
+		ProjectionSuspendedAt:   projectionSuspendedAt,
+		ModelSyncStatus:         status,
+		ModelSyncMessage:        group.ModelSyncMessage,
+		ModelSyncAuthoritative:  group.ModelSyncAuthoritative,
+		ModelSyncModelCount:     group.ModelSyncModelCount,
+		LastModelSyncAt:         lastModelSyncAt,
+		LastModelSyncSuccessAt:  lastModelSyncSuccessAt,
+		ModelSyncFailureCount:   group.ModelSyncFailureCount,
+		ProjectedChannelIDs:     make([]int, 0),
+		ProjectedChannels:       make([]model.SiteProjectedChannelSettings, 0),
+		SourceKeys:              make([]model.SiteSourceKey, 0),
+		ProjectedKeys:           make([]model.SiteProjectedKey, 0),
+		Models:                  make([]model.SiteChannelModel, 0),
+	}
 }
 
 func normalizeEditableSourceTokenValue(value string) (string, error) {
@@ -463,18 +505,28 @@ func SiteManualModelsAdd(siteID int, accountID int, req *model.SiteManualModelAd
 		})
 	}
 
-	var existing []model.SiteModel
-	if err := db.GetDB().WithContext(ctx).
-		Where("site_account_id = ? AND group_key = ?", accountID, groupKey).
-		Find(&existing).Error; err != nil {
-		return err
-	}
-	for _, item := range existing {
-		if _, ok := seen[strings.TrimSpace(item.ModelName)]; ok {
-			return fmt.Errorf("model already exists: %s", item.ModelName)
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing []model.SiteModel
+		if err := tx.Where("site_account_id = ? AND group_key = ?", accountID, groupKey).Find(&existing).Error; err != nil {
+			return err
 		}
-	}
-	return db.GetDB().WithContext(ctx).Create(&rows).Error
+		for _, item := range existing {
+			if _, ok := seen[strings.TrimSpace(item.ModelName)]; ok {
+				return fmt.Errorf("model already exists: %s", item.ModelName)
+			}
+		}
+		if err := tx.Create(&rows).Error; err != nil {
+			return err
+		}
+		readyKey, err := siteGroupHasReadyTokenTx(tx, accountID, groupKey)
+		if err != nil {
+			return err
+		}
+		if !readyKey {
+			return nil
+		}
+		return restoreSystemPausedSiteGroupProjectionTx(tx, accountID, groupKey)
+	})
 }
 
 func SiteManualModelDelete(siteID int, accountID int, req *model.SiteManualModelDeleteRequest, ctx context.Context) error {
@@ -662,8 +714,58 @@ func UpdateSiteSourceKeys(siteID int, accountID int, req *model.SiteSourceKeyUpd
 			}
 		}
 
-		return nil
+		readyKey, err := siteGroupHasReadyTokenTx(tx, accountID, targetGroupKey)
+		if err != nil {
+			return err
+		}
+		hasModel, err := siteGroupHasModelTx(tx, accountID, targetGroupKey)
+		if err != nil {
+			return err
+		}
+		if !readyKey || !hasModel {
+			return nil
+		}
+		return restoreSystemPausedSiteGroupProjectionTx(tx, accountID, targetGroupKey)
 	})
+}
+
+func siteGroupHasReadyTokenTx(tx *gorm.DB, accountID int, groupKey string) (bool, error) {
+	var tokens []model.SiteToken
+	if err := tx.Where("site_account_id = ? AND group_key = ?", accountID, model.NormalizeSiteGroupKey(groupKey)).Find(&tokens).Error; err != nil {
+		return false, err
+	}
+	for _, token := range tokens {
+		if token.Enabled && model.IsReadySiteToken(token) && !model.IsMaskedSiteTokenValue(token.Token) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func siteGroupHasModelTx(tx *gorm.DB, accountID int, groupKey string) (bool, error) {
+	var count int64
+	if err := tx.Model(&model.SiteModel{}).
+		Where("site_account_id = ? AND group_key = ? AND disabled = ?", accountID, model.NormalizeSiteGroupKey(groupKey), false).
+		Where("TRIM(model_name) <> ''").
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func restoreSystemPausedSiteGroupProjectionTx(tx *gorm.DB, accountID int, groupKey string) error {
+	return tx.Model(&model.SiteUserGroup{}).
+		Where("site_account_id = ? AND group_key = ?", accountID, model.NormalizeSiteGroupKey(groupKey)).
+		Where("projection_suspended = ? OR model_sync_status IN ?", true, []model.SiteGroupModelSyncStatus{model.SiteGroupModelSyncStatusEmpty, model.SiteGroupModelSyncStatusMissingKey}).
+		Updates(map[string]any{
+			"projection_suspended":      false,
+			"projection_suspend_reason": "",
+			"projection_suspended_at":   nil,
+			"model_sync_status":         model.SiteGroupModelSyncStatusIdle,
+			"model_sync_message":        "",
+			"model_sync_authoritative":  false,
+			"model_sync_failure_count":  0,
+		}).Error
 }
 
 func countSiteChannelModels(groups []model.SiteChannelGroup) int {

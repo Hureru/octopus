@@ -106,13 +106,9 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 	siteModels = expandExplicitGroupModelsToGroups(siteModels, groups, tokens)
 	groupResults := finalizeSiteGroupSyncResults(account, groups, tokens, siteModels, tokenGroupResults)
 	status := buildSyncSnapshotStatus(groupResults)
-	if status == model.SiteExecutionStatusFailed {
-		return nil, buildSyncSnapshotFailure(groupResults)
-	}
-
 	balance, balanceUsed, todayIncome := fetchSiteAccountBalance(ctx, siteRecord, account, accessToken, userID)
 	message := buildSyncSnapshotMessage(groupResults)
-	return &syncSnapshot{
+	snapshot := &syncSnapshot{
 		accessToken:  accessToken,
 		groups:       groups,
 		tokens:       tokens,
@@ -123,7 +119,11 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		balanceUsed:  balanceUsed,
 		todayIncome:  todayIncome,
 		message:      message,
-	}, nil
+	}
+	if status == model.SiteExecutionStatusFailed {
+		return snapshot, buildSyncSnapshotFailure(groupResults)
+	}
+	return snapshot, nil
 }
 
 func checkinAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (*model.SiteCheckinResult, string, error) {
@@ -861,7 +861,7 @@ func anyRouterFormatHTTPError(statusCode int, header http.Header, body string) e
 		}
 	}
 	bodyBytes := []byte(body)
-	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+	if IsCloudflareProtectionResponse(statusCode, header, bodyBytes) {
 		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
 	}
 	if summary := anyRouterExtractHTMLErrorSummary(body); summary != "" {

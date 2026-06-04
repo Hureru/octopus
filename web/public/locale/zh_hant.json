@@ -231,7 +231,51 @@
             },
             "hint": "當渠道連續失敗達到閾值後觸發熔斷，冷卻時間按指數退避增長，上限為最大冷卻時間"
         },
+        "outlierRetirement": {
+            "title": "被動離群退役",
+            "hint": "基於真實請求的成敗序列自動退役持續失敗的投影渠道（停用而非刪除），探活恢復後自動啟用。僅作用於站點投影渠道，預設關閉。",
+            "enabled": {
+                "label": "啟用被動離群退役"
+            },
+            "interval": {
+                "label": "評估間隔（分鐘）",
+                "placeholder": "請輸入間隔分鐘數"
+            },
+            "failRate": {
+                "label": "失敗率閾值（%）",
+                "placeholder": "請輸入失敗率百分比"
+            },
+            "minSamples": {
+                "label": "最小樣本數",
+                "placeholder": "請輸入最小樣本數"
+            },
+            "consecFails": {
+                "label": "連續失敗閾值",
+                "placeholder": "請輸入連續失敗次數"
+            },
+            "windowMinutes": {
+                "label": "滾動視窗時長（分鐘）",
+                "placeholder": "請輸入視窗分鐘數"
+            },
+            "windowCapacity": {
+                "label": "視窗樣本上限（≤20）",
+                "placeholder": "請輸入樣本上限"
+            },
+            "recoverStreak": {
+                "label": "恢復所需連續探活成功次數",
+                "placeholder": "請輸入成功次數"
+            },
+            "reapMinutes": {
+                "label": "視窗回收時長（分鐘）",
+                "placeholder": "請輸入回收分鐘數"
+            },
+            "cfRecoverMinutes": {
+                "label": "Cloudflare 退役恢復冷卻（分鐘）",
+                "placeholder": "請輸入冷卻分鐘數"
+            }
+        },
         "saved": "已儲存",
+        "saveFailed": "儲存失敗",
         "backup": {
             "title": "備份 / 復原",
             "export": {

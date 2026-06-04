@@ -34,12 +34,25 @@ const (
 
 type SiteExecutionStatus string
 
+type SiteGroupModelSyncStatus string
+
 const (
 	SiteExecutionStatusIdle    SiteExecutionStatus = "idle"
 	SiteExecutionStatusSuccess SiteExecutionStatus = "success"
 	SiteExecutionStatusPartial SiteExecutionStatus = "partial"
 	SiteExecutionStatusFailed  SiteExecutionStatus = "failed"
 	SiteExecutionStatusSkipped SiteExecutionStatus = "skipped"
+)
+
+const (
+	SiteGroupModelSyncStatusIdle       SiteGroupModelSyncStatus = "idle"
+	SiteGroupModelSyncStatusSynced     SiteGroupModelSyncStatus = "synced"
+	SiteGroupModelSyncStatusEmpty      SiteGroupModelSyncStatus = "empty"
+	SiteGroupModelSyncStatusStale      SiteGroupModelSyncStatus = "stale"
+	SiteGroupModelSyncStatusFailed     SiteGroupModelSyncStatus = "failed"
+	SiteGroupModelSyncStatusUnresolved SiteGroupModelSyncStatus = "unresolved"
+	SiteGroupModelSyncStatusMissingKey SiteGroupModelSyncStatus = "missing_key"
+	SiteGroupModelSyncStatusRemoved    SiteGroupModelSyncStatus = "removed"
 )
 
 type SiteModelRouteType string
@@ -202,12 +215,22 @@ type SiteToken struct {
 }
 
 type SiteUserGroup struct {
-	ID                 int    `json:"id" gorm:"primaryKey"`
-	SiteAccountID      int    `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_group;not null"`
-	GroupKey           string `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_account_group;not null"`
-	Name               string `json:"name"`
-	RawPayload         string `json:"raw_payload"`
-	ProjectionDisabled bool   `json:"projection_disabled" gorm:"default:false"`
+	ID                      int                      `json:"id" gorm:"primaryKey"`
+	SiteAccountID           int                      `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_group;not null"`
+	GroupKey                string                   `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_account_group;not null"`
+	Name                    string                   `json:"name"`
+	RawPayload              string                   `json:"raw_payload"`
+	ProjectionDisabled      bool                     `json:"projection_disabled" gorm:"default:false"`
+	ProjectionSuspended     bool                     `json:"projection_suspended" gorm:"default:false;index"`
+	ProjectionSuspendReason string                   `json:"projection_suspend_reason"`
+	ProjectionSuspendedAt   *time.Time               `json:"projection_suspended_at"`
+	ModelSyncStatus         SiteGroupModelSyncStatus `json:"model_sync_status" gorm:"type:varchar(32);not null;default:'idle';index"`
+	ModelSyncMessage        string                   `json:"model_sync_message"`
+	ModelSyncAuthoritative  bool                     `json:"model_sync_authoritative" gorm:"default:false"`
+	ModelSyncModelCount     int                      `json:"model_sync_model_count" gorm:"default:0"`
+	LastModelSyncAt         *time.Time               `json:"last_model_sync_at"`
+	LastModelSyncSuccessAt  *time.Time               `json:"last_model_sync_success_at"`
+	ModelSyncFailureCount   int                      `json:"model_sync_failure_count" gorm:"default:0"`
 }
 
 type SiteModel struct {
@@ -326,13 +349,15 @@ type SiteSyncResult struct {
 }
 
 type SiteSyncGroupResult struct {
-	GroupKey      string `json:"group_key"`
-	GroupName     string `json:"group_name"`
-	HasKey        bool   `json:"has_key"`
-	Status        string `json:"status"`
-	Authoritative bool   `json:"authoritative"`
-	ModelCount    int    `json:"model_count"`
-	Message       string `json:"message,omitempty"`
+	GroupKey                string `json:"group_key"`
+	GroupName               string `json:"group_name"`
+	HasKey                  bool   `json:"has_key"`
+	Status                  string `json:"status"`
+	Authoritative           bool   `json:"authoritative"`
+	ModelCount              int    `json:"model_count"`
+	Message                 string `json:"message,omitempty"`
+	ProjectionSuspended     bool   `json:"projection_suspended"`
+	ProjectionSuspendReason string `json:"projection_suspend_reason,omitempty"`
 }
 
 type SiteCheckinResult struct {

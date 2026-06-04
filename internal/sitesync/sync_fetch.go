@@ -680,7 +680,7 @@ func syncSiteModelsByGroup(
 				groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), err.Error())
 			} else {
 				groupResult.Status = siteGroupSyncStatusUnresolved
-				groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), "本次未能确认该分组模型，已保留历史模型")
+				groupResult.Message = firstNonEmptyString(strings.TrimSpace(result.message), "本次未能确认该分组模型，已沿用历史投影")
 			}
 			results = append(results, groupResult)
 			continue

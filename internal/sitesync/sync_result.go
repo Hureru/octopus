@@ -75,10 +75,10 @@ func buildSyncSnapshotMessage(results []siteGroupSyncResult) string {
 		parts = append(parts, fmt.Sprintf("移除 %d 个分组", counts[siteGroupSyncStatusRemoved]))
 	}
 	if counts[siteGroupSyncStatusUnresolved] > 0 || counts[siteGroupSyncStatusFailed] > 0 {
-		parts = append(parts, fmt.Sprintf("保留 %d 个分组的历史模型", counts[siteGroupSyncStatusUnresolved]+counts[siteGroupSyncStatusFailed]))
+		parts = append(parts, fmt.Sprintf("保留 %d 个分组的历史投影", counts[siteGroupSyncStatusUnresolved]+counts[siteGroupSyncStatusFailed]))
 	}
 	if counts[siteGroupSyncStatusMissingKey] > 0 {
-		parts = append(parts, fmt.Sprintf("%d 个分组缺少可用 Key", counts[siteGroupSyncStatusMissingKey]))
+		parts = append(parts, fmt.Sprintf("暂停 %d 个缺少可用 Key 的分组投影", counts[siteGroupSyncStatusMissingKey]))
 	}
 
 	message := strings.Join(parts, "，")
@@ -98,7 +98,7 @@ func buildSyncSnapshotMessage(results []siteGroupSyncResult) string {
 		}
 		return "同步完成：" + message
 	default:
-		return "同步失败：所有分组都未能确认模型，已保留历史模型"
+		return "同步失败：所有分组都未能确认模型，已保留历史投影"
 	}
 }
 
@@ -121,7 +121,7 @@ func buildSyncSnapshotFailure(results []siteGroupSyncResult) error {
 	if len(parts) == 0 {
 		return newAllGroupsUnresolvedError("")
 	}
-	return newAllGroupsUnresolvedError(fmt.Sprintf("站点账号同步失败：所有分组都未能确认模型，已保留历史模型。%s", strings.Join(parts, "；")))
+	return newAllGroupsUnresolvedError(fmt.Sprintf("站点账号同步失败：所有分组都未能确认模型，已保留历史投影。%s", strings.Join(parts, "；")))
 }
 
 func finalizeSiteGroupSyncResults(
@@ -186,10 +186,10 @@ func finalizeSiteGroupSyncResults(
 			result.Message = fmt.Sprintf("通过显式分组元数据同步到 %d 个模型", count)
 		} else if hasKeyMap[groupKey] {
 			result.Status = siteGroupSyncStatusUnresolved
-			result.Message = "本次未能确认该分组模型，已保留历史模型"
+			result.Message = "本次未能确认该分组模型，已沿用历史投影"
 		} else {
 			result.Status = siteGroupSyncStatusMissingKey
-			result.Message = "该分组没有可用 Key，本次保留历史模型"
+			result.Message = "该分组没有可用 Key，已暂停投影"
 		}
 		resultMap[groupKey] = result
 	}
@@ -216,6 +216,26 @@ func finalizeSiteGroupSyncResults(
 		return results[i].GroupKey < results[j].GroupKey
 	})
 	return results
+}
+
+func isSuspendedGroupSyncStatus(status siteGroupSyncStatus) bool {
+	switch status {
+	case siteGroupSyncStatusEmpty, siteGroupSyncStatusMissingKey:
+		return true
+	default:
+		return false
+	}
+}
+
+func suspendReasonForGroupResult(item siteGroupSyncResult, suspended bool) string {
+	if !suspended {
+		return ""
+	}
+	message := strings.TrimSpace(item.Message)
+	if message == "" {
+		return "本次未能确认该分组模型，已暂停投影"
+	}
+	return message
 }
 
 func collectCurrentGroupNames(account *model.SiteAccount, groups []model.SiteUserGroup, tokens []model.SiteToken) map[string]string {
@@ -277,14 +297,17 @@ func exportSiteSyncGroupResults(results []siteGroupSyncResult) []model.SiteSyncG
 	}
 	exported := make([]model.SiteSyncGroupResult, 0, len(results))
 	for _, item := range results {
+		suspended := isSuspendedGroupSyncStatus(item.Status)
 		exported = append(exported, model.SiteSyncGroupResult{
-			GroupKey:      item.GroupKey,
-			GroupName:     item.GroupName,
-			HasKey:        item.HasKey,
-			Status:        string(item.Status),
-			Authoritative: item.Authoritative,
-			ModelCount:    item.ModelCount,
-			Message:       item.Message,
+			GroupKey:                item.GroupKey,
+			GroupName:               item.GroupName,
+			HasKey:                  item.HasKey,
+			Status:                  string(item.Status),
+			Authoritative:           item.Authoritative,
+			ModelCount:              item.ModelCount,
+			Message:                 item.Message,
+			ProjectionSuspended:     suspended,
+			ProjectionSuspendReason: suspendReasonForGroupResult(item, suspended),
 		})
 	}
 	return exported
