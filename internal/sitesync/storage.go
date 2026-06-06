@@ -107,11 +107,23 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 			return err
 		}
 
+		groupResultMap := make(map[string]siteGroupSyncResult, len(snapshot.groupResults))
+		for _, result := range snapshot.groupResults {
+			groupResultMap[model.NormalizeSiteGroupKey(result.GroupKey)] = result
+		}
 		for i := range snapshot.groups {
 			snapshot.groups[i].SiteAccountID = accountID
 			snapshot.groups[i].GroupKey = model.NormalizeSiteGroupKey(snapshot.groups[i].GroupKey)
-			if existing, ok := existingGroupMap[snapshot.groups[i].GroupKey]; ok {
-				snapshot.groups[i].ProjectionDisabled = existing.ProjectionDisabled
+			var existing *model.SiteUserGroup
+			if item, ok := existingGroupMap[snapshot.groups[i].GroupKey]; ok {
+				itemCopy := item
+				existing = &itemCopy
+				snapshot.groups[i].ProjectionDisabled = item.ProjectionDisabled
+			}
+			if result, ok := groupResultMap[snapshot.groups[i].GroupKey]; ok {
+				applyPersistedGroupSyncState(&snapshot.groups[i], existing, result, now)
+			} else if existing != nil {
+				copyPersistedGroupSyncState(&snapshot.groups[i], *existing)
 			}
 		}
 		mergedTokens := mergePersistedSiteTokens(accountID, existingTokens, snapshot.tokens, now)
@@ -168,6 +180,85 @@ func preparePersistedSyncModels(accountID int, incoming []model.SiteModel, exist
 		prepared = append(prepared, item)
 	}
 	return compactPersistedSiteModels(prepared)
+}
+
+func copyPersistedGroupSyncState(group *model.SiteUserGroup, existing model.SiteUserGroup) {
+	group.ProjectionSuspended = existing.ProjectionSuspended
+	group.ProjectionSuspendReason = existing.ProjectionSuspendReason
+	group.ProjectionSuspendedAt = existing.ProjectionSuspendedAt
+	group.ModelSyncStatus = existing.ModelSyncStatus
+	group.ModelSyncMessage = existing.ModelSyncMessage
+	group.ModelSyncAuthoritative = existing.ModelSyncAuthoritative
+	group.ModelSyncModelCount = existing.ModelSyncModelCount
+	group.LastModelSyncAt = existing.LastModelSyncAt
+	group.LastModelSyncSuccessAt = existing.LastModelSyncSuccessAt
+	group.ModelSyncFailureCount = existing.ModelSyncFailureCount
+}
+
+func applyPersistedGroupSyncState(group *model.SiteUserGroup, existing *model.SiteUserGroup, result siteGroupSyncResult, now time.Time) {
+	if existing != nil {
+		group.ModelSyncFailureCount = existing.ModelSyncFailureCount
+		group.LastModelSyncSuccessAt = existing.LastModelSyncSuccessAt
+	}
+	group.ModelSyncStatus = modelSiteGroupSyncStatus(result.Status)
+	group.ModelSyncMessage = sanitizeSiteStatusText(result.Message)
+	group.ModelSyncAuthoritative = result.Authoritative
+	group.ModelSyncModelCount = result.ModelCount
+	group.LastModelSyncAt = &now
+
+	switch result.Status {
+	case siteGroupSyncStatusSynced:
+		group.ProjectionSuspended = false
+		group.ProjectionSuspendReason = ""
+		group.ProjectionSuspendedAt = nil
+		group.LastModelSyncSuccessAt = &now
+		group.ModelSyncFailureCount = 0
+	case siteGroupSyncStatusEmpty:
+		group.ProjectionSuspended = true
+		group.ProjectionSuspendReason = firstNonEmptyString(group.ModelSyncMessage, "上游当前无可用模型，已暂停投影")
+		group.ProjectionSuspendedAt = &now
+		group.ModelSyncFailureCount = 0
+	case siteGroupSyncStatusRemoved:
+		group.ProjectionSuspended = false
+		group.ProjectionSuspendReason = ""
+		group.ProjectionSuspendedAt = nil
+		group.ModelSyncFailureCount = 0
+	case siteGroupSyncStatusMissingKey:
+		group.ProjectionSuspended = true
+		group.ProjectionSuspendReason = firstNonEmptyString(group.ModelSyncMessage, "该分组没有可用 Key，已暂停投影")
+		group.ProjectionSuspendedAt = &now
+		group.ModelSyncFailureCount++
+	case siteGroupSyncStatusFailed, siteGroupSyncStatusUnresolved:
+		group.ProjectionSuspended = false
+		group.ProjectionSuspendReason = ""
+		group.ProjectionSuspendedAt = nil
+		group.ModelSyncFailureCount++
+	default:
+		if existing != nil {
+			group.ProjectionSuspended = existing.ProjectionSuspended
+			group.ProjectionSuspendReason = existing.ProjectionSuspendReason
+			group.ProjectionSuspendedAt = existing.ProjectionSuspendedAt
+		}
+	}
+}
+
+func modelSiteGroupSyncStatus(status siteGroupSyncStatus) model.SiteGroupModelSyncStatus {
+	switch status {
+	case siteGroupSyncStatusSynced:
+		return model.SiteGroupModelSyncStatusSynced
+	case siteGroupSyncStatusEmpty:
+		return model.SiteGroupModelSyncStatusEmpty
+	case siteGroupSyncStatusFailed:
+		return model.SiteGroupModelSyncStatusFailed
+	case siteGroupSyncStatusUnresolved:
+		return model.SiteGroupModelSyncStatusUnresolved
+	case siteGroupSyncStatusMissingKey:
+		return model.SiteGroupModelSyncStatusMissingKey
+	case siteGroupSyncStatusRemoved:
+		return model.SiteGroupModelSyncStatusRemoved
+	default:
+		return model.SiteGroupModelSyncStatusIdle
+	}
 }
 
 func mergePersistedSiteModelsByGroup(existing []model.SiteModel, incoming []model.SiteModel, results []siteGroupSyncResult) []model.SiteModel {

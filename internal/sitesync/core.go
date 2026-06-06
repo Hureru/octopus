@@ -35,13 +35,17 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		return nil, sanitizeSiteError(err)
 	}
 
-	snapshot, err := syncAccountState(ctx, siteRecord, account)
-	if err != nil {
-		updateErr := updateAccountSyncState(ctx, account.ID, model.SiteExecutionStatusFailed, sanitizeSiteStatusMessage(err), "")
+	snapshot, syncErr := syncAccountState(ctx, siteRecord, account)
+	if snapshot == nil && syncErr != nil {
+		message := sanitizeSiteStatusMessage(syncErr)
+		updateErr := updateAccountSyncState(ctx, account.ID, model.SiteExecutionStatusFailed, message, "")
 		if updateErr != nil {
 			log.Warnf("failed to update site account sync state (account=%d): %v", account.ID, updateErr)
 		}
-		return nil, sanitizeSiteError(err)
+		if staleErr := MarkAccountProjectionStale(ctx, account.ID, message); staleErr != nil {
+			log.Warnf("failed to mark site account projection stale (account=%d): %v", account.ID, staleErr)
+		}
+		return nil, sanitizeSiteError(syncErr)
 	}
 
 	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
@@ -59,7 +63,7 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 	}
 	slices.Sort(modelNames)
 
-	return &model.SiteSyncResult{
+	result := &model.SiteSyncResult{
 		AccountID:       account.ID,
 		SiteID:          siteRecord.ID,
 		Status:          snapshot.status,
@@ -71,7 +75,11 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		Models:          modelNames,
 		GroupResults:    exportSiteSyncGroupResults(snapshot.groupResults),
 		Message:         sanitizeSiteStatusText(snapshot.message),
-	}, nil
+	}
+	if syncErr != nil {
+		return result, sanitizeSiteError(syncErr)
+	}
+	return result, nil
 }
 
 func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResult, error) {

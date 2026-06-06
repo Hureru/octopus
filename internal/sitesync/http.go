@@ -131,7 +131,7 @@ func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) e
 			return newSiteHTTPError(statusCode, message)
 		}
 	}
-	if isCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+	if IsCloudflareProtectionResponse(statusCode, header, bodyBytes) {
 		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
 	}
 	if summary := extractSiteHTMLResponseSummary(header.Get("Content-Type"), bodyBytes); summary != "" {
@@ -140,7 +140,9 @@ func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) e
 	return newSiteHTTPError(statusCode, "上游返回非 JSON 响应，无法解析为接口响应")
 }
 
-func isCloudflareProtectionResponse(statusCode int, header http.Header, bodyBytes []byte) bool {
+// IsCloudflareProtectionResponse 判断一次上游响应是否为 Cloudflare 防护拦截（403 + CF 指纹）。
+// 供 sitesync 内部与被动离群退役（POR）门3 复用。
+func IsCloudflareProtectionResponse(statusCode int, header http.Header, bodyBytes []byte) bool {
 	if statusCode != http.StatusForbidden {
 		return false
 	}

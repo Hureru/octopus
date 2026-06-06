@@ -28,19 +28,29 @@ type SiteRouteSummary struct {
 }
 
 type SiteChannelGroup struct {
-	GroupKey              string                         `json:"group_key"`
-	GroupName             string                         `json:"group_name"`
-	ProjectionDisabled    bool                           `json:"projection_disabled"`
-	KeyCount              int                            `json:"key_count"`
-	EnabledKeyCount       int                            `json:"enabled_key_count"`
-	MaskedPendingKeyCount int                            `json:"masked_pending_key_count"`
-	HasKeys               bool                           `json:"has_keys"`
-	HasProjectedChannel   bool                           `json:"has_projected_channel"`
-	ProjectedChannelIDs   []int                          `json:"projected_channel_ids"`
-	ProjectedChannels     []SiteProjectedChannelSettings `json:"projected_channels,omitempty"`
-	SourceKeys            []SiteSourceKey                `json:"source_keys,omitempty"`
-	ProjectedKeys         []SiteProjectedKey             `json:"projected_keys,omitempty"`
-	Models                []SiteChannelModel             `json:"models"`
+	GroupKey                string                         `json:"group_key"`
+	GroupName               string                         `json:"group_name"`
+	ProjectionDisabled      bool                           `json:"projection_disabled"`
+	ProjectionSuspended     bool                           `json:"projection_suspended"`
+	ProjectionSuspendReason string                         `json:"projection_suspend_reason,omitempty"`
+	ProjectionSuspendedAt   *int64                         `json:"projection_suspended_at,omitempty"`
+	ModelSyncStatus         SiteGroupModelSyncStatus       `json:"model_sync_status"`
+	ModelSyncMessage        string                         `json:"model_sync_message,omitempty"`
+	ModelSyncAuthoritative  bool                           `json:"model_sync_authoritative"`
+	ModelSyncModelCount     int                            `json:"model_sync_model_count"`
+	LastModelSyncAt         *int64                         `json:"last_model_sync_at,omitempty"`
+	LastModelSyncSuccessAt  *int64                         `json:"last_model_sync_success_at,omitempty"`
+	ModelSyncFailureCount   int                            `json:"model_sync_failure_count"`
+	KeyCount                int                            `json:"key_count"`
+	EnabledKeyCount         int                            `json:"enabled_key_count"`
+	MaskedPendingKeyCount   int                            `json:"masked_pending_key_count"`
+	HasKeys                 bool                           `json:"has_keys"`
+	HasProjectedChannel     bool                           `json:"has_projected_channel"`
+	ProjectedChannelIDs     []int                          `json:"projected_channel_ids"`
+	ProjectedChannels       []SiteProjectedChannelSettings `json:"projected_channels,omitempty"`
+	SourceKeys              []SiteSourceKey                `json:"source_keys,omitempty"`
+	ProjectedKeys           []SiteProjectedKey             `json:"projected_keys,omitempty"`
+	Models                  []SiteChannelModel             `json:"models"`
 }
 
 type SiteSourceKey struct {

@@ -30,6 +30,16 @@ export const SettingKey = {
     SSEPreStreamHeartbeatDelay: 'sse_pre_stream_heartbeat_delay',
     GroupHealthEnabled: 'group_health_enabled',
     ProjectedChannelAutoGroupEnabled: 'projected_channel_auto_group_enabled',
+    OutlierRetireEnabled: 'outlier_retire_enabled',
+    OutlierRetireInterval: 'outlier_retire_interval',
+    OutlierWindowCapacity: 'outlier_window_capacity',
+    OutlierWindowMinutes: 'outlier_window_minutes',
+    OutlierMinSamples: 'outlier_min_samples',
+    OutlierFailRatePct: 'outlier_fail_rate_pct',
+    OutlierConsecFails: 'outlier_consec_fails',
+    OutlierRecoverStreak: 'outlier_recover_streak',
+    OutlierReapMinutes: 'outlier_reap_minutes',
+    OutlierCFRecoverMinutes: 'outlier_cf_recover_minutes',
 } as const;
 
 /**

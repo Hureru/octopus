@@ -91,4 +91,11 @@ func Init() {
 			log.Debugf("ws response affinity cleanup removed %d expired rows", deleted)
 		}
 	})
+
+	// 注册被动离群退役(POR)任务（默认间隔 2 分钟，总开关在任务内判断）
+	outlierIntervalMinutes, err := op.SettingGetInt(model.SettingKeyOutlierRetireInterval)
+	if err != nil || outlierIntervalMinutes <= 0 {
+		outlierIntervalMinutes = 2
+	}
+	Register(string(model.SettingKeyOutlierRetireInterval), time.Duration(outlierIntervalMinutes)*time.Minute, false, SiteOutlierRetireTask)
 }

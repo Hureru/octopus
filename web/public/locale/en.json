@@ -231,7 +231,51 @@
             },
             "hint": "When a channel fails consecutively up to the threshold, circuit breaker trips. Cooldown grows exponentially up to the max cooldown"
         },
+        "outlierRetirement": {
+            "title": "Passive Outlier Retirement",
+            "hint": "Automatically retires (disables, not deletes) projected channels that keep failing, based on real request success/failure sequences; auto-recovers via probing. Applies only to site projected channels. Off by default.",
+            "enabled": {
+                "label": "Enable Passive Outlier Retirement"
+            },
+            "interval": {
+                "label": "Evaluation Interval (minutes)",
+                "placeholder": "Enter interval in minutes"
+            },
+            "failRate": {
+                "label": "Failure Rate Threshold (%)",
+                "placeholder": "Enter failure rate percent"
+            },
+            "minSamples": {
+                "label": "Minimum Samples",
+                "placeholder": "Enter minimum samples"
+            },
+            "consecFails": {
+                "label": "Consecutive Failure Threshold",
+                "placeholder": "Enter consecutive failures"
+            },
+            "windowMinutes": {
+                "label": "Rolling Window Duration (minutes)",
+                "placeholder": "Enter window minutes"
+            },
+            "windowCapacity": {
+                "label": "Window Sample Capacity (≤20)",
+                "placeholder": "Enter sample capacity"
+            },
+            "recoverStreak": {
+                "label": "Consecutive Probe Successes to Recover",
+                "placeholder": "Enter success count"
+            },
+            "reapMinutes": {
+                "label": "Idle Window Reap TTL (minutes)",
+                "placeholder": "Enter reap minutes"
+            },
+            "cfRecoverMinutes": {
+                "label": "Cloudflare Retired Recovery Cooldown (minutes)",
+                "placeholder": "Enter cooldown minutes"
+            }
+        },
         "saved": "Saved",
+        "saveFailed": "Save failed",
         "backup": {
             "title": "Backup / Restore",
             "export": {

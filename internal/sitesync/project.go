@@ -40,7 +40,9 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	groupMap := make(map[string]model.SiteUserGroup)
 	for _, item := range account.UserGroups {
 		key := model.NormalizeSiteGroupKey(item.GroupKey)
-		groupMap[key] = model.SiteUserGroup{ID: item.ID, SiteAccountID: account.ID, GroupKey: key, Name: model.NormalizeSiteGroupName(key, item.Name), RawPayload: item.RawPayload, ProjectionDisabled: item.ProjectionDisabled}
+		item.GroupKey = key
+		item.Name = model.NormalizeSiteGroupName(key, item.Name)
+		groupMap[key] = item
 	}
 	if len(groupMap) == 0 {
 		groupMap[model.SiteDefaultGroupKey] = model.SiteUserGroup{SiteAccountID: account.ID, GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
@@ -67,6 +69,10 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			continue
 		}
 		groupKey := model.NormalizeSiteGroupKey(item.GroupKey)
+		group, ok := groupMap[groupKey]
+		if !ok || !isSiteGroupProjectionActive(siteRecord, account, group, tokenGroups[groupKey]) {
+			continue
+		}
 		item.GroupKey = groupKey
 		item.ModelName = name
 		if !siteModelBelongsToProjectedGroup(item, groupKey) {
@@ -97,7 +103,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 
 	desiredKeys := make([]string, 0, len(groupMap))
 	for groupKey, group := range groupMap {
-		if len(tokenGroups[groupKey]) > 0 && !group.ProjectionDisabled {
+		if isSiteGroupProjectionActive(siteRecord, account, group, tokenGroups[groupKey]) {
 			desiredKeys = append(desiredKeys, groupKey)
 		}
 	}
@@ -114,7 +120,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		modelBuckets := partitionSiteModelsByRouteType(groupModels, shouldSplit, siteRecord.Platform)
 		proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
 		baseUrls := []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}}
-		enabled := siteRecord.Enabled && account.Enabled && len(groupTokens) > 0
+		enabled := siteRecord.Enabled && account.Enabled && hasUsableToken(groupTokens)
 		for routeType, bucketModels := range modelBuckets {
 			if len(bucketModels) == 0 {
 				continue
@@ -232,12 +238,22 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 			desiredSet[compositeBindingKey(groupKey, obType, shouldSplit)] = struct{}{}
 		}
 	}
-	if err := rewriteManagedGroupItemsForAccount(ctx, account.ID, shouldSplit, account.Models, bindingChannelByKey); err != nil {
+	if err := rewriteManagedGroupItemsForAccount(ctx, siteRecord, account, shouldSplit, groupMap, tokenGroups, account.Models, bindingChannelByKey); err != nil {
 		return nil, err
 	}
 	for _, binding := range existingBindings {
-		groupKey := model.NormalizeSiteGroupKey(binding.GroupKey)
-		if _, ok := desiredSet[groupKey]; ok {
+		bindingKey := model.NormalizeSiteGroupKey(binding.GroupKey)
+		if _, ok := desiredSet[bindingKey]; ok {
+			continue
+		}
+		baseGroupKey, _ := parseCompositeBindingKey(bindingKey)
+		if group, ok := groupMap[baseGroupKey]; ok && isSiteGroupProjectionSystemPaused(group) {
+			if err := updateSiteChannelBindingGroup(ctx, binding.ID, group); err != nil {
+				return nil, err
+			}
+			if err := op.ChannelEnabledManaged(binding.ChannelID, false, ctx); err != nil {
+				log.Warnf("failed to disable system-paused managed channel %d: %v", binding.ChannelID, err)
+			}
 			continue
 		}
 		if err := op.ChannelDelManaged(binding.ChannelID, ctx); err != nil {
@@ -248,7 +264,75 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		}
 	}
 
+	// POR 覆盖：本次同步可能把数据面已退役的渠道重新 enabled，按退役状态压回 disabled。
+	// 仅作用于 managedChannelIDs（本轮实际投影/启用的渠道），不影响上面已清理删除的过时绑定。
+	for _, channelID := range managedChannelIDs {
+		retired, err := op.SiteChannelOutlierIsRetired(channelID, ctx)
+		if err != nil {
+			log.Warnf("POR retired check failed for channel %d: %v", channelID, err)
+			continue
+		}
+		if retired {
+			if err := op.ChannelEnabledManaged(channelID, false, ctx); err != nil {
+				log.Warnf("POR keep retired channel %d disabled failed: %v", channelID, err)
+			}
+		}
+	}
+
 	return managedChannelIDs, nil
+}
+
+func isSiteGroupProjectionActive(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, tokens []model.SiteToken) bool {
+	if siteRecord == nil || account == nil {
+		return false
+	}
+	if !siteRecord.Enabled || !account.Enabled {
+		return false
+	}
+	if !hasUsableToken(tokens) {
+		return false
+	}
+	if group.ProjectionDisabled || group.ProjectionSuspended {
+		return false
+	}
+	switch group.ModelSyncStatus {
+	case "", model.SiteGroupModelSyncStatusIdle,
+		model.SiteGroupModelSyncStatusSynced,
+		model.SiteGroupModelSyncStatusStale,
+		model.SiteGroupModelSyncStatusFailed,
+		model.SiteGroupModelSyncStatusUnresolved:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSiteGroupProjectionSystemPaused(group model.SiteUserGroup) bool {
+	if group.ProjectionDisabled {
+		return false
+	}
+	if group.ProjectionSuspended {
+		return true
+	}
+	switch group.ModelSyncStatus {
+	case model.SiteGroupModelSyncStatusEmpty, model.SiteGroupModelSyncStatusMissingKey:
+		return true
+	default:
+		return false
+	}
+}
+
+func updateSiteChannelBindingGroup(ctx context.Context, bindingID int, group model.SiteUserGroup) error {
+	updates := map[string]any{}
+	if group.ID != 0 {
+		updates["site_user_group_id"] = group.ID
+	} else {
+		updates["site_user_group_id"] = nil
+	}
+	if err := db.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{}).Where("id = ?", bindingID).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update paused site channel binding: %w", err)
+	}
+	return nil
 }
 
 func ProjectSite(ctx context.Context, siteID int) error {
@@ -333,16 +417,34 @@ func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
 	}
 	return baseURL + "/v1"
 }
+
+// isUsableSiteToken reports whether a token can produce a projected channel
+// key: it must be ready, unmasked, and carry a non-empty normalized value.
+func isUsableSiteToken(token model.SiteToken) bool {
+	if !model.IsReadySiteToken(token) || model.IsMaskedSiteTokenValue(token.Token) {
+		return false
+	}
+	return model.NormalizeSiteSyncTokenValue(token.Token) != ""
+}
+
+// hasUsableToken reports whether at least one token would yield a channel key,
+// keeping projection activation aligned with buildChannelKeys.
+func hasUsableToken(tokens []model.SiteToken) bool {
+	for _, token := range tokens {
+		if isUsableSiteToken(token) {
+			return true
+		}
+	}
+	return false
+}
+
 func buildChannelKeys(tokens []model.SiteToken) []model.ChannelKey {
 	keys := make([]model.ChannelKey, 0, len(tokens))
 	for _, token := range tokens {
-		if !model.IsReadySiteToken(token) || model.IsMaskedSiteTokenValue(token.Token) {
+		if !isUsableSiteToken(token) {
 			continue
 		}
 		normalized := model.NormalizeSiteSyncTokenValue(token.Token)
-		if normalized == "" {
-			continue
-		}
 		keys = append(keys, model.ChannelKey{Enabled: token.Enabled, ChannelKey: normalized, Remark: model.NormalizeSiteGroupName(token.GroupKey, token.GroupName)})
 	}
 	return keys
@@ -542,10 +644,11 @@ func parseCompositeBindingKey(groupKey string) (string, model.SiteModelRouteType
 	return model.ParseSiteChannelBindingKey(groupKey)
 }
 
-func rewriteManagedGroupItemsForAccount(ctx context.Context, accountID int, split bool, accountModels []model.SiteModel, bindingChannelByKey map[string]int) error {
-	if len(bindingChannelByKey) == 0 {
+func rewriteManagedGroupItemsForAccount(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, split bool, groupMap map[string]model.SiteUserGroup, tokenGroups map[string][]model.SiteToken, accountModels []model.SiteModel, bindingChannelByKey map[string]int) error {
+	if account == nil {
 		return nil
 	}
+	accountID := account.ID
 	var bindings []model.SiteChannelBinding
 	if err := db.GetDB().WithContext(ctx).Where("site_account_id = ?", accountID).Find(&bindings).Error; err != nil {
 		return fmt.Errorf("failed to list bindings for group rewrite: %w", err)
@@ -570,6 +673,19 @@ func rewriteManagedGroupItemsForAccount(ctx context.Context, accountID int, spli
 		if item.Disabled {
 			continue
 		}
+		baseGroupKey := model.NormalizeSiteGroupKey(item.GroupKey)
+		group, ok := groupMap[baseGroupKey]
+		if !ok || !isSiteGroupProjectionActive(siteRecord, account, group, tokenGroups[baseGroupKey]) {
+			continue
+		}
+		if !siteModelBelongsToProjectedGroup(item, baseGroupKey) {
+			continue
+		}
+		item.GroupKey = baseGroupKey
+		item.ModelName = strings.TrimSpace(item.ModelName)
+		if item.ModelName == "" {
+			continue
+		}
 		key := model.NormalizeSiteGroupKey(item.GroupKey) + "\x00" + strings.TrimSpace(item.ModelName)
 		activeModelKeys[key] = struct{}{}
 		routeType := model.NormalizeSiteModelRouteType(item.RouteType)
@@ -591,6 +707,9 @@ func rewriteManagedGroupItemsForAccount(ctx context.Context, accountID int, spli
 			continue
 		}
 		baseGroupKey, _ := parseCompositeBindingKey(binding.GroupKey)
+		if group, ok := groupMap[baseGroupKey]; ok && isSiteGroupProjectionSystemPaused(group) {
+			continue
+		}
 		modelKey := baseGroupKey + "\x00" + strings.TrimSpace(item.ModelName)
 		if _, ok := activeModelKeys[modelKey]; !ok {
 			deleteItemIDs = append(deleteItemIDs, item.ID)
