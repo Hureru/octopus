@@ -583,7 +583,6 @@ func ChannelGetByName(name string, ctx context.Context) (*model.Channel, error) 
 	var channel model.Channel
 	if err := db.GetDB().WithContext(ctx).
 		Preload("Keys").
-		Preload("Stats").
 		Where("name = ?", trimmed).
 		First(&channel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -628,7 +627,6 @@ func channelRefreshCache(ctx context.Context) error {
 	channelKeyCacheNeedUpdateLock.Unlock()
 	for _, channel := range channels {
 		normalizeChannelProxyFields(&channel)
-		channel.Stats = nil
 		channelCache.Set(channel.ID, channel)
 		for _, k := range channel.Keys {
 			if k.ID != 0 {
@@ -650,7 +648,6 @@ func channelRefreshCacheByID(id int, ctx context.Context) error {
 	var channel model.Channel
 	if err := db.GetDB().WithContext(ctx).
 		Preload("Keys").
-		Preload("Stats").
 		First(&channel, id).Error; err != nil {
 		return err
 	}
