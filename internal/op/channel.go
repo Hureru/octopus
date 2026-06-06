@@ -603,6 +603,7 @@ func ChannelGetByName(name string, ctx context.Context) (*model.Channel, error) 
 	}
 
 	normalizeChannelProxyFields(&channel)
+	channel.Stats = nil
 	channelCache.Set(channel.ID, channel)
 	for _, k := range channel.Keys {
 		if k.ID != 0 {
@@ -654,6 +655,7 @@ func channelRefreshCacheByID(id int, ctx context.Context) error {
 		return err
 	}
 	normalizeChannelProxyFields(&channel)
+	channel.Stats = nil
 	channelCache.Set(channel.ID, channel)
 	for _, k := range channel.Keys {
 		if k.ID != 0 {
