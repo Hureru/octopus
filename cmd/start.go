@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/conf"
@@ -39,16 +40,16 @@ var startCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		shutdown.Init(log.Logger)
-		defer shutdown.Listen()
 		if err := db.InitDB(conf.AppConfig.Database.Type, conf.AppConfig.Database.Path, conf.IsDebug()); err != nil {
 			log.Errorf("database init error: %v", err)
-			return
+			os.Exit(1)
 		}
 		shutdown.Register(db.Close)
 
 		if err := op.InitCache(); err != nil {
 			log.Errorf("cache init error: %v", err)
-			return
+			shutdown.Shutdown()
+			os.Exit(1)
 		}
 		relayLogWriterCtx, stopRelayLogWriter := context.WithCancel(context.Background())
 		shutdown.Register(func() error {
@@ -61,12 +62,14 @@ var startCmd = &cobra.Command{
 
 		if err := op.UserInit(); err != nil {
 			log.Errorf("user init error: %v", err)
-			return
+			shutdown.Shutdown()
+			os.Exit(1)
 		}
 
 		if err := server.Start(); err != nil {
 			log.Errorf("server start error: %v", err)
-			return
+			shutdown.Shutdown()
+			os.Exit(1)
 		}
 		shutdown.Register(server.Close)
 		shutdown.Register(func() error {
@@ -108,6 +111,8 @@ var startCmd = &cobra.Command{
 			defer close(ensureIndexDone)
 			op.RelayLogEnsureIndexes(ensureIndexCtx)
 		})
+
+		shutdown.Listen()
 	},
 }
 

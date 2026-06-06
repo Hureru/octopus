@@ -617,7 +617,6 @@ func channelRefreshCache(ctx context.Context) error {
 	channels := []model.Channel{}
 	if err := db.GetDB().WithContext(ctx).
 		Preload("Keys").
-		Preload("Stats").
 		Find(&channels).Error; err != nil {
 		log.Warnf("failed to get channels: %v", err)
 		return err
@@ -628,6 +627,7 @@ func channelRefreshCache(ctx context.Context) error {
 	channelKeyCacheNeedUpdateLock.Unlock()
 	for _, channel := range channels {
 		normalizeChannelProxyFields(&channel)
+		channel.Stats = nil
 		channelCache.Set(channel.ID, channel)
 		for _, k := range channel.Keys {
 			if k.ID != 0 {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/spf13/viper"
@@ -33,13 +34,26 @@ type Database struct {
 	Path string `mapstructure:"path"`
 }
 
+type Startup struct {
+	CacheInitTimeoutSeconds int `mapstructure:"cache_init_timeout_seconds"`
+}
+
 type Config struct {
 	Server   Server   `mapstructure:"server"`
 	Log      Log      `mapstructure:"log"`
 	Database Database `mapstructure:"database"`
+	Startup  Startup  `mapstructure:"startup"`
 }
 
 var AppConfig Config
+
+func CacheInitTimeout() time.Duration {
+	seconds := AppConfig.Startup.CacheInitTimeoutSeconds
+	if seconds <= 0 {
+		seconds = 120
+	}
+	return time.Duration(seconds) * time.Second
+}
 
 func Load(path string) error {
 	if path != "" {
@@ -90,4 +104,5 @@ func setDefaults() {
 	viper.SetDefault("log.access.enabled", false)
 	viper.SetDefault("log.access.slow_threshold_ms", 3000)
 	viper.SetDefault("log.relay.summary", true)
+	viper.SetDefault("startup.cache_init_timeout_seconds", 120)
 }

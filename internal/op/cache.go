@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/bestruirui/octopus/internal/conf"
 )
 
 func InitCache() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), conf.CacheInitTimeout())
 	defer cancel()
 	if err := settingRefreshCache(ctx); err != nil {
 		return fmt.Errorf("setting refresh cache error: %v", err)
