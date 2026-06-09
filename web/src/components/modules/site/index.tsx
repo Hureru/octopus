@@ -28,6 +28,7 @@ import {
   useImportMetAPI,
   useRestoreSite,
   useSiteBatchAction,
+  useBatchUpdateSiteHeader,
   useSiteList,
   useSyncAllSites,
   useSyncSiteAccount,
@@ -68,6 +69,7 @@ import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import { SiteEditDialog } from "./SiteEditDialog";
+import { BatchHeaderDialog } from "./BatchHeaderDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
 import {
   accountHasCheckinEnabled,
@@ -583,6 +585,7 @@ export function Site() {
   const importAllAPIHub = useImportAllAPIHub();
   const importMetAPI = useImportMetAPI();
   const batchAction = useSiteBatchAction();
+  const batchHeader = useBatchUpdateSiteHeader();
 
   const [siteDialogOpen, setSiteDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -611,6 +614,7 @@ export function Site() {
 
   // Batch selection
   const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
+  const [batchHeaderOpen, setBatchHeaderOpen] = useState(false);
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -1906,6 +1910,15 @@ export function Site() {
                 批量删除
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() => setBatchHeaderOpen(true)}
+                disabled={batchHeader.isPending}
+              >
+                批量编辑 Header
+              </Button>
+              <Button
                 variant="ghost"
                 size="sm"
                 className="rounded-xl"
@@ -2010,6 +2023,13 @@ export function Site() {
         onOpenChange={closeSiteDialog}
         site={editingSite}
         onCreated={(createdSite) => openCreateAccountDialog(createdSite)}
+      />
+
+      <BatchHeaderDialog
+        open={batchHeaderOpen}
+        onOpenChange={setBatchHeaderOpen}
+        selectedSiteIds={selectedSiteIds}
+        onApplied={() => setSelectedSiteIds([])}
       />
 
       <AccountEditDialog
