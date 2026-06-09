@@ -28,7 +28,6 @@ import {
   useImportMetAPI,
   useRestoreSite,
   useSiteBatchAction,
-  useBatchUpdateSiteHeader,
   useSiteList,
   useSyncAllSites,
   useSyncSiteAccount,
@@ -585,7 +584,6 @@ export function Site() {
   const importAllAPIHub = useImportAllAPIHub();
   const importMetAPI = useImportMetAPI();
   const batchAction = useSiteBatchAction();
-  const batchHeader = useBatchUpdateSiteHeader();
 
   const [siteDialogOpen, setSiteDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -1914,7 +1912,6 @@ export function Site() {
                 size="sm"
                 className="rounded-xl"
                 onClick={() => setBatchHeaderOpen(true)}
-                disabled={batchHeader.isPending}
               >
                 批量编辑 Header
               </Button>

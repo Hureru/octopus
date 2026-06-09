@@ -57,10 +57,15 @@ export function BatchHeaderDialog({
     const batchHeader = useBatchUpdateSiteHeader();
     const [rows, setRows] = useState<HeaderRow[]>(() => [createEmptyRow()]);
 
-    const resetAndClose = useCallback(() => {
-        setRows([createEmptyRow()]);
-        onOpenChange(false);
-    }, [onOpenChange]);
+    const handleOpenChange = useCallback(
+        (next: boolean) => {
+            if (!next) {
+                setRows([createEmptyRow()]);
+            }
+            onOpenChange(next);
+        },
+        [onOpenChange],
+    );
 
     const handleSubmit = useCallback(
         async (event: FormEvent<HTMLFormElement>) => {
@@ -107,17 +112,17 @@ export function BatchHeaderDialog({
                 const successCount = result.success_ids.length;
                 const failedCount = result.failed_items.length;
                 toast.success(`批量编辑完成：成功 ${successCount}，失败 ${failedCount}`);
-                resetAndClose();
+                handleOpenChange(false);
                 onApplied?.();
             } catch (submitError) {
                 toast.error(getErrorMessage(submitError));
             }
         },
-        [rows, selectedSiteIds, batchHeader, resetAndClose, onApplied],
+        [rows, selectedSiteIds, batchHeader, handleOpenChange, onApplied],
     );
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent
                 showCloseButton={false}
                 className="w-screen max-w-full md:max-w-xl bg-card text-card-foreground px-6 py-4 rounded-3xl flex flex-col gap-0 border-0 sm:max-w-xl max-h-[min(calc(100vh-2rem),52rem)] overflow-hidden"
@@ -133,7 +138,7 @@ export function BatchHeaderDialog({
                     </div>
                     <button
                         type="button"
-                        onClick={() => onOpenChange(false)}
+                        onClick={() => handleOpenChange(false)}
                         aria-label="关闭"
                         className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                     >
@@ -242,7 +247,7 @@ export function BatchHeaderDialog({
                             type="button"
                             variant="secondary"
                             className="h-12 w-full rounded-2xl sm:flex-1"
-                            onClick={() => onOpenChange(false)}
+                            onClick={() => handleOpenChange(false)}
                         >
                             取消
                         </Button>
