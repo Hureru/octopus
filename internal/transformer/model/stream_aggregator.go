@@ -1,5 +1,7 @@
 package model
 
+import "sort"
+
 type StreamAggregator struct {
 	chunks []*InternalLLMResponse
 }
@@ -55,10 +57,13 @@ func (a *StreamAggregator) Response() *InternalLLMResponse {
 	}
 
 	result.Choices = make([]Choice, 0, len(choicesMap))
-	for idx := 0; idx < len(choicesMap); idx++ {
-		if choice := choicesMap[idx]; choice != nil {
-			result.Choices = append(result.Choices, *choice)
-		}
+	indices := make([]int, 0, len(choicesMap))
+	for idx := range choicesMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		result.Choices = append(result.Choices, *choicesMap[idx])
 	}
 	return result
 }
