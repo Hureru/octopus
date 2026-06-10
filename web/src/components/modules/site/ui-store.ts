@@ -15,10 +15,14 @@ type CheckinFilterStatusesUpdate =
     | CheckinActiveFilterStatus[]
     | ((current: CheckinActiveFilterStatus[]) => CheckinActiveFilterStatus[]);
 
+type TagFiltersUpdate = string[] | ((current: string[]) => string[]);
+
 interface SiteUIState {
     handlers: SiteUIHandlers;
     checkinFilterStatuses: CheckinActiveFilterStatus[];
     setCheckinFilterStatuses: (value: CheckinFilterStatusesUpdate) => void;
+    tagFilters: string[];
+    setTagFilters: (value: TagFiltersUpdate) => void;
     setHandlers: (handlers: Partial<SiteUIHandlers>) => void;
     resetHandlers: () => void;
     requestOpenCreateDialog: () => void;
@@ -45,6 +49,11 @@ export const useSiteUIStore = create<SiteUIState>((set, get) => ({
         set((state) => ({
             checkinFilterStatuses:
                 typeof value === 'function' ? value(state.checkinFilterStatuses) : value,
+        })),
+    tagFilters: [],
+    setTagFilters: (value) =>
+        set((state) => ({
+            tagFilters: typeof value === 'function' ? value(state.tagFilters) : value,
         })),
     setHandlers: (handlers) =>
         set((state) => ({

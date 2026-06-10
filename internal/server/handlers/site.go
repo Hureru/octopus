@@ -415,6 +415,7 @@ func batchSite(c *gin.Context) {
 	}
 	validActions := map[string]bool{
 		"enable": true, "disable": true, "delete": true,
+		"add_tags": true, "remove_tags": true,
 	}
 	if !validActions[req.Action] {
 		resp.Error(c, http.StatusBadRequest, "invalid action")
@@ -423,6 +424,18 @@ func batchSite(c *gin.Context) {
 	if len(req.IDs) == 0 {
 		resp.Error(c, http.StatusBadRequest, "ids is required")
 		return
+	}
+	var batchTags []string
+	if req.Action == "add_tags" || req.Action == "remove_tags" {
+		batchTags = model.NormalizeSiteTags(req.Tags)
+		if len(batchTags) == 0 {
+			resp.Error(c, http.StatusBadRequest, "tags is required")
+			return
+		}
+		if err := model.ValidateSiteTags(batchTags); err != nil {
+			resp.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	result := model.SiteBatchResult{
@@ -440,6 +453,10 @@ func batchSite(c *gin.Context) {
 			batchErr = op.SiteEnabled(id, false, ctx)
 		case "delete":
 			batchErr = sitesvc.DeleteSite(ctx, id)
+		case "add_tags":
+			batchErr = op.SiteTagsAdd(id, batchTags, ctx)
+		case "remove_tags":
+			batchErr = op.SiteTagsRemove(id, batchTags, ctx)
 		}
 		if batchErr != nil {
 			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: batchErr.Error()})

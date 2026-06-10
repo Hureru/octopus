@@ -182,6 +182,10 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.CustomHeader = *req.CustomHeader
 		selectFields = append(selectFields, "custom_header")
 	}
+	if req.Tags != nil {
+		merged.Tags = *req.Tags
+		selectFields = append(selectFields, "tags")
+	}
 	if len(selectFields) > 0 {
 		if err := merged.Validate(); err != nil {
 			return nil, err
@@ -225,6 +229,9 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	if req.CustomHeader != nil {
 		updates.CustomHeader = merged.CustomHeader
 	}
+	if req.Tags != nil {
+		updates.Tags = merged.Tags
+	}
 	if len(selectFields) > 0 {
 		if err := db.GetDB().WithContext(ctx).
 			Model(&model.Site{}).
@@ -243,6 +250,45 @@ func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 			return err
 		}
 		return tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Update("enabled", enabled).Error
+	})
+}
+
+func SiteTagsAdd(id int, tags []string, ctx context.Context) error {
+	return siteTagsModify(id, ctx, func(current []string) []string {
+		return append(current, tags...)
+	})
+}
+
+func SiteTagsRemove(id int, tags []string, ctx context.Context) error {
+	removed := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		removed[tag] = struct{}{}
+	}
+	return siteTagsModify(id, ctx, func(current []string) []string {
+		next := make([]string, 0, len(current))
+		for _, tag := range current {
+			if _, ok := removed[tag]; !ok {
+				next = append(next, tag)
+			}
+		}
+		return next
+	})
+}
+
+func siteTagsModify(id int, ctx context.Context, apply func(current []string) []string) error {
+	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var site model.Site
+		if err := tx.First(&site, id).Error; err != nil {
+			return fmt.Errorf("site not found")
+		}
+		next := model.NormalizeSiteTags(apply(site.Tags))
+		if err := model.ValidateSiteTags(next); err != nil {
+			return err
+		}
+		return tx.Model(&model.Site{}).
+			Where("id = ?", id).
+			Select("tags").
+			Updates(&model.Site{Tags: next}).Error
 	})
 }
 

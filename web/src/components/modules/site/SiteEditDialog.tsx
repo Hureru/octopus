@@ -24,6 +24,7 @@ import {
     AccordionTrigger,
 } from '@/components/ui/accordion';
 import { ProxySelector } from '@/components/modules/proxy-pool/ProxySelector';
+import { TagInput } from './TagInput';
 import { toast } from '@/components/common/Toast';
 import { useSettingStore } from '@/stores/setting';
 import {
@@ -49,6 +50,7 @@ type SiteFormState = {
     sort_order: number;
     global_weight: number;
     custom_header: CustomHeader[];
+    tags: string[];
 };
 
 const AUTO_DETECT_VALUE = '__auto__';
@@ -78,6 +80,7 @@ function createEmptySiteForm(): SiteFormState {
         sort_order: 0,
         global_weight: 1,
         custom_header: [{ header_key: '', header_value: '' }],
+        tags: [],
     };
 }
 
@@ -96,6 +99,7 @@ function createSiteForm(site: SiteRecord): SiteFormState {
         custom_header: site.custom_header.length > 0
             ? site.custom_header.map((item) => ({ ...item }))
             : [{ header_key: '', header_value: '' }],
+        tags: [...(site.tags ?? [])],
     };
 }
 
@@ -103,6 +107,7 @@ function normalizeSiteRecord(site: SiteRecord): SiteRecord {
     return {
         ...site,
         custom_header: site.custom_header ?? [],
+        tags: site.tags ?? [],
         proxy_mode: site.proxy_mode ?? 'direct',
         proxy_config_id: site.proxy_config_id ?? null,
         external_checkin_url: site.external_checkin_url ?? null,
@@ -143,6 +148,7 @@ interface SiteEditDialogProps {
     onOpenChange: (open: boolean) => void;
     site: SiteRecord | null;
     onCreated?: (site: SiteRecord) => void;
+    allTags?: string[];
 }
 
 /**
@@ -150,7 +156,7 @@ interface SiteEditDialogProps {
  * bg-card / rounded-3xl / text-2xl 标题 / 自定义 close 按钮 / 整体 flex 布局并对长表单
  * 提供独立滚动区域，避免视口高度较小时底部按钮被裁切。
  */
-export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEditDialogProps) {
+export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }: SiteEditDialogProps) {
     const t = useTranslations();
     const tProxy = useTranslations('proxyPool');
     const locale = useSettingStore((state) => state.locale);
@@ -221,6 +227,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                 sort_order: siteForm.sort_order,
                 global_weight: siteForm.global_weight,
                 custom_header: customHeader,
+                tags: siteForm.tags,
             };
 
             try {
@@ -359,6 +366,20 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated }: SiteEdit
                             />
                             <span className="text-xs text-muted-foreground">
                                 配置后可在站点总览中一键打开此页面进行手动签到。
+                            </span>
+                        </label>
+
+                        <label className="grid gap-2 text-sm">
+                            <span className="font-medium">标签</span>
+                            <TagInput
+                                value={siteForm.tags}
+                                onChange={(tags) =>
+                                    setSiteForm((current) => ({ ...current, tags }))
+                                }
+                                suggestions={allTags}
+                            />
+                            <span className="text-xs text-muted-foreground">
+                                可选：为站点打标签，便于在列表中分类筛选。
                             </span>
                         </label>
 

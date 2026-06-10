@@ -193,6 +193,120 @@ func TestSiteUpdateCanClearNullableFields(t *testing.T) {
 	}
 }
 
+func TestSiteCreateNormalizesTags(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "tag-normalize-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+		Tags:     []string{" prod ", "prod", "", "cheap"},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 2 || reloaded.Tags[0] != "prod" || reloaded.Tags[1] != "cheap" {
+		t.Fatalf("expected normalized tags [prod cheap], got %#v", reloaded.Tags)
+	}
+}
+
+func TestSiteUpdateSetAndClearTags(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "tag-update-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	var setReq model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"tags":["prod"," cheap "]}`), &setReq); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	updated, err := SiteUpdate(&setReq, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.Tags) != 2 || updated.Tags[0] != "prod" || updated.Tags[1] != "cheap" {
+		t.Fatalf("expected tags [prod cheap], got %#v", updated.Tags)
+	}
+
+	var nameReq model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"name":"tag-update-site-renamed"}`), &nameReq); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	updated, err = SiteUpdate(&nameReq, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.Tags) != 2 {
+		t.Fatalf("expected update without tags to keep tags, got %#v", updated.Tags)
+	}
+
+	var clearReq model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"tags":[]}`), &clearReq); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	updated, err = SiteUpdate(&clearReq, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.Tags) != 0 {
+		t.Fatalf("expected tags to be cleared, got %#v", updated.Tags)
+	}
+}
+
+func TestSiteTagsAddRemove(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "tag-batch-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+		Tags:     []string{"prod"},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	if err := SiteTagsAdd(site.ID, []string{"prod", " cheap "}, ctx); err != nil {
+		t.Fatalf("SiteTagsAdd failed: %v", err)
+	}
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 2 || reloaded.Tags[0] != "prod" || reloaded.Tags[1] != "cheap" {
+		t.Fatalf("expected tags [prod cheap], got %#v", reloaded.Tags)
+	}
+
+	if err := SiteTagsRemove(site.ID, []string{"prod", "missing"}, ctx); err != nil {
+		t.Fatalf("SiteTagsRemove failed: %v", err)
+	}
+	reloaded, err = SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 1 || reloaded.Tags[0] != "cheap" {
+		t.Fatalf("expected tags [cheap], got %#v", reloaded.Tags)
+	}
+
+	if err := SiteTagsAdd(site.ID+9999, []string{"prod"}, ctx); err == nil {
+		t.Fatalf("expected SiteTagsAdd on missing site to fail")
+	}
+}
+
 func TestSiteAccountUpdateCanClearNullableFields(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
