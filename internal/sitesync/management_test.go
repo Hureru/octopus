@@ -947,16 +947,19 @@ func TestSyncManagementPlatformAppliesPricingRouteMetadata(t *testing.T) {
 	if routeByModel["text-embedding-3-large"].RouteType != model.SiteModelRouteTypeOpenAIEmbedding {
 		t.Fatalf("expected text-embedding-3-large route type %q, got %q", model.SiteModelRouteTypeOpenAIEmbedding, routeByModel["text-embedding-3-large"].RouteType)
 	}
-	if routeByModel["vendor-embedding-x"].RouteType != model.SiteModelRouteTypeUnknown {
-		t.Fatalf("expected vendor-embedding-x route type %q, got %q", model.SiteModelRouteTypeUnknown, routeByModel["vendor-embedding-x"].RouteType)
+	if routeByModel["vendor-embedding-x"].RouteType != model.SiteModelRouteTypeOpenAIEmbedding {
+		t.Fatalf("expected vendor-embedding-x route type %q, got %q", model.SiteModelRouteTypeOpenAIEmbedding, routeByModel["vendor-embedding-x"].RouteType)
 	}
 
 	metadata, ok := model.ParseSiteModelRouteMetadata(routeByModel["vendor-embedding-x"].RouteRawPayload)
 	if !ok {
-		t.Fatalf("expected unsupported model route metadata to be recorded")
+		t.Fatalf("expected guessed model route metadata to be recorded")
 	}
-	if metadata.RouteSupported {
-		t.Fatalf("expected unsupported vendor embedding metadata to remain unsupported")
+	if !metadata.RouteSupported {
+		t.Fatalf("expected guessed vendor embedding metadata to mark route as supported")
+	}
+	if !metadata.RouteGuessed {
+		t.Fatalf("expected guessed vendor embedding metadata to record name guess")
 	}
 }
 
