@@ -24,6 +24,23 @@ type ResponseOutbound struct {
 	streamModel string
 	initialized bool
 	outputItems map[int]ResponsesItem
+	// toolCallIndexes maps a Responses output_index to a dense 0-based
+	// tool_calls index: output_index counts all output items (reasoning,
+	// message, function_call), so function calls may start above 0, while
+	// the Chat Completions protocol expects dense 0-based tool_calls indices.
+	toolCallIndexes map[int]int
+}
+
+func (o *ResponseOutbound) toolCallIndexFor(outputIndex int) int {
+	if o.toolCallIndexes == nil {
+		o.toolCallIndexes = make(map[int]int)
+	}
+	if idx, ok := o.toolCallIndexes[outputIndex]; ok {
+		return idx
+	}
+	idx := len(o.toolCallIndexes)
+	o.toolCallIndexes[outputIndex] = idx
+	return idx
 }
 
 func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.InternalLLMRequest, baseUrl, key string) (*http.Request, error) {
@@ -171,6 +188,7 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 	if !o.initialized {
 		o.initialized = true
 		o.outputItems = make(map[int]ResponsesItem)
+		o.toolCallIndexes = make(map[int]int)
 	}
 
 	var streamEvent ResponsesStreamEvent
@@ -204,29 +222,29 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 		o.mergeFunctionCallDelta(streamEvent)
 		if streamEvent.Delta != "" {
 			toolCall := model.ToolCall{
-				Index: streamEvent.OutputIndex,
+				Index: o.toolCallIndexFor(streamEvent.OutputIndex),
 				ID:    streamEvent.CallID,
 				Type:  "function",
 				Function: model.FunctionCall{
 					Name: streamEvent.Name,
 				},
 			}
-			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall})
-			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallDelta, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall, Delta: &model.StreamDelta{Arguments: streamEvent.Delta}})
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: base.Index, ToolCall: &toolCall})
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallDelta, ID: base.ID, Model: base.Model, Index: base.Index, ToolCall: &toolCall, Delta: &model.StreamDelta{Arguments: streamEvent.Delta}})
 		}
 
 	case "response.output_item.added":
 		o.mergeOutputItemAdded(streamEvent)
 		if streamEvent.Item != nil && streamEvent.Item.Type == "function_call" {
 			toolCall := model.ToolCall{
-				Index: streamEvent.OutputIndex,
+				Index: o.toolCallIndexFor(streamEvent.OutputIndex),
 				ID:    streamEvent.Item.CallID,
 				Type:  "function",
 				Function: model.FunctionCall{
 					Name: streamEvent.Item.Name,
 				},
 			}
-			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: streamEvent.OutputIndex, ToolCall: &toolCall})
+			events = append(events, model.StreamEvent{Kind: model.StreamEventKindToolCallStart, ID: base.ID, Model: base.Model, Index: base.Index, ToolCall: &toolCall})
 		}
 
 	case "response.reasoning_summary_text.delta":
