@@ -70,7 +70,11 @@ func (i *ChatInbound) TransformStream(ctx context.Context, stream *model.Interna
 }
 
 func (i *ChatInbound) TransformStreamEvents(ctx context.Context, events []model.StreamEvent) ([]byte, error) {
-	return i.TransformStream(ctx, model.InternalResponseFromStreamEvents(events))
+	stream := model.InternalResponseFromStreamEvents(events)
+	if stream == nil {
+		return nil, nil
+	}
+	return i.TransformStream(ctx, stream)
 }
 
 // GetInternalResponse returns the complete internal response for logging, statistics, etc.
