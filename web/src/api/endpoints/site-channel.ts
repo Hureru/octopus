@@ -43,6 +43,7 @@ export type SiteModelRouteMetadata = {
     version?: number;
     source?: string;
     route_supported: boolean;
+    route_guessed?: boolean;
     route_type?: SiteModelRouteType;
     enable_groups?: string[];
     supported_endpoint_types?: string[];
@@ -209,6 +210,7 @@ function normalizeSiteModelRouteMetadata(
         route_type: metadata.route_supported
             ? normalizeSiteModelRouteType(metadata.route_type)
             : 'unknown',
+        route_guessed: metadata.route_guessed ?? false,
         enable_groups: metadata.enable_groups ?? [],
         supported_endpoint_types: metadata.supported_endpoint_types ?? [],
         heuristic_endpoint_types: metadata.heuristic_endpoint_types ?? [],

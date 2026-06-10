@@ -30,6 +30,57 @@ func TestSiteMaskedTokenMatchesIgnoresOptionalSKPrefix(t *testing.T) {
 	}
 }
 
+func TestApplyPersistedRouteStateGuessesLegacyUnknownRoute(t *testing.T) {
+	legacyPayload := model.SiteModelRouteMetadata{
+		Source:                 "/api/pricing",
+		RouteSupported:         false,
+		SupportedEndpointTypes: []string{"/vendor/embeddings"},
+		UnsupportedReason:      "site reports endpoint types outside current supported route buckets",
+	}.Marshal()
+	existing := &model.SiteModel{
+		ModelName:       "vendor-embedding-x",
+		RouteType:       model.SiteModelRouteTypeUnknown,
+		RouteSource:     model.SiteModelRouteSourceSyncInferred,
+		RouteRawPayload: legacyPayload,
+	}
+	item := &model.SiteModel{ModelName: "vendor-embedding-x"}
+
+	applyPersistedRouteState(item, existing, time.Unix(1711929600, 0))
+
+	if item.RouteType != model.SiteModelRouteTypeOpenAIEmbedding {
+		t.Fatalf("expected legacy unknown route to be guessed as %q, got %q", model.SiteModelRouteTypeOpenAIEmbedding, item.RouteType)
+	}
+	metadata, ok := model.ParseSiteModelRouteMetadata(item.RouteRawPayload)
+	if !ok {
+		t.Fatalf("expected guessed route metadata to parse")
+	}
+	if !metadata.RouteSupported || !metadata.RouteGuessed {
+		t.Fatalf("expected guessed route metadata to mark supported name guess, got %+v", metadata)
+	}
+	if metadata.RouteType != model.SiteModelRouteTypeOpenAIEmbedding {
+		t.Fatalf("expected guessed metadata route type %q, got %q", model.SiteModelRouteTypeOpenAIEmbedding, metadata.RouteType)
+	}
+}
+
+func TestApplyPersistedRouteStateKeepsManualOverrideUntouched(t *testing.T) {
+	existing := &model.SiteModel{
+		ModelName:      "vendor-embedding-x",
+		RouteType:      model.SiteModelRouteTypeOpenAIChat,
+		RouteSource:    model.SiteModelRouteSourceManualOverride,
+		ManualOverride: true,
+	}
+	item := &model.SiteModel{ModelName: "vendor-embedding-x"}
+
+	applyPersistedRouteState(item, existing, time.Unix(1711929600, 0))
+
+	if item.RouteType != model.SiteModelRouteTypeOpenAIChat {
+		t.Fatalf("expected manual override route to be preserved, got %q", item.RouteType)
+	}
+	if !item.ManualOverride {
+		t.Fatalf("expected manual override flag to be preserved")
+	}
+}
+
 func TestMergePersistedSiteTokensPreservesManualFullTokenWhenIncomingIsMasked(t *testing.T) {
 	now := time.Unix(1711929600, 0)
 	existing := []model.SiteToken{{
