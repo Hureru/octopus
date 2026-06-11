@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -928,6 +929,14 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 	return response, nil
 }
 
+// errEmptyUpstreamStream marks 200 SSE streams that ended without forwarding
+// any payload to the client; they must fail the attempt instead of being
+// recorded as zero-token successes (issue #65). The message must not contain
+// detectRouteMismatchTarget trigger substrings ("text/event-stream",
+// "/responses", "/messages", "anthropic-version", "responses api"), which
+// would corrupt managed route learning.
+var errEmptyUpstreamStream = errors.New("upstream stream ended without forwarding any payload")
+
 // handleStreamResponse 处理流式响应
 func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http.Response) error {
 	defer ra.closeFirstTokenBudget()
@@ -992,6 +1001,9 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			select {
 			case r, ok := <-results:
 				if !ok || (r.err != nil && r.err == io.EOF) {
+					if !ra.streamPayloadWritten.Load() {
+						return errEmptyUpstreamStream
+					}
 					log.Debugf("stream end")
 					return nil
 				}
@@ -1023,6 +1035,9 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			}
 		case r, ok := <-results:
 			if !ok {
+				if !ra.streamPayloadWritten.Load() {
+					return errEmptyUpstreamStream
+				}
 				log.Debugf("stream end")
 				return nil
 			}
@@ -1306,6 +1321,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 	var rawStream bytes.Buffer
 
 	finishStream := func(c context.Context) error {
+		if !ra.streamPayloadWritten.Load() {
+			return errEmptyUpstreamStream
+		}
 		ra.collectOpenAIResponsesPassthroughMetrics(c, rawStream.Bytes())
 		log.Debugf("stream end")
 		return nil
@@ -1618,6 +1636,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 	var rawStream bytes.Buffer
 
 	finishStream := func(c context.Context) error {
+		if !ra.streamPayloadWritten.Load() {
+			return errEmptyUpstreamStream
+		}
 		ra.collectAnthropicPassthroughMetrics(c, rawStream.Bytes())
 		ra.collectResponse()
 		log.Debugf("stream end")

@@ -565,6 +565,17 @@ func inferSiteModelRouteType(item model.SiteModel) model.SiteModelRouteType {
 	return model.InferSiteModelRouteType(item.ModelName)
 }
 
+func markRouteMetadataGuessed(rawPayload string, routeType model.SiteModelRouteType) string {
+	metadata, ok := model.ParseSiteModelRouteMetadata(rawPayload)
+	if !ok {
+		metadata = &model.SiteModelRouteMetadata{}
+	}
+	metadata.RouteType = routeType
+	metadata.RouteSupported = true
+	metadata.RouteGuessed = true
+	return metadata.Marshal()
+}
+
 func applyPersistedRouteState(item *model.SiteModel, existing *model.SiteModel, now time.Time) {
 	if item == nil {
 		return
@@ -580,6 +591,11 @@ func applyPersistedRouteState(item *model.SiteModel, existing *model.SiteModel, 
 	}
 
 	if routeType, routeRawPayload, explicit := resolveExplicitSyncRoute(item, existing); explicit {
+		if !model.IsProjectedSiteModelRouteType(routeType) {
+			// 最后一步：历史遗留的未识别路由按模型名称猜测，避免模型停留在待人工指定状态。
+			routeType = model.InferSiteModelRouteType(item.ModelName)
+			routeRawPayload = markRouteMetadataGuessed(routeRawPayload, routeType)
+		}
 		item.RouteType = routeType
 		item.RouteSource = model.SiteModelRouteSourceSyncInferred
 		item.ManualOverride = false
