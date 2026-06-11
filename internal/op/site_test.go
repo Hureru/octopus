@@ -1059,3 +1059,191 @@ func containsAll(messages []string, fragments ...string) bool {
 	}
 	return true
 }
+
+func assertHeaders(t *testing.T, got, want []model.CustomHeader) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("header length mismatch: got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("header[%d] mismatch: got %#v, want %#v (full got=%#v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestMergeHeaders(t *testing.T) {
+	ch := func(k, v string) model.CustomHeader { return model.CustomHeader{HeaderKey: k, HeaderValue: v} }
+
+	tests := []struct {
+		name       string
+		existing   []model.CustomHeader
+		upserts    []model.CustomHeader
+		deleteKeys []string
+		want       []model.CustomHeader
+	}{
+		{
+			name:     "upsert case-insensitive hit keeps original key and updates value",
+			existing: []model.CustomHeader{ch("Authorization", "old")},
+			upserts:  []model.CustomHeader{ch("authorization", "new")},
+			want:     []model.CustomHeader{ch("Authorization", "new")},
+		},
+		{
+			name:     "append new keys preserves order",
+			existing: []model.CustomHeader{ch("X-A", "1")},
+			upserts:  []model.CustomHeader{ch("X-B", "2"), ch("X-C", "3")},
+			want:     []model.CustomHeader{ch("X-A", "1"), ch("X-B", "2"), ch("X-C", "3")},
+		},
+		{
+			name:     "keep untouched keys",
+			existing: []model.CustomHeader{ch("Keep", "k"), ch("X-Foo", "a")},
+			upserts:  []model.CustomHeader{ch("X-Foo", "NEW")},
+			want:     []model.CustomHeader{ch("Keep", "k"), ch("X-Foo", "NEW")},
+		},
+		{
+			name:       "delete is case-insensitive",
+			existing:   []model.CustomHeader{ch("X-Foo", "a"), ch("Keep", "k")},
+			deleteKeys: []string{"x-foo"},
+			want:       []model.CustomHeader{ch("Keep", "k")},
+		},
+		{
+			name:       "delete wins over upsert on the same key",
+			existing:   []model.CustomHeader{ch("X-Foo", "a")},
+			upserts:    []model.CustomHeader{ch("X-Foo", "b")},
+			deleteKeys: []string{"X-FOO"},
+			want:       []model.CustomHeader{},
+		},
+		{
+			name:       "delete missing key is harmless",
+			existing:   []model.CustomHeader{ch("Keep", "k")},
+			deleteKeys: []string{"Nope"},
+			want:       []model.CustomHeader{ch("Keep", "k")},
+		},
+		{
+			name:     "blank keys are skipped and keys are trimmed",
+			existing: []model.CustomHeader{ch("  ", "x")},
+			upserts:  []model.CustomHeader{ch("", "y"), ch("  X-Real  ", "z")},
+			want:     []model.CustomHeader{ch("X-Real", "z")},
+		},
+		{
+			name:       "delete all yields empty slice",
+			existing:   []model.CustomHeader{ch("A", "1"), ch("B", "2")},
+			deleteKeys: []string{"a", "b"},
+			want:       []model.CustomHeader{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeHeaders(tt.existing, tt.upserts, tt.deleteKeys)
+			assertHeaders(t, got, tt.want)
+		})
+	}
+}
+
+func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	siteA := &model.Site{
+		Name:         "batch-header-a",
+		Platform:     model.SitePlatformNewAPI,
+		BaseURL:      "https://a.example.com",
+		Enabled:      true,
+		CustomHeader: []model.CustomHeader{{HeaderKey: "X-Foo", HeaderValue: "a1"}},
+	}
+	if err := SiteCreate(siteA, ctx); err != nil {
+		t.Fatalf("SiteCreate A failed: %v", err)
+	}
+	siteB := &model.Site{
+		Name:     "batch-header-b",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://b.example.com",
+		Enabled:  true,
+		CustomHeader: []model.CustomHeader{
+			{HeaderKey: "x-foo", HeaderValue: "b1"},
+			{HeaderKey: "Keep", HeaderValue: "k"},
+		},
+	}
+	if err := SiteCreate(siteB, ctx); err != nil {
+		t.Fatalf("SiteCreate B failed: %v", err)
+	}
+
+	req := &model.SiteBatchHeaderRequest{
+		IDs: []int{siteA.ID, siteB.ID, 99999},
+		Upserts: []model.CustomHeader{
+			{HeaderKey: "X-Foo", HeaderValue: "NEW"},
+			{HeaderKey: "X-Bar", HeaderValue: "zzz"},
+		},
+		DeleteKeys: []string{"Authorization"},
+	}
+	result, affected, err := SiteBatchUpdateHeader(req, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchUpdateHeader failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 2 {
+		t.Fatalf("expected 2 success ids, got %#v", result.SuccessIDs)
+	}
+	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != 99999 {
+		t.Fatalf("expected 1 failed item for missing site, got %#v", result.FailedItems)
+	}
+	if len(affected) != 2 {
+		t.Fatalf("expected 2 affected ids, got %#v", affected)
+	}
+
+	reloadedA, err := SiteGet(siteA.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet A failed: %v", err)
+	}
+	assertHeaders(t, reloadedA.CustomHeader, []model.CustomHeader{
+		{HeaderKey: "X-Foo", HeaderValue: "NEW"},
+		{HeaderKey: "X-Bar", HeaderValue: "zzz"},
+	})
+
+	reloadedB, err := SiteGet(siteB.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet B failed: %v", err)
+	}
+	assertHeaders(t, reloadedB.CustomHeader, []model.CustomHeader{
+		{HeaderKey: "x-foo", HeaderValue: "NEW"},
+		{HeaderKey: "Keep", HeaderValue: "k"},
+		{HeaderKey: "X-Bar", HeaderValue: "zzz"},
+	})
+}
+
+func TestSiteBatchUpdateHeaderCanClearAll(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "batch-header-clear",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://clear.example.com",
+		Enabled:  true,
+		CustomHeader: []model.CustomHeader{
+			{HeaderKey: "A", HeaderValue: "1"},
+			{HeaderKey: "B", HeaderValue: "2"},
+		},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	req := &model.SiteBatchHeaderRequest{
+		IDs:        []int{site.ID},
+		DeleteKeys: []string{"a", "b"},
+	}
+	result, _, err := SiteBatchUpdateHeader(req, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchUpdateHeader failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 {
+		t.Fatalf("expected 1 success id, got %#v", result)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.CustomHeader) != 0 {
+		t.Fatalf("expected headers to be cleared, got %#v", reloaded.CustomHeader)
+	}
+}

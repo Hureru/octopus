@@ -617,6 +617,17 @@ function getUnknownRouteReason(model: SiteModelView) {
     return details.filter((item): item is string => Boolean(item && item.trim())).join(' · ') || null;
 }
 
+function getGuessedRouteReason(model: SiteModelView) {
+    const metadata = model.route_metadata;
+    if (!metadata?.route_guessed) return null;
+
+    const details = ['站点未报告可识别的端点格式，已按模型名称猜测，如不准确可手动调整'];
+    if (metadata.supported_endpoint_types?.length) {
+        details.push(`站点报告端点: ${metadata.supported_endpoint_types.join(', ')}`);
+    }
+    return details.join(' · ');
+}
+
 function getModelLastRequestAt(model: SiteModelView) {
     return model.history?.last_request_at ?? null;
 }
@@ -1101,6 +1112,15 @@ function SiteChannelTableView({
                                                 title={getUnknownRouteReason(model) ?? undefined}
                                             >
                                                 待人工指定
+                                            </Badge>
+                                        ) : null}
+                                        {isSupportedRouteType(model.route_type) && model.route_metadata?.route_guessed ? (
+                                            <Badge
+                                                variant="outline"
+                                                className="h-6 px-2 text-[11px] border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                                                title={getGuessedRouteReason(model) ?? undefined}
+                                            >
+                                                名称猜测
                                             </Badge>
                                         ) : null}
                                     </div>

@@ -68,6 +68,7 @@ import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import { SiteEditDialog } from "./SiteEditDialog";
+import { BatchHeaderDialog } from "./BatchHeaderDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
 import { TagInput } from "./TagInput";
 import {
@@ -617,6 +618,7 @@ export function Site() {
     null,
   );
   const [batchTags, setBatchTags] = useState<string[]>([]);
+  const [batchHeaderOpen, setBatchHeaderOpen] = useState(false);
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -1908,6 +1910,7 @@ export function Site() {
       <PageWrapper
         className="space-y-4 pb-24 md:pb-4"
         childLayout={false}
+        animateChildren={false}
       >
         <CheckinPanel
           sites={sites}
@@ -1926,7 +1929,7 @@ export function Site() {
         />
 
         {selectedSiteIds.length > 0 ? (
-          <section className="rounded-3xl border border-primary/30 bg-primary/5 p-4">
+          <section className="sticky top-0 z-30 rounded-3xl border border-border/70 bg-card/95 p-4 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.45)] backdrop-blur supports-[backdrop-filter]:bg-card/90">
             <div className="flex flex-wrap items-center gap-3">
               {(() => {
                 const visibleIds = visibleSites.map((item) => item.site.id);
@@ -2013,6 +2016,14 @@ export function Site() {
                 disabled={batchAction.isPending}
               >
                 批量删除
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() => setBatchHeaderOpen(true)}
+              >
+                批量编辑 Header
               </Button>
               <Button
                 variant="ghost"
@@ -2177,6 +2188,13 @@ export function Site() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BatchHeaderDialog
+        open={batchHeaderOpen}
+        onOpenChange={setBatchHeaderOpen}
+        selectedSiteIds={selectedSiteIds}
+        onApplied={() => setSelectedSiteIds([])}
+      />
 
       <AccountEditDialog
         key={

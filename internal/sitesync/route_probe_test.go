@@ -65,9 +65,6 @@ func TestBuildSiteModelRouteDetectionAddsHeuristicResponsesForGPT5(t *testing.T)
 	if !ok {
 		t.Fatalf("expected heuristic response detection to be produced")
 	}
-	if !detection.ApplyRouteType {
-		t.Fatalf("expected heuristic response detection to apply route type")
-	}
 
 	metadata, ok := model.ParseSiteModelRouteMetadata(detection.RouteRawPayload)
 	if !ok {
@@ -84,5 +81,105 @@ func TestBuildSiteModelRouteDetectionAddsHeuristicResponsesForGPT5(t *testing.T)
 	}
 	if len(metadata.NormalizedEndpointTypes) != 2 {
 		t.Fatalf("expected normalized endpoint list to include explicit and heuristic routes, got %#v", metadata.NormalizedEndpointTypes)
+	}
+}
+
+func TestBuildSiteModelRouteDetectionGuessesRouteFromModelName(t *testing.T) {
+	tests := []struct {
+		name                   string
+		modelName              string
+		enableGroups           []string
+		supportedEndpointTypes []string
+		expected               model.SiteModelRouteType
+	}{
+		{
+			name:                   "unmappable endpoint types fall back to embedding guess",
+			modelName:              "vendor-embedding-x",
+			supportedEndpointTypes: []string{"/vendor/embeddings"},
+			expected:               model.SiteModelRouteTypeOpenAIEmbedding,
+		},
+		{
+			name:                   "unmappable endpoint types fall back to anthropic guess",
+			modelName:              "claude-3-5-sonnet",
+			supportedEndpointTypes: []string{"/vendor/custom"},
+			expected:               model.SiteModelRouteTypeAnthropic,
+		},
+		{
+			name:         "enable groups without endpoint types fall back to chat guess",
+			modelName:    "vendor-chat-x",
+			enableGroups: []string{"default"},
+			expected:     model.SiteModelRouteTypeOpenAIChat,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			detection, ok := buildSiteModelRouteDetection(
+				tt.modelName,
+				tt.enableGroups,
+				tt.supportedEndpointTypes,
+				"/api/pricing",
+				map[string]struct{}{tt.modelName: {}},
+			)
+			if !ok {
+				t.Fatalf("expected guessed detection to be produced")
+			}
+			if detection.RouteType != tt.expected {
+				t.Fatalf("expected guessed route type %q, got %q", tt.expected, detection.RouteType)
+			}
+
+			metadata, ok := model.ParseSiteModelRouteMetadata(detection.RouteRawPayload)
+			if !ok {
+				t.Fatalf("expected route metadata to parse")
+			}
+			if !metadata.RouteSupported {
+				t.Fatalf("expected guessed metadata to mark route as supported")
+			}
+			if !metadata.RouteGuessed {
+				t.Fatalf("expected guessed metadata to record name guess")
+			}
+			if metadata.RouteType != tt.expected {
+				t.Fatalf("expected guessed metadata route type %q, got %q", tt.expected, metadata.RouteType)
+			}
+		})
+	}
+}
+
+func TestMergeSiteModelRouteDetectionsPrefersDetectedOverGuessed(t *testing.T) {
+	guessed, ok := buildSiteModelRouteDetection(
+		"vendor-chat-x",
+		[]string{"default"},
+		nil,
+		"/api/pricing",
+		nil,
+	)
+	if !ok {
+		t.Fatalf("expected guessed detection to be produced")
+	}
+	detected, ok := buildSiteModelRouteDetection(
+		"vendor-chat-x",
+		nil,
+		[]string{"/v1/messages"},
+		"/api/available_model",
+		nil,
+	)
+	if !ok {
+		t.Fatalf("expected explicit detection to be produced")
+	}
+
+	merged := mergeSiteModelRouteDetections(
+		map[string]siteModelRouteDetection{"vendor-chat-x": guessed},
+		map[string]siteModelRouteDetection{"vendor-chat-x": detected},
+	)
+	if merged["vendor-chat-x"].RouteType != model.SiteModelRouteTypeAnthropic {
+		t.Fatalf("expected explicit detection to replace guessed detection, got %q", merged["vendor-chat-x"].RouteType)
+	}
+
+	merged = mergeSiteModelRouteDetections(
+		map[string]siteModelRouteDetection{"vendor-chat-x": detected},
+		map[string]siteModelRouteDetection{"vendor-chat-x": guessed},
+	)
+	if merged["vendor-chat-x"].RouteType != model.SiteModelRouteTypeAnthropic {
+		t.Fatalf("expected guessed detection to not replace explicit detection, got %q", merged["vendor-chat-x"].RouteType)
 	}
 }

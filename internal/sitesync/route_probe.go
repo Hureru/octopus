@@ -11,7 +11,6 @@ import (
 type siteModelRouteDetection struct {
 	RouteType       model.SiteModelRouteType
 	RouteRawPayload string
-	ApplyRouteType  bool
 }
 
 func applyDetectedRoutesToSiteModels(
@@ -47,9 +46,7 @@ func applyKnownRouteDetectionsToSiteModels(
 		if !ok {
 			continue
 		}
-		if detection.ApplyRouteType {
-			items[i].RouteType = detection.RouteType
-		}
+		items[i].RouteType = detection.RouteType
 		items[i].RouteSource = model.SiteModelRouteSourceSyncInferred
 		items[i].RouteRawPayload = detection.RouteRawPayload
 	}
@@ -398,15 +395,16 @@ func buildSiteModelRouteDetection(
 	}
 	if metadata.RouteSupported {
 		metadata.RouteType = pickPreferredDetectedRouteType(modelName, knownRouteTypes)
-	} else if len(supportedEndpointTypes) > 0 {
-		metadata.RouteType = model.SiteModelRouteTypeUnknown
-		metadata.UnsupportedReason = "site reports endpoint types outside current supported route buckets"
+	} else {
+		// 最后一步：站点未报告可映射的端点格式时按模型名称猜测，避免模型停留在待人工指定状态。
+		metadata.RouteType = model.InferSiteModelRouteType(modelName)
+		metadata.RouteSupported = true
+		metadata.RouteGuessed = true
 	}
 
 	return siteModelRouteDetection{
 		RouteType:       metadata.RouteType,
 		RouteRawPayload: metadata.Marshal(),
-		ApplyRouteType:  len(supportedEndpointTypes) > 0 || len(heuristicEndpointTypes) > 0,
 	}, true
 }
 
@@ -658,11 +656,11 @@ func shouldReplaceSiteModelRouteDetection(
 	if !existingOK {
 		return nextOK
 	}
-	if !nextOK {
+	if !nextOK || !nextMetadata.RouteSupported {
 		return false
 	}
-	if nextMetadata.RouteSupported && !existingMetadata.RouteSupported {
+	if !existingMetadata.RouteSupported {
 		return true
 	}
-	return false
+	return existingMetadata.RouteGuessed && !nextMetadata.RouteGuessed
 }

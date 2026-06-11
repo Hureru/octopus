@@ -16,6 +16,7 @@ type SiteModelRouteMetadata struct {
 	Version                 int                `json:"version"`
 	Source                  string             `json:"source,omitempty"`
 	RouteSupported          bool               `json:"route_supported"`
+	RouteGuessed            bool               `json:"route_guessed,omitempty"`
 	RouteType               SiteModelRouteType `json:"route_type,omitempty"`
 	EnableGroups            []string           `json:"enable_groups,omitempty"`
 	SupportedEndpointTypes  []string           `json:"supported_endpoint_types,omitempty"`
@@ -36,9 +37,11 @@ func (m SiteModelRouteMetadata) Marshal() string {
 		m.RouteType = NormalizeSiteModelRouteType(m.RouteType)
 		if !IsProjectedSiteModelRouteType(m.RouteType) {
 			m.RouteSupported = false
+			m.RouteGuessed = false
 			m.RouteType = SiteModelRouteTypeUnknown
 		}
 	} else {
+		m.RouteGuessed = false
 		m.RouteType = SiteModelRouteTypeUnknown
 	}
 	payload, err := json.Marshal(m)
@@ -73,6 +76,7 @@ func ParseSiteModelRouteMetadata(raw string) (*SiteModelRouteMetadata, bool) {
 			return nil, false
 		}
 	} else {
+		metadata.RouteGuessed = false
 		metadata.RouteType = SiteModelRouteTypeUnknown
 	}
 	return &metadata, true

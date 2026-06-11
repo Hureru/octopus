@@ -1,6 +1,9 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
+)
 
 type StreamEventKind string
 
@@ -118,7 +121,7 @@ func StreamEventsFromInternalResponse(response *InternalLLMResponse) []StreamEve
 			}
 			for _, toolCall := range delta.ToolCalls {
 				toolCall := toolCall
-				event := StreamEvent{Kind: StreamEventKindToolCallDelta, ID: response.ID, Model: response.Model, Index: toolCall.Index, ToolCall: &toolCall}
+				event := StreamEvent{Kind: StreamEventKindToolCallDelta, ID: response.ID, Model: response.Model, Index: choice.Index, ToolCall: &toolCall}
 				if toolCall.Function.Arguments != "" {
 					event.Delta = &StreamDelta{Arguments: toolCall.Function.Arguments}
 				}
@@ -225,10 +228,13 @@ func InternalResponseFromStreamEvents(events []StreamEvent) *InternalLLMResponse
 			choice.StopSequence = event.StopSequence
 		}
 	}
-	for idx := 0; idx < len(choices); idx++ {
-		if choice := choices[idx]; choice != nil {
-			response.Choices = append(response.Choices, *choice)
-		}
+	indices := make([]int, 0, len(choices))
+	for idx := range choices {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	for _, idx := range indices {
+		response.Choices = append(response.Choices, *choices[idx])
 	}
 	if len(response.Choices) == 0 && response.Usage == nil && response.Error == nil {
 		return nil
