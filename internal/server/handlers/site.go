@@ -48,7 +48,6 @@ func init() {
 		AddRoute(router.NewRoute("/enable", http.MethodPost).Handle(enableSite)).
 		AddRoute(router.NewRoute("/detect", http.MethodPost).Handle(detectSitePlatform)).
 		AddRoute(router.NewRoute("/batch", http.MethodPost).Handle(batchSite)).
-		AddRoute(router.NewRoute("/batch/header", http.MethodPost).Handle(batchUpdateSiteHeader)).
 		AddRoute(router.NewRoute("/batch/edit", http.MethodPost).Handle(batchEditSite)).
 		AddRoute(router.NewRoute("/account/create", http.MethodPost).Handle(createSiteAccount)).
 		AddRoute(router.NewRoute("/account/update", http.MethodPost).Handle(updateSiteAccount)).
@@ -448,30 +447,6 @@ func projectSitesAsync(ids []int) {
 			}
 		})
 	}
-}
-
-func batchUpdateSiteHeader(c *gin.Context) {
-	var req model.SiteBatchHeaderRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.InvalidJSON(c)
-		return
-	}
-	if len(req.IDs) == 0 {
-		resp.Error(c, http.StatusBadRequest, "ids is required")
-		return
-	}
-	if len(req.Upserts) == 0 && len(req.DeleteKeys) == 0 {
-		resp.Error(c, http.StatusBadRequest, "nothing to update")
-		return
-	}
-
-	result, affected, err := op.SiteBatchUpdateHeader(&req, c.Request.Context())
-	if err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	projectSitesAsync(affected)
-	resp.Success(c, result)
 }
 
 func batchEditSite(c *gin.Context) {

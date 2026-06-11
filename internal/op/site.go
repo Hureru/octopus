@@ -289,19 +289,6 @@ func mergeHeaders(existing, upserts []model.CustomHeader, deleteKeys []string) [
 	return out
 }
 
-// SiteBatchUpdateHeader 批量将 upserts/deleteKeys 智能合并进每个站点的 custom_header。
-// 兼容旧接口，等价于仅含 Header 修改的 SiteBatchEdit。
-func SiteBatchUpdateHeader(req *model.SiteBatchHeaderRequest, ctx context.Context) (*model.SiteBatchResult, []int, error) {
-	if req == nil {
-		return nil, nil, fmt.Errorf("site batch header request is nil")
-	}
-	return SiteBatchEdit(&model.SiteBatchEditRequest{
-		IDs:        req.IDs,
-		Upserts:    req.Upserts,
-		DeleteKeys: req.DeleteKeys,
-	}, ctx)
-}
-
 // SiteBatchEdit 将一组修改补丁（添加/移除标签、设置/删除 Header）逐站点合并落库，
 // 每站点一次加载、一次更新；单站失败计入 FailedItems 后继续。
 // 标签先添加后移除（同名时移除优先），传入的标签需已规范化。

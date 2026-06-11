@@ -386,17 +386,10 @@ type SiteBatchFailure struct {
 	Message string `json:"message"`
 }
 
-// SiteBatchHeaderRequest 批量合并站点 custom_header。
+// SiteBatchEditRequest 批量编辑：对一批站点统一应用标签与 custom_header 修改补丁。
+// 标签先添加后移除（同名时移除优先）。
 // Upserts 按 header key 大小写不敏感 upsert（命中改值并保留已存的原始 key 大小写）；
 // DeleteKeys 按 key 大小写不敏感删除；同一 key 同时出现时 DeleteKeys 优先（最终删除）。
-type SiteBatchHeaderRequest struct {
-	IDs        []int          `json:"ids" binding:"required"`
-	Upserts    []CustomHeader `json:"upserts"`
-	DeleteKeys []string       `json:"delete_keys"`
-}
-
-// SiteBatchEditRequest 批量编辑：对一批站点统一应用标签与 custom_header 修改补丁。
-// 标签先添加后移除（同名时移除优先）；Header 语义与 SiteBatchHeaderRequest 一致。
 type SiteBatchEditRequest struct {
 	IDs        []int          `json:"ids" binding:"required"`
 	AddTags    []string       `json:"add_tags"`

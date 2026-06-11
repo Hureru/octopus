@@ -1300,7 +1300,7 @@ func TestMergeHeaders(t *testing.T) {
 	}
 }
 
-func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
+func TestSiteBatchEditMergesHeadersPerSite(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
 	siteA := &model.Site{
@@ -1327,7 +1327,7 @@ func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
 		t.Fatalf("SiteCreate B failed: %v", err)
 	}
 
-	req := &model.SiteBatchHeaderRequest{
+	req := &model.SiteBatchEditRequest{
 		IDs: []int{siteA.ID, siteB.ID, 99999},
 		Upserts: []model.CustomHeader{
 			{HeaderKey: "X-Foo", HeaderValue: "NEW"},
@@ -1335,9 +1335,9 @@ func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
 		},
 		DeleteKeys: []string{"Authorization"},
 	}
-	result, affected, err := SiteBatchUpdateHeader(req, ctx)
+	result, affected, err := SiteBatchEdit(req, ctx)
 	if err != nil {
-		t.Fatalf("SiteBatchUpdateHeader failed: %v", err)
+		t.Fatalf("SiteBatchEdit failed: %v", err)
 	}
 	if len(result.SuccessIDs) != 2 {
 		t.Fatalf("expected 2 success ids, got %#v", result.SuccessIDs)
@@ -1369,7 +1369,7 @@ func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
 	})
 }
 
-func TestSiteBatchUpdateHeaderCanClearAll(t *testing.T) {
+func TestSiteBatchEditCanClearAllHeaders(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
 	site := &model.Site{
@@ -1386,13 +1386,13 @@ func TestSiteBatchUpdateHeaderCanClearAll(t *testing.T) {
 		t.Fatalf("SiteCreate failed: %v", err)
 	}
 
-	req := &model.SiteBatchHeaderRequest{
+	req := &model.SiteBatchEditRequest{
 		IDs:        []int{site.ID},
 		DeleteKeys: []string{"a", "b"},
 	}
-	result, _, err := SiteBatchUpdateHeader(req, ctx)
+	result, _, err := SiteBatchEdit(req, ctx)
 	if err != nil {
-		t.Fatalf("SiteBatchUpdateHeader failed: %v", err)
+		t.Fatalf("SiteBatchEdit failed: %v", err)
 	}
 	if len(result.SuccessIDs) != 1 {
 		t.Fatalf("expected 1 success id, got %#v", result)
