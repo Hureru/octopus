@@ -322,6 +322,46 @@ func SiteBatchUpdateHeader(req *model.SiteBatchHeaderRequest, ctx context.Contex
 	return result, affected, nil
 }
 
+// SiteBatchApply 对一组站点逐个执行批量动作（enable/disable/delete/add_tags/remove_tags），
+// 单站失败计入 FailedItems 后继续。deleteSite 由调用方注入，避免 op 反向依赖站点同步层。
+// 返回结果与需要刷新投影的站点 ID（仅 enable/disable 影响投影）。
+func SiteBatchApply(req *model.SiteBatchRequest, deleteSite func(context.Context, int) error, ctx context.Context) (*model.SiteBatchResult, []int, error) {
+	if req == nil {
+		return nil, nil, fmt.Errorf("site batch request is nil")
+	}
+	result := &model.SiteBatchResult{
+		SuccessIDs:  make([]int, 0, len(req.IDs)),
+		FailedItems: make([]model.SiteBatchFailure, 0),
+	}
+	for _, id := range req.IDs {
+		var err error
+		switch req.Action {
+		case "enable":
+			err = SiteEnabled(id, true, ctx)
+		case "disable":
+			err = SiteEnabled(id, false, ctx)
+		case "delete":
+			err = deleteSite(ctx, id)
+		case "add_tags":
+			err = SiteTagsAdd(id, req.Tags, ctx)
+		case "remove_tags":
+			err = SiteTagsRemove(id, req.Tags, ctx)
+		default:
+			err = fmt.Errorf("invalid action: %s", req.Action)
+		}
+		if err != nil {
+			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: err.Error()})
+			continue
+		}
+		result.SuccessIDs = append(result.SuccessIDs, id)
+	}
+	var affected []int
+	if req.Action == "enable" || req.Action == "disable" {
+		affected = result.SuccessIDs
+	}
+	return result, affected, nil
+}
+
 func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.Site{}).Where("id = ?", id).Update("enabled", enabled).Error; err != nil {

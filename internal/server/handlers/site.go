@@ -426,61 +426,39 @@ func batchSite(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "ids is required")
 		return
 	}
-	var batchTags []string
 	if req.Action == "add_tags" || req.Action == "remove_tags" {
-		batchTags = model.NormalizeSiteTags(req.Tags)
-		if len(batchTags) == 0 {
+		req.Tags = model.NormalizeSiteTags(req.Tags)
+		if len(req.Tags) == 0 {
 			resp.Error(c, http.StatusBadRequest, "tags is required")
 			return
 		}
-		if err := model.ValidateSiteTags(batchTags); err != nil {
+		if err := model.ValidateSiteTags(req.Tags); err != nil {
 			resp.Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 
-	result := model.SiteBatchResult{
-		SuccessIDs:  make([]int, 0),
-		FailedItems: make([]model.SiteBatchFailure, 0),
+	result, affected, err := op.SiteBatchApply(&req, sitesvc.DeleteSite, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
 	}
-	ctx := c.Request.Context()
-
-	for _, id := range req.IDs {
-		var batchErr error
-		switch req.Action {
-		case "enable":
-			batchErr = op.SiteEnabled(id, true, ctx)
-		case "disable":
-			batchErr = op.SiteEnabled(id, false, ctx)
-		case "delete":
-			batchErr = sitesvc.DeleteSite(ctx, id)
-		case "add_tags":
-			batchErr = op.SiteTagsAdd(id, batchTags, ctx)
-		case "remove_tags":
-			batchErr = op.SiteTagsRemove(id, batchTags, ctx)
-		}
-		if batchErr != nil {
-			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: batchErr.Error()})
-		} else {
-			result.SuccessIDs = append(result.SuccessIDs, id)
-		}
-	}
-
-	// Project affected sites asynchronously
-	if req.Action == "enable" || req.Action == "disable" {
-		for _, id := range result.SuccessIDs {
-			siteID := id
-			safe.Go("site-batch-project", func() {
-				projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				defer projCancel()
-				if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
-					log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
-				}
-			})
-		}
-	}
-
+	projectSitesAsync(affected)
 	resp.Success(c, result)
+}
+
+// projectSitesAsync 在后台逐个刷新站点投影，供批量操作成功后调用。
+func projectSitesAsync(ids []int) {
+	for _, id := range ids {
+		siteID := id
+		safe.Go("site-batch-project", func() {
+			projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer projCancel()
+			if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
+				log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
+			}
+		})
+	}
 }
 
 func batchUpdateSiteHeader(c *gin.Context) {
@@ -503,18 +481,7 @@ func batchUpdateSiteHeader(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	for _, id := range affected {
-		siteID := id
-		safe.Go("site-batch-header-project", func() {
-			projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer projCancel()
-			if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
-				log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
-			}
-		})
-	}
-
+	projectSitesAsync(affected)
 	resp.Success(c, result)
 }
 

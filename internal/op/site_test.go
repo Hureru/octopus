@@ -307,6 +307,86 @@ func TestSiteTagsAddRemove(t *testing.T) {
 	}
 }
 
+func TestSiteBatchApply(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	siteA := &model.Site{
+		Name:     "batch-apply-a",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	siteB := &model.Site{
+		Name:     "batch-apply-b",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	for _, site := range []*model.Site{siteA, siteB} {
+		if err := SiteCreate(site, ctx); err != nil {
+			t.Fatalf("SiteCreate failed: %v", err)
+		}
+	}
+	noDelete := func(context.Context, int) error {
+		t.Fatalf("deleteSite should not be called for non-delete action")
+		return nil
+	}
+
+	result, affected, err := SiteBatchApply(&model.SiteBatchRequest{
+		IDs:    []int{siteA.ID, siteB.ID},
+		Action: "disable",
+	}, noDelete, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchApply disable failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 2 || len(result.FailedItems) != 0 {
+		t.Fatalf("expected 2 successes, got %#v", result)
+	}
+	if len(affected) != 2 {
+		t.Fatalf("expected disable to mark 2 sites for projection, got %#v", affected)
+	}
+	reloaded, err := SiteGet(siteA.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if reloaded.Enabled {
+		t.Fatalf("expected site to be disabled")
+	}
+
+	result, affected, err = SiteBatchApply(&model.SiteBatchRequest{
+		IDs:    []int{siteA.ID, siteB.ID + 9999},
+		Action: "add_tags",
+		Tags:   []string{"prod"},
+	}, noDelete, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchApply add_tags failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 || result.SuccessIDs[0] != siteA.ID {
+		t.Fatalf("expected only existing site to succeed, got %#v", result)
+	}
+	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != siteB.ID+9999 {
+		t.Fatalf("expected missing site in failed items, got %#v", result.FailedItems)
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected tag action to skip projection, got %#v", affected)
+	}
+
+	deleted := make([]int, 0, 1)
+	result, _, err = SiteBatchApply(&model.SiteBatchRequest{
+		IDs:    []int{siteB.ID},
+		Action: "delete",
+	}, func(_ context.Context, id int) error {
+		deleted = append(deleted, id)
+		return nil
+	}, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchApply delete failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 || len(deleted) != 1 || deleted[0] != siteB.ID {
+		t.Fatalf("expected injected delete to run for site %d, got result=%#v deleted=%#v", siteB.ID, result, deleted)
+	}
+}
+
 func TestSiteAccountUpdateCanClearNullableFields(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 

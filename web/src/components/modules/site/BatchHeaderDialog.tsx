@@ -111,7 +111,7 @@ export function BatchHeaderDialog({
                 });
                 const successCount = result.success_ids.length;
                 const failedCount = result.failed_items.length;
-                toast.success(`批量编辑完成：成功 ${successCount}，失败 ${failedCount}`);
+                toast.success(`操作完成：成功 ${successCount}，失败 ${failedCount}`);
                 handleOpenChange(false);
                 onApplied?.();
             } catch (submitError) {
