@@ -49,6 +49,7 @@ func init() {
 		AddRoute(router.NewRoute("/detect", http.MethodPost).Handle(detectSitePlatform)).
 		AddRoute(router.NewRoute("/batch", http.MethodPost).Handle(batchSite)).
 		AddRoute(router.NewRoute("/batch/header", http.MethodPost).Handle(batchUpdateSiteHeader)).
+		AddRoute(router.NewRoute("/batch/edit", http.MethodPost).Handle(batchEditSite)).
 		AddRoute(router.NewRoute("/account/create", http.MethodPost).Handle(createSiteAccount)).
 		AddRoute(router.NewRoute("/account/update", http.MethodPost).Handle(updateSiteAccount)).
 		AddRoute(router.NewRoute("/account/enable", http.MethodPost).Handle(enableSiteAccount))
@@ -477,6 +478,37 @@ func batchUpdateSiteHeader(c *gin.Context) {
 	}
 
 	result, affected, err := op.SiteBatchUpdateHeader(&req, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	projectSitesAsync(affected)
+	resp.Success(c, result)
+}
+
+func batchEditSite(c *gin.Context) {
+	var req model.SiteBatchEditRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	if len(req.IDs) == 0 {
+		resp.Error(c, http.StatusBadRequest, "ids is required")
+		return
+	}
+	req.AddTags = model.NormalizeSiteTags(req.AddTags)
+	req.RemoveTags = model.NormalizeSiteTags(req.RemoveTags)
+	if err := model.ValidateSiteTags(req.AddTags); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.AddTags) == 0 && len(req.RemoveTags) == 0 &&
+		len(req.Upserts) == 0 && len(req.DeleteKeys) == 0 {
+		resp.Error(c, http.StatusBadRequest, "nothing to edit")
+		return
+	}
+
+	result, affected, err := op.SiteBatchEdit(&req, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return

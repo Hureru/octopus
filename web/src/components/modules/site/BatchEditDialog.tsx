@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import { Plus, X, XIcon } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/components/common/Toast';
-import { type CustomHeader, useBatchUpdateSiteHeader } from '@/api/endpoints/site';
+import { type CustomHeader, useSiteBatchEdit } from '@/api/endpoints/site';
+import { TagInput } from './TagInput';
 
 type HeaderRowMode = 'set' | 'delete';
 
@@ -23,11 +24,12 @@ interface HeaderRow {
     header_value: string;
 }
 
-interface BatchHeaderDialogProps {
+interface BatchEditDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     selectedSiteIds: number[];
-    onApplied?: () => void;
+    allTagNames: string[];
+    selectedSiteTags: string[];
 }
 
 function createEmptyRow(): HeaderRow {
@@ -40,26 +42,40 @@ function getErrorMessage(error: unknown) {
         const message = (error as { message?: unknown }).message;
         if (typeof message === 'string') return message;
     }
-    return '批量编辑 Header 失败';
+    return '批量编辑失败';
 }
 
 /**
- * 多站点批量编辑 Header 弹窗。视觉风格与 SiteEditDialog 保持一致。
- * 写入语义为智能合并：「设置」行按 Header Key 大小写不敏感 upsert，「删除」行按 Key
- * 移除；各站点原有未涉及的 Header 保持不变（合并逻辑由后端 /api/v1/site/batch/header 执行）。
+ * 多站点批量编辑弹窗（标签 + Header）。视觉风格与 SiteEditDialog 保持一致。
+ * 只提交填写了的部分：标签先添加后移除（同名时移除优先）；Header「设置」行按 Key
+ * 大小写不敏感 upsert，「删除」行按 Key 移除；各站点未涉及的内容保持不变
+ * （合并逻辑由后端 /api/v1/site/batch/edit 执行）。
  */
-export function BatchHeaderDialog({
+export function BatchEditDialog({
     open,
     onOpenChange,
     selectedSiteIds,
-    onApplied,
-}: BatchHeaderDialogProps) {
-    const batchHeader = useBatchUpdateSiteHeader();
+    allTagNames,
+    selectedSiteTags,
+}: BatchEditDialogProps) {
+    const batchEdit = useSiteBatchEdit();
+    const [addTags, setAddTags] = useState<string[]>([]);
+    const [removeTags, setRemoveTags] = useState<string[]>([]);
     const [rows, setRows] = useState<HeaderRow[]>(() => [createEmptyRow()]);
+
+    const hasInput = useMemo(
+        () =>
+            addTags.length > 0 ||
+            removeTags.length > 0 ||
+            rows.some((row) => row.header_key.trim() !== ''),
+        [addTags, removeTags, rows],
+    );
 
     const handleOpenChange = useCallback(
         (next: boolean) => {
             if (!next) {
+                setAddTags([]);
+                setRemoveTags([]);
                 setRows([createEmptyRow()]);
             }
             onOpenChange(next);
@@ -98,14 +114,21 @@ export function BatchHeaderDialog({
                 toast.error('设置类 Header 的键和值都不能为空');
                 return;
             }
-            if (upserts.length === 0 && deleteKeys.length === 0) {
-                toast.error('请至少填写一项有效的 Header');
+            if (
+                addTags.length === 0 &&
+                removeTags.length === 0 &&
+                upserts.length === 0 &&
+                deleteKeys.length === 0
+            ) {
+                toast.error('请至少填写一项修改');
                 return;
             }
 
             try {
-                const result = await batchHeader.mutateAsync({
+                const result = await batchEdit.mutateAsync({
                     ids: selectedSiteIds,
+                    add_tags: addTags,
+                    remove_tags: removeTags,
                     upserts,
                     delete_keys: deleteKeys,
                 });
@@ -113,12 +136,11 @@ export function BatchHeaderDialog({
                 const failedCount = result.failed_items.length;
                 toast.success(`操作完成：成功 ${successCount}，失败 ${failedCount}`);
                 handleOpenChange(false);
-                onApplied?.();
             } catch (submitError) {
                 toast.error(getErrorMessage(submitError));
             }
         },
-        [rows, selectedSiteIds, batchHeader, handleOpenChange, onApplied],
+        [rows, addTags, removeTags, selectedSiteIds, batchEdit, handleOpenChange],
     );
 
     return (
@@ -130,10 +152,10 @@ export function BatchHeaderDialog({
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
                         <h2 className="text-2xl font-bold text-card-foreground truncate">
-                            批量编辑 Header
+                            批量编辑
                         </h2>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            将对 {selectedSiteIds.length} 个站点合并以下 Header（保留各站点原有未涉及的 Header）
+                            将对 {selectedSiteIds.length} 个站点应用以下修改（未涉及的内容保持不变）
                         </p>
                     </div>
                     <button
@@ -147,7 +169,30 @@ export function BatchHeaderDialog({
                 </header>
 
                 <form className="flex flex-1 min-h-0 flex-col" onSubmit={handleSubmit}>
-                    <div className="flex-1 min-h-0 space-y-3 overflow-y-auto px-1">
+                    <div className="flex-1 min-h-0 space-y-4 overflow-y-auto px-1">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-card-foreground">
+                                添加标签
+                            </label>
+                            <TagInput
+                                value={addTags}
+                                onChange={setAddTags}
+                                suggestions={allTagNames}
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-card-foreground">
+                                移除标签
+                            </label>
+                            <TagInput
+                                value={removeTags}
+                                onChange={setRemoveTags}
+                                suggestions={selectedSiteTags}
+                            />
+                        </div>
+
+                        <div className="border-t border-border/60" />
+
                         <div className="flex items-center justify-between">
                             <label className="text-sm font-medium text-card-foreground">
                                 Header 列表 {rows.length > 0 ? `(${rows.length})` : ''}
@@ -254,9 +299,13 @@ export function BatchHeaderDialog({
                         <Button
                             type="submit"
                             className="h-12 w-full rounded-2xl sm:flex-1"
-                            disabled={batchHeader.isPending || selectedSiteIds.length === 0}
+                            disabled={
+                                batchEdit.isPending ||
+                                selectedSiteIds.length === 0 ||
+                                !hasInput
+                            }
                         >
-                            {batchHeader.isPending ? '应用中...' : '应用到所选站点'}
+                            {batchEdit.isPending ? '应用中...' : '应用到所选站点'}
                         </Button>
                     </footer>
                 </form>

@@ -610,20 +610,22 @@ export function useSiteBatchAction() {
   });
 }
 
-export function useBatchUpdateSiteHeader() {
+export function useSiteBatchEdit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
       ids: number[];
+      add_tags: string[];
+      remove_tags: string[];
       upserts: CustomHeader[];
       delete_keys: string[];
     }) =>
       apiClient.post<{
         success_ids: number[];
         failed_items: Array<{ id: number; message: string }>;
-      }>("/api/v1/site/batch/header", data),
+      }>("/api/v1/site/batch/edit", data),
     onSuccess: () => invalidateSiteQueries(queryClient),
-    onError: (error) => logger.error("批量编辑 Header 失败:", error),
+    onError: (error) => logger.error("批量编辑失败:", error),
   });
 }
 

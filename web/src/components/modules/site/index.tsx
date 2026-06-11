@@ -68,9 +68,8 @@ import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import { SiteEditDialog } from "./SiteEditDialog";
-import { BatchHeaderDialog } from "./BatchHeaderDialog";
+import { BatchEditDialog } from "./BatchEditDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
-import { TagInput } from "./TagInput";
 import {
   accountHasCheckinEnabled,
   accountMatchesCheckinFilters,
@@ -104,8 +103,6 @@ import {
   Square,
   Archive,
   ArchiveRestore,
-  Tag,
-  Tags,
   Trash2,
   TriangleAlert,
   Upload,
@@ -616,10 +613,7 @@ export function Site() {
 
   // Batch selection
   const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
-  const [batchDialog, setBatchDialog] = useState<
-    "add_tags" | "remove_tags" | "header" | null
-  >(null);
-  const [batchTags, setBatchTags] = useState<string[]>([]);
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -1186,7 +1180,7 @@ export function Site() {
     );
   }
 
-  async function handleBatchAction(action: string, tags?: string[]) {
+  async function handleBatchAction(action: string) {
     if (selectedSiteIds.length === 0) {
       toast.error("请先选择站点");
       return;
@@ -1195,7 +1189,6 @@ export function Site() {
       const result = await batchAction.mutateAsync({
         ids: selectedSiteIds,
         action,
-        tags,
       });
       const successCount = result.success_ids.length;
       const failedCount = result.failed_items.length;
@@ -1990,71 +1983,30 @@ export function Site() {
               >
                 批量禁用
               </Button>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-xl"
-                    disabled={batchAction.isPending}
-                  >
-                    <MoreHorizontal className="size-4" />
-                    更多操作
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  className="w-52 rounded-2xl border border-border/60 bg-card p-2"
-                >
-                  <div className="grid gap-1">
-                    <button
-                      type="button"
-                      className={MENU_BUTTON_CLASS}
-                      onClick={() => {
-                        setBatchTags([]);
-                        setBatchDialog("add_tags");
-                      }}
-                    >
-                      <Tags className="size-4" />
-                      <span>添加标签</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={MENU_BUTTON_CLASS}
-                      onClick={() => {
-                        setBatchTags([]);
-                        setBatchDialog("remove_tags");
-                      }}
-                    >
-                      <Tag className="size-4" />
-                      <span>移除标签</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={MENU_BUTTON_CLASS}
-                      onClick={() => setBatchDialog("header")}
-                    >
-                      <Pencil className="size-4" />
-                      <span>编辑 Header</span>
-                    </button>
-                    <div className="my-1 border-t border-border/60" />
-                    <button
-                      type="button"
-                      className={cn(MENU_BUTTON_CLASS, "text-destructive")}
-                      onClick={() =>
-                        setDeleteConfirm({
-                          type: "batch-site",
-                          id: 0,
-                          name: String(selectedSiteIds.length),
-                        })
-                      }
-                    >
-                      <Trash2 className="size-4" />
-                      <span>批量删除</span>
-                    </button>
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() => setBatchEditOpen(true)}
+                disabled={batchAction.isPending}
+              >
+                批量编辑
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="rounded-xl"
+                onClick={() =>
+                  setDeleteConfirm({
+                    type: "batch-site",
+                    id: 0,
+                    name: String(selectedSiteIds.length),
+                  })
+                }
+                disabled={batchAction.isPending}
+              >
+                批量删除
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -2163,66 +2115,12 @@ export function Site() {
         allTags={allTagNames}
       />
 
-      <Dialog
-        open={batchDialog === "add_tags" || batchDialog === "remove_tags"}
-        onOpenChange={(open) => {
-          if (!open) {
-            setBatchDialog(null);
-            setBatchTags([]);
-          }
-        }}
-      >
-        <DialogContent className="rounded-3xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {batchDialog === "remove_tags" ? "批量移除标签" : "批量添加标签"}
-            </DialogTitle>
-            <DialogDescription>
-              {batchDialog === "remove_tags"
-                ? `从已选的 ${selectedSiteIds.length} 个站点移除以下标签。`
-                : `为已选的 ${selectedSiteIds.length} 个站点添加以下标签。`}
-            </DialogDescription>
-          </DialogHeader>
-          <TagInput
-            value={batchTags}
-            onChange={setBatchTags}
-            suggestions={
-              batchDialog === "remove_tags" ? selectedSiteTags : allTagNames
-            }
-          />
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              className="rounded-xl"
-              onClick={() => {
-                setBatchDialog(null);
-                setBatchTags([]);
-              }}
-            >
-              取消
-            </Button>
-            <Button
-              className="rounded-xl"
-              disabled={batchTags.length === 0 || batchAction.isPending}
-              onClick={async () => {
-                await handleBatchAction(
-                  batchDialog === "remove_tags" ? "remove_tags" : "add_tags",
-                  batchTags,
-                );
-                setBatchDialog(null);
-                setBatchTags([]);
-              }}
-            >
-              确认
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <BatchHeaderDialog
-        open={batchDialog === "header"}
-        onOpenChange={(open) => setBatchDialog(open ? "header" : null)}
+      <BatchEditDialog
+        open={batchEditOpen}
+        onOpenChange={setBatchEditOpen}
         selectedSiteIds={selectedSiteIds}
+        allTagNames={allTagNames}
+        selectedSiteTags={selectedSiteTags}
       />
 
       <AccountEditDialog

@@ -387,6 +387,132 @@ func TestSiteBatchApply(t *testing.T) {
 	}
 }
 
+func TestSiteBatchEditAppliesTagsAndHeadersTogether(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:         "batch-edit-site",
+		Platform:     model.SitePlatformNewAPI,
+		BaseURL:      "https://example.com",
+		Enabled:      true,
+		Tags:         []string{"prod", "legacy"},
+		CustomHeader: []model.CustomHeader{{HeaderKey: "X-Foo", HeaderValue: "old"}},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	result, affected, err := SiteBatchEdit(&model.SiteBatchEditRequest{
+		IDs:        []int{site.ID, site.ID + 9999},
+		AddTags:    []string{"cheap"},
+		RemoveTags: []string{"legacy"},
+		Upserts:    []model.CustomHeader{{HeaderKey: "x-foo", HeaderValue: "new"}},
+		DeleteKeys: []string{"Authorization"},
+	}, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchEdit failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 || result.SuccessIDs[0] != site.ID {
+		t.Fatalf("expected only existing site to succeed, got %#v", result)
+	}
+	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != site.ID+9999 {
+		t.Fatalf("expected missing site in failed items, got %#v", result.FailedItems)
+	}
+	if len(affected) != 1 || affected[0] != site.ID {
+		t.Fatalf("expected header edit to mark site for projection, got %#v", affected)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 2 || reloaded.Tags[0] != "prod" || reloaded.Tags[1] != "cheap" {
+		t.Fatalf("expected tags [prod cheap], got %#v", reloaded.Tags)
+	}
+	assertHeaders(t, reloaded.CustomHeader, []model.CustomHeader{
+		{HeaderKey: "X-Foo", HeaderValue: "new"},
+	})
+}
+
+func TestSiteBatchEditTagsOnlySkipsProjection(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:         "batch-edit-tags-only",
+		Platform:     model.SitePlatformNewAPI,
+		BaseURL:      "https://example.com",
+		Enabled:      true,
+		CustomHeader: []model.CustomHeader{{HeaderKey: "Keep", HeaderValue: "k"}},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	result, affected, err := SiteBatchEdit(&model.SiteBatchEditRequest{
+		IDs:     []int{site.ID},
+		AddTags: []string{"prod"},
+	}, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchEdit failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 {
+		t.Fatalf("expected success, got %#v", result)
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected tags-only edit to skip projection, got %#v", affected)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 1 || reloaded.Tags[0] != "prod" {
+		t.Fatalf("expected tags [prod], got %#v", reloaded.Tags)
+	}
+	assertHeaders(t, reloaded.CustomHeader, []model.CustomHeader{
+		{HeaderKey: "Keep", HeaderValue: "k"},
+	})
+}
+
+func TestSiteBatchEditRejectsEmptyPatch(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	if _, _, err := SiteBatchEdit(&model.SiteBatchEditRequest{IDs: []int{1}}, ctx); err == nil {
+		t.Fatalf("expected empty patch to be rejected")
+	}
+}
+
+func TestSiteBatchEditRemoveWinsOverAdd(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "batch-edit-remove-wins",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+		Tags:     []string{"prod"},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	if _, _, err := SiteBatchEdit(&model.SiteBatchEditRequest{
+		IDs:        []int{site.ID},
+		AddTags:    []string{"dup"},
+		RemoveTags: []string{"dup", "prod"},
+	}, ctx); err != nil {
+		t.Fatalf("SiteBatchEdit failed: %v", err)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 0 {
+		t.Fatalf("expected empty tags, got %#v", reloaded.Tags)
+	}
+}
+
 func TestSiteAccountUpdateCanClearNullableFields(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 

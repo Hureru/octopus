@@ -396,6 +396,16 @@ type SiteBatchHeaderRequest struct {
 	DeleteKeys []string       `json:"delete_keys"`
 }
 
+// SiteBatchEditRequest 批量编辑：对一批站点统一应用标签与 custom_header 修改补丁。
+// 标签先添加后移除（同名时移除优先）；Header 语义与 SiteBatchHeaderRequest 一致。
+type SiteBatchEditRequest struct {
+	IDs        []int          `json:"ids" binding:"required"`
+	AddTags    []string       `json:"add_tags"`
+	RemoveTags []string       `json:"remove_tags"`
+	Upserts    []CustomHeader `json:"upserts"`
+	DeleteKeys []string       `json:"delete_keys"`
+}
+
 func NormalizeSiteGroupKey(value string) string {
 	key := strings.TrimSpace(value)
 	if key == "" {
