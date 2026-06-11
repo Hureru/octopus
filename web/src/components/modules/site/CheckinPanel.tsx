@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FilterX,
   Layers3,
+  Tag,
   TrendingUp,
   Wallet,
 } from "lucide-react";
@@ -107,6 +108,9 @@ export function CheckinPanel({
   onClearFilters,
   activeFilterStatuses,
   onFilterChange,
+  allTags,
+  activeTags,
+  onTagFilterChange,
 }: {
   sites: Site[] | undefined;
   inventory: {
@@ -123,6 +127,9 @@ export function CheckinPanel({
   onClearFilters: () => void;
   activeFilterStatuses: CheckinActiveFilterStatus[];
   onFilterChange: (status: CheckinFilterStatus) => void;
+  allTags: Array<{ tag: string; count: number }>;
+  activeTags: string[];
+  onTagFilterChange: (tag: string) => void;
 }) {
   const summaryNow = useMemo(() => {
     const [year = "", month = "", day = ""] = statusDayKey.split("-");
@@ -251,6 +258,32 @@ export function CheckinPanel({
             ) : null}
           </div>
         </div>
+
+        {allTags.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {allTags.map(({ tag, count }) => {
+              const active = activeTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => onTagFilterChange(tag)}
+                  title={active ? `取消按「${tag}」筛选` : `按「${tag}」筛选`}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    active
+                      ? "border-primary/30 bg-primary text-primary-foreground"
+                      : "border-border bg-background text-foreground hover:bg-muted/40",
+                  )}
+                >
+                  <Tag className="size-3" />
+                  <span>{tag}</span>
+                  <span className="text-[10px] opacity-70">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </section>
   );

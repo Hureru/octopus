@@ -124,12 +124,13 @@ export type Site = {
   sort_order: number;
   global_weight: number;
   custom_header: CustomHeader[];
+  tags: string[];
   archived: boolean;
   archived_at?: string | null;
   accounts: SiteAccount[];
 };
 
-type SiteServer = Omit<Site, "accounts" | "custom_header"> & {
+type SiteServer = Omit<Site, "accounts" | "custom_header" | "tags"> & {
   accounts: Array<
     Omit<
       SiteAccount,
@@ -142,6 +143,7 @@ type SiteServer = Omit<Site, "accounts" | "custom_header"> & {
     }
   > | null;
   custom_header: CustomHeader[] | null;
+  tags: string[] | null;
 };
 
 export type SiteSyncResult = {
@@ -221,6 +223,7 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
   return data.map((site) => ({
     ...site,
     custom_header: site.custom_header ?? [],
+    tags: site.tags ?? [],
     proxy_mode: site.proxy_mode ?? "direct",
     proxy_config_id: site.proxy_config_id ?? null,
     external_checkin_url: site.external_checkin_url ?? null,
@@ -607,20 +610,22 @@ export function useSiteBatchAction() {
   });
 }
 
-export function useBatchUpdateSiteHeader() {
+export function useSiteBatchEdit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
       ids: number[];
+      add_tags: string[];
+      remove_tags: string[];
       upserts: CustomHeader[];
       delete_keys: string[];
     }) =>
       apiClient.post<{
         success_ids: number[];
         failed_items: Array<{ id: number; message: string }>;
-      }>("/api/v1/site/batch/header", data),
+      }>("/api/v1/site/batch/edit", data),
     onSuccess: () => invalidateSiteQueries(queryClient),
-    onError: (error) => logger.error("批量编辑 Header 失败:", error),
+    onError: (error) => logger.error("批量编辑失败:", error),
   });
 }
 

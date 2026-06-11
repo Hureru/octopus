@@ -193,6 +193,279 @@ func TestSiteUpdateCanClearNullableFields(t *testing.T) {
 	}
 }
 
+func TestSiteCreateNormalizesTags(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "tag-normalize-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+		Tags:     []string{" prod ", "prod", "", "cheap"},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 2 || reloaded.Tags[0] != "prod" || reloaded.Tags[1] != "cheap" {
+		t.Fatalf("expected normalized tags [prod cheap], got %#v", reloaded.Tags)
+	}
+}
+
+func TestSiteUpdateSetAndClearTags(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "tag-update-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	var setReq model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"tags":["prod"," cheap "]}`), &setReq); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	updated, err := SiteUpdate(&setReq, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.Tags) != 2 || updated.Tags[0] != "prod" || updated.Tags[1] != "cheap" {
+		t.Fatalf("expected tags [prod cheap], got %#v", updated.Tags)
+	}
+
+	var nameReq model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"name":"tag-update-site-renamed"}`), &nameReq); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	updated, err = SiteUpdate(&nameReq, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.Tags) != 2 {
+		t.Fatalf("expected update without tags to keep tags, got %#v", updated.Tags)
+	}
+
+	var clearReq model.SiteUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":`+fmt.Sprint(site.ID)+`,"tags":[]}`), &clearReq); err != nil {
+		t.Fatalf("json.Unmarshal SiteUpdateRequest failed: %v", err)
+	}
+	updated, err = SiteUpdate(&clearReq, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.Tags) != 0 {
+		t.Fatalf("expected tags to be cleared, got %#v", updated.Tags)
+	}
+}
+
+func TestSiteBatchApply(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	siteA := &model.Site{
+		Name:     "batch-apply-a",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	siteB := &model.Site{
+		Name:     "batch-apply-b",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	for _, site := range []*model.Site{siteA, siteB} {
+		if err := SiteCreate(site, ctx); err != nil {
+			t.Fatalf("SiteCreate failed: %v", err)
+		}
+	}
+	noDelete := func(context.Context, int) error {
+		t.Fatalf("deleteSite should not be called for non-delete action")
+		return nil
+	}
+
+	result, affected, err := SiteBatchApply(&model.SiteBatchRequest{
+		IDs:    []int{siteA.ID, siteB.ID},
+		Action: "disable",
+	}, noDelete, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchApply disable failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 2 || len(result.FailedItems) != 0 {
+		t.Fatalf("expected 2 successes, got %#v", result)
+	}
+	if len(affected) != 2 {
+		t.Fatalf("expected disable to mark 2 sites for projection, got %#v", affected)
+	}
+	reloaded, err := SiteGet(siteA.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if reloaded.Enabled {
+		t.Fatalf("expected site to be disabled")
+	}
+
+	deleted := make([]int, 0, 1)
+	result, affected, err = SiteBatchApply(&model.SiteBatchRequest{
+		IDs:    []int{siteA.ID, siteB.ID},
+		Action: "delete",
+	}, func(_ context.Context, id int) error {
+		if id == siteA.ID {
+			return fmt.Errorf("delete failed")
+		}
+		deleted = append(deleted, id)
+		return nil
+	}, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchApply delete failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 || result.SuccessIDs[0] != siteB.ID {
+		t.Fatalf("expected only site B to succeed, got %#v", result)
+	}
+	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != siteA.ID {
+		t.Fatalf("expected site A in failed items, got %#v", result.FailedItems)
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected delete to skip projection, got %#v", affected)
+	}
+	if len(deleted) != 1 || deleted[0] != siteB.ID {
+		t.Fatalf("expected injected delete to run for site %d, got %#v", siteB.ID, deleted)
+	}
+}
+
+func TestSiteBatchEditAppliesTagsAndHeadersTogether(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:         "batch-edit-site",
+		Platform:     model.SitePlatformNewAPI,
+		BaseURL:      "https://example.com",
+		Enabled:      true,
+		Tags:         []string{"prod", "legacy"},
+		CustomHeader: []model.CustomHeader{{HeaderKey: "X-Foo", HeaderValue: "old"}},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	result, affected, err := SiteBatchEdit(&model.SiteBatchEditRequest{
+		IDs:        []int{site.ID, site.ID + 9999},
+		AddTags:    []string{"cheap"},
+		RemoveTags: []string{"legacy"},
+		Upserts:    []model.CustomHeader{{HeaderKey: "x-foo", HeaderValue: "new"}},
+		DeleteKeys: []string{"Authorization"},
+	}, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchEdit failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 || result.SuccessIDs[0] != site.ID {
+		t.Fatalf("expected only existing site to succeed, got %#v", result)
+	}
+	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != site.ID+9999 {
+		t.Fatalf("expected missing site in failed items, got %#v", result.FailedItems)
+	}
+	if len(affected) != 1 || affected[0] != site.ID {
+		t.Fatalf("expected header edit to mark site for projection, got %#v", affected)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 2 || reloaded.Tags[0] != "prod" || reloaded.Tags[1] != "cheap" {
+		t.Fatalf("expected tags [prod cheap], got %#v", reloaded.Tags)
+	}
+	assertHeaders(t, reloaded.CustomHeader, []model.CustomHeader{
+		{HeaderKey: "X-Foo", HeaderValue: "new"},
+	})
+}
+
+func TestSiteBatchEditTagsOnlySkipsProjection(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:         "batch-edit-tags-only",
+		Platform:     model.SitePlatformNewAPI,
+		BaseURL:      "https://example.com",
+		Enabled:      true,
+		CustomHeader: []model.CustomHeader{{HeaderKey: "Keep", HeaderValue: "k"}},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	result, affected, err := SiteBatchEdit(&model.SiteBatchEditRequest{
+		IDs:     []int{site.ID},
+		AddTags: []string{"prod"},
+	}, ctx)
+	if err != nil {
+		t.Fatalf("SiteBatchEdit failed: %v", err)
+	}
+	if len(result.SuccessIDs) != 1 {
+		t.Fatalf("expected success, got %#v", result)
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected tags-only edit to skip projection, got %#v", affected)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 1 || reloaded.Tags[0] != "prod" {
+		t.Fatalf("expected tags [prod], got %#v", reloaded.Tags)
+	}
+	assertHeaders(t, reloaded.CustomHeader, []model.CustomHeader{
+		{HeaderKey: "Keep", HeaderValue: "k"},
+	})
+}
+
+func TestSiteBatchEditRejectsEmptyPatch(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	if _, _, err := SiteBatchEdit(&model.SiteBatchEditRequest{IDs: []int{1}}, ctx); err == nil {
+		t.Fatalf("expected empty patch to be rejected")
+	}
+}
+
+func TestSiteBatchEditRemoveWinsOverAdd(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "batch-edit-remove-wins",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+		Tags:     []string{"prod"},
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	if _, _, err := SiteBatchEdit(&model.SiteBatchEditRequest{
+		IDs:        []int{site.ID},
+		AddTags:    []string{"dup"},
+		RemoveTags: []string{"dup", "prod"},
+	}, ctx); err != nil {
+		t.Fatalf("SiteBatchEdit failed: %v", err)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if len(reloaded.Tags) != 0 {
+		t.Fatalf("expected empty tags, got %#v", reloaded.Tags)
+	}
+}
+
 func TestSiteAccountUpdateCanClearNullableFields(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
@@ -1027,7 +1300,7 @@ func TestMergeHeaders(t *testing.T) {
 	}
 }
 
-func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
+func TestSiteBatchEditMergesHeadersPerSite(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
 	siteA := &model.Site{
@@ -1054,7 +1327,7 @@ func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
 		t.Fatalf("SiteCreate B failed: %v", err)
 	}
 
-	req := &model.SiteBatchHeaderRequest{
+	req := &model.SiteBatchEditRequest{
 		IDs: []int{siteA.ID, siteB.ID, 99999},
 		Upserts: []model.CustomHeader{
 			{HeaderKey: "X-Foo", HeaderValue: "NEW"},
@@ -1062,9 +1335,9 @@ func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
 		},
 		DeleteKeys: []string{"Authorization"},
 	}
-	result, affected, err := SiteBatchUpdateHeader(req, ctx)
+	result, affected, err := SiteBatchEdit(req, ctx)
 	if err != nil {
-		t.Fatalf("SiteBatchUpdateHeader failed: %v", err)
+		t.Fatalf("SiteBatchEdit failed: %v", err)
 	}
 	if len(result.SuccessIDs) != 2 {
 		t.Fatalf("expected 2 success ids, got %#v", result.SuccessIDs)
@@ -1096,7 +1369,7 @@ func TestSiteBatchUpdateHeaderMergesPerSite(t *testing.T) {
 	})
 }
 
-func TestSiteBatchUpdateHeaderCanClearAll(t *testing.T) {
+func TestSiteBatchEditCanClearAllHeaders(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
 	site := &model.Site{
@@ -1113,13 +1386,13 @@ func TestSiteBatchUpdateHeaderCanClearAll(t *testing.T) {
 		t.Fatalf("SiteCreate failed: %v", err)
 	}
 
-	req := &model.SiteBatchHeaderRequest{
+	req := &model.SiteBatchEditRequest{
 		IDs:        []int{site.ID},
 		DeleteKeys: []string{"a", "b"},
 	}
-	result, _, err := SiteBatchUpdateHeader(req, ctx)
+	result, _, err := SiteBatchEdit(req, ctx)
 	if err != nil {
-		t.Fatalf("SiteBatchUpdateHeader failed: %v", err)
+		t.Fatalf("SiteBatchEdit failed: %v", err)
 	}
 	if len(result.SuccessIDs) != 1 {
 		t.Fatalf("expected 1 success id, got %#v", result)

@@ -68,7 +68,7 @@ import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import { SiteEditDialog } from "./SiteEditDialog";
-import { BatchHeaderDialog } from "./BatchHeaderDialog";
+import { BatchEditDialog } from "./BatchEditDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
 import {
   accountHasCheckinEnabled,
@@ -556,13 +556,14 @@ function IconActionButton({
 }
 
 function estimateVisibleSiteCardHeight(item: VisibleSite, expanded: boolean) {
+  const tagRow = item.site.tags.length > 0 ? 30 : 0;
   if (item.forceExpanded || expanded) {
-    return 360 + item.visibleAccounts.length * 190;
+    return 360 + tagRow + item.visibleAccounts.length * 190;
   }
   if (item.site.accounts.length === 0) {
-    return 280;
+    return 280 + tagRow;
   }
-  return 310;
+  return 310 + tagRow;
 }
 
 export function Site() {
@@ -612,11 +613,11 @@ export function Site() {
 
   // Batch selection
   const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
-  const [batchHeaderOpen, setBatchHeaderOpen] = useState(false);
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{
-    type: "site" | "account" | "archive-site";
+    type: "site" | "account" | "archive-site" | "batch-site";
     id: number;
     name: string;
   } | null>(null);
@@ -663,6 +664,8 @@ export function Site() {
   const setCheckinFilterStatuses = useSiteUIStore(
     (state) => state.setCheckinFilterStatuses,
   );
+  const tagFilters = useSiteUIStore((state) => state.tagFilters);
+  const setTagFilters = useSiteUIStore((state) => state.setTagFilters);
   const setSiteHandlers = useSiteUIStore((state) => state.setHandlers);
   const resetSiteHandlers = useSiteUIStore((state) => state.resetHandlers);
   const pendingJump = useJumpStore((state) => state.pending);
@@ -796,12 +799,46 @@ export function Site() {
     [searchTerm],
   );
 
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const site of sites ?? []) {
+      for (const tag of site.tags) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts, ([tag, count]) => ({ tag, count })).sort(
+      (a, b) => b.count - a.count || a.tag.localeCompare(b.tag),
+    );
+  }, [sites]);
+  const allTagNames = useMemo(
+    () => allTags.map((item) => item.tag),
+    [allTags],
+  );
+  const selectedSiteTags = useMemo(() => {
+    const tags = new Set<string>();
+    for (const site of sites ?? []) {
+      if (!selectedSiteIds.includes(site.id)) continue;
+      for (const tag of site.tags) {
+        tags.add(tag);
+      }
+    }
+    return Array.from(tags);
+  }, [sites, selectedSiteIds]);
+
   const visibleSites = useMemo<VisibleSite[]>(() => {
     const hasSearch = normalizedQuery.length > 0;
 
     const list = (sites ?? []).flatMap((site) => {
       const summary = buildSiteSummary(site);
       const isForcedTarget = forcedSiteId === site.id;
+
+      if (
+        tagFilters.length > 0 &&
+        !isForcedTarget &&
+        !site.tags.some((tag) => tagFilters.includes(tag))
+      ) {
+        return [];
+      }
 
       const hasCheckinFilters = checkinFilterStatuses.length > 0;
 
@@ -884,13 +921,16 @@ export function Site() {
     sites,
     normalizedQuery,
     checkinFilterStatuses,
+    tagFilters,
     forcedSiteId,
     siteSortField,
     siteSortOrder,
   ]);
 
   const hasActiveFilters =
-    normalizedQuery.length > 0 || checkinFilterStatuses.length > 0;
+    normalizedQuery.length > 0 ||
+    checkinFilterStatuses.length > 0 ||
+    tagFilters.length > 0;
   const visibleAccountCount = visibleSites.reduce(
     (sum, item) => sum + item.visibleAccounts.length,
     0,
@@ -1094,6 +1134,11 @@ export function Site() {
 
   async function confirmDelete() {
     if (!deleteConfirm) return;
+    if (deleteConfirm.type === "batch-site") {
+      await handleBatchAction("delete");
+      setDeleteConfirm(null);
+      return;
+    }
     try {
       if (deleteConfirm.type === "site") {
         await deleteSite.mutateAsync(deleteConfirm.id);
@@ -1178,9 +1223,18 @@ export function Site() {
     );
   }
 
+  function handleTagFilterChange(tag: string) {
+    setTagFilters((current) =>
+      current.includes(tag)
+        ? current.filter((item) => item !== tag)
+        : [...current, tag],
+    );
+  }
+
   function clearFilters() {
     setSearchTerm("site", "");
     setCheckinFilterStatuses([]);
+    setTagFilters([]);
   }
 
   function jumpToSiteChannel(siteId: number) {
@@ -1404,6 +1458,40 @@ export function Site() {
                     value={formatBalance(summary.todayIncome)}
                   />
                 </div>
+
+                {site.tags.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {site.tags.map((tag) => (
+                      <Badge
+                        key={tag}
+                        asChild
+                        variant="secondary"
+                        className={cn(
+                          "cursor-pointer transition-colors hover:bg-secondary/70",
+                          tagFilters.includes(tag) &&
+                            "bg-primary text-primary-foreground hover:bg-primary/90",
+                        )}
+                      >
+                        <button
+                          type="button"
+                          title={
+                            tagFilters.includes(tag)
+                              ? `取消按「${tag}」筛选`
+                              : `按「${tag}」筛选`
+                          }
+                          aria-pressed={tagFilters.includes(tag)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleTagFilterChange(tag);
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          {tag}
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span>
@@ -1841,6 +1929,9 @@ export function Site() {
           onClearFilters={clearFilters}
           activeFilterStatuses={checkinFilterStatuses}
           onFilterChange={handleCheckinFilterChange}
+          allTags={allTags}
+          activeTags={tagFilters}
+          onTagFilterChange={handleTagFilterChange}
         />
 
         {selectedSiteIds.length > 0 ? (
@@ -1900,21 +1991,28 @@ export function Site() {
                 批量禁用
               </Button>
               <Button
-                variant="destructive"
-                size="sm"
-                className="rounded-xl"
-                onClick={() => handleBatchAction("delete")}
-                disabled={batchAction.isPending}
-              >
-                批量删除
-              </Button>
-              <Button
                 variant="outline"
                 size="sm"
                 className="rounded-xl"
-                onClick={() => setBatchHeaderOpen(true)}
+                onClick={() => setBatchEditOpen(true)}
+                disabled={batchAction.isPending}
               >
-                批量编辑 Header
+                批量编辑
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="rounded-xl"
+                onClick={() =>
+                  setDeleteConfirm({
+                    type: "batch-site",
+                    id: 0,
+                    name: String(selectedSiteIds.length),
+                  })
+                }
+                disabled={batchAction.isPending}
+              >
+                批量删除
               </Button>
               <Button
                 variant="ghost"
@@ -2021,13 +2119,15 @@ export function Site() {
         onOpenChange={closeSiteDialog}
         site={editingSite}
         onCreated={(createdSite) => openCreateAccountDialog(createdSite)}
+        allTags={allTagNames}
       />
 
-      <BatchHeaderDialog
-        open={batchHeaderOpen}
-        onOpenChange={setBatchHeaderOpen}
+      <BatchEditDialog
+        open={batchEditOpen}
+        onOpenChange={setBatchEditOpen}
         selectedSiteIds={selectedSiteIds}
-        onApplied={() => setSelectedSiteIds([])}
+        allTagNames={allTagNames}
+        selectedSiteTags={selectedSiteTags}
       />
 
       <AccountEditDialog
@@ -2356,7 +2456,9 @@ export function Site() {
                 ? `确认删除站点「${deleteConfirm?.name}」及其所有账号和托管渠道？此操作不可撤销。`
                 : deleteConfirm?.type === "archive-site"
                   ? `确认归档站点「${deleteConfirm?.name}」？归档后将从主列表移除，托管渠道会被下线，账号和密钥会保留；可在『归档站点』中随时恢复。`
-                  : `确认删除账号「${deleteConfirm?.name}」及其托管渠道？此操作不可撤销。`}
+                  : deleteConfirm?.type === "batch-site"
+                    ? `确认删除已选的 ${deleteConfirm?.name} 个站点及其所有账号和托管渠道？此操作不可撤销。`
+                    : `确认删除账号「${deleteConfirm?.name}」及其托管渠道？此操作不可撤销。`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -2374,14 +2476,17 @@ export function Site() {
               disabled={
                 deleteSite.isPending ||
                 deleteSiteAccount.isPending ||
-                archiveSite.isPending
+                archiveSite.isPending ||
+                batchAction.isPending
               }
             >
               {deleteConfirm?.type === "archive-site"
                 ? archiveSite.isPending
                   ? "归档中..."
                   : "确认归档"
-                : deleteSite.isPending || deleteSiteAccount.isPending
+                : deleteSite.isPending ||
+                    deleteSiteAccount.isPending ||
+                    batchAction.isPending
                   ? "删除中..."
                   : "确认删除"}
             </Button>

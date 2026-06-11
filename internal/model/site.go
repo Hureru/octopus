@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 )
@@ -98,6 +99,7 @@ type Site struct {
 	SortOrder          int            `json:"sort_order" gorm:"default:0"`
 	GlobalWeight       float64        `json:"global_weight" gorm:"default:1"`
 	CustomHeader       []CustomHeader `json:"custom_header" gorm:"serializer:json"`
+	Tags               []string       `json:"tags" gorm:"serializer:json"`
 	Archived           bool           `json:"archived" gorm:"default:false;index"`
 	ArchivedAt         *time.Time     `json:"archived_at"`
 	Accounts           []SiteAccount  `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
@@ -274,6 +276,7 @@ type SiteUpdateRequest struct {
 	SortOrder          *int            `json:"sort_order,omitempty"`
 	GlobalWeight       *float64        `json:"global_weight,omitempty"`
 	CustomHeader       *[]CustomHeader `json:"custom_header,omitempty"`
+	Tags               *[]string       `json:"tags,omitempty"`
 }
 
 func (r *SiteUpdateRequest) UnmarshalJSON(data []byte) error {
@@ -383,11 +386,14 @@ type SiteBatchFailure struct {
 	Message string `json:"message"`
 }
 
-// SiteBatchHeaderRequest 批量合并站点 custom_header。
+// SiteBatchEditRequest 批量编辑：对一批站点统一应用标签与 custom_header 修改补丁。
+// 标签先添加后移除（同名时移除优先）。
 // Upserts 按 header key 大小写不敏感 upsert（命中改值并保留已存的原始 key 大小写）；
 // DeleteKeys 按 key 大小写不敏感删除；同一 key 同时出现时 DeleteKeys 优先（最终删除）。
-type SiteBatchHeaderRequest struct {
+type SiteBatchEditRequest struct {
 	IDs        []int          `json:"ids" binding:"required"`
+	AddTags    []string       `json:"add_tags"`
+	RemoveTags []string       `json:"remove_tags"`
 	Upserts    []CustomHeader `json:"upserts"`
 	DeleteKeys []string       `json:"delete_keys"`
 }
@@ -398,6 +404,46 @@ func NormalizeSiteGroupKey(value string) string {
 		return SiteDefaultGroupKey
 	}
 	return key
+}
+
+const (
+	SiteTagMaxLength = 32
+	SiteTagsMaxCount = 20
+)
+
+func NormalizeSiteTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func ValidateSiteTags(tags []string) error {
+	if len(tags) > SiteTagsMaxCount {
+		return fmt.Errorf("site tags must not exceed %d", SiteTagsMaxCount)
+	}
+	for _, tag := range tags {
+		if utf8.RuneCountInString(tag) > SiteTagMaxLength {
+			return fmt.Errorf("site tag %q must not exceed %d characters", tag, SiteTagMaxLength)
+		}
+	}
+	return nil
 }
 
 func NormalizeSiteGroupName(groupKey string, name string) string {
@@ -729,6 +775,7 @@ func (s *Site) Normalize() {
 	if s.SortOrder < 0 {
 		s.SortOrder = 0
 	}
+	s.Tags = NormalizeSiteTags(s.Tags)
 }
 
 func (s *Site) Validate() error {
@@ -747,6 +794,9 @@ func (s *Site) Validate() error {
 	}
 	if s.ProxyMode == ProxyUsageModePool && (s.ProxyConfigID == nil || *s.ProxyConfigID <= 0) {
 		return fmt.Errorf("proxy config id is required when proxy mode is pool")
+	}
+	if err := ValidateSiteTags(s.Tags); err != nil {
+		return err
 	}
 	parsed, err := url.Parse(s.BaseURL)
 	if err != nil {

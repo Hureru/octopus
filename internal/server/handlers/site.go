@@ -48,7 +48,7 @@ func init() {
 		AddRoute(router.NewRoute("/enable", http.MethodPost).Handle(enableSite)).
 		AddRoute(router.NewRoute("/detect", http.MethodPost).Handle(detectSitePlatform)).
 		AddRoute(router.NewRoute("/batch", http.MethodPost).Handle(batchSite)).
-		AddRoute(router.NewRoute("/batch/header", http.MethodPost).Handle(batchUpdateSiteHeader)).
+		AddRoute(router.NewRoute("/batch/edit", http.MethodPost).Handle(batchEditSite)).
 		AddRoute(router.NewRoute("/account/create", http.MethodPost).Handle(createSiteAccount)).
 		AddRoute(router.NewRoute("/account/update", http.MethodPost).Handle(updateSiteAccount)).
 		AddRoute(router.NewRoute("/account/enable", http.MethodPost).Handle(enableSiteAccount))
@@ -426,48 +426,31 @@ func batchSite(c *gin.Context) {
 		return
 	}
 
-	result := model.SiteBatchResult{
-		SuccessIDs:  make([]int, 0),
-		FailedItems: make([]model.SiteBatchFailure, 0),
+	result, affected, err := op.SiteBatchApply(&req, sitesvc.DeleteSite, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
 	}
-	ctx := c.Request.Context()
-
-	for _, id := range req.IDs {
-		var batchErr error
-		switch req.Action {
-		case "enable":
-			batchErr = op.SiteEnabled(id, true, ctx)
-		case "disable":
-			batchErr = op.SiteEnabled(id, false, ctx)
-		case "delete":
-			batchErr = sitesvc.DeleteSite(ctx, id)
-		}
-		if batchErr != nil {
-			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: batchErr.Error()})
-		} else {
-			result.SuccessIDs = append(result.SuccessIDs, id)
-		}
-	}
-
-	// Project affected sites asynchronously
-	if req.Action == "enable" || req.Action == "disable" {
-		for _, id := range result.SuccessIDs {
-			siteID := id
-			safe.Go("site-batch-project", func() {
-				projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				defer projCancel()
-				if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
-					log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
-				}
-			})
-		}
-	}
-
+	projectSitesAsync(affected)
 	resp.Success(c, result)
 }
 
-func batchUpdateSiteHeader(c *gin.Context) {
-	var req model.SiteBatchHeaderRequest
+// projectSitesAsync 在后台逐个刷新站点投影，供批量操作成功后调用。
+func projectSitesAsync(ids []int) {
+	for _, id := range ids {
+		siteID := id
+		safe.Go("site-batch-project", func() {
+			projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer projCancel()
+			if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
+				log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
+			}
+		})
+	}
+}
+
+func batchEditSite(c *gin.Context) {
+	var req model.SiteBatchEditRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.InvalidJSON(c)
 		return
@@ -476,28 +459,24 @@ func batchUpdateSiteHeader(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "ids is required")
 		return
 	}
-	if len(req.Upserts) == 0 && len(req.DeleteKeys) == 0 {
-		resp.Error(c, http.StatusBadRequest, "nothing to update")
+	req.AddTags = model.NormalizeSiteTags(req.AddTags)
+	req.RemoveTags = model.NormalizeSiteTags(req.RemoveTags)
+	if err := model.ValidateSiteTags(req.AddTags); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.AddTags) == 0 && len(req.RemoveTags) == 0 &&
+		len(req.Upserts) == 0 && len(req.DeleteKeys) == 0 {
+		resp.Error(c, http.StatusBadRequest, "nothing to edit")
 		return
 	}
 
-	result, affected, err := op.SiteBatchUpdateHeader(&req, c.Request.Context())
+	result, affected, err := op.SiteBatchEdit(&req, c.Request.Context())
 	if err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	for _, id := range affected {
-		siteID := id
-		safe.Go("site-batch-header-project", func() {
-			projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer projCancel()
-			if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
-				log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
-			}
-		})
-	}
-
+	projectSitesAsync(affected)
 	resp.Success(c, result)
 }
 
