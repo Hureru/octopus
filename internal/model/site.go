@@ -372,9 +372,8 @@ type SiteCheckinResult struct {
 }
 
 type SiteBatchRequest struct {
-	IDs    []int    `json:"ids" binding:"required"`
-	Action string   `json:"action" binding:"required"`
-	Tags   []string `json:"tags,omitempty"`
+	IDs    []int  `json:"ids" binding:"required"`
+	Action string `json:"action" binding:"required"`
 }
 
 type SiteBatchResult struct {

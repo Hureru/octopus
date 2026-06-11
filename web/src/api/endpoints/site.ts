@@ -600,7 +600,7 @@ export function useDetectSitePlatform() {
 export function useSiteBatchAction() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { ids: number[]; action: string; tags?: string[] }) =>
+    mutationFn: async (data: { ids: number[]; action: string }) =>
       apiClient.post<{
         success_ids: number[];
         failed_items: Array<{ id: number; message: string }>;

@@ -266,47 +266,6 @@ func TestSiteUpdateSetAndClearTags(t *testing.T) {
 	}
 }
 
-func TestSiteTagsAddRemove(t *testing.T) {
-	ctx := setupSiteOpTestDB(t)
-
-	site := &model.Site{
-		Name:     "tag-batch-site",
-		Platform: model.SitePlatformNewAPI,
-		BaseURL:  "https://example.com",
-		Enabled:  true,
-		Tags:     []string{"prod"},
-	}
-	if err := SiteCreate(site, ctx); err != nil {
-		t.Fatalf("SiteCreate failed: %v", err)
-	}
-
-	if err := SiteTagsAdd(site.ID, []string{"prod", " cheap "}, ctx); err != nil {
-		t.Fatalf("SiteTagsAdd failed: %v", err)
-	}
-	reloaded, err := SiteGet(site.ID, ctx)
-	if err != nil {
-		t.Fatalf("SiteGet failed: %v", err)
-	}
-	if len(reloaded.Tags) != 2 || reloaded.Tags[0] != "prod" || reloaded.Tags[1] != "cheap" {
-		t.Fatalf("expected tags [prod cheap], got %#v", reloaded.Tags)
-	}
-
-	if err := SiteTagsRemove(site.ID, []string{"prod", "missing"}, ctx); err != nil {
-		t.Fatalf("SiteTagsRemove failed: %v", err)
-	}
-	reloaded, err = SiteGet(site.ID, ctx)
-	if err != nil {
-		t.Fatalf("SiteGet failed: %v", err)
-	}
-	if len(reloaded.Tags) != 1 || reloaded.Tags[0] != "cheap" {
-		t.Fatalf("expected tags [cheap], got %#v", reloaded.Tags)
-	}
-
-	if err := SiteTagsAdd(site.ID+9999, []string{"prod"}, ctx); err == nil {
-		t.Fatalf("expected SiteTagsAdd on missing site to fail")
-	}
-}
-
 func TestSiteBatchApply(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 
@@ -353,37 +312,31 @@ func TestSiteBatchApply(t *testing.T) {
 		t.Fatalf("expected site to be disabled")
 	}
 
-	result, affected, err = SiteBatchApply(&model.SiteBatchRequest{
-		IDs:    []int{siteA.ID, siteB.ID + 9999},
-		Action: "add_tags",
-		Tags:   []string{"prod"},
-	}, noDelete, ctx)
-	if err != nil {
-		t.Fatalf("SiteBatchApply add_tags failed: %v", err)
-	}
-	if len(result.SuccessIDs) != 1 || result.SuccessIDs[0] != siteA.ID {
-		t.Fatalf("expected only existing site to succeed, got %#v", result)
-	}
-	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != siteB.ID+9999 {
-		t.Fatalf("expected missing site in failed items, got %#v", result.FailedItems)
-	}
-	if len(affected) != 0 {
-		t.Fatalf("expected tag action to skip projection, got %#v", affected)
-	}
-
 	deleted := make([]int, 0, 1)
-	result, _, err = SiteBatchApply(&model.SiteBatchRequest{
-		IDs:    []int{siteB.ID},
+	result, affected, err = SiteBatchApply(&model.SiteBatchRequest{
+		IDs:    []int{siteA.ID, siteB.ID},
 		Action: "delete",
 	}, func(_ context.Context, id int) error {
+		if id == siteA.ID {
+			return fmt.Errorf("delete failed")
+		}
 		deleted = append(deleted, id)
 		return nil
 	}, ctx)
 	if err != nil {
 		t.Fatalf("SiteBatchApply delete failed: %v", err)
 	}
-	if len(result.SuccessIDs) != 1 || len(deleted) != 1 || deleted[0] != siteB.ID {
-		t.Fatalf("expected injected delete to run for site %d, got result=%#v deleted=%#v", siteB.ID, result, deleted)
+	if len(result.SuccessIDs) != 1 || result.SuccessIDs[0] != siteB.ID {
+		t.Fatalf("expected only site B to succeed, got %#v", result)
+	}
+	if len(result.FailedItems) != 1 || result.FailedItems[0].ID != siteA.ID {
+		t.Fatalf("expected site A in failed items, got %#v", result.FailedItems)
+	}
+	if len(affected) != 0 {
+		t.Fatalf("expected delete to skip projection, got %#v", affected)
+	}
+	if len(deleted) != 1 || deleted[0] != siteB.ID {
+		t.Fatalf("expected injected delete to run for site %d, got %#v", siteB.ID, deleted)
 	}
 }
 

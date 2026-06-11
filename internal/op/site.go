@@ -372,7 +372,7 @@ func SiteBatchEdit(req *model.SiteBatchEditRequest, ctx context.Context) (*model
 	return result, affected, nil
 }
 
-// SiteBatchApply 对一组站点逐个执行批量动作（enable/disable/delete/add_tags/remove_tags），
+// SiteBatchApply 对一组站点逐个执行批量动作（enable/disable/delete），
 // 单站失败计入 FailedItems 后继续。deleteSite 由调用方注入，避免 op 反向依赖站点同步层。
 // 返回结果与需要刷新投影的站点 ID（仅 enable/disable 影响投影）。
 func SiteBatchApply(req *model.SiteBatchRequest, deleteSite func(context.Context, int) error, ctx context.Context) (*model.SiteBatchResult, []int, error) {
@@ -392,10 +392,6 @@ func SiteBatchApply(req *model.SiteBatchRequest, deleteSite func(context.Context
 			err = SiteEnabled(id, false, ctx)
 		case "delete":
 			err = deleteSite(ctx, id)
-		case "add_tags":
-			err = SiteTagsAdd(id, req.Tags, ctx)
-		case "remove_tags":
-			err = SiteTagsRemove(id, req.Tags, ctx)
 		default:
 			err = fmt.Errorf("invalid action: %s", req.Action)
 		}
@@ -418,45 +414,6 @@ func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 			return err
 		}
 		return tx.Model(&model.SiteAccount{}).Where("site_id = ?", id).Update("enabled", enabled).Error
-	})
-}
-
-func SiteTagsAdd(id int, tags []string, ctx context.Context) error {
-	return siteTagsModify(id, ctx, func(current []string) []string {
-		return append(current, tags...)
-	})
-}
-
-func SiteTagsRemove(id int, tags []string, ctx context.Context) error {
-	removed := make(map[string]struct{}, len(tags))
-	for _, tag := range tags {
-		removed[tag] = struct{}{}
-	}
-	return siteTagsModify(id, ctx, func(current []string) []string {
-		next := make([]string, 0, len(current))
-		for _, tag := range current {
-			if _, ok := removed[tag]; !ok {
-				next = append(next, tag)
-			}
-		}
-		return next
-	})
-}
-
-func siteTagsModify(id int, ctx context.Context, apply func(current []string) []string) error {
-	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var site model.Site
-		if err := tx.First(&site, id).Error; err != nil {
-			return fmt.Errorf("site not found")
-		}
-		next := model.NormalizeSiteTags(apply(site.Tags))
-		if err := model.ValidateSiteTags(next); err != nil {
-			return err
-		}
-		return tx.Model(&model.Site{}).
-			Where("id = ?", id).
-			Select("tags").
-			Updates(&model.Site{Tags: next}).Error
 	})
 }
 
