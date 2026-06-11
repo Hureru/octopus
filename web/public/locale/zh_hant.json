@@ -177,6 +177,11 @@
             "label": "代理位址",
             "placeholder": "請輸入代理位址"
         },
+        "apiBaseUrl": {
+            "label": "API 位址",
+            "placeholder": "https://octopus.example.com",
+            "description": "用戶端存取本服務的基礎位址，填寫後 API 金鑰列表將顯示匯出按鈕"
+        },
         "statsSaveInterval": {
             "label": "統計保存週期（分鐘）",
             "placeholder": "請輸入週期（分鐘）"
@@ -309,6 +314,20 @@
             "empty": "暫無 API 金鑰",
             "add": "新增金鑰",
             "loadFailed": "載入失敗",
+            "export": {
+                "title": "匯出至用戶端",
+                "cliTool": "CLI 工具",
+                "mainModel": "主模型",
+                "name": "名稱",
+                "namePlaceholder": "請輸入設定名稱",
+                "haikuModel": "Haiku 模型",
+                "sonnetModel": "Sonnet 模型",
+                "opusModel": "Opus 模型",
+                "none": "不設定",
+                "apiType": "API 類型",
+                "hint": "需已安裝對應用戶端，瀏覽器將請求開啟外部應用",
+                "import": "匯入至 {platform}"
+            },
             "form": {
                 "name": "名稱",
                 "maxCost": "最大金額",

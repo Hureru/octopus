@@ -39,6 +39,7 @@ const (
 	SettingKeyOutlierRecoverStreak             SettingKey = "outlier_recover_streak"               // POR 连续探活成功恢复阈值
 	SettingKeyOutlierReapMinutes               SettingKey = "outlier_reap_minutes"                 // POR 窗口内存回收 TTL(分钟)
 	SettingKeyOutlierCFRecoverMinutes          SettingKey = "outlier_cf_recover_minutes"           // POR CF 退役渠道恢复探活冷却(分钟)
+	SettingKeyApiBaseUrl                       SettingKey = "api_base_url"                         // 对外服务基础地址，用于一键导出客户端配置，为空时不显示导出入口
 )
 
 type Setting struct {
@@ -78,6 +79,7 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyOutlierRecoverStreak, Value: "2"},     // 连续探活成功 2 次恢复
 		{Key: SettingKeyOutlierReapMinutes, Value: "30"},      // 窗口 30 分钟无流量回收
 		{Key: SettingKeyOutlierCFRecoverMinutes, Value: "30"}, // CF 退役渠道 30 分钟后才探活恢复
+		{Key: SettingKeyApiBaseUrl, Value: ""},                // 默认为空，不显示客户端导出入口
 	}
 }
 
@@ -146,6 +148,21 @@ func (s *Setting) Validate() error {
 		}
 		if parsedURL.Host == "" {
 			return fmt.Errorf("proxy URL must have a host")
+		}
+		return nil
+	case SettingKeyApiBaseUrl:
+		if s.Value == "" {
+			return nil
+		}
+		parsedURL, err := url.Parse(s.Value)
+		if err != nil {
+			return fmt.Errorf("api base URL is invalid: %w", err)
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return fmt.Errorf("api base URL scheme must be http or https")
+		}
+		if parsedURL.Host == "" {
+			return fmt.Errorf("api base URL must have a host")
 		}
 		return nil
 	}
