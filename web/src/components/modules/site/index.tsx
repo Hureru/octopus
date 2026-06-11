@@ -1464,23 +1464,30 @@ export function Site() {
                     {site.tags.map((tag) => (
                       <Badge
                         key={tag}
+                        asChild
                         variant="secondary"
                         className={cn(
                           "cursor-pointer transition-colors hover:bg-secondary/70",
                           tagFilters.includes(tag) &&
                             "bg-primary text-primary-foreground hover:bg-primary/90",
                         )}
-                        title={
-                          tagFilters.includes(tag)
-                            ? `取消按「${tag}」筛选`
-                            : `按「${tag}」筛选`
-                        }
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleTagFilterChange(tag);
-                        }}
                       >
-                        {tag}
+                        <button
+                          type="button"
+                          title={
+                            tagFilters.includes(tag)
+                              ? `取消按「${tag}」筛选`
+                              : `按「${tag}」筛选`
+                          }
+                          aria-pressed={tagFilters.includes(tag)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleTagFilterChange(tag);
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          {tag}
+                        </button>
                       </Badge>
                     ))}
                   </div>
