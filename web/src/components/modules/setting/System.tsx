@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { toast } from '@/components/common/Toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
+import type { ApiError } from '@/api/types';
 
 export function SettingSystem() {
     const t = useTranslations('setting');
@@ -113,6 +114,23 @@ export function SettingSystem() {
                     initialSseHeartbeatInterval.current = value;
                 } else if (key === SettingKey.SSEPreStreamHeartbeatDelay) {
                     initialSsePreStreamHeartbeatDelay.current = value;
+                }
+            },
+            onError: (error) => {
+                const msg = (error as unknown as ApiError)?.message;
+                toast.error(t('saveFailed'), { description: msg });
+                if (key === SettingKey.ProxyURL) {
+                    setProxyUrl(initialValue);
+                } else if (key === SettingKey.ApiBaseUrl) {
+                    setApiBaseUrl(initialValue);
+                } else if (key === SettingKey.StatsSaveInterval) {
+                    setStatsSaveInterval(initialValue);
+                } else if (key === SettingKey.CORSAllowOrigins) {
+                    setCorsAllowOrigins(initialValue);
+                } else if (key === SettingKey.SSEHeartbeatInterval) {
+                    setSseHeartbeatInterval(initialValue);
+                } else if (key === SettingKey.SSEPreStreamHeartbeatDelay) {
+                    setSsePreStreamHeartbeatDelay(initialValue);
                 }
             }
         });
