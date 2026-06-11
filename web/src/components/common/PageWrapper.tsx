@@ -8,6 +8,7 @@ interface PageWrapperProps {
   children: ReactNode;
   className?: string;
   childLayout?: boolean;
+  animateChildren?: boolean;
 }
 
 /**
@@ -25,8 +26,12 @@ function getDiminishingDelay(index: number): number {
  * 通用页面包装器，为页面内容添加流体动画效果
  * 使用递减延迟策略，避免元素过多时动画时间过长
  */
-export function PageWrapper({ children, className = 'space-y-6', childLayout = true }: PageWrapperProps) {
+export function PageWrapper({ children, className = 'space-y-6', childLayout = true, animateChildren = true }: PageWrapperProps) {
   const childArray = Children.toArray(children);
+
+  if (!animateChildren) {
+    return <motion.div className={className}>{children}</motion.div>;
+  }
 
   return (
     <motion.div className={className}>

@@ -48,6 +48,7 @@ func init() {
 		AddRoute(router.NewRoute("/enable", http.MethodPost).Handle(enableSite)).
 		AddRoute(router.NewRoute("/detect", http.MethodPost).Handle(detectSitePlatform)).
 		AddRoute(router.NewRoute("/batch", http.MethodPost).Handle(batchSite)).
+		AddRoute(router.NewRoute("/batch/header", http.MethodPost).Handle(batchUpdateSiteHeader)).
 		AddRoute(router.NewRoute("/account/create", http.MethodPost).Handle(createSiteAccount)).
 		AddRoute(router.NewRoute("/account/update", http.MethodPost).Handle(updateSiteAccount)).
 		AddRoute(router.NewRoute("/account/enable", http.MethodPost).Handle(enableSiteAccount))
@@ -460,6 +461,41 @@ func batchSite(c *gin.Context) {
 				}
 			})
 		}
+	}
+
+	resp.Success(c, result)
+}
+
+func batchUpdateSiteHeader(c *gin.Context) {
+	var req model.SiteBatchHeaderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	if len(req.IDs) == 0 {
+		resp.Error(c, http.StatusBadRequest, "ids is required")
+		return
+	}
+	if len(req.Upserts) == 0 && len(req.DeleteKeys) == 0 {
+		resp.Error(c, http.StatusBadRequest, "nothing to update")
+		return
+	}
+
+	result, affected, err := op.SiteBatchUpdateHeader(&req, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	for _, id := range affected {
+		siteID := id
+		safe.Go("site-batch-header-project", func() {
+			projCtx, projCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer projCancel()
+			if err := sitesvc.ProjectSite(projCtx, siteID); err != nil {
+				log.Warnf("background ProjectSite failed (site=%d): %v", siteID, err)
+			}
+		})
 	}
 
 	resp.Success(c, result)

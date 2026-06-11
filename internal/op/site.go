@@ -237,6 +237,84 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	return SiteGet(req.ID, ctx)
 }
 
+// mergeHeaders 将 upserts 合并进 existing：按 header key 大小写不敏感匹配，命中则仅
+// 更新值并保留已存的原始 key 大小写，未命中则追加；随后按 deleteKeys（大小写不敏感）
+// 删除，delete 在 upsert 之后执行（优先）。输出顺序稳定，空白 key 跳过。
+func mergeHeaders(existing, upserts []model.CustomHeader, deleteKeys []string) []model.CustomHeader {
+	order := make([]string, 0, len(existing)+len(upserts))
+	byLower := make(map[string]model.CustomHeader, len(existing)+len(upserts))
+
+	put := func(key, value string) {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			return
+		}
+		lk := strings.ToLower(k)
+		if cur, ok := byLower[lk]; ok {
+			cur.HeaderValue = value
+			byLower[lk] = cur
+			return
+		}
+		order = append(order, lk)
+		byLower[lk] = model.CustomHeader{HeaderKey: k, HeaderValue: value}
+	}
+
+	for _, h := range existing {
+		put(h.HeaderKey, h.HeaderValue)
+	}
+	for _, u := range upserts {
+		put(u.HeaderKey, strings.TrimSpace(u.HeaderValue))
+	}
+	for _, dk := range deleteKeys {
+		lk := strings.ToLower(strings.TrimSpace(dk))
+		if lk == "" {
+			continue
+		}
+		delete(byLower, lk)
+	}
+
+	out := make([]model.CustomHeader, 0, len(order))
+	for _, lk := range order {
+		if h, ok := byLower[lk]; ok {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// SiteBatchUpdateHeader 批量将 upserts/deleteKeys 智能合并进每个站点的 custom_header。
+// 逐站点执行，单站失败计入 FailedItems 后继续；返回结果与成功落库的站点 ID（供投影刷新）。
+func SiteBatchUpdateHeader(req *model.SiteBatchHeaderRequest, ctx context.Context) (*model.SiteBatchResult, []int, error) {
+	if req == nil {
+		return nil, nil, fmt.Errorf("site batch header request is nil")
+	}
+	result := &model.SiteBatchResult{
+		SuccessIDs:  make([]int, 0, len(req.IDs)),
+		FailedItems: make([]model.SiteBatchFailure, 0),
+	}
+	affected := make([]int, 0, len(req.IDs))
+	for _, id := range req.IDs {
+		var site model.Site
+		if err := db.GetDB().WithContext(ctx).First(&site, id).Error; err != nil {
+			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: "site not found"})
+			continue
+		}
+		merged := mergeHeaders(site.CustomHeader, req.Upserts, req.DeleteKeys)
+		updates := model.Site{ID: id, CustomHeader: merged}
+		if err := db.GetDB().WithContext(ctx).
+			Model(&model.Site{}).
+			Where("id = ?", id).
+			Select("custom_header").
+			Updates(&updates).Error; err != nil {
+			result.FailedItems = append(result.FailedItems, model.SiteBatchFailure{ID: id, Message: err.Error()})
+			continue
+		}
+		result.SuccessIDs = append(result.SuccessIDs, id)
+		affected = append(affected, id)
+	}
+	return result, affected, nil
+}
+
 func SiteEnabled(id int, enabled bool, ctx context.Context) error {
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.Site{}).Where("id = ?", id).Update("enabled", enabled).Error; err != nil {
