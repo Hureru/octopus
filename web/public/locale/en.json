@@ -228,44 +228,53 @@
         },
         "outlierRetirement": {
             "title": "Passive Outlier Retirement",
-            "hint": "Automatically retires (disables, not deletes) projected channels that keep failing, based on real request success/failure sequences; auto-recovers via probing. Applies only to site projected channels. Off by default.",
+            "hint": "Temporarily disables site projected channels that keep failing on real requests (disabled, never deleted), then probes them periodically and re-enables them once they recover. Before disabling, sibling channels of the same site are cross-checked and a probe request confirms the failure to avoid false positives; at least one enabled channel is always kept per account. Applies only to site projected channels. Off by default.",
             "enabled": {
                 "label": "Enable Passive Outlier Retirement"
             },
             "interval": {
                 "label": "Evaluation Interval (minutes)",
+                "description": "How often the background task runs one round of evaluation and recovery probing.",
                 "placeholder": "Enter interval in minutes"
             },
             "failRate": {
                 "label": "Failure Rate Threshold (%)",
+                "description": "A channel is considered abnormal only when the failure ratio within the window reaches this value.",
                 "placeholder": "Enter failure rate percent"
             },
             "minSamples": {
                 "label": "Minimum Samples",
+                "description": "Evaluation is skipped while the window holds fewer requests than this, avoiding misjudgment on sparse traffic.",
                 "placeholder": "Enter minimum samples"
             },
             "consecFails": {
                 "label": "Consecutive Failure Threshold",
+                "description": "After the failure rate is met, the most recent consecutive failures must also reach this count (or the window has no success at all).",
                 "placeholder": "Enter consecutive failures"
             },
             "windowMinutes": {
                 "label": "Rolling Window Duration (minutes)",
+                "description": "Only requests within this recent period are counted; older records expire automatically.",
                 "placeholder": "Enter window minutes"
             },
             "windowCapacity": {
                 "label": "Window Sample Capacity (≤20)",
+                "description": "Maximum number of request records kept per window; the oldest are dropped first.",
                 "placeholder": "Enter sample capacity"
             },
             "recoverStreak": {
-                "label": "Consecutive Probe Successes to Recover",
+                "label": "Probe Successes to Recover",
+                "description": "A retired channel is re-enabled after this many consecutive successful probes.",
                 "placeholder": "Enter success count"
             },
             "reapMinutes": {
-                "label": "Idle Window Reap TTL (minutes)",
+                "label": "Idle Window Reap (minutes)",
+                "description": "Frees a channel's in-memory stats window after it has received no new requests for this long.",
                 "placeholder": "Enter reap minutes"
             },
             "cfRecoverMinutes": {
-                "label": "Cloudflare Retired Recovery Cooldown (minutes)",
+                "label": "Cloudflare Recovery Cooldown (minutes)",
+                "description": "Channels retired due to Cloudflare protection wait this long before recovery probing starts, to reduce pointless probes.",
                 "placeholder": "Enter cooldown minutes"
             }
         },

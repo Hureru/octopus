@@ -20,17 +20,18 @@ const OUTLIER_FIELDS: { key: string; labelKey: string; min: number; max?: number
     { key: SettingKey.OutlierCFRecoverMinutes, labelKey: 'cfRecoverMinutes', min: 1 },
 ];
 
-function NumberFieldRow({ settingKey, label, placeholder, icon, min, max }: {
+function NumberFieldRow({ settingKey, label, placeholder, tooltip, icon, min, max }: {
     settingKey: string;
     label: string;
     placeholder: string;
+    tooltip?: React.ReactNode;
     icon?: LucideIcon;
     min?: number;
     max?: number;
 }) {
     const field = useSettingField(settingKey);
     return (
-        <SettingRow icon={icon} label={label}>
+        <SettingRow icon={icon} label={label} tooltip={tooltip}>
             <Input
                 type="number"
                 step={1}
@@ -90,6 +91,7 @@ export function SettingReliability() {
                     settingKey={f.key}
                     label={t(`outlierRetirement.${f.labelKey}.label`)}
                     placeholder={t(`outlierRetirement.${f.labelKey}.placeholder`)}
+                    tooltip={t(`outlierRetirement.${f.labelKey}.description`)}
                     min={f.min}
                     max={f.max}
                 />
