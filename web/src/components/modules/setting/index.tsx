@@ -17,8 +17,8 @@ export function Setting() {
                 <SettingAPIKey key="setting-apikey" />
                 <SettingInfo key="setting-info" />
                 <SettingAppearance key="setting-appearance" />
-                <SettingAccount key="setting-account" />
                 <SettingNetwork key="setting-network" />
+                <SettingAccount key="setting-account" />
                 <SettingReliability key="setting-reliability" />
                 <SettingSyncTasks key="setting-sync-tasks" />
                 <SettingData key="setting-data" />
