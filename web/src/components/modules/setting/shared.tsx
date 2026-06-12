@@ -99,8 +99,11 @@ export function SettingHelpTip({ children }: { children: React.ReactNode }) {
                 <TooltipTrigger asChild>
                     <HelpCircle className="size-4 text-muted-foreground cursor-help" />
                 </TooltipTrigger>
-                {/* 限宽让长描述自动换行，避免单行铺满屏幕 */}
-                <TooltipContent className="max-w-xs">{children}</TooltipContent>
+                {/* 限宽让长描述自动换行；内层覆盖组件自带的 text-balance——
+                    balance 会把各行收窄至近似等宽，导致盒子右侧留白 */}
+                <TooltipContent className="max-w-xs">
+                    <span className="block text-wrap">{children}</span>
+                </TooltipContent>
             </Tooltip>
         </TooltipProvider>
     );
