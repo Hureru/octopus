@@ -188,6 +188,11 @@ function MorphingDialogContent({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // 与下方 useClickOutside 的忽略逻辑一致：上层 portal 内容（Select/浮层等）
+        // 打开时 Escape 只关闭上层，不连带关闭本对话框
+        for (const slot of PORTAL_IGNORED_SLOTS) {
+          if (document.querySelector(`[data-slot="${slot}"]`)) return;
+        }
         setIsOpen(false);
       }
       if (event.key === 'Tab') {

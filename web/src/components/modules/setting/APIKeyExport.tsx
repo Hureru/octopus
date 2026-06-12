@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { motion } from 'motion/react';
 import { ExternalLink, X } from 'lucide-react';
@@ -18,6 +18,7 @@ import { useGroupList } from '@/api/endpoints/group';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { cn } from '@/lib/utils';
 import type { APIKey } from '@/api/endpoints/apikey';
+import { OverlayPortal } from './OverlayPortal';
 
 type Platform = 'ccswitch' | 'cherrystudio';
 type CCSwitchApp = 'claude' | 'codex';
@@ -173,16 +174,6 @@ export function APIKeyExportOverlay({
     const { data: groups = [] } = useGroupList();
     const titleId = useId();
 
-    // 浮层仅在打开时挂载，Escape 关闭与点击取消等效；
-    // Radix Select 展开时 Escape 已被其消费（defaultPrevented），不连带关闭浮层
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape' && !event.defaultPrevented) onClose();
-        };
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [onClose]);
-
     const [platform, setPlatform] = useState<Platform>('ccswitch');
     const [appType, setAppType] = useState<CCSwitchApp>('claude');
     const [model, setModel] = useState('');
@@ -231,167 +222,170 @@ export function APIKeyExportOverlay({
     const platformLabel = platform === 'ccswitch' ? 'CC Switch' : 'Cherry Studio';
 
     return (
-        <motion.div
-            layoutId={layoutId}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            className="absolute left-1/2 top-1/2 z-20 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-        >
-            <h3 id={titleId} className="text-sm font-semibold text-card-foreground line-clamp-1 mb-3">
-                {t('apiKey.export.title')} · {apiKey.name}
-            </h3>
+        <OverlayPortal onClose={onClose}>
+            <motion.div
+                layoutId={layoutId}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                data-slot="dialog-content"
+                className="fixed left-1/2 top-1/2 z-50 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            >
+                <h3 id={titleId} className="text-sm font-semibold text-card-foreground line-clamp-1 mb-3">
+                    {t('apiKey.export.title')} · {apiKey.name}
+                </h3>
 
-            <Tabs value={platform} onValueChange={(v) => setPlatform(v as Platform)}>
-                <TabsList className="w-full rounded-xl">
-                    <TabsTrigger value="ccswitch">CC Switch</TabsTrigger>
-                    <TabsTrigger value="cherrystudio">Cherry Studio</TabsTrigger>
-                </TabsList>
-                {/* TabsContents/TabsContent 原语均自带 overflow-hidden 会裁掉输入框焦点环：
-                    外层用内补外负边距留出空间，面板层覆盖为 visible（裁切仍由外层兜底） */}
-                <TabsContents className="p-2 -m-2">
-                    <TabsContent value="ccswitch" className="grid gap-2" style={{ overflow: 'visible' }}>
-                        <div className="grid gap-1 text-xs text-muted-foreground">
-                            {t('apiKey.export.cliTool')}
-                            <ToggleGroup
-                                value={appType}
-                                options={[
-                                    { value: 'claude', label: 'Claude Code' },
-                                    { value: 'codex', label: 'Codex' },
-                                ]}
-                                onChange={setAppType}
-                            />
-                        </div>
-
-                        <div className="grid gap-1">
-                            <div className="text-xs text-muted-foreground">{t('apiKey.export.mainModel')}</div>
-                            <div className="max-h-40 overflow-auto rounded-xl p-2">
-                                {modelOptions.length === 0 ? (
-                                    <div className="text-xs text-muted-foreground py-2 text-center">
-                                        {t('apiKey.form.noModels')}
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-wrap gap-2">
-                                        {modelOptions.map((m) => {
-                                            const checked = model === m;
-                                            return (
-                                                <button
-                                                    key={m}
-                                                    type="button"
-                                                    onClick={() => setModel(checked ? '' : m)}
-                                                    className="text-left"
-                                                >
-                                                    <Badge
-                                                        variant={checked ? 'default' : 'outline'}
-                                                        className={cn(
-                                                            'cursor-pointer select-none',
-                                                            !checked && 'bg-background/40 hover:bg-background/70'
-                                                        )}
-                                                    >
-                                                        {m}
-                                                    </Badge>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                <Tabs value={platform} onValueChange={(v) => setPlatform(v as Platform)}>
+                    <TabsList className="w-full rounded-xl">
+                        <TabsTrigger value="ccswitch">CC Switch</TabsTrigger>
+                        <TabsTrigger value="cherrystudio">Cherry Studio</TabsTrigger>
+                    </TabsList>
+                    {/* TabsContents/TabsContent 原语均自带 overflow-hidden 会裁掉输入框焦点环：
+                        外层用内补外负边距留出空间，面板层覆盖为 visible（裁切仍由外层兜底） */}
+                    <TabsContents className="p-2 -m-2">
+                        <TabsContent value="ccswitch" className="grid gap-2" style={{ overflow: 'visible' }}>
+                            <div className="grid gap-1 text-xs text-muted-foreground">
+                                {t('apiKey.export.cliTool')}
+                                <ToggleGroup
+                                    value={appType}
+                                    options={[
+                                        { value: 'claude', label: 'Claude Code' },
+                                        { value: 'codex', label: 'Codex' },
+                                    ]}
+                                    onChange={setAppType}
+                                />
                             </div>
-                        </div>
 
-                        <label className="grid gap-1 text-xs text-muted-foreground">
-                            {t('apiKey.export.name')}
-                            <Input
-                                value={name}
-                                onChange={(e) => setCustomName(e.target.value === '' ? null : e.target.value)}
-                                placeholder={t('apiKey.export.namePlaceholder')}
-                                className="h-9 text-sm rounded-xl"
-                            />
-                        </label>
+                            <div className="grid gap-1">
+                                <div className="text-xs text-muted-foreground">{t('apiKey.export.mainModel')}</div>
+                                <div className="max-h-40 overflow-auto rounded-xl p-2">
+                                    {modelOptions.length === 0 ? (
+                                        <div className="text-xs text-muted-foreground py-2 text-center">
+                                            {t('apiKey.form.noModels')}
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                            {modelOptions.map((m) => {
+                                                const checked = model === m;
+                                                return (
+                                                    <button
+                                                        key={m}
+                                                        type="button"
+                                                        onClick={() => setModel(checked ? '' : m)}
+                                                        className="text-left"
+                                                    >
+                                                        <Badge
+                                                            variant={checked ? 'default' : 'outline'}
+                                                            className={cn(
+                                                                'cursor-pointer select-none',
+                                                                !checked && 'bg-background/40 hover:bg-background/70'
+                                                            )}
+                                                        >
+                                                            {m}
+                                                        </Badge>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
 
-                        {appType === 'claude' && (
-                            <>
-                                <OptionalModelSelect
-                                    label={t('apiKey.export.haikuModel')}
-                                    value={haikuModel}
-                                    options={modelOptions}
-                                    noneLabel={t('apiKey.export.none')}
-                                    onChange={setHaikuModel}
+                            <label className="grid gap-1 text-xs text-muted-foreground">
+                                {t('apiKey.export.name')}
+                                <Input
+                                    value={name}
+                                    onChange={(e) => setCustomName(e.target.value === '' ? null : e.target.value)}
+                                    placeholder={t('apiKey.export.namePlaceholder')}
+                                    className="h-9 text-sm rounded-xl"
                                 />
-                                <OptionalModelSelect
-                                    label={t('apiKey.export.sonnetModel')}
-                                    value={sonnetModel}
-                                    options={modelOptions}
-                                    noneLabel={t('apiKey.export.none')}
-                                    onChange={setSonnetModel}
+                            </label>
+
+                            {appType === 'claude' && (
+                                <>
+                                    <OptionalModelSelect
+                                        label={t('apiKey.export.haikuModel')}
+                                        value={haikuModel}
+                                        options={modelOptions}
+                                        noneLabel={t('apiKey.export.none')}
+                                        onChange={setHaikuModel}
+                                    />
+                                    <OptionalModelSelect
+                                        label={t('apiKey.export.sonnetModel')}
+                                        value={sonnetModel}
+                                        options={modelOptions}
+                                        noneLabel={t('apiKey.export.none')}
+                                        onChange={setSonnetModel}
+                                    />
+                                    <OptionalModelSelect
+                                        label={t('apiKey.export.opusModel')}
+                                        value={opusModel}
+                                        options={modelOptions}
+                                        noneLabel={t('apiKey.export.none')}
+                                        onChange={setOpusModel}
+                                    />
+                                </>
+                            )}
+                        </TabsContent>
+
+                        <TabsContent value="cherrystudio" className="grid gap-2" style={{ overflow: 'visible' }}>
+                            <label className="grid gap-1 text-xs text-muted-foreground">
+                                {t('apiKey.export.name')}
+                                <Input
+                                    value={cherryName}
+                                    onChange={(e) => setCherryName(e.target.value)}
+                                    placeholder={t('apiKey.export.namePlaceholder')}
+                                    className="h-9 text-sm rounded-xl"
                                 />
-                                <OptionalModelSelect
-                                    label={t('apiKey.export.opusModel')}
-                                    value={opusModel}
-                                    options={modelOptions}
-                                    noneLabel={t('apiKey.export.none')}
-                                    onChange={setOpusModel}
+                            </label>
+
+                            <div className="grid gap-1 text-xs text-muted-foreground">
+                                {t('apiKey.export.apiType')}
+                                <ToggleGroup
+                                    value={cherryApiType}
+                                    options={[
+                                        { value: 'openai', label: 'OpenAI' },
+                                        { value: 'anthropic', label: 'Anthropic' },
+                                    ]}
+                                    onChange={setCherryApiType}
                                 />
-                            </>
+                            </div>
+                        </TabsContent>
+                    </TabsContents>
+                </Tabs>
+
+                <div className="mt-2 text-[11px] text-muted-foreground/80">{t('apiKey.export.hint')}</div>
+
+                <div className="flex gap-2 pt-2 mt-3">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="h-9 px-3 flex items-center justify-center gap-1.5 rounded-xl bg-muted text-muted-foreground text-sm font-medium transition-all hover:bg-muted/80 active:scale-[0.98]"
+                    >
+                        <X className="size-4" />
+                        {t('apiKey.form.cancel')}
+                    </button>
+                    <button
+                        type="button"
+                        disabled={!ready}
+                        onClick={() => window.open(exportUrl, '_blank')}
+                        className="flex-1 h-9 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
+                    >
+                        <ExternalLink className="size-4" />
+                        {t('apiKey.export.import', { platform: platformLabel })}
+                    </button>
+                    <CopyIconButton
+                        text={exportUrl}
+                        className={cn(
+                            'size-9 shrink-0 flex items-center justify-center rounded-xl bg-muted text-muted-foreground transition-all hover:bg-muted/80 active:scale-95',
+                            !ready && 'opacity-50 pointer-events-none'
                         )}
-                    </TabsContent>
-
-                    <TabsContent value="cherrystudio" className="grid gap-2" style={{ overflow: 'visible' }}>
-                        <label className="grid gap-1 text-xs text-muted-foreground">
-                            {t('apiKey.export.name')}
-                            <Input
-                                value={cherryName}
-                                onChange={(e) => setCherryName(e.target.value)}
-                                placeholder={t('apiKey.export.namePlaceholder')}
-                                className="h-9 text-sm rounded-xl"
-                            />
-                        </label>
-
-                        <div className="grid gap-1 text-xs text-muted-foreground">
-                            {t('apiKey.export.apiType')}
-                            <ToggleGroup
-                                value={cherryApiType}
-                                options={[
-                                    { value: 'openai', label: 'OpenAI' },
-                                    { value: 'anthropic', label: 'Anthropic' },
-                                ]}
-                                onChange={setCherryApiType}
-                            />
-                        </div>
-                    </TabsContent>
-                </TabsContents>
-            </Tabs>
-
-            <div className="mt-2 text-[11px] text-muted-foreground/80">{t('apiKey.export.hint')}</div>
-
-            <div className="flex gap-2 pt-2 mt-3">
-                <button
-                    type="button"
-                    onClick={onClose}
-                    className="h-9 px-3 flex items-center justify-center gap-1.5 rounded-xl bg-muted text-muted-foreground text-sm font-medium transition-all hover:bg-muted/80 active:scale-[0.98]"
-                >
-                    <X className="size-4" />
-                    {t('apiKey.form.cancel')}
-                </button>
-                <button
-                    type="button"
-                    disabled={!ready}
-                    onClick={() => window.open(exportUrl, '_blank')}
-                    className="flex-1 h-9 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
-                >
-                    <ExternalLink className="size-4" />
-                    {t('apiKey.export.import', { platform: platformLabel })}
-                </button>
-                <CopyIconButton
-                    text={exportUrl}
-                    className={cn(
-                        'size-9 shrink-0 flex items-center justify-center rounded-xl bg-muted text-muted-foreground transition-all hover:bg-muted/80 active:scale-95',
-                        !ready && 'opacity-50 pointer-events-none'
-                    )}
-                    copyIconClassName="size-4"
-                    checkIconClassName="size-4"
-                />
-            </div>
-        </motion.div>
+                        copyIconClassName="size-4"
+                        checkIconClassName="size-4"
+                    />
+                </div>
+            </motion.div>
+        </OverlayPortal>
     );
 }
