@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/sitesync"
@@ -41,6 +42,14 @@ func CheckinAll(ctx context.Context) {
 
 func CheckinAllWithOptions(ctx context.Context, opts sitesync.SiteBatchOptions) sitesync.SiteBatchSummary {
 	return sitesync.CheckinAllWithOptions(ctx, opts)
+}
+
+func LastSyncAllTime() time.Time {
+	return sitesync.LastSyncAllTime()
+}
+
+func LastCheckinAllTime() time.Time {
+	return sitesync.LastCheckinAllTime()
 }
 
 func RefreshAccountRandomCheckinSchedule(ctx context.Context, accountID int) error {

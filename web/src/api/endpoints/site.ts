@@ -474,6 +474,23 @@ export function useCheckinAllSites() {
   });
 }
 
+export function useSiteLastSyncTime() {
+  return useQuery({
+    queryKey: ["sites", "last-sync-time"],
+    queryFn: async () => apiClient.get<string>("/api/v1/site/last-sync-time"),
+    refetchInterval: 30000,
+  });
+}
+
+export function useSiteLastCheckinTime() {
+  return useQuery({
+    queryKey: ["sites", "last-checkin-time"],
+    queryFn: async () =>
+      apiClient.get<string>("/api/v1/site/last-checkin-time"),
+    refetchInterval: 30000,
+  });
+}
+
 export function useImportAllAPIHub() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -112,6 +113,37 @@ func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResul
 	return result, nil
 }
 
+// 全量同步/签到的上次执行时间（含定时与手动触发），仅内存记录，重启后清零
+var (
+	lastBatchTimeMu    sync.RWMutex
+	lastSyncAllTime    time.Time
+	lastCheckinAllTime time.Time
+)
+
+func markLastSyncAllTime() {
+	lastBatchTimeMu.Lock()
+	lastSyncAllTime = time.Now()
+	lastBatchTimeMu.Unlock()
+}
+
+func markLastCheckinAllTime() {
+	lastBatchTimeMu.Lock()
+	lastCheckinAllTime = time.Now()
+	lastBatchTimeMu.Unlock()
+}
+
+func LastSyncAllTime() time.Time {
+	lastBatchTimeMu.RLock()
+	defer lastBatchTimeMu.RUnlock()
+	return lastSyncAllTime
+}
+
+func LastCheckinAllTime() time.Time {
+	lastBatchTimeMu.RLock()
+	defer lastBatchTimeMu.RUnlock()
+	return lastCheckinAllTime
+}
+
 func SyncAll(ctx context.Context) {
 	SyncAllWithOptions(ctx, SiteBatchOptions{Trigger: SiteBatchTriggerScheduled})
 }
@@ -123,6 +155,7 @@ func SyncAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatchSum
 		log.Warnw("sitesync.sync.list_failed", "trigger", string(trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
 		return SiteBatchSummary{Phase: SiteBatchPhaseSync, Trigger: trigger}
 	}
+	defer markLastSyncAllTime()
 	return syncBatchAccounts(ctx, eligibleSyncAccounts(sites), opts)
 }
 
@@ -179,6 +212,7 @@ func CheckinAllWithOptions(ctx context.Context, opts SiteBatchOptions) SiteBatch
 		log.Warnw("sitesync.checkin.list_failed", "trigger", string(trigger), "reason", string(siteBatchReason(err)), "message", sanitizeSiteStatusMessage(err))
 		return SiteBatchSummary{Phase: SiteBatchPhaseCheckin, Trigger: trigger}
 	}
+	defer markLastCheckinAllTime()
 	items := eligibleCheckinAccounts(sites)
 	summary := newSiteBatchSummary(SiteBatchPhaseCheckin, opts, len(items))
 	defer summary.emitLog()

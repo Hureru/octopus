@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { SettingKey } from '@/api/endpoints/setting';
 import { useLastSyncTime, useSyncChannel } from '@/api/endpoints/channel';
 import { useLastUpdateTime, useUpdateModelPrice } from '@/api/endpoints/model';
-import { useCheckinAllSites, useSyncAllSites } from '@/api/endpoints/site';
+import { useCheckinAllSites, useSiteLastCheckinTime, useSiteLastSyncTime, useSyncAllSites } from '@/api/endpoints/site';
 import { toast } from '@/components/common/Toast';
 import { useSettingStore } from '@/stores/setting';
 import { translateSiteMessage } from '@/components/modules/site/site-message';
@@ -82,6 +82,8 @@ export function SettingSyncTasks() {
     const { data: lastUpdateTime } = useLastUpdateTime();
     const syncAllSites = useSyncAllSites();
     const checkinAllSites = useCheckinAllSites();
+    const { data: lastSiteSyncTime } = useSiteLastSyncTime();
+    const { data: lastSiteCheckinTime } = useSiteLastCheckinTime();
 
     const formatTime = (timeStr: string | undefined) => {
         if (!timeStr) return t('syncTasks.never');
@@ -127,6 +129,7 @@ export function SettingSyncTasks() {
                 icon={Globe2}
                 label={t('syncTasks.siteSync.label')}
                 settingKey={SettingKey.SiteSyncInterval}
+                last={formatTime(lastSiteSyncTime)}
                 running={syncAllSites.isPending}
                 runLabel={t('syncTasks.siteSync.button')}
                 pendingLabel={t('syncTasks.siteSync.pending')}
@@ -141,6 +144,7 @@ export function SettingSyncTasks() {
                 icon={CalendarCheck2}
                 label={t('syncTasks.siteCheckin.label')}
                 settingKey={SettingKey.SiteCheckinInterval}
+                last={formatTime(lastSiteCheckinTime)}
                 running={checkinAllSites.isPending}
                 runLabel={t('syncTasks.siteCheckin.button')}
                 pendingLabel={t('syncTasks.siteCheckin.pending')}
