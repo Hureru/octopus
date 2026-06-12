@@ -99,7 +99,8 @@ export function SettingHelpTip({ children }: { children: React.ReactNode }) {
                 <TooltipTrigger asChild>
                     <HelpCircle className="size-4 text-muted-foreground cursor-help" />
                 </TooltipTrigger>
-                <TooltipContent>{children}</TooltipContent>
+                {/* 限宽让长描述自动换行，避免单行铺满屏幕 */}
+                <TooltipContent className="max-w-xs">{children}</TooltipContent>
             </Tooltip>
         </TooltipProvider>
     );
