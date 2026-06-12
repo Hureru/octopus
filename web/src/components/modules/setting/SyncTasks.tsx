@@ -88,6 +88,7 @@ export function SettingSyncTasks() {
     const formatTime = (timeStr: string | undefined) => {
         if (!timeStr) return t('syncTasks.never');
         const date = new Date(timeStr);
+        if (Number.isNaN(date.getTime())) return t('syncTasks.never');
         if (date.getFullYear() === 1) return t('syncTasks.never');
         return date.toLocaleString();
     };

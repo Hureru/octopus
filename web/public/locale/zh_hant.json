@@ -297,6 +297,7 @@
                 "button": "匯入 JSON",
                 "importing": "匯入中...",
                 "noFile": "請先選擇 JSON 檔案",
+                "invalidFileType": "僅支援 JSON（.json）格式的備份檔案",
                 "success": "匯入成功",
                 "failed": "匯入失敗",
                 "result": "匯入結果"

@@ -51,6 +51,13 @@ export function SettingData() {
             toast.error(t('backup.import.noFile'));
             return;
         }
+        // accept 属性只约束选择器默认过滤，仍可手动选任意文件，导入前再校验一次
+        if (file.type !== 'application/json' && !file.name.toLowerCase().endsWith('.json')) {
+            toast.error(t('backup.import.invalidFileType'));
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            setFile(null);
+            return;
+        }
         try {
             await importDB.mutateAsync(file);
             toast.success(t('backup.import.success'));

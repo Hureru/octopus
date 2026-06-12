@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { toast } from '@/components/common/Toast';
+import type { ApiError } from '@/api/types';
 import { SettingCard, SettingRow, useSettingField } from './shared';
 
 // SSE 心跳间隔与流建立前首次心跳延迟统一为一个值（通常配置相同），回显以心跳间隔为准
@@ -23,6 +24,16 @@ function toWSMode(enabled: boolean, rawMode: string): WSMode {
     if (rawMode === 'off') return 'defaultOff';
     if (rawMode === 'transform') return 'transform';
     return 'passthrough';
+}
+
+// 逗号/换行/中文逗号分隔的输入 → 去重后的 origin 列表
+function parseCorsOrigins(raw: string): string[] {
+    return Array.from(new Set(
+        raw
+            .split(/[,\n，]/)
+            .map(item => item.trim())
+            .filter(Boolean)
+    ));
 }
 
 function useResponsesWSMode() {
@@ -59,9 +70,9 @@ function useResponsesWSMode() {
             }
             toast.success(t('saved'));
             initial.current = v;
-        } catch {
+        } catch (error) {
             setMode(initial.current);
-            toast.error(t('saveFailed'));
+            toast.error(t('saveFailed'), { description: (error as ApiError)?.message });
         }
     }, [setSetting, t]);
 
@@ -83,12 +94,7 @@ export function SettingNetwork() {
         const value = cors.value.trim();
         if (!value) return [];
         if (value === '*') return ['*'];
-        return Array.from(new Set(
-            value
-                .split(/[,\n，]/)
-                .map(item => item.trim())
-                .filter(Boolean)
-        ));
+        return parseCorsOrigins(value);
     }, [cors.value]);
 
     const corsAllowOriginsDisplay = useMemo(
@@ -107,12 +113,7 @@ export function SettingNetwork() {
     };
 
     const handleAddCorsOrigin = () => {
-        const newOrigins = Array.from(new Set(
-            corsInputValue
-                .split(/[,\n，]/)
-                .map(item => item.trim())
-                .filter(Boolean)
-        ));
+        const newOrigins = parseCorsOrigins(corsInputValue);
         if (newOrigins.length === 0) return;
 
         if (newOrigins.includes('*')) {

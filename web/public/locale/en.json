@@ -297,6 +297,7 @@
                 "button": "Import JSON",
                 "importing": "Importing...",
                 "noFile": "Please select a JSON file first",
+                "invalidFileType": "Only JSON (.json) backup files are supported",
                 "success": "Import successful",
                 "failed": "Import failed",
                 "result": "Import result"

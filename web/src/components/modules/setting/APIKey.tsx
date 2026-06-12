@@ -366,6 +366,8 @@ function APIKeyFormOverlay({
         <OverlayPortal onClose={onClose}>
             <motion.div
                 layoutId={layoutId}
+                role="dialog"
+                aria-modal="true"
                 data-slot="dialog-content"
                 className="fixed left-1/2 top-1/2 z-50 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
                 transition={{ type: 'spring', stiffness: 400, damping: 30 }}
@@ -399,6 +401,8 @@ function APIKeyStatsCard({
         <OverlayPortal onClose={onClose}>
             <motion.div
                 layoutId={layoutId}
+                role="dialog"
+                aria-modal="true"
                 data-slot="dialog-content"
                 className="fixed left-1/2 top-1/2 z-50 w-[min(320px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex flex-col bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
                 transition={{ type: 'spring', stiffness: 400, damping: 30 }}

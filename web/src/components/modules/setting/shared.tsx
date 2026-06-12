@@ -11,6 +11,7 @@ import type { ApiError } from '@/api/types';
 // 文本/数字设置项的本地编辑状态。
 // 仅首次拿到数据时回填：useSettingList 每 30s 轮询、保存成功又会 invalidate，
 // 反复回填会覆盖正在编辑但尚未保存的输入。
+// 回填经 queueMicrotask 延迟：lint 规则 react-hooks/set-state-in-effect 禁止 effect 内同步 setState。
 // mirrorKeys 用于一个输入同时写多个 key（需传模块级常量保持引用稳定），回显以 key 为准。
 export function useSettingField(key: string, mirrorKeys?: readonly string[]) {
     const t = useTranslations('setting');
@@ -35,9 +36,9 @@ export function useSettingField(key: string, mirrorKeys?: readonly string[]) {
         setValue(next);
         if (next === initial.current) return;
         try {
-            for (const k of [key, ...(mirrorKeys ?? [])]) {
-                await setSetting.mutateAsync({ key: k, value: next });
-            }
+            await Promise.all(
+                [key, ...(mirrorKeys ?? [])].map((k) => setSetting.mutateAsync({ key: k, value: next }))
+            );
             toast.success(t('saved'));
             initial.current = next;
         } catch (error) {
