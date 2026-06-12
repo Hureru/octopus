@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { motion } from 'motion/react';
 import { ExternalLink, X } from 'lucide-react';
@@ -39,17 +39,23 @@ interface CherryStudioForm {
     apiType: CherryApiType;
 }
 
+// 用户填写的 Base URL 可能带尾部斜杠或已含 /v1，统一去掉，避免下游拼出 /v1/v1
+function normalizeBaseUrl(url: string): string {
+    return url.trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
+
 // 协议格式见 cc-switch 的 src-tauri/src/deeplink/parser.rs
 export function buildCCSwitchUrl(baseUrl: string, apiKey: string, form: CCSwitchForm): string {
+    const base = normalizeBaseUrl(baseUrl);
     const params = new URLSearchParams();
     params.set('resource', 'provider');
     params.set('app', form.appType);
     params.set('name', form.name);
     // Codex 客户端需要带 /v1 的 OpenAI 端点，Claude Code 由客户端自行拼接路径
-    params.set('endpoint', form.appType === 'codex' ? `${baseUrl}/v1` : baseUrl);
+    params.set('endpoint', form.appType === 'codex' ? `${base}/v1` : base);
     params.set('apiKey', apiKey);
     params.set('model', form.model);
-    params.set('homepage', baseUrl);
+    params.set('homepage', base);
     params.set('enabled', 'true');
     if (form.appType === 'claude') {
         if (form.haikuModel) params.set('haikuModel', form.haikuModel);
@@ -71,10 +77,11 @@ function base64EncodeUtf8(str: string): string {
 // 协议格式见 cherry-studio 的 src/main/services/protocol/handlers/providersImport.ts；
 // 其解码端对 _/- 做了非标准映射，与 URL-safe base64 方向相反，必须用标准 base64 + percent 编码
 export function buildCherryStudioUrl(baseUrl: string, apiKey: string, form: CherryStudioForm): string {
+    const base = normalizeBaseUrl(baseUrl);
     const id = form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'octopus';
     const config = {
         id,
-        baseUrl: form.apiType === 'openai' ? `${baseUrl}/v1` : baseUrl,
+        baseUrl: form.apiType === 'openai' ? `${base}/v1` : base,
         apiKey,
         name: form.name,
         type: form.apiType,
@@ -164,6 +171,17 @@ export function APIKeyExportOverlay({
 }) {
     const t = useTranslations('setting');
     const { data: groups = [] } = useGroupList();
+    const titleId = useId();
+
+    // 浮层仅在打开时挂载，Escape 关闭与点击取消等效；
+    // Radix Select 展开时 Escape 已被其消费（defaultPrevented），不连带关闭浮层
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && !event.defaultPrevented) onClose();
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [onClose]);
 
     const [platform, setPlatform] = useState<Platform>('ccswitch');
     const [appType, setAppType] = useState<CCSwitchApp>('claude');
@@ -174,8 +192,6 @@ export function APIKeyExportOverlay({
     const [opusModel, setOpusModel] = useState('');
     const [cherryName, setCherryName] = useState('Octopus');
     const [cherryApiType, setCherryApiType] = useState<CherryApiType>('openai');
-
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
 
     const modelOptions = useMemo(() => {
         const all = Array.from(new Set(groups.map((g) => g.name).filter(Boolean)))
@@ -197,7 +213,7 @@ export function APIKeyExportOverlay({
     const exportUrl = useMemo(() => {
         if (!ready) return '';
         if (platform === 'ccswitch') {
-            return buildCCSwitchUrl(normalizedBaseUrl, apiKey.api_key, {
+            return buildCCSwitchUrl(baseUrl, apiKey.api_key, {
                 appType,
                 name: name.trim(),
                 model,
@@ -206,21 +222,24 @@ export function APIKeyExportOverlay({
                 opusModel,
             });
         }
-        return buildCherryStudioUrl(normalizedBaseUrl, apiKey.api_key, {
+        return buildCherryStudioUrl(baseUrl, apiKey.api_key, {
             name: cherryName.trim(),
             apiType: cherryApiType,
         });
-    }, [ready, platform, normalizedBaseUrl, apiKey.api_key, appType, name, model, haikuModel, sonnetModel, opusModel, cherryName, cherryApiType]);
+    }, [ready, platform, baseUrl, apiKey.api_key, appType, name, model, haikuModel, sonnetModel, opusModel, cherryName, cherryApiType]);
 
     const platformLabel = platform === 'ccswitch' ? 'CC Switch' : 'Cherry Studio';
 
     return (
         <motion.div
             layoutId={layoutId}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
             className="absolute left-1/2 top-1/2 z-20 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 bg-card p-5 rounded-3xl border border-border max-h-[80vh] overflow-auto"
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         >
-            <h3 className="text-sm font-semibold text-card-foreground line-clamp-1 mb-3">
+            <h3 id={titleId} className="text-sm font-semibold text-card-foreground line-clamp-1 mb-3">
                 {t('apiKey.export.title')} · {apiKey.name}
             </h3>
 
