@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { KeyRound, Plus, Loader, Trash2, Check, X, Info, CalendarDays, Pencil, Maximize2 } from 'lucide-react';
+import { KeyRound, Plus, Loader, Trash2, Check, X, Info, CalendarDays, Pencil, Maximize2, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
@@ -25,6 +25,8 @@ import {
 } from '@/api/endpoints/apikey';
 import { useGroupList } from '@/api/endpoints/group';
 import { useStatsAPIKey } from '@/api/endpoints/stats';
+import { useSettingValue, SettingKey } from '@/api/endpoints/setting';
+import { APIKeyExportOverlay } from './APIKeyExport';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/common/Toast';
 import { CopyIconButton } from '@/components/common/CopyButton';
@@ -465,18 +467,22 @@ function APIKeyKeyItem({
     statsLayoutId,
     editLayoutId,
     deleteLayoutId,
+    exportLayoutId,
     onViewStats,
     onEdit,
     onDelete,
+    onExport,
     isDeleting,
 }: {
     apiKey: APIKey;
     statsLayoutId: string;
     editLayoutId: string;
     deleteLayoutId: string;
+    exportLayoutId: string;
     onViewStats: () => void;
     onEdit: () => void;
     onDelete: () => void;
+    onExport?: () => void;
     isDeleting: boolean;
 }) {
     const t = useTranslations('setting');
@@ -512,6 +518,17 @@ function APIKeyKeyItem({
                 >
                     <Pencil className="size-4" />
                 </motion.button>
+                {onExport && (
+                    <motion.button
+                        type="button"
+                        layoutId={exportLayoutId}
+                        onClick={onExport}
+                        className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
+                        title="Export"
+                    >
+                        <Share2 className="size-4" />
+                    </motion.button>
+                )}
                 <CopyIconButton
                     text={apiKey.api_key}
                     className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary transition-all hover:bg-primary hover:text-primary-foreground active:scale-95"
@@ -577,16 +594,20 @@ function APIKeyPanelBase({
     const createAPIKey = useCreateAPIKey();
     const updateAPIKey = useUpdateAPIKey();
     const deleteAPIKey = useDeleteAPIKey();
+    const { value: apiBaseUrl } = useSettingValue(SettingKey.ApiBaseUrl);
+    const canExport = apiBaseUrl.trim() !== '';
 
     const instanceId = useId();
     const addLayoutId = `add-btn-${idPrefix}-${instanceId}`;
     const statsPrefix = `${idPrefix}-stats-${instanceId}`;
     const editPrefix = `${idPrefix}-edit-${instanceId}`;
+    const exportPrefix = `${idPrefix}-export-${instanceId}`;
     const deletePrefix = `${idPrefix}-delete-`;
 
     const [isAdding, setIsAdding] = useState(false);
     const [viewingStats, setViewingStats] = useState<{ apiKey: APIKey; layoutId: string } | null>(null);
     const [editingKey, setEditingKey] = useState<{ apiKey: APIKey; layoutId: string } | null>(null);
+    const [exportingKey, setExportingKey] = useState<{ apiKey: APIKey; layoutId: string } | null>(null);
     const [deletingId, setDeletingId] = useState<number | null>(null);
 
     const sortedApiKeys = useMemo(() => {
@@ -612,9 +633,10 @@ function APIKeyPanelBase({
         setIsAdding(false);
         setViewingStats(null);
         setEditingKey(null);
+        setExportingKey(null);
     }, []);
 
-    const disabledHeaderActions = createAPIKey.isPending || isAdding || !!viewingStats || !!editingKey;
+    const disabledHeaderActions = createAPIKey.isPending || isAdding || !!viewingStats || !!editingKey || !!exportingKey;
 
     const handleCreate = useCallback((data: Omit<APIKey, 'id' | 'api_key'>) => {
         createAPIKey.mutate(data, {
@@ -699,6 +721,17 @@ function APIKeyPanelBase({
                 )}
             </AnimatePresence>
 
+            <AnimatePresence>
+                {exportingKey && (
+                    <APIKeyExportOverlay
+                        layoutId={exportingKey.layoutId}
+                        apiKey={exportingKey.apiKey}
+                        baseUrl={apiBaseUrl}
+                        onClose={() => setExportingKey(null)}
+                    />
+                )}
+            </AnimatePresence>
+
             <div className={listClassName}>
                 {apiKeysLoading ? (
                     <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
@@ -717,6 +750,7 @@ function APIKeyPanelBase({
                         {sortedApiKeys.map((apiKey) => {
                             const statsLayoutId = `${statsPrefix}-${apiKey.id}`;
                             const editLayoutId = `${editPrefix}-${apiKey.id}`;
+                            const exportLayoutId = `${exportPrefix}-${apiKey.id}`;
                             const deleteLayoutId = `${deletePrefix}${apiKey.id}`;
                             return (
                                 <APIKeyKeyItem
@@ -725,6 +759,7 @@ function APIKeyPanelBase({
                                     statsLayoutId={statsLayoutId}
                                     editLayoutId={editLayoutId}
                                     deleteLayoutId={deleteLayoutId}
+                                    exportLayoutId={exportLayoutId}
                                     onViewStats={() => {
                                         closeAllOverlays();
                                         setViewingStats({ apiKey, layoutId: statsLayoutId });
@@ -733,6 +768,10 @@ function APIKeyPanelBase({
                                         closeAllOverlays();
                                         setEditingKey({ apiKey, layoutId: editLayoutId });
                                     }}
+                                    onExport={canExport ? () => {
+                                        closeAllOverlays();
+                                        setExportingKey({ apiKey, layoutId: exportLayoutId });
+                                    } : undefined}
                                     onDelete={() => handleDelete(apiKey.id)}
                                     isDeleting={deleteAPIKey.isPending && deletingId === apiKey.id}
                                 />

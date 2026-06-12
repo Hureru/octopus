@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Monitor, Globe, Clock, Shield, HelpCircle, X, Activity, HeartPulse, Radio } from 'lucide-react';
+import { Monitor, Globe, Clock, Shield, HelpCircle, X, Activity, HeartPulse, Radio, Link } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
 import { toast } from '@/components/common/Toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
+import type { ApiError } from '@/api/types';
 
 export function SettingSystem() {
     const t = useTranslations('setting');
@@ -17,6 +18,7 @@ export function SettingSystem() {
     const setSetting = useSetSetting();
 
     const [proxyUrl, setProxyUrl] = useState('');
+    const [apiBaseUrl, setApiBaseUrl] = useState('');
     const [statsSaveInterval, setStatsSaveInterval] = useState('');
     const [corsAllowOrigins, setCorsAllowOrigins] = useState('');
     const [corsInputValue, setCorsInputValue] = useState('');
@@ -27,6 +29,7 @@ export function SettingSystem() {
     const [ssePreStreamHeartbeatDelay, setSsePreStreamHeartbeatDelay] = useState('');
 
     const initialProxyUrl = useRef('');
+    const initialApiBaseUrl = useRef('');
     const initialStatsSaveInterval = useRef('');
     const initialCorsAllowOrigins = useRef('');
     const initialResponsesWSEnabled = useRef(false);
@@ -38,6 +41,7 @@ export function SettingSystem() {
     useEffect(() => {
         if (settings) {
             const proxy = settings.find(s => s.key === SettingKey.ProxyURL);
+            const apiBase = settings.find(s => s.key === SettingKey.ApiBaseUrl);
             const interval = settings.find(s => s.key === SettingKey.StatsSaveInterval);
             const cors = settings.find(s => s.key === SettingKey.CORSAllowOrigins);
             const responsesWS = settings.find(s => s.key === SettingKey.ResponsesWSEnabled);
@@ -48,6 +52,10 @@ export function SettingSystem() {
             if (proxy) {
                 queueMicrotask(() => setProxyUrl(proxy.value));
                 initialProxyUrl.current = proxy.value;
+            }
+            if (apiBase) {
+                queueMicrotask(() => setApiBaseUrl(apiBase.value));
+                initialApiBaseUrl.current = apiBase.value;
             }
             if (interval) {
                 queueMicrotask(() => setStatsSaveInterval(interval.value));
@@ -90,6 +98,8 @@ export function SettingSystem() {
                 toast.success(t('saved'));
                 if (key === SettingKey.ProxyURL) {
                     initialProxyUrl.current = value;
+                } else if (key === SettingKey.ApiBaseUrl) {
+                    initialApiBaseUrl.current = value;
                 } else if (key === SettingKey.StatsSaveInterval) {
                     initialStatsSaveInterval.current = value;
                 } else if (key === SettingKey.CORSAllowOrigins) {
@@ -104,6 +114,23 @@ export function SettingSystem() {
                     initialSseHeartbeatInterval.current = value;
                 } else if (key === SettingKey.SSEPreStreamHeartbeatDelay) {
                     initialSsePreStreamHeartbeatDelay.current = value;
+                }
+            },
+            onError: (error) => {
+                const msg = (error as unknown as ApiError)?.message;
+                toast.error(t('saveFailed'), { description: msg });
+                if (key === SettingKey.ProxyURL) {
+                    setProxyUrl(initialValue);
+                } else if (key === SettingKey.ApiBaseUrl) {
+                    setApiBaseUrl(initialValue);
+                } else if (key === SettingKey.StatsSaveInterval) {
+                    setStatsSaveInterval(initialValue);
+                } else if (key === SettingKey.CORSAllowOrigins) {
+                    setCorsAllowOrigins(initialValue);
+                } else if (key === SettingKey.SSEHeartbeatInterval) {
+                    setSseHeartbeatInterval(initialValue);
+                } else if (key === SettingKey.SSEPreStreamHeartbeatDelay) {
+                    setSsePreStreamHeartbeatDelay(initialValue);
                 }
             }
         });
@@ -223,6 +250,31 @@ export function SettingSystem() {
                     onChange={(e) => setProxyUrl(e.target.value)}
                     onBlur={() => handleSave('proxy_url', proxyUrl, initialProxyUrl.current)}
                     placeholder={t('proxyUrl.placeholder')}
+                    className="w-48 rounded-xl"
+                />
+            </div>
+
+            {/* 对外服务基础地址 */}
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <Link className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('apiBaseUrl.label')}</span>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {t('apiBaseUrl.description')}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+                <Input
+                    value={apiBaseUrl}
+                    onChange={(e) => setApiBaseUrl(e.target.value)}
+                    onBlur={() => handleSave(SettingKey.ApiBaseUrl, apiBaseUrl, initialApiBaseUrl.current)}
+                    placeholder={t('apiBaseUrl.placeholder')}
                     className="w-48 rounded-xl"
                 />
             </div>

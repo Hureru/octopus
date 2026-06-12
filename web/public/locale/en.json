@@ -177,6 +177,11 @@
             "label": "Proxy URL",
             "placeholder": "Enter proxy URL"
         },
+        "apiBaseUrl": {
+            "label": "API Base URL",
+            "placeholder": "https://octopus.example.com",
+            "description": "Base URL clients use to reach this service. When set, an export button appears in the API key list"
+        },
         "statsSaveInterval": {
             "label": "Stats Save Interval",
             "placeholder": "Enter interval in minutes"
@@ -309,6 +314,20 @@
             "empty": "No API keys",
             "add": "Add Key",
             "loadFailed": "Failed to load",
+            "export": {
+                "title": "Export to Client",
+                "cliTool": "CLI Tool",
+                "mainModel": "Main Model",
+                "name": "Name",
+                "namePlaceholder": "Enter a profile name",
+                "haikuModel": "Haiku Model",
+                "sonnetModel": "Sonnet Model",
+                "opusModel": "Opus Model",
+                "none": "Not set",
+                "apiType": "API Type",
+                "hint": "Requires the client app to be installed; the browser will ask to open it",
+                "import": "Import into {platform}"
+            },
             "form": {
                 "name": "Name",
                 "maxCost": "Max Cost",

@@ -177,6 +177,11 @@
             "label": "代理地址",
             "placeholder": "请输入代理地址"
         },
+        "apiBaseUrl": {
+            "label": "API 地址",
+            "placeholder": "https://octopus.example.com",
+            "description": "客户端访问本服务的基础地址，填写后 API 密钥列表将显示导出按钮"
+        },
         "statsSaveInterval": {
             "label": "统计保存周期（分钟）",
             "placeholder": "请输入周期（分钟）"
@@ -309,6 +314,20 @@
             "empty": "暂无 API 密钥",
             "add": "添加密钥",
             "loadFailed": "加载失败",
+            "export": {
+                "title": "导出到客户端",
+                "cliTool": "CLI 工具",
+                "mainModel": "主模型",
+                "name": "名称",
+                "namePlaceholder": "请输入配置名称",
+                "haikuModel": "Haiku 模型",
+                "sonnetModel": "Sonnet 模型",
+                "opusModel": "Opus 模型",
+                "none": "不设置",
+                "apiType": "API 类型",
+                "hint": "需已安装对应客户端，浏览器将请求打开外部应用",
+                "import": "导入到 {platform}"
+            },
             "form": {
                 "name": "名称",
                 "maxCost": "最大金额",
