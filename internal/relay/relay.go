@@ -964,6 +964,18 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 
 	firstToken := true
 
+	disconnect := func() error {
+		err := contextError(ctx)
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
+		}
+		if isLocalRelayBudgetExceeded(ctx, err) {
+			return err
+		}
+		log.Debugf("client disconnected, stopping stream: written=%t first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), !firstToken, time.Since(ra.metrics.StartTime))
+		return err
+	}
+
 	type sseReadResult struct {
 		data string
 		err  error
@@ -1011,20 +1023,15 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
 						return timeoutErr
 					}
-					log.Warnf("failed to read event: %v", r.err)
-					return fmt.Errorf("failed to read stream event: %w", r.err)
+					// 断连取消沿出站请求传播、被读侧先观察到时，按断连处理而非上游流失败
+					if !errors.Is(r.err, context.Canceled) {
+						log.Warnf("failed to read event: %v", r.err)
+						return fmt.Errorf("failed to read stream event: %w", r.err)
+					}
 				}
 			default:
 			}
-			err := contextError(ctx)
-			if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
-				return timeoutErr
-			}
-			if isLocalRelayBudgetExceeded(ctx, err) {
-				return err
-			}
-			log.Debugf("client disconnected, stopping stream: written=%t first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), !firstToken, time.Since(ra.metrics.StartTime))
-			return err
+			return disconnect()
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
@@ -1044,6 +1051,9 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			if r.err != nil {
 				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
 					return timeoutErr
+				}
+				if errors.Is(r.err, context.Canceled) && contextError(ctx) != nil {
+					return disconnect()
 				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
@@ -1329,6 +1339,26 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 		return nil
 	}
 
+	disconnect := func() error {
+		err := contextError(ctx)
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
+		}
+		if isLocalRelayBudgetExceeded(ctx, err) {
+			return err
+		}
+		// 客户端收到终态事件后立即断连是 SDK 标准行为，此时上游 EOF 可能尚未到达；
+		// 缓存流已含终态事件说明响应已完整送达，按正常结束处理，避免误记失败且丢失 usage。
+		if streamReachedTerminalEvent(rawStream.Bytes(), responsesPassthroughTerminalEvents) {
+			return finishStream(context.Background())
+		}
+		log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
+		if rawStream.Len() > 0 {
+			ra.collectOpenAIResponsesPassthroughMetrics(context.Background(), rawStream.Bytes())
+		}
+		return err
+	}
+
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time
 	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
@@ -1355,23 +1385,15 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
 						return timeoutErr
 					}
-					log.Warnf("failed to read event: %v", r.err)
-					return fmt.Errorf("failed to read stream event: %w", r.err)
+					// 断连取消沿出站请求传播、被读侧先观察到时，按断连处理而非上游流失败
+					if !errors.Is(r.err, context.Canceled) {
+						log.Warnf("failed to read event: %v", r.err)
+						return fmt.Errorf("failed to read stream event: %w", r.err)
+					}
 				}
 			default:
 			}
-			err := contextError(ctx)
-			if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
-				return timeoutErr
-			}
-			if isLocalRelayBudgetExceeded(ctx, err) {
-				return err
-			}
-			log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
-			if rawStream.Len() > 0 {
-				ra.collectOpenAIResponsesPassthroughMetrics(context.Background(), rawStream.Bytes())
-			}
-			return err
+			return disconnect()
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
@@ -1390,6 +1412,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx conte
 				}
 				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
 					return timeoutErr
+				}
+				if errors.Is(r.err, context.Canceled) && contextError(ctx) != nil {
+					return disconnect()
 				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)
@@ -1452,6 +1477,49 @@ func (ra *relayAttempt) collectOpenAIResponsesPassthroughMetrics(ctx context.Con
 			_, _ = ra.inAdapter.TransformStream(ctx, internalStream)
 		}
 	}
+}
+
+// responsesPassthroughTerminalEvents / anthropicPassthroughTerminalEvents 定义各协议
+// SSE 流的终态事件类型；缓存流中出现终态事件即视为上游响应已完整送达。
+var (
+	responsesPassthroughTerminalEvents = map[string]struct{}{
+		"response.completed":  {},
+		"response.failed":     {},
+		"response.incomplete": {},
+		"error":               {},
+	}
+	anthropicPassthroughTerminalEvents = map[string]struct{}{
+		"message_stop": {},
+		"error":        {},
+	}
+)
+
+// streamReachedTerminalEvent 报告缓存的原始 SSE 流是否已包含协议终态事件。
+// 客户端 SDK 收到终态事件后会立即断连而不等上游 EOF，断连取消会沿出站请求
+// 传播打断上游读取；此时读取被取消不代表流未完成。
+func streamReachedTerminalEvent(rawStream []byte, terminalTypes map[string]struct{}) bool {
+	if len(rawStream) == 0 {
+		return false
+	}
+	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+		if err != nil {
+			break
+		}
+		typ := strings.TrimSpace(ev.Type)
+		if typ == "" {
+			var head struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal([]byte(ev.Data), &head) == nil {
+				typ = head.Type
+			}
+		}
+		if _, ok := terminalTypes[typ]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (ra *relayAttempt) handleResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
@@ -1645,6 +1713,27 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 		return nil
 	}
 
+	disconnect := func() error {
+		err := contextError(ctx)
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
+		}
+		if isLocalRelayBudgetExceeded(ctx, err) {
+			return err
+		}
+		// 客户端收到终态事件后立即断连是 SDK 标准行为，此时上游 EOF 可能尚未到达；
+		// 缓存流已含终态事件说明响应已完整送达，按正常结束处理，避免误记失败且丢失 usage。
+		if streamReachedTerminalEvent(rawStream.Bytes(), anthropicPassthroughTerminalEvents) {
+			return finishStream(context.Background())
+		}
+		log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
+		if rawStream.Len() > 0 {
+			ra.collectAnthropicPassthroughMetrics(context.Background(), rawStream.Bytes())
+			ra.collectResponse()
+		}
+		return err
+	}
+
 	var firstTokenTimer *time.Timer
 	var firstTokenC <-chan time.Time
 	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
@@ -1671,24 +1760,15 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
 						return timeoutErr
 					}
-					log.Warnf("failed to read event: %v", r.err)
-					return fmt.Errorf("failed to read stream event: %w", r.err)
+					// 断连取消沿出站请求传播、被读侧先观察到时，按断连处理而非上游流失败
+					if !errors.Is(r.err, context.Canceled) {
+						log.Warnf("failed to read event: %v", r.err)
+						return fmt.Errorf("failed to read stream event: %w", r.err)
+					}
 				}
 			default:
 			}
-			err := contextError(ctx)
-			if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
-				return timeoutErr
-			}
-			if isLocalRelayBudgetExceeded(ctx, err) {
-				return err
-			}
-			log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
-			if rawStream.Len() > 0 {
-				ra.collectAnthropicPassthroughMetrics(context.Background(), rawStream.Bytes())
-				ra.collectResponse()
-			}
-			return err
+			return disconnect()
 		case <-firstTokenC:
 			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
 			_ = response.Body.Close()
@@ -1707,6 +1787,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Con
 				}
 				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
 					return timeoutErr
+				}
+				if errors.Is(r.err, context.Canceled) && contextError(ctx) != nil {
+					return disconnect()
 				}
 				log.Warnf("failed to read event: %v", r.err)
 				return fmt.Errorf("failed to read stream event: %w", r.err)

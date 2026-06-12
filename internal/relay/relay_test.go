@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -135,6 +136,216 @@ func TestHandleStreamResponsePassthroughOpenAIResponsesPreservesRawSSE(t *testin
 	}
 	if got := recorder.Body.String(); got != rawSSE {
 		t.Fatalf("expected raw SSE to be preserved exactly, got %q want %q", got, rawSSE)
+	}
+}
+
+// stallUntilCancelBody 先返回完整 payload，随后阻塞直到 ctx 取消并返回 context.Canceled，
+// 模拟客户端断连取消沿出站请求传播、打断上游 EOF 读取的场景。
+type stallUntilCancelBody struct {
+	ctx  context.Context
+	data []byte
+	off  int
+}
+
+func (b *stallUntilCancelBody) Read(p []byte) (int, error) {
+	if b.off < len(b.data) {
+		n := copy(p, b.data[b.off:])
+		b.off += n
+		return n, nil
+	}
+	<-b.ctx.Done()
+	return 0, context.Canceled
+}
+
+func (b *stallUntilCancelBody) Close() error { return nil }
+
+// notifyStreamWriter 在每次写入后回调，用于在终态事件写出后触发客户端取消。
+type notifyStreamWriter struct {
+	buf     bytes.Buffer
+	header  http.Header
+	written bool
+	onWrite func([]byte)
+}
+
+func (w *notifyStreamWriter) Write(p []byte) (int, error) {
+	w.written = true
+	n, err := w.buf.Write(p)
+	if w.onWrite != nil {
+		w.onWrite(p)
+	}
+	return n, err
+}
+
+func (w *notifyStreamWriter) Flush()              {}
+func (w *notifyStreamWriter) Written() bool       { return w.written }
+func (w *notifyStreamWriter) Header() http.Header { return w.header }
+func (w *notifyStreamWriter) WriteHeader(int)     {}
+
+func newOpenAIResponsesPassthroughAttempt(writer StreamWriter) (*relayAttempt, *relayRequest) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	internalReq := &transformerModel.InternalLLMRequest{
+		Model:        "gpt-4o",
+		Stream:       boolPtr(true),
+		RawAPIFormat: transformerModel.APIFormatOpenAIResponse,
+	}
+	req := &relayRequest{
+		c:               c,
+		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
+		internalRequest: internalReq,
+		metrics:         NewRelayMetrics(1, internalReq.Model, nil, internalReq),
+		apiKeyID:        1,
+		requestModel:    internalReq.Model,
+		streamWriter:    writer,
+	}
+	ra := &relayAttempt{
+		relayRequest: req,
+		outAdapter:   outbound.Get(outbound.OutboundTypeOpenAIResponse),
+		channel:      &model.Channel{Type: outbound.OutboundTypeOpenAIResponse},
+	}
+	return ra, req
+}
+
+// 回归：客户端收到 response.completed 后立即断连，上游 EOF 尚未到达、读取被取消。
+// 流已完整送达，应按正常结束处理（成功 + 收集 usage），而非 "failed to read stream event"。
+func TestHandleStreamResponsePassthroughOpenAIResponsesClientCancelAfterTerminal(t *testing.T) {
+	rawSSE := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","model":"gpt-4o","created_at":1,"output":[],"status":"in_progress"}}`,
+		"",
+		`data: {"type":"response.output_text.delta","delta":"hello"}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-4o","created_at":1,"output":[],"status":"completed","usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}}`,
+		"",
+	}, "\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &notifyStreamWriter{header: http.Header{}}
+	writer.onWrite = func(p []byte) {
+		if bytes.Contains(p, []byte(`"type":"response.completed"`)) {
+			cancel()
+		}
+	}
+	ra, req := newOpenAIResponsesPassthroughAttempt(writer)
+
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
+	}
+
+	if err := ra.handleStreamResponsePassthroughOpenAIResponses(ctx, response); err != nil {
+		t.Fatalf("expected stream with terminal event to finish successfully, got error: %v", err)
+	}
+	if got := writer.buf.String(); got != rawSSE {
+		t.Fatalf("expected raw SSE to be preserved exactly, got %q want %q", got, rawSSE)
+	}
+	internalResp, err := req.inAdapter.GetInternalResponse(context.Background())
+	if err != nil || internalResp == nil {
+		t.Fatalf("expected internal response for usage collection, got resp=%v err=%v", internalResp, err)
+	}
+	if internalResp.Usage == nil || internalResp.Usage.PromptTokens != 3 || internalResp.Usage.CompletionTokens != 5 {
+		t.Fatalf("expected usage input=3 output=5, got %+v", internalResp.Usage)
+	}
+}
+
+// 回归：客户端在终态事件前断连（真正的中途取消），仍应按断连处理返回取消错误，
+// 而不是 "failed to read stream event"，也不应误判为成功。
+func TestHandleStreamResponsePassthroughOpenAIResponsesClientCancelMidStream(t *testing.T) {
+	rawSSE := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","object":"response","model":"gpt-4o","created_at":1,"output":[],"status":"in_progress"}}`,
+		"",
+		`data: {"type":"response.output_text.delta","delta":"hello"}`,
+		"",
+	}, "\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &notifyStreamWriter{header: http.Header{}}
+	writer.onWrite = func([]byte) { cancel() }
+	ra, _ := newOpenAIResponsesPassthroughAttempt(writer)
+
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
+	}
+
+	err := ra.handleStreamResponsePassthroughOpenAIResponses(ctx, response)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled for mid-stream disconnect, got: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "failed to read stream event") {
+		t.Fatalf("mid-stream disconnect must not be classified as stream read failure, got: %v", err)
+	}
+}
+
+// 回归：Anthropic 直通同场景——客户端收到 message_stop 后立即断连，应按正常结束处理。
+func TestHandleStreamResponsePassthroughAnthropicClientCancelAfterTerminal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rawSSE := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":3,"output_tokens":0}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+		"",
+	}, "\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &notifyStreamWriter{header: http.Header{}}
+	writer.onWrite = func(p []byte) {
+		if bytes.Contains(p, []byte(`"type":"message_stop"`)) {
+			cancel()
+		}
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	internalReq := &transformerModel.InternalLLMRequest{
+		Model:        "claude-haiku-4-5-20251001",
+		Stream:       boolPtr(true),
+		RawAPIFormat: transformerModel.APIFormatAnthropicMessage,
+	}
+	req := &relayRequest{
+		c:               c,
+		inAdapter:       inbound.Get(inbound.InboundTypeAnthropic),
+		internalRequest: internalReq,
+		metrics:         NewRelayMetrics(1, internalReq.Model, nil, internalReq),
+		apiKeyID:        1,
+		requestModel:    internalReq.Model,
+		streamWriter:    writer,
+	}
+	ra := &relayAttempt{
+		relayRequest: req,
+		outAdapter:   outbound.Get(outbound.OutboundTypeAnthropic),
+	}
+
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
+	}
+
+	if err := ra.handleStreamResponsePassthroughAnthropic(ctx, response); err != nil {
+		t.Fatalf("expected stream with terminal event to finish successfully, got error: %v", err)
+	}
+	if got := writer.buf.String(); got != rawSSE {
+		t.Fatalf("expected raw SSE to be preserved exactly, got %q want %q", got, rawSSE)
+	}
+	if req.metrics.Stats.InputToken != 3 || req.metrics.Stats.OutputToken != 5 {
+		t.Fatalf("expected usage input=3 output=5 collected into metrics, got input=%d output=%d", req.metrics.Stats.InputToken, req.metrics.Stats.OutputToken)
 	}
 }
 
