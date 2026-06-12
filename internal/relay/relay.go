@@ -1501,7 +1501,6 @@ func streamReachedTerminalEvent(rawStream []byte, terminalTypes map[string]struc
 	if len(rawStream) == 0 {
 		return false
 	}
-	terminal := false
 	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
 	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
 		if err != nil {
@@ -1517,10 +1516,10 @@ func streamReachedTerminalEvent(rawStream []byte, terminalTypes map[string]struc
 			}
 		}
 		if _, ok := terminalTypes[typ]; ok {
-			terminal = true
+			return true
 		}
 	}
-	return terminal
+	return false
 }
 
 func (ra *relayAttempt) handleResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
