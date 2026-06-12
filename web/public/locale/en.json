@@ -274,18 +274,13 @@
         "backup": {
             "export": {
                 "title": "Export",
-                "includeLogs": "Include Logs",
                 "includeStats": "Include Stats",
-                "format": {
-                    "label": "Format",
-                    "json": "JSON",
-                    "zip": "ZIP",
-                    "logsHint": "ZIP is required when including logs (NDJSON streaming) to avoid memory spikes."
-                },
-                "button": "Download",
+                "button": "Export JSON",
                 "exporting": "Exporting...",
                 "success": "Export started",
-                "failed": "Export failed"
+                "failed": "Export failed",
+                "withLogsButton": "Export Archive with Logs (ZIP)",
+                "withLogsWarning": "The archive with logs is a streamed ZIP export for archival only; it cannot be imported to restore data."
             },
             "import": {
                 "title": "Import (Incremental)",

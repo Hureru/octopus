@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Calendar, Clock, Database, Download, ScrollText, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, Calendar, Clock, Database, Download, FileArchive, ScrollText, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -24,11 +24,9 @@ export function SettingData() {
     const exportDB = useExportDB();
     const importDB = useImportDB();
 
-    const [includeLogs, setIncludeLogs] = useState(false);
     const [includeStats, setIncludeStats] = useState(false);
-    const [format, setFormat] = useState<'json' | 'zip'>('json');
-
-    const effectiveFormat: 'json' | 'zip' = includeLogs ? 'zip' : format;
+    // 常规导出固定 JSON（可导入恢复）；含日志导出为 ZIP 流式归档，单独成按钮
+    const [exportingKind, setExportingKind] = useState<'json' | 'logs' | null>(null);
 
     const [file, setFile] = useState<File | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -63,12 +61,17 @@ export function SettingData() {
         }
     };
 
-    const onExport = async () => {
+    const onExport = async (kind: 'json' | 'logs') => {
+        setExportingKind(kind);
         try {
-            await exportDB.mutateAsync({ include_logs: includeLogs, include_stats: includeStats, format: effectiveFormat });
+            await exportDB.mutateAsync(kind === 'logs'
+                ? { include_logs: true, include_stats: includeStats, format: 'zip' }
+                : { include_logs: false, include_stats: includeStats, format: 'json' });
             toast.success(t('backup.export.success'));
         } catch (e) {
             toast.error(e instanceof Error ? e.message : t('backup.export.failed'));
+        } finally {
+            setExportingKind(null);
         }
     };
 
@@ -118,50 +121,36 @@ export function SettingData() {
             <SettingSection title={t('backup.export.title')} />
             <div className="space-y-3">
                 <div className="flex items-center justify-between gap-4">
-                    <div className="text-sm text-muted-foreground">{t('backup.export.includeLogs')}</div>
-                    <Switch checked={includeLogs} onCheckedChange={setIncludeLogs} />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
                     <div className="text-sm text-muted-foreground">{t('backup.export.includeStats')}</div>
                     <Switch checked={includeStats} onCheckedChange={setIncludeStats} />
                 </div>
-
-                <div className="flex items-center justify-between gap-4">
-                    <div className="text-sm text-muted-foreground">{t('backup.export.format.label')}</div>
-                    <div className="inline-flex rounded-lg border border-border p-0.5 text-xs">
-                        {(['json', 'zip'] as const).map((opt) => {
-                            const active = effectiveFormat === opt;
-                            const disabled = includeLogs && opt === 'json';
-                            return (
-                                <button
-                                    key={opt}
-                                    type="button"
-                                    disabled={disabled}
-                                    onClick={() => setFormat(opt)}
-                                    className={`rounded-md px-3 py-1 transition-colors ${active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-                                >
-                                    {t(`backup.export.format.${opt}`)}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {includeLogs ? (
-                    <p className="text-xs text-muted-foreground">{t('backup.export.format.logsHint')}</p>
-                ) : null}
 
                 <Button
                     type="button"
                     variant="outline"
                     className="w-full rounded-xl"
-                    onClick={onExport}
+                    onClick={() => onExport('json')}
                     disabled={exportDB.isPending}
                 >
                     <Download className="size-4" />
-                    {exportDB.isPending ? t('backup.export.exporting') : t('backup.export.button')}
+                    {exportingKind === 'json' ? t('backup.export.exporting') : t('backup.export.button')}
                 </Button>
+
+                {/* 含日志归档：数据量大，ZIP 流式写入，仅供留存，无法导入恢复 */}
+                <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full rounded-xl"
+                    onClick={() => onExport('logs')}
+                    disabled={exportDB.isPending}
+                >
+                    <FileArchive className="size-4" />
+                    {exportingKind === 'logs' ? t('backup.export.exporting') : t('backup.export.withLogsButton')}
+                </Button>
+                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                    {t('backup.export.withLogsWarning')}
+                </p>
             </div>
 
             {/* 备份导入 */}

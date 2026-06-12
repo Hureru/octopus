@@ -274,18 +274,13 @@
         "backup": {
             "export": {
                 "title": "匯出",
-                "includeLogs": "包含日誌",
                 "includeStats": "包含統計",
-                "format": {
-                    "label": "格式",
-                    "json": "JSON",
-                    "zip": "ZIP",
-                    "logsHint": "包含日誌時強制使用 ZIP（NDJSON 串流寫入），避免記憶體佔用過高。"
-                },
-                "button": "下載",
+                "button": "匯出 JSON",
                 "exporting": "匯出中...",
                 "success": "開始匯出",
-                "failed": "匯出失敗"
+                "failed": "匯出失敗",
+                "withLogsButton": "匯出含日誌歸檔 (ZIP)",
+                "withLogsWarning": "含日誌歸檔為 ZIP 串流匯出，僅供留存查閱，無法匯入復原。"
             },
             "import": {
                 "title": "匯入（增量）",

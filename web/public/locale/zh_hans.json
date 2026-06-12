@@ -274,18 +274,13 @@
         "backup": {
             "export": {
                 "title": "导出",
-                "includeLogs": "包含日志",
                 "includeStats": "包含统计",
-                "format": {
-                    "label": "格式",
-                    "json": "JSON",
-                    "zip": "ZIP",
-                    "logsHint": "包含日志时强制使用 ZIP（NDJSON 流式写入），避免内存占用过高。"
-                },
-                "button": "下载",
+                "button": "导出 JSON",
                 "exporting": "导出中...",
                 "success": "开始导出",
-                "failed": "导出失败"
+                "failed": "导出失败",
+                "withLogsButton": "导出含日志归档 (ZIP)",
+                "withLogsWarning": "含日志归档为 ZIP 流式导出，仅供留存查阅，无法导入恢复。"
             },
             "import": {
                 "title": "导入（增量）",
