@@ -2,17 +2,13 @@
 
 import { PageWrapper } from '@/components/common/PageWrapper';
 import { SettingAppearance } from './Appearance';
-import { SettingSystem } from './System';
 import { SettingAPIKey } from './APIKey';
-import { SettingLLMPrice } from './LLMPrice';
 import { SettingAccount } from './Account';
 import { SettingInfo } from './Info';
-import { SettingLLMSync } from './LLMSync';
-import { SettingSiteAutomation } from './SiteAutomation';
-import { SettingLog } from './Log';
-import { SettingBackup } from './Backup';
-import { SettingCircuitBreaker } from './CircuitBreaker';
-import { SettingOutlierRetirement } from './OutlierRetirement';
+import { SettingNetwork } from './Network';
+import { SettingReliability } from './Reliability';
+import { SettingSyncTasks } from './SyncTasks';
+import { SettingData } from './Data';
 
 export function Setting() {
     return (
@@ -21,15 +17,11 @@ export function Setting() {
                 <SettingInfo key="setting-info" />
                 <SettingAppearance key="setting-appearance" />
                 <SettingAccount key="setting-account" />
-                <SettingSystem key="setting-system" />
-                <SettingLog key="setting-log" />
-                <SettingLLMPrice key="setting-llmprice" />
                 <SettingAPIKey key="setting-apikey" />
-                <SettingLLMSync key="setting-llmsync" />
-                <SettingSiteAutomation key="setting-site-automation" />
-                <SettingCircuitBreaker key="setting-circuit-breaker" />
-                <SettingOutlierRetirement key="setting-outlier-retirement" />
-                <SettingBackup key="setting-backup" />
+                <SettingNetwork key="setting-network" />
+                <SettingReliability key="setting-reliability" />
+                <SettingSyncTasks key="setting-sync-tasks" />
+                <SettingData key="setting-data" />
             </PageWrapper>
         </div>
     );

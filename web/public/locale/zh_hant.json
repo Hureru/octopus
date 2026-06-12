@@ -160,7 +160,6 @@
     },
     "setting": {
         "appearance": "外觀",
-        "system": "系統",
         "theme": {
             "label": "主題",
             "light": "淺色",
@@ -192,29 +191,20 @@
             "example": "只允許指定域名: https://example.com,https://example2.com"
         },
         "responsesWS": {
-            "enabled": {
-                "label": "OpenAI Responses WebSocket",
-                "description": "為客戶端 WebSocket /v1/responses 入站啟用上游 WebSocket，預設關閉。"
-            },
-            "defaultMode": {
-                "label": "Responses WS 預設模式",
-                "description": "OpenAI Responses 渠道的預設上游 WS 模式，可被渠道級設定覆蓋。",
-                "passthrough": "直通",
-                "transform": "轉換",
-                "off": "關閉"
+            "label": "OpenAI Responses WebSocket",
+            "description": "為客戶端 WebSocket /v1/responses 入站啟用上游 WebSocket。「啟用 · 預設關閉」表示能力開啟但預設不使用，渠道可單獨開啟；直通/轉換為渠道未覆蓋時的預設模式。",
+            "mode": {
+                "disabled": "禁用",
+                "defaultOff": "啟用 · 預設關閉",
+                "passthrough": "啟用 · 直通",
+                "transform": "啟用 · 轉換"
             }
         },
         "sseHeartbeat": {
-            "label": "SSE 流式心跳間隔（秒）",
-            "description": "設定為 0 禁用心跳；Cloudflare 反代場景建議 30-60 秒。",
+            "label": "SSE 心跳間隔（秒）",
+            "description": "同時作為流中心跳間隔與上游流建立前的首次心跳延遲；設定為 0 禁用。Cloudflare 反代場景建議 30-60 秒。",
             "compatibility": "部分客戶端可能錯誤處理 SSE 註解，如遇相容問題可關閉。",
             "placeholder": "0 = 禁用，建議 30-60"
-        },
-        "ssePreStreamHeartbeat": {
-            "label": "SSE 流建立前心跳延遲（秒）",
-            "description": "設定為 0 禁用建立前心跳；啟用後會在上游流尚未建立且等待超過該秒數時發送 SSE 註解。",
-            "risk": "可降低 Cloudflare 524 風險，但可能影響部分客戶端重試判斷。",
-            "placeholder": "0 = 禁用，可選 90-100"
         },
         "groupHealth": {
             "label": "分組健康檢查",
@@ -282,7 +272,6 @@
         "saved": "已儲存",
         "saveFailed": "儲存失敗",
         "backup": {
-            "title": "備份 / 復原",
             "export": {
                 "title": "匯出",
                 "includeLogs": "包含日誌",
@@ -363,38 +352,6 @@
                 "deleteError": "API 金鑰刪除失敗"
             }
         },
-        "llmPrice": {
-            "title": "模型價格",
-            "updateInterval": {
-                "label": "自動更新間隔（小時）",
-                "placeholder": "請輸入間隔（小時）"
-            },
-            "manualUpdate": {
-                "label": "手動更新價格",
-                "button": "立即更新",
-                "updating": "更新中..."
-            },
-            "lastUpdate": "上次更新",
-            "neverUpdated": "從未更新",
-            "updateSuccess": "價格更新成功",
-            "updateFailed": "價格更新失敗"
-        },
-        "llmSync": {
-            "title": "供應源同步",
-            "syncInterval": {
-                "label": "自動同步間隔（小時）",
-                "placeholder": "請輸入間隔（小時）"
-            },
-            "manualSync": {
-                "label": "手動同步供應源",
-                "button": "立即同步",
-                "syncing": "同步中..."
-            },
-            "lastSync": "上次同步",
-            "neverSynced": "從未同步",
-            "syncSuccess": "供應源同步成功",
-            "syncFailed": "供應源同步失敗"
-        },
         "account": {
             "title": "帳戶設定",
             "save": "儲存",
@@ -439,7 +396,7 @@
             "updateFailed": "更新失敗"
         },
         "log": {
-            "title": "日誌設定",
+            "title": "歷史日誌",
             "enabled": {
                 "label": "啟用歷史日誌"
             },
@@ -454,6 +411,49 @@
             },
             "clearSuccess": "日誌已清空",
             "clearFailed": "清空失敗"
+        },
+        "network": {
+            "title": "網路與服務"
+        },
+        "reliability": {
+            "title": "可靠性"
+        },
+        "syncTasks": {
+            "title": "同步與定時任務",
+            "intervalPlaceholder": "間隔（小時）",
+            "last": "上次",
+            "never": "從未執行",
+            "llmSync": {
+                "label": "供應源同步",
+                "button": "立即同步",
+                "pending": "同步中...",
+                "success": "供應源同步成功",
+                "failed": "供應源同步失敗"
+            },
+            "llmPrice": {
+                "label": "模型價格更新",
+                "button": "立即更新",
+                "pending": "更新中...",
+                "success": "價格更新成功",
+                "failed": "價格更新失敗"
+            },
+            "siteSync": {
+                "label": "站點全量同步",
+                "button": "立即同步",
+                "pending": "同步中...",
+                "success": "已觸發後台站點全量同步",
+                "failed": "觸發同步失敗"
+            },
+            "siteCheckin": {
+                "label": "站點全量簽到",
+                "button": "立即簽到",
+                "pending": "簽到中...",
+                "success": "已觸發後台站點全量簽到",
+                "failed": "觸發簽到失敗"
+            }
+        },
+        "data": {
+            "title": "資料管理"
         }
     },
     "group": {

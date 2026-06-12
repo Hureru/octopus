@@ -160,7 +160,6 @@
     },
     "setting": {
         "appearance": "Appearance",
-        "system": "System",
         "theme": {
             "label": "Theme",
             "light": "Light",
@@ -192,29 +191,20 @@
             "example": "Only allow specific domains: https://example.com,https://example2.com"
         },
         "responsesWS": {
-            "enabled": {
-                "label": "OpenAI Responses WebSocket",
-                "description": "Opt-in upstream WebSocket support for client WebSocket /v1/responses ingress."
-            },
-            "defaultMode": {
-                "label": "Responses WS Default Mode",
-                "description": "Default upstream WS mode for OpenAI Responses channels unless overridden per channel.",
-                "passthrough": "Passthrough",
-                "transform": "Transform",
-                "off": "Off"
+            "label": "OpenAI Responses WebSocket",
+            "description": "Opt-in upstream WebSocket for client WebSocket /v1/responses ingress. \"Enabled · Default off\" turns the capability on without using it by default (channels can opt in); Passthrough/Transform is the default mode unless overridden per channel.",
+            "mode": {
+                "disabled": "Disabled",
+                "defaultOff": "Enabled · Default off",
+                "passthrough": "Enabled · Passthrough",
+                "transform": "Enabled · Transform"
             }
         },
         "sseHeartbeat": {
             "label": "SSE Heartbeat Interval (seconds)",
-            "description": "Set to 0 to disable heartbeat; 30-60 seconds is recommended behind Cloudflare.",
+            "description": "Applies to both the in-stream heartbeat interval and the first heartbeat delay before the upstream stream is established; 0 disables. 30-60 seconds is recommended behind Cloudflare.",
             "compatibility": "Some clients may mishandle SSE comments, so disable it if compatibility issues occur.",
             "placeholder": "0 = disabled, recommend 30-60"
-        },
-        "ssePreStreamHeartbeat": {
-            "label": "SSE Pre-stream Heartbeat Delay (seconds)",
-            "description": "Set to 0 to disable pre-stream heartbeats. When enabled, an SSE comment is sent only if the upstream stream is still not established after this delay.",
-            "risk": "This may reduce Cloudflare 524 risk but can affect retry behavior in some clients.",
-            "placeholder": "0 = disabled, optional 90-100"
         },
         "groupHealth": {
             "label": "Group Health Checks",
@@ -282,7 +272,6 @@
         "saved": "Saved",
         "saveFailed": "Save failed",
         "backup": {
-            "title": "Backup / Restore",
             "export": {
                 "title": "Export",
                 "includeLogs": "Include Logs",
@@ -363,38 +352,6 @@
                 "deleteError": "Failed to delete API key"
             }
         },
-        "llmPrice": {
-            "title": "Model Pricing",
-            "updateInterval": {
-                "label": "Auto Update Interval (hours)",
-                "placeholder": "Enter interval in hours"
-            },
-            "manualUpdate": {
-                "label": "Manual Price Update",
-                "button": "Update Now",
-                "updating": "Updating..."
-            },
-            "lastUpdate": "Last Update",
-            "neverUpdated": "Never updated",
-            "updateSuccess": "Price updated successfully",
-            "updateFailed": "Failed to update price"
-        },
-        "llmSync": {
-            "title": "Channel Sync",
-            "syncInterval": {
-                "label": "Auto Sync Interval (hours)",
-                "placeholder": "Enter interval in hours"
-            },
-            "manualSync": {
-                "label": "Manual Channel Sync",
-                "button": "Sync Now",
-                "syncing": "Syncing..."
-            },
-            "lastSync": "Last Sync",
-            "neverSynced": "Never synced",
-            "syncSuccess": "Channel synced successfully",
-            "syncFailed": "Failed to sync channel"
-        },
         "account": {
             "title": "Account Settings",
             "save": "Save",
@@ -439,7 +396,7 @@
             "updateFailed": "Update failed"
         },
         "log": {
-            "title": "Log Settings",
+            "title": "History Logs",
             "enabled": {
                 "label": "Enable History Logs"
             },
@@ -454,6 +411,49 @@
             },
             "clearSuccess": "Logs cleared",
             "clearFailed": "Failed to clear logs"
+        },
+        "network": {
+            "title": "Network & Service"
+        },
+        "reliability": {
+            "title": "Reliability"
+        },
+        "syncTasks": {
+            "title": "Sync & Scheduled Tasks",
+            "intervalPlaceholder": "Interval (hours)",
+            "last": "Last",
+            "never": "Never",
+            "llmSync": {
+                "label": "Channel sync",
+                "button": "Sync Now",
+                "pending": "Syncing...",
+                "success": "Channel synced successfully",
+                "failed": "Failed to sync channel"
+            },
+            "llmPrice": {
+                "label": "Model price update",
+                "button": "Update Now",
+                "pending": "Updating...",
+                "success": "Price updated successfully",
+                "failed": "Failed to update price"
+            },
+            "siteSync": {
+                "label": "Site full sync",
+                "button": "Sync Now",
+                "pending": "Syncing...",
+                "success": "Background site sync triggered",
+                "failed": "Failed to trigger site sync"
+            },
+            "siteCheckin": {
+                "label": "Site check-in",
+                "button": "Check In",
+                "pending": "Checking in...",
+                "success": "Background site check-in triggered",
+                "failed": "Failed to trigger site check-in"
+            }
+        },
+        "data": {
+            "title": "Data Management"
         }
     },
     "group": {
