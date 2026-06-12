@@ -24,7 +24,7 @@ export function SettingData() {
     const exportDB = useExportDB();
     const importDB = useImportDB();
 
-    const [includeStats, setIncludeStats] = useState(false);
+    const [includeStats, setIncludeStats] = useState(true);
     // 常规导出固定 JSON（可导入恢复）；含日志导出为 ZIP 流式归档，单独成按钮
     const [exportingKind, setExportingKind] = useState<'json' | 'logs' | null>(null);
 
