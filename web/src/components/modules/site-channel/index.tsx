@@ -7,6 +7,7 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/zh-cn';
 import 'dayjs/locale/zh-tw';
+import { useCompletionStore } from './completion-store';
 import {
     ArrowUpDown,
     Check,
@@ -3124,6 +3125,23 @@ export function SiteChannelCompletionAction() {
     );
 }
 
+// 新增：用于在 SiteChannelSection 中同步状态到 store
+export function useCompletionStateSync() {
+    const { data } = useSiteChannelList();
+
+    const pendingCompletionSites = useMemo(
+        () => collectPendingCompletionSites(data ?? []),
+        [data],
+    );
+
+    const totalPendingCompletionCount = useMemo(
+        () => pendingCompletionSites.reduce((sum, site) => sum + site.pending_count, 0),
+        [pendingCompletionSites],
+    );
+
+    return { pendingCompletionSites, totalPendingCompletionCount };
+}
+
 export function SiteChannelSection({
     searchTerm,
     sortField,
@@ -3143,6 +3161,16 @@ export function SiteChannelSection({
     const requestJump = useJumpStore((state) => state.requestJump);
     const [highlightedSiteId, setHighlightedSiteId] = useState<number | null>(null);
     const siteCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+    // 同步补全状态到 store，并暴露对话框控制
+    const { pendingCompletionSites, totalPendingCompletionCount } = useCompletionStateSync();
+    const setPendingCount = useCompletionStore((s) => s.setPendingCount);
+    const completionDialogOpen = useCompletionStore((s) => s.dialogOpen);
+    const setCompletionDialogOpen = useCompletionStore((s) => s.setDialogOpen);
+
+    useEffect(() => {
+        setPendingCount(totalPendingCompletionCount);
+    }, [totalPendingCompletionCount, setPendingCount]);
 
     const pendingSiteChannelJump = pendingJump && isSiteChannelJumpTarget(pendingJump.target)
         ? pendingJump as SiteChannelPendingJump
@@ -3278,13 +3306,20 @@ function SiteChannelGrid({
     ), [layout, pendingSiteChannelJump, highlightedSiteId, registerCardRef, clearPending, requestJump]);
 
     return (
-        <VirtualizedGrid
-            items={cards}
-            layout={layout}
-            columns={columnCompute}
-            estimateItemHeight={240}
-            getItemKey={(card) => `site-channel-${card.site_id}`}
-            renderItem={renderCard}
-        />
+        <>
+            <VirtualizedGrid
+                items={cards}
+                layout={layout}
+                columns={columnCompute}
+                estimateItemHeight={240}
+                getItemKey={(card) => `site-channel-${card.site_id}`}
+                renderItem={renderCard}
+            />
+            <UnifiedCompletionDialog
+                open={completionDialogOpen && totalPendingCompletionCount > 0}
+                onOpenChange={setCompletionDialogOpen}
+                sites={pendingCompletionSites}
+            />
+        </>
     );
 }
