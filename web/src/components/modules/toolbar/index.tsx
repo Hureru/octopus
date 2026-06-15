@@ -112,19 +112,6 @@ export function Toolbar() {
                 transition={{ duration: 0.2 }}
                 className="flex items-center gap-2"
             >
-                {/* 站点页面的代理池按钮 */}
-                {toolbarItem === 'site' && (
-                    <button
-                        type="button"
-                        aria-label="代理池"
-                        title="代理池"
-                        onClick={() => openProxyPool()}
-                        className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}
-                    >
-                        <Network className="size-4 transition-colors duration-300" />
-                    </button>
-                )}
-
                 {/* 搜索按钮/展开框 */}
                 <div className="relative h-9 w-9">
                     {!searchExpanded ? (
@@ -161,6 +148,23 @@ export function Toolbar() {
                         </motion.div>
                     )}
                 </div>
+
+                {/* 站点页面的代理池按钮 */}
+                {toolbarItem === 'site' && (
+                    <motion.button
+                        type="button"
+                        aria-label="代理池"
+                        title="代理池"
+                        onClick={() => openProxyPool()}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        transition={{ duration: 0.2 }}
+                        className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}
+                    >
+                        <Network className="size-4 transition-colors duration-300" />
+                    </motion.button>
+                )}
 
                 {!isLogToolbar && <Popover>
                     <PopoverTrigger asChild>
