@@ -171,17 +171,15 @@ export function ProxyPoolHeaderAction() {
     const t = useTranslations('proxyPool');
     const open = useProxyPoolDialogStore((state) => state.open);
     return (
-        <Button
+        <button
             type="button"
-            variant="ghost"
-            size="icon"
-            className="rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground"
             aria-label={t('name')}
             title={t('name')}
             onClick={() => open()}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:text-foreground"
         >
-            <Network className="size-4" />
-        </Button>
+            <Network className="size-4 transition-colors duration-300" />
+        </button>
     );
 }
 
