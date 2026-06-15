@@ -3256,15 +3256,24 @@ export function SiteChannelSection({
         return null;
     }
 
-    return <SiteChannelGrid
-        cards={cards}
-        layout={layout}
-        pendingSiteChannelJump={pendingSiteChannelJump}
-        highlightedSiteId={highlightedSiteId}
-        registerCardRef={registerCardRef}
-        clearPending={clearPending}
-        requestJump={requestJump}
-    />;
+    return (
+        <>
+            <SiteChannelGrid
+                cards={cards}
+                layout={layout}
+                pendingSiteChannelJump={pendingSiteChannelJump}
+                highlightedSiteId={highlightedSiteId}
+                registerCardRef={registerCardRef}
+                clearPending={clearPending}
+                requestJump={requestJump}
+            />
+            <UnifiedCompletionDialog
+                open={completionDialogOpen && totalPendingCompletionCount > 0}
+                onOpenChange={setCompletionDialogOpen}
+                sites={pendingCompletionSites}
+            />
+        </>
+    );
 }
 
 function SiteChannelGrid({
@@ -3306,20 +3315,13 @@ function SiteChannelGrid({
     ), [layout, pendingSiteChannelJump, highlightedSiteId, registerCardRef, clearPending, requestJump]);
 
     return (
-        <>
-            <VirtualizedGrid
-                items={cards}
-                layout={layout}
-                columns={columnCompute}
-                estimateItemHeight={240}
-                getItemKey={(card) => `site-channel-${card.site_id}`}
-                renderItem={renderCard}
-            />
-            <UnifiedCompletionDialog
-                open={completionDialogOpen && totalPendingCompletionCount > 0}
-                onOpenChange={setCompletionDialogOpen}
-                sites={pendingCompletionSites}
-            />
-        </>
+        <VirtualizedGrid
+            items={cards}
+            layout={layout}
+            columns={columnCompute}
+            estimateItemHeight={240}
+            getItemKey={(card) => `site-channel-${card.site_id}`}
+            renderItem={renderCard}
+        />
     );
 }
