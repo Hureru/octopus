@@ -234,7 +234,7 @@ export function AppContainer() {
                                 animate="animate"
                                 exit="exit"
                                 transition={{ duration: 0.3 }}
-                                className="flex items-baseline gap-6"
+                                className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-6"
                             >
                                 <span className="text-3xl font-bold mt-1">{t(activeItem)}</span>
                                 {activeItem === 'channel' && <ChannelTabSwitcher />}
