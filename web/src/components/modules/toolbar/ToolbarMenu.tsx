@@ -41,15 +41,6 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                 <ActionButton key={action.id} action={action} />
             ))}
 
-            {/* 中屏以上可见的按钮 - md:flex */}
-            {desktopVisible.length > 0 && (
-                <div className="hidden md:flex items-center gap-2">
-                    {desktopVisible.map((action) => (
-                        <ActionButton key={action.id} action={action} />
-                    ))}
-                </div>
-            )}
-
             {/* 大屏可见的按钮 - xl:flex */}
             {largeVisible.length > 0 && (
                 <div className="hidden xl:flex items-center gap-2">
@@ -105,7 +96,7 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                                         ))}
                                     </div>
                                     {(desktopVisible.length > 0 || menuOnly.length > 0) && (
-                                        <div className="my-1 border-t border-border/60 xl:hidden" />
+                                        <div className="my-1 border-t border-border/60 md:hidden" />
                                     )}
                                 </>
                             )}
@@ -131,6 +122,15 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                         </div>
                     </PopoverContent>
                 </Popover>
+            )}
+
+            {/* 中屏以上可见的按钮 - md:flex（如新增，置于最右） */}
+            {desktopVisible.length > 0 && (
+                <div className="hidden md:flex items-center gap-2">
+                    {desktopVisible.map((action) => (
+                        <ActionButton key={action.id} action={action} />
+                    ))}
+                </div>
             )}
         </>
     );

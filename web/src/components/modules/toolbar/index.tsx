@@ -245,6 +245,7 @@ export function Toolbar() {
     ]);
 
     return (
+        <>
         <AnimatePresence mode="wait">
             <motion.div
                 key="toolbar"
@@ -302,9 +303,6 @@ export function Toolbar() {
 
                 {/* 日志页面的筛选按钮 */}
                 {isLogToolbar && <LogFilterPopover />}
-
-                {/* 统一的工具按钮菜单 */}
-                <ToolbarMenu actions={actions} />
 
                 {/* 设置按钮 - 始终可见（除了日志页面） */}
                 {!isLogToolbar && (
@@ -523,10 +521,18 @@ export function Toolbar() {
                     </Popover>
                 )}
 
+                {/* 统一的工具按钮菜单（新增 + 按钮位于最右侧） */}
+                <ToolbarMenu actions={actions} />
+            </motion.div>
+        </AnimatePresence>
+
+            {/* 对话框通过 portal 渲染，统一包在隐藏容器中（display:none 不参与 flex 布局），
+                避免其触发器外层 div 作为 flex 子项在工具栏右侧产生逐页不同的间隔 */}
+            <div className="hidden">
                 {/* 创建对话框 (channel/group/model) */}
                 {toolbarItem !== 'site' && toolbarItem !== 'log' && (
                     <MorphingDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-                        <MorphingDialogTrigger asChild>
+                        <MorphingDialogTrigger>
                             <button type="button" className="hidden">
                                 Hidden trigger
                             </button>
@@ -542,7 +548,7 @@ export function Toolbar() {
                 {/* 自动分组对话框 */}
                 {toolbarItem === 'group' && (
                     <MorphingDialog open={autoGroupDialogOpen} onOpenChange={setAutoGroupDialogOpen}>
-                        <MorphingDialogTrigger asChild>
+                        <MorphingDialogTrigger>
                             <button type="button" className="hidden">
                                 Hidden trigger
                             </button>
@@ -554,8 +560,8 @@ export function Toolbar() {
                         </MorphingDialogContainer>
                     </MorphingDialog>
                 )}
-            </motion.div>
-        </AnimatePresence>
+            </div>
+        </>
     );
 }
 

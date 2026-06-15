@@ -54,15 +54,34 @@ function useMorphingDialog() {
 export type MorphingDialogProviderProps = {
   children: React.ReactNode;
   transition?: Transition;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 function MorphingDialogProvider({
   children,
   transition,
+  open: controlledOpen,
+  onOpenChange,
 }: MorphingDialogProviderProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const isOpen = isControlled ? (controlledOpen as boolean) : uncontrolledOpen;
   const uniqueId = useId();
   const triggerRef = useRef<HTMLDivElement>(null!);
+
+  const setIsOpen = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
+    (value) => {
+      const current = isControlled ? (controlledOpen as boolean) : uncontrolledOpen;
+      const next =
+        typeof value === 'function'
+          ? (value as (prev: boolean) => boolean)(current)
+          : value;
+      if (!isControlled) setUncontrolledOpen(next);
+      if (next !== current) onOpenChange?.(next);
+    },
+    [isControlled, controlledOpen, uncontrolledOpen, onOpenChange]
+  );
 
   const contextValue = useMemo(
     () => ({
@@ -71,7 +90,7 @@ function MorphingDialogProvider({
       uniqueId,
       triggerRef,
     }),
-    [isOpen, uniqueId]
+    [isOpen, setIsOpen, uniqueId]
   );
 
   return (
@@ -84,11 +103,13 @@ function MorphingDialogProvider({
 export type MorphingDialogProps = {
   children: React.ReactNode;
   transition?: Transition;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
-function MorphingDialog({ children, transition }: MorphingDialogProps) {
+function MorphingDialog({ children, transition, open, onOpenChange }: MorphingDialogProps) {
   return (
-    <MorphingDialogProvider transition={transition}>
+    <MorphingDialogProvider transition={transition} open={open} onOpenChange={onOpenChange}>
       {children}
     </MorphingDialogProvider>
   );
