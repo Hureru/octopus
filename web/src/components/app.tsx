@@ -209,9 +209,9 @@ export function AppContainer() {
         >
             <NavBar />
             <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
-                <header className="my-6 flex flex-none items-center gap-x-2 px-2">
+                <header className="my-6 flex flex-none items-start gap-x-2 px-2">
                     <Logo size={48} />
-                    <div className="flex-1 overflow-hidden">
+                    <div className="flex-1 overflow-hidden pb-2 sm:pb-0">
                         <AnimatePresence mode="wait" custom={direction}>
                             <motion.div
                                 key={activeItem}
@@ -241,7 +241,7 @@ export function AppContainer() {
                             </motion.div>
                         </AnimatePresence>
                     </div>
-                    <div className="ml-auto flex items-center gap-3">
+                    <div className="ml-auto flex items-center gap-3 relative min-h-[36px]">
                         <Toolbar />
                     </div>
                     <ProxyPoolDialog />
