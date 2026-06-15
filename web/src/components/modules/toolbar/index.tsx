@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowDownWideNarrow, ArrowDownZA, ArrowUpAZ, ArrowUpNarrowWide, Clock3, LayoutGrid, List, Plus, RefreshCw, Search, SlidersHorizontal, WandSparkles, X } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowDownZA, ArrowUpAZ, ArrowUpNarrowWide, Clock3, LayoutGrid, List, Network, Plus, RefreshCw, Search, SlidersHorizontal, WandSparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
     MorphingDialog,
@@ -20,6 +20,7 @@ import { CreateDialogContent as ModelCreateContent } from '@/components/modules/
 import { useSiteUIStore } from '@/components/modules/site/ui-store';
 import { useLogUIStore } from '@/components/modules/log/ui-store';
 import { LogFilterPopover } from '@/components/modules/log/FilterPopover';
+import { useProxyPoolDialogStore } from '@/components/modules/proxy-pool/dialog-store';
 import { useTranslations } from 'next-intl';
 import { useSearchStore } from './search-store';
 import {
@@ -89,6 +90,7 @@ export function Toolbar() {
     const requestCheckinAll = useSiteUIStore((s) => s.requestCheckinAll);
     const requestLogRefresh = useLogUIStore((s) => s.requestRefresh);
     const isLogRefreshing = useLogUIStore((s) => s.isRefreshing);
+    const openProxyPool = useProxyPoolDialogStore((s) => s.open);
     const [expandedSearchItem, setExpandedSearchItem] = useState<ToolbarPage | null>(null);
     const searchExpanded = expandedSearchItem === toolbarItem;
 
@@ -110,6 +112,19 @@ export function Toolbar() {
                 transition={{ duration: 0.2 }}
                 className="flex items-center gap-2"
             >
+                {/* 站点页面的代理池按钮 */}
+                {toolbarItem === 'site' && (
+                    <button
+                        type="button"
+                        aria-label="代理池"
+                        title="代理池"
+                        onClick={() => openProxyPool()}
+                        className={buttonVariants({ variant: "ghost", size: "icon", className: "rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground" })}
+                    >
+                        <Network className="size-4 transition-colors duration-300" />
+                    </button>
+                )}
+
                 {/* 搜索按钮/展开框 */}
                 <div className="relative h-9 w-9">
                     {!searchExpanded ? (
