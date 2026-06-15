@@ -275,9 +275,6 @@ export function Toolbar() {
                         <motion.div
                             layoutId="search-box"
                             className="absolute right-0 top-0 flex items-center gap-2 h-9 px-3 rounded-xl border"
-                            style={{
-                                maxWidth: 'min(200px, calc(100vw - 600px))',
-                            }}
                             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                         >
                             <motion.span layout="position">
