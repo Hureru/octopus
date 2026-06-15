@@ -30,10 +30,9 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
     const largeVisible = actions.filter((a) => a.priority === 'large');
     const menuOnly = actions.filter((a) => a.priority === 'menu-only');
 
-    // 根据响应式断点，决定哪些进入菜单
-    const menuActions = [...largeVisible, ...desktopVisible, ...menuOnly];
-
-    const hasMenuActions = menuActions.length > 0;
+    // 是否需要显示"更多"按钮
+    // 注意：没有 menu-only 按钮时，"更多"按钮完全通过 CSS 响应式控制显隐
+    const hasAnyMenuContent = largeVisible.length > 0 || desktopVisible.length > 0 || menuOnly.length > 0;
 
     return (
         <>
@@ -61,18 +60,31 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
             )}
 
             {/* 更多菜单 - 收纳折叠的按钮 */}
-            {hasMenuActions && (
+            {hasAnyMenuContent && (
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
                             type="button"
                             aria-label="更多操作"
-                            className={buttonVariants({
-                                variant: 'ghost',
-                                size: 'icon',
-                                className:
-                                    'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground',
-                            })}
+                            className={cn(
+                                buttonVariants({
+                                    variant: 'ghost',
+                                    size: 'icon',
+                                    className:
+                                        'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground',
+                                }),
+                                // 响应式显隐规则：
+                                // - 如果有 large 按钮：xl 以下显示"更多"
+                                // - 否则如果有 desktop 按钮：md 以下显示"更多"
+                                // - 否则如果只有 menu-only：始终显示"更多"（但这种情况不应该出现，因为我们没有 menu-only 按钮）
+                                largeVisible.length > 0
+                                    ? 'xl:hidden'
+                                    : desktopVisible.length > 0
+                                    ? 'md:hidden'
+                                    : menuOnly.length > 0
+                                    ? ''
+                                    : 'hidden'
+                            )}
                         >
                             <MoreHorizontal className="size-4 transition-colors duration-300" />
                         </button>
@@ -112,7 +124,7 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                                 </>
                             )}
 
-                            {/* 始终在菜单的按钮 */}
+                            {/* 始终在菜单的按钮（但我们现在没有使用 menu-only） */}
                             {menuOnly.map((action) => (
                                 <MenuActionItem key={action.id} action={action} />
                             ))}
