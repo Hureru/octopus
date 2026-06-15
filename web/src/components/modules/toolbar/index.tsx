@@ -162,41 +162,6 @@ export function Toolbar() {
                     label: '新增站点',
                     onClick: requestOpenCreateSite,
                     priority: 'desktop', // md以上可见
-                },
-                {
-                    id: 'import-sites',
-                    icon: <Upload className="size-4" />,
-                    label: '导入站点数据',
-                    onClick: requestOpenImportDialog,
-                    priority: 'menu-only',
-                },
-                {
-                    id: 'sync-all',
-                    icon: <RefreshCw className="size-4" />,
-                    label: '全量同步',
-                    onClick: requestSyncAll,
-                    priority: 'menu-only',
-                },
-                {
-                    id: 'checkin-all',
-                    icon: <CalendarCheck2 className="size-4" />,
-                    label: '全量签到',
-                    onClick: requestCheckinAll,
-                    priority: 'menu-only',
-                },
-                {
-                    id: 'archived',
-                    icon: <Archive className="size-4" />,
-                    label: '归档站点',
-                    onClick: requestOpenArchivedDialog,
-                    priority: 'menu-only',
-                },
-                {
-                    id: 'view-options',
-                    icon: <SlidersHorizontal className="size-4" />,
-                    label: '视图选项',
-                    onClick: () => setViewOptionsOpen(true),
-                    priority: 'menu-only',
                 }
             );
         }
@@ -215,22 +180,13 @@ export function Toolbar() {
                 });
             }
 
-            result.push(
-                {
-                    id: 'create-channel',
-                    icon: <Plus className="size-4" />,
-                    label: '新增渠道',
-                    onClick: () => setCreateDialogOpen(true),
-                    priority: 'desktop',
-                },
-                {
-                    id: 'view-options',
-                    icon: <SlidersHorizontal className="size-4" />,
-                    label: '视图选项',
-                    onClick: () => setViewOptionsOpen(true),
-                    priority: 'menu-only',
-                }
-            );
+            result.push({
+                id: 'create-channel',
+                icon: <Plus className="size-4" />,
+                label: '新增渠道',
+                onClick: () => setCreateDialogOpen(true),
+                priority: 'desktop',
+            });
         }
 
         // 分组页面按钮
@@ -249,35 +205,19 @@ export function Toolbar() {
                     label: '新增分组',
                     onClick: () => setCreateDialogOpen(true),
                     priority: 'desktop',
-                },
-                {
-                    id: 'view-options',
-                    icon: <SlidersHorizontal className="size-4" />,
-                    label: '视图选项',
-                    onClick: () => setViewOptionsOpen(true),
-                    priority: 'menu-only',
                 }
             );
         }
 
         // 模型页面按钮
         if (toolbarItem === 'model') {
-            result.push(
-                {
-                    id: 'create-model',
-                    icon: <Plus className="size-4" />,
-                    label: '新增模型',
-                    onClick: () => setCreateDialogOpen(true),
-                    priority: 'desktop',
-                },
-                {
-                    id: 'view-options',
-                    icon: <SlidersHorizontal className="size-4" />,
-                    label: '视图选项',
-                    onClick: () => setViewOptionsOpen(true),
-                    priority: 'menu-only',
-                }
-            );
+            result.push({
+                id: 'create-model',
+                icon: <Plus className="size-4" />,
+                label: '新增模型',
+                onClick: () => setCreateDialogOpen(true),
+                priority: 'desktop',
+            });
         }
 
         // 日志页面按钮
@@ -300,10 +240,6 @@ export function Toolbar() {
         isLogRefreshing,
         openProxyPool,
         requestOpenCreateSite,
-        requestOpenImportDialog,
-        requestSyncAll,
-        requestCheckinAll,
-        requestOpenArchivedDialog,
         openCompletionDialog,
         requestLogRefresh,
     ]);
@@ -371,14 +307,23 @@ export function Toolbar() {
                 {isLogToolbar && <LogFilterPopover />}
 
                 {/* 统一的工具按钮菜单 */}
-                {!isLogToolbar && <ToolbarMenu actions={actions} />}
+                <ToolbarMenu actions={actions} />
 
-                {/* 视图选项弹窗 */}
+                {/* 设置按钮 - 始终可见（除了日志页面） */}
                 {!isLogToolbar && (
                     <Popover open={viewOptionsOpen} onOpenChange={setViewOptionsOpen}>
                         <PopoverTrigger asChild>
-                            <button type="button" className="hidden">
-                                Hidden trigger
+                            <button
+                                type="button"
+                                aria-label={t('popover.ariaLabel')}
+                                className={buttonVariants({
+                                    variant: 'ghost',
+                                    size: 'icon',
+                                    className:
+                                        'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground',
+                                })}
+                            >
+                                <SlidersHorizontal className="size-4 transition-colors duration-300" />
                             </button>
                         </PopoverTrigger>
                         <PopoverContent
@@ -537,6 +482,43 @@ export function Toolbar() {
                                                 </button>
                                             </div>
                                         )}
+                                    </div>
+                                )}
+
+                                {/* 站点页面的全局操作 */}
+                                {toolbarItem === 'site' && (
+                                    <div className="grid gap-2">
+                                        <p className="text-xs font-medium text-muted-foreground">全局操作</p>
+                                        <div className="grid gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={requestOpenImportDialog}
+                                                className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                            >
+                                                导入站点数据
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={requestSyncAll}
+                                                className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                            >
+                                                全量同步
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={requestCheckinAll}
+                                                className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                            >
+                                                全量签到
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={requestOpenArchivedDialog}
+                                                className="h-8 rounded-lg border px-2 text-xs font-medium text-left transition-colors border-border bg-muted/20 text-foreground hover:bg-muted/30"
+                                            >
+                                                归档站点
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
