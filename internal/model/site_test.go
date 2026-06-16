@@ -111,6 +111,44 @@ func TestNormalizeSiteRouteBaseURLs(t *testing.T) {
 	}
 }
 
+func TestValidateSiteRouteBaseURLs(t *testing.T) {
+	tests := []struct {
+		name    string
+		items   []SiteRouteBaseURL
+		wantErr bool
+	}{
+		{
+			name:    "valid http override",
+			items:   []SiteRouteBaseURL{{RouteType: SiteModelRouteTypeAnthropic, BaseURL: "https://example.com/anthropic/v1"}},
+			wantErr: false,
+		},
+		{
+			name:    "unsupported route type",
+			items:   []SiteRouteBaseURL{{RouteType: SiteModelRouteTypeUnknown, BaseURL: "https://example.com/v1"}},
+			wantErr: true,
+		},
+		{
+			name:    "missing scheme",
+			items:   []SiteRouteBaseURL{{RouteType: SiteModelRouteTypeAnthropic, BaseURL: "example.com/anthropic/v1"}},
+			wantErr: true,
+		},
+		{
+			name:    "missing host",
+			items:   []SiteRouteBaseURL{{RouteType: SiteModelRouteTypeAnthropic, BaseURL: "https:///anthropic"}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSiteRouteBaseURLs(tt.items)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateSiteRouteBaseURLs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCompactSiteModelRouteTypeName(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -135,6 +135,29 @@ func NormalizeSiteRouteBaseURLs(items []SiteRouteBaseURL) []SiteRouteBaseURL {
 	return result
 }
 
+// ValidateSiteRouteBaseURLs rejects overrides whose route type is not a
+// projectable outbound route or whose base URL is not a valid http/https URL.
+// It mirrors the validation applied to Site.BaseURL so malformed overrides are
+// surfaced to the caller instead of silently breaking projection.
+func ValidateSiteRouteBaseURLs(items []SiteRouteBaseURL) error {
+	for _, item := range items {
+		if !IsProjectedSiteModelRouteType(item.RouteType) {
+			return fmt.Errorf("route base url has unsupported route type: %s", item.RouteType)
+		}
+		parsed, err := url.Parse(item.BaseURL)
+		if err != nil {
+			return fmt.Errorf("route base url for %s is invalid: %w", item.RouteType, err)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("route base url for %s must use http or https", item.RouteType)
+		}
+		if parsed.Host == "" {
+			return fmt.Errorf("route base url for %s must have a host", item.RouteType)
+		}
+	}
+	return nil
+}
+
 type Site struct {
 	ID                 int                `json:"id" gorm:"primaryKey"`
 	Name               string             `json:"name" gorm:"unique;not null"`
@@ -887,6 +910,9 @@ func (s *Site) Validate() error {
 	}
 	if parsed.Host == "" {
 		return fmt.Errorf("site base url must have a host")
+	}
+	if err := ValidateSiteRouteBaseURLs(s.RouteBaseURLs); err != nil {
+		return err
 	}
 	if s.ExternalCheckinURL != nil {
 		checkinParsed, err := url.Parse(*s.ExternalCheckinURL)
