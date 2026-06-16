@@ -14,9 +14,9 @@ export type ToolbarAction = {
     disabled?: boolean;
     badge?: number;
     priority: 'always' | 'desktop' | 'large' | 'menu-only';
-    // always: 始终可见（搜索）
-    // desktop: md以上可见（新增）
-    // large: xl以上可见（代理池/补全）
+    // always:    始终可见（搜索）
+    // desktop:   较常用，空间足够即平铺，否则折叠进"更多"（新增/刷新）
+    // large:     次要，仅大屏平铺，否则折叠进"更多"（代理池/补全）
     // menu-only: 只在菜单（设置/页面操作）
 };
 
@@ -30,9 +30,49 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
     const largeVisible = actions.filter((a) => a.priority === 'large');
     const menuOnly = actions.filter((a) => a.priority === 'menu-only');
 
-    // 是否需要显示"更多"按钮
-    // 注意：没有 menu-only 按钮时，"更多"按钮完全通过 CSS 响应式控制显隐
-    const hasAnyMenuContent = largeVisible.length > 0 || desktopVisible.length > 0 || menuOnly.length > 0;
+    // "更多"折叠只有在收纳 ≥2 项时才有意义；只剩 1 项时该项直接平铺，
+    // 避免出现"更多里只有一个选项"（占位相同还多一次点击）。
+    // 各断点会被折叠进菜单的项数：
+    //   < md  ：large + desktop + menuOnly（desktop 在 md 以下折叠）
+    //   md~xl ：仅 large ≥2 时的 large（单个 large 已平铺）+ menuOnly
+    //   ≥ xl  ：menuOnly
+    const collapsedBelowMd = largeVisible.length + desktopVisible.length + menuOnly.length;
+    const collapsedMdToXl = (largeVisible.length > 1 ? largeVisible.length : 0) + menuOnly.length;
+    const moreVisibleBelowMd = collapsedBelowMd >= 2;
+    const moreVisibleMdToXl = collapsedMdToXl >= 2;
+
+    // large 按钮：在"会被折叠且该区间确实显示更多"的断点收起，否则直接平铺
+    const largeFlexClass =
+        largeVisible.length > 1 && moreVisibleMdToXl
+            ? 'hidden xl:flex'
+            : largeVisible.length > 0 && moreVisibleBelowMd
+            ? 'hidden md:flex'
+            : 'flex';
+    const largeMenuItemClass =
+        largeVisible.length > 1 && moreVisibleMdToXl
+            ? 'xl:hidden'
+            : largeVisible.length > 0 && moreVisibleBelowMd
+            ? 'md:hidden'
+            : 'hidden';
+
+    // desktop 按钮：仅在 <md 且该处确有 ≥2 项时折叠，否则始终平铺
+    const desktopFlexClass =
+        desktopVisible.length > 0 && moreVisibleBelowMd ? 'hidden md:flex' : 'flex';
+    const desktopMenuItemClass =
+        desktopVisible.length > 0 && moreVisibleBelowMd ? 'md:hidden' : 'hidden';
+
+    // "更多"按钮：menuOnly 项只能在菜单内呈现，存在时始终显示；否则按区间项数决定
+    const moreButtonVisibilityClass =
+        menuOnly.length > 0
+            ? ''
+            : moreVisibleMdToXl
+            ? 'xl:hidden'
+            : moreVisibleBelowMd
+            ? 'md:hidden'
+            : 'hidden';
+
+    // 是否渲染"更多"菜单（任一断点需要显示，或存在只能放菜单的项）
+    const showMoreButton = menuOnly.length > 0 || moreVisibleBelowMd || moreVisibleMdToXl;
 
     return (
         <>
@@ -41,9 +81,9 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                 <ActionButton key={action.id} action={action} />
             ))}
 
-            {/* 大屏可见的按钮 - xl:flex */}
+            {/* 大屏可见的按钮 - 单个 md 平铺、多个 xl 平铺 */}
             {largeVisible.length > 0 && (
-                <div className="hidden xl:flex items-center gap-2">
+                <div className={cn(largeFlexClass, 'items-center gap-2')}>
                     {largeVisible.map((action) => (
                         <ActionButton key={action.id} action={action} />
                     ))}
@@ -51,7 +91,7 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
             )}
 
             {/* 更多菜单 - 收纳折叠的按钮 */}
-            {hasAnyMenuContent && (
+            {showMoreButton && (
                 <Popover>
                     <PopoverTrigger asChild>
                         <button
@@ -64,17 +104,7 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                                     className:
                                         'rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground',
                                 }),
-                                // 响应式显隐规则：
-                                // - 如果有 large 按钮：xl 以下显示"更多"
-                                // - 否则如果有 desktop 按钮：md 以下显示"更多"
-                                // - 否则如果只有 menu-only：始终显示"更多"（但这种情况不应该出现，因为我们没有 menu-only 按钮）
-                                largeVisible.length > 0
-                                    ? 'xl:hidden'
-                                    : desktopVisible.length > 0
-                                    ? 'md:hidden'
-                                    : menuOnly.length > 0
-                                    ? ''
-                                    : 'hidden'
+                                moreButtonVisibilityClass
                             )}
                         >
                             <MoreHorizontal className="size-4 transition-colors duration-300" />
@@ -87,10 +117,10 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                         className="w-52 rounded-2xl border border-border/60 bg-card p-2 shadow-xl"
                     >
                         <div className="grid gap-1">
-                            {/* xl以下显示 large 按钮 */}
+                            {/* 折叠时显示 large 按钮 */}
                             {largeVisible.length > 0 && (
                                 <>
-                                    <div className="xl:hidden">
+                                    <div className={largeMenuItemClass}>
                                         {largeVisible.map((action) => (
                                             <MenuActionItem key={action.id} action={action} />
                                         ))}
@@ -101,10 +131,10 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                                 </>
                             )}
 
-                            {/* md以下显示 desktop 按钮 */}
+                            {/* 折叠时显示 desktop 按钮 */}
                             {desktopVisible.length > 0 && (
                                 <>
-                                    <div className="md:hidden">
+                                    <div className={desktopMenuItemClass}>
                                         {desktopVisible.map((action) => (
                                             <MenuActionItem key={action.id} action={action} />
                                         ))}
@@ -124,9 +154,9 @@ export function ToolbarMenu({ actions }: ToolbarMenuProps) {
                 </Popover>
             )}
 
-            {/* 中屏以上可见的按钮 - md:flex（如新增，置于最右） */}
+            {/* 中屏以上可见的按钮（如新增，置于最右）；单独成项时始终平铺 */}
             {desktopVisible.length > 0 && (
-                <div className="hidden md:flex items-center gap-2">
+                <div className={cn(desktopFlexClass, 'items-center gap-2')}>
                     {desktopVisible.map((action) => (
                         <ActionButton key={action.id} action={action} />
                     ))}
