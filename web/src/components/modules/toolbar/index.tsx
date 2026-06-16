@@ -2,12 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import {
-    Archive,
     ArrowDownWideNarrow,
     ArrowDownZA,
     ArrowUpAZ,
     ArrowUpNarrowWide,
-    CalendarCheck2,
     Clock3,
     KeyRound,
     LayoutGrid,
@@ -17,7 +15,6 @@ import {
     RefreshCw,
     Search,
     SlidersHorizontal,
-    Upload,
     WandSparkles,
     X
 } from 'lucide-react';
@@ -134,8 +131,6 @@ export function Toolbar() {
 
     const searchExpanded = expandedSearchItem === toolbarItem;
 
-    if (!toolbarItem) return null;
-
     const isLogToolbar = toolbarItem === 'log';
     const showLayoutOptions = toolbarItem === 'channel' || toolbarItem === 'model';
     const showSiteSortOptions = toolbarItem === 'site';
@@ -243,6 +238,8 @@ export function Toolbar() {
         openCompletionDialog,
         requestLogRefresh,
     ]);
+
+    if (!toolbarItem) return null;
 
     return (
         <>
