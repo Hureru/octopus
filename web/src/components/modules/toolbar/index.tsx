@@ -71,6 +71,7 @@ function CreateDialogContent({ activeItem }: { activeItem: ToolbarPage }) {
 
 export function Toolbar() {
     const t = useTranslations('toolbar');
+    const tProxyPool = useTranslations('proxyPool');
     const { activeItem } = useNavStore();
     const toolbarItem = isToolbarPage(activeItem) ? activeItem : null;
     const searchTerm = useSearchStore((s) => (toolbarItem ? s.searchTerms[toolbarItem] || '' : ''));
@@ -153,8 +154,8 @@ export function Toolbar() {
                 {toolbarItem === 'site' && (
                     <motion.button
                         type="button"
-                        aria-label="代理池"
-                        title="代理池"
+                        aria-label={tProxyPool('name')}
+                        title={tProxyPool('name')}
                         onClick={() => openProxyPool()}
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
