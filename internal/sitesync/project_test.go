@@ -673,6 +673,25 @@ func setupProjectTestDB(t *testing.T) context.Context {
 	return context.Background()
 }
 
+func TestResolveProjectedChannelBaseURLAppliesOverride(t *testing.T) {
+	site := &model.Site{
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		RouteBaseURLs: []model.SiteRouteBaseURL{
+			{RouteType: model.SiteModelRouteTypeAnthropic, BaseURL: "https://example.com/anthropic/v1"},
+		},
+	}
+
+	// Overridden route uses the per-route base verbatim.
+	if got := resolveProjectedChannelBaseURL(site, model.SiteModelRouteTypeAnthropic); got != "https://example.com/anthropic/v1" {
+		t.Fatalf("expected anthropic override, got %q", got)
+	}
+	// Non-overridden route falls back to the default /v1 behavior.
+	if got := resolveProjectedChannelBaseURL(site, model.SiteModelRouteTypeOpenAIResponse); got != "https://example.com/v1" {
+		t.Fatalf("expected default /v1 base for non-overridden route, got %q", got)
+	}
+}
+
 func TestBuildChannelKeysAppliesPlatformPrefix(t *testing.T) {
 	tokens := []model.SiteToken{
 		{Token: "key-primary", GroupKey: "default", GroupName: "default", Enabled: true},

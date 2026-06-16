@@ -596,6 +596,49 @@ func TestSiteAccountUpdateRejectsInvalidMergedCredentials(t *testing.T) {
 	}
 }
 
+func TestSiteUpdateMergesRouteBaseURLs(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+
+	site := &model.Site{
+		Name:     "route-base-url-site",
+		Platform: model.SitePlatformNewAPI,
+		BaseURL:  "https://example.com",
+		Enabled:  true,
+	}
+	if err := SiteCreate(site, ctx); err != nil {
+		t.Fatalf("SiteCreate failed: %v", err)
+	}
+
+	overrides := []model.SiteRouteBaseURL{
+		{RouteType: model.SiteModelRouteTypeAnthropic, BaseURL: "https://example.com/anthropic/v1/"},
+	}
+	updated, err := SiteUpdate(&model.SiteUpdateRequest{ID: site.ID, RouteBaseURLs: &overrides}, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate failed: %v", err)
+	}
+	if len(updated.RouteBaseURLs) != 1 || updated.RouteBaseURLs[0].BaseURL != "https://example.com/anthropic/v1" {
+		t.Fatalf("expected normalized anthropic override, got %+v", updated.RouteBaseURLs)
+	}
+
+	reloaded, err := SiteGet(site.ID, ctx)
+	if err != nil {
+		t.Fatalf("SiteGet failed: %v", err)
+	}
+	if got, ok := reloaded.ResolveRouteBaseURL(model.SiteModelRouteTypeAnthropic); !ok || got != "https://example.com/anthropic/v1" {
+		t.Fatalf("expected persisted anthropic override, got %q ok=%v", got, ok)
+	}
+
+	// Clearing with an explicit empty slice removes the overrides.
+	empty := []model.SiteRouteBaseURL{}
+	cleared, err := SiteUpdate(&model.SiteUpdateRequest{ID: site.ID, RouteBaseURLs: &empty}, ctx)
+	if err != nil {
+		t.Fatalf("SiteUpdate clear failed: %v", err)
+	}
+	if len(cleared.RouteBaseURLs) != 0 {
+		t.Fatalf("expected route base urls to be cleared, got %+v", cleared.RouteBaseURLs)
+	}
+}
+
 func TestSiteImportAllAPIHubImportsAndUpdatesAccounts(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 

@@ -27,6 +27,11 @@ export type CustomHeader = {
   header_value: string;
 };
 
+export type SiteRouteBaseURL = {
+  route_type: string;
+  base_url: string;
+};
+
 export type SiteToken = {
   id: number;
   site_account_id: number;
@@ -124,13 +129,17 @@ export type Site = {
   sort_order: number;
   global_weight: number;
   custom_header: CustomHeader[];
+  route_base_urls: SiteRouteBaseURL[];
   tags: string[];
   archived: boolean;
   archived_at?: string | null;
   accounts: SiteAccount[];
 };
 
-type SiteServer = Omit<Site, "accounts" | "custom_header" | "tags"> & {
+type SiteServer = Omit<
+  Site,
+  "accounts" | "custom_header" | "route_base_urls" | "tags"
+> & {
   accounts: Array<
     Omit<
       SiteAccount,
@@ -143,6 +152,7 @@ type SiteServer = Omit<Site, "accounts" | "custom_header" | "tags"> & {
     }
   > | null;
   custom_header: CustomHeader[] | null;
+  route_base_urls: SiteRouteBaseURL[] | null;
   tags: string[] | null;
 };
 
@@ -223,6 +233,7 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
   return data.map((site) => ({
     ...site,
     custom_header: site.custom_header ?? [],
+    route_base_urls: site.route_base_urls ?? [],
     tags: site.tags ?? [],
     proxy_mode: site.proxy_mode ?? "direct",
     proxy_config_id: site.proxy_config_id ?? null,

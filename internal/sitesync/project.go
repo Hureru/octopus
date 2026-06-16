@@ -119,13 +119,13 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		groupModels := modelsByGroup[groupKey]
 		modelBuckets := partitionSiteModelsByRouteType(groupModels, shouldSplit, siteRecord.Platform)
 		proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
-		baseUrls := []model.BaseUrl{{URL: buildProjectedChannelBaseURL(siteRecord), Delay: 0}}
 		enabled := siteRecord.Enabled && account.Enabled && hasUsableToken(groupTokens)
 		for routeType, bucketModels := range modelBuckets {
 			if len(bucketModels) == 0 {
 				continue
 			}
 			obType := routeType.ToOutboundType()
+			baseUrls := []model.BaseUrl{{URL: resolveProjectedChannelBaseURL(siteRecord, routeType), Delay: 0}}
 			modelNames := extractSiteModelNames(bucketModels)
 			bindingKey := compositeBindingKey(groupKey, obType, shouldSplit)
 			channelPayload := model.Channel{
@@ -416,6 +416,18 @@ func buildProjectedChannelBaseURL(siteRecord *model.Site) string {
 		return baseURL
 	}
 	return baseURL + "/v1"
+}
+
+// resolveProjectedChannelBaseURL returns the base URL for a projected channel
+// of the given route type. A per-route override on the site (RouteBaseURLs)
+// wins and is used verbatim; otherwise the default site base URL handling
+// (with the "/v1" convention) applies. This lets one upstream expose different
+// protocols under different path prefixes.
+func resolveProjectedChannelBaseURL(siteRecord *model.Site, routeType model.SiteModelRouteType) string {
+	if override, ok := siteRecord.ResolveRouteBaseURL(routeType); ok {
+		return override
+	}
+	return buildProjectedChannelBaseURL(siteRecord)
 }
 
 // isUsableSiteToken reports whether a token can produce a projected channel

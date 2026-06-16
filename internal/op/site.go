@@ -182,6 +182,10 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.CustomHeader = *req.CustomHeader
 		selectFields = append(selectFields, "custom_header")
 	}
+	if req.RouteBaseURLs != nil {
+		merged.RouteBaseURLs = *req.RouteBaseURLs
+		selectFields = append(selectFields, "route_base_urls")
+	}
 	if req.Tags != nil {
 		merged.Tags = *req.Tags
 		selectFields = append(selectFields, "tags")
@@ -228,6 +232,9 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	}
 	if req.CustomHeader != nil {
 		updates.CustomHeader = merged.CustomHeader
+	}
+	if req.RouteBaseURLs != nil {
+		updates.RouteBaseURLs = merged.RouteBaseURLs
 	}
 	if req.Tags != nil {
 		updates.Tags = merged.Tags
