@@ -3170,7 +3170,11 @@ export function SiteChannelSection({
 
     useEffect(() => {
         setPendingCount(totalPendingCompletionCount);
-    }, [totalPendingCompletionCount, setPendingCount]);
+        // 待补全清零时主动关闭对话框，避免残留的 open 状态在新任务到来时自动重开
+        if (totalPendingCompletionCount === 0) {
+            setCompletionDialogOpen(false);
+        }
+    }, [totalPendingCompletionCount, setPendingCount, setCompletionDialogOpen]);
 
     const pendingSiteChannelJump = pendingJump && isSiteChannelJumpTarget(pendingJump.target)
         ? pendingJump as SiteChannelPendingJump
@@ -3252,21 +3256,19 @@ export function SiteChannelSection({
         );
     }
 
-    if (cards.length === 0) {
-        return null;
-    }
-
     return (
         <>
-            <SiteChannelGrid
-                cards={cards}
-                layout={layout}
-                pendingSiteChannelJump={pendingSiteChannelJump}
-                highlightedSiteId={highlightedSiteId}
-                registerCardRef={registerCardRef}
-                clearPending={clearPending}
-                requestJump={requestJump}
-            />
+            {cards.length > 0 && (
+                <SiteChannelGrid
+                    cards={cards}
+                    layout={layout}
+                    pendingSiteChannelJump={pendingSiteChannelJump}
+                    highlightedSiteId={highlightedSiteId}
+                    registerCardRef={registerCardRef}
+                    clearPending={clearPending}
+                    requestJump={requestJump}
+                />
+            )}
             <UnifiedCompletionDialog
                 open={completionDialogOpen && totalPendingCompletionCount > 0}
                 onOpenChange={setCompletionDialogOpen}

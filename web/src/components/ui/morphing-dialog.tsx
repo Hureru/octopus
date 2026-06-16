@@ -72,15 +72,21 @@ function MorphingDialogProvider({
 
   const setIsOpen = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
     (value) => {
-      const current = isControlled ? (controlledOpen as boolean) : uncontrolledOpen;
+      // 非受控：直接交给 setUncontrolledOpen，由 React 基于最新 state 计算，
+      // 避免 useCallback 闭包捕获到陈旧的 uncontrolledOpen
+      if (!isControlled) {
+        setUncontrolledOpen(value);
+        return;
+      }
+      // 受控：基于 controlledOpen 计算下一个值并通知外部
+      const current = controlledOpen as boolean;
       const next =
         typeof value === 'function'
           ? (value as (prev: boolean) => boolean)(current)
           : value;
-      if (!isControlled) setUncontrolledOpen(next);
       if (next !== current) onOpenChange?.(next);
     },
-    [isControlled, controlledOpen, uncontrolledOpen, onOpenChange]
+    [isControlled, controlledOpen, onOpenChange]
   );
 
   const contextValue = useMemo(
