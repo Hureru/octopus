@@ -128,8 +128,8 @@ func TestUpdateSiteSourceKeysMarksExistingTokenAsManual(t *testing.T) {
 	if saved.Source != "manual" {
 		t.Fatalf("expected updated token source to become manual, got %q", saved.Source)
 	}
-	if saved.Token != "sk-new-manual-key" {
-		t.Fatalf("expected updated token to be normalized, got %q", saved.Token)
+	if saved.Token != "new-manual-key" {
+		t.Fatalf("expected updated token to be stored verbatim, got %q", saved.Token)
 	}
 	if saved.ValueStatus != model.SiteTokenValueStatusReady {
 		t.Fatalf("expected updated token value_status to be ready, got %q", saved.ValueStatus)
@@ -189,8 +189,8 @@ func TestUpdateSiteSourceKeysRestoresReadyWhenMaskedPendingTokenIsCompleted(t *t
 	if err := dbpkg.GetDB().WithContext(ctx).First(&saved, row.ID).Error; err != nil {
 		t.Fatalf("reload site token failed: %v", err)
 	}
-	if saved.Token != "sk-yzFyREALREALOTkb" {
-		t.Fatalf("expected completed token to be normalized and saved, got %q", saved.Token)
+	if saved.Token != "yzFyREALREALOTkb" {
+		t.Fatalf("expected completed token to be stored verbatim, got %q", saved.Token)
 	}
 	if saved.ValueStatus != model.SiteTokenValueStatusReady {
 		t.Fatalf("expected completed token value_status to restore ready, got %q", saved.ValueStatus)
@@ -629,14 +629,14 @@ func TestUpdateSiteSourceKeysNormalizesPrefix(t *testing.T) {
 	if len(saved) != 2 {
 		t.Fatalf("expected account to have two site tokens after update, got %d", len(saved))
 	}
-	if saved[0].Token != "sk-fresh-key" {
-		t.Fatalf("expected updated token to be normalized, got %q", saved[0].Token)
+	if saved[0].Token != "fresh-key" {
+		t.Fatalf("expected updated token to be stored verbatim, got %q", saved[0].Token)
 	}
 	if saved[0].Name != "manual" {
 		t.Fatalf("expected updated name to be saved, got %q", saved[0].Name)
 	}
-	if saved[1].Token != "sk-backup-key" {
-		t.Fatalf("expected added token to be normalized, got %q", saved[1].Token)
+	if saved[1].Token != "backup-key" {
+		t.Fatalf("expected added token to be stored verbatim, got %q", saved[1].Token)
 	}
 }
 

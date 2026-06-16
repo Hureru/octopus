@@ -53,7 +53,7 @@ func TestCreateAccountTokenCreatesManagedKeyAndSyncsAccount(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"data":[{"id":"vip","name":"VIP"}]}`))
 		case r.URL.Path == "/models":
-			if r.Header.Get("Authorization") != "Bearer managed-created-key" {
+			if r.Header.Get("Authorization") != "Bearer sk-managed-created-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return

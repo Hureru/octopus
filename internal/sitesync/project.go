@@ -133,7 +133,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 				Type:          obType,
 				Enabled:       enabled,
 				BaseUrls:      baseUrls,
-				Keys:          buildChannelKeys(groupTokens),
+				Keys:          buildChannelKeys(groupTokens, siteRecord.Platform),
 				Model:         strings.Join(modelNames, ","),
 				CustomModel:   "",
 				ProxyMode:     proxyMode,
@@ -424,7 +424,7 @@ func isUsableSiteToken(token model.SiteToken) bool {
 	if !model.IsReadySiteToken(token) || model.IsMaskedSiteTokenValue(token.Token) {
 		return false
 	}
-	return model.NormalizeSiteSyncTokenValue(token.Token) != ""
+	return strings.TrimSpace(token.Token) != ""
 }
 
 // hasUsableToken reports whether at least one token would yield a channel key,
@@ -438,13 +438,13 @@ func hasUsableToken(tokens []model.SiteToken) bool {
 	return false
 }
 
-func buildChannelKeys(tokens []model.SiteToken) []model.ChannelKey {
+func buildChannelKeys(tokens []model.SiteToken, platform model.SitePlatform) []model.ChannelKey {
 	keys := make([]model.ChannelKey, 0, len(tokens))
 	for _, token := range tokens {
 		if !isUsableSiteToken(token) {
 			continue
 		}
-		normalized := model.NormalizeSiteSyncTokenValue(token.Token)
+		normalized := model.NormalizeSiteSyncTokenValueForPlatform(platform, token.Token)
 		keys = append(keys, model.ChannelKey{Enabled: token.Enabled, ChannelKey: normalized, Remark: model.NormalizeSiteGroupName(token.GroupKey, token.GroupName)})
 	}
 	return keys
