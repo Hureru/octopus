@@ -388,7 +388,7 @@ func newSiteChannelGroupView(groupKey string, groupName string, group model.Site
 }
 
 func normalizeEditableSourceTokenValue(value string) (string, error) {
-	normalized := model.NormalizeSiteSyncTokenValue(value)
+	normalized := strings.TrimSpace(value)
 	if normalized == "" {
 		return "", fmt.Errorf("key 不能为空")
 	}

@@ -673,6 +673,26 @@ func setupProjectTestDB(t *testing.T) context.Context {
 	return context.Background()
 }
 
+func TestBuildChannelKeysAppliesPlatformPrefix(t *testing.T) {
+	tokens := []model.SiteToken{
+		{Token: "key-primary", GroupKey: "default", GroupName: "default", Enabled: true},
+		{Token: "sk-key-backup", GroupKey: "default", GroupName: "default", Enabled: true},
+	}
+
+	newAPIKeys := buildChannelKeys(tokens, model.SitePlatformNewAPI)
+	if len(newAPIKeys) != 2 {
+		t.Fatalf("expected two keys, got %d", len(newAPIKeys))
+	}
+	if newAPIKeys[0].ChannelKey != "sk-key-primary" || newAPIKeys[1].ChannelKey != "sk-key-backup" {
+		t.Fatalf("expected new-api keys to carry sk- prefix, got %q and %q", newAPIKeys[0].ChannelKey, newAPIKeys[1].ChannelKey)
+	}
+
+	openAIKeys := buildChannelKeys(tokens, model.SitePlatformOpenAI)
+	if openAIKeys[0].ChannelKey != "key-primary" || openAIKeys[1].ChannelKey != "sk-key-backup" {
+		t.Fatalf("expected openai keys to stay verbatim, got %q and %q", openAIKeys[0].ChannelKey, openAIKeys[1].ChannelKey)
+	}
+}
+
 func createProjectionFixture(t *testing.T, ctx context.Context) (*model.Site, *model.SiteAccount) {
 	t.Helper()
 

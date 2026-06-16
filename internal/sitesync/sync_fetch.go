@@ -242,6 +242,11 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		return fetchSub2APIModelsForSiteToken(ctx, siteRecord, account, token)
 	}
 
+	// Normalize the token the same way projection does, so the model-fetch
+	// request authenticates with the value the upstream actually expects
+	// (new-api family needs the "sk-" prefix; direct providers stay verbatim).
+	tokenValue := model.NormalizeSiteSyncTokenValueForPlatform(siteRecord.Platform, token.Token)
+
 	proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
 	var (
 		firstErr error
@@ -249,7 +254,7 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 	)
 
 	for _, baseURL := range buildModelFetchBaseURLs(siteRecord) {
-		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: token.Token}}, ProxyMode: proxyMode, ProxyConfigID: proxyConfigID, CustomHeader: siteRecord.CustomHeader}
+		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: tokenValue}}, ProxyMode: proxyMode, ProxyConfigID: proxyConfigID, CustomHeader: siteRecord.CustomHeader}
 		fetched, err := helper.FetchModels(ctx, channel)
 		if err == nil && len(fetched) > 0 {
 			return normalizeModelNames(fetched), nil
@@ -268,7 +273,7 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		return normalizeModelNames(models), nil
 	}
 
-	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + token.Token}, account)
+	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + tokenValue}, account)
 	if fallbackErr != nil {
 		if firstErr != nil {
 			return nil, firstErr

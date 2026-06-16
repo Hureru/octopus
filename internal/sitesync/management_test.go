@@ -48,7 +48,7 @@ func TestSyncManagementPlatformDiscoversNewAPIUserID(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"data":[{"id":"vip","name":"VIP"}]}`))
 		case r.URL.Path == "/models":
-			if r.Header.Get("Authorization") != "Bearer managed-key" {
+			if r.Header.Get("Authorization") != "Bearer sk-managed-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
@@ -174,7 +174,7 @@ func TestSyncManagementPlatformUsesV1ModelsWhenRootModelEndpointReturnsHTML(t *t
 		case r.URL.Path == "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			observedV1AuthHeader = r.Header.Get("Authorization")
-			if observedV1AuthHeader != "Bearer managed-key" {
+			if observedV1AuthHeader != "Bearer sk-managed-key" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 				return
@@ -200,7 +200,7 @@ func TestSyncManagementPlatformUsesV1ModelsWhenRootModelEndpointReturnsHTML(t *t
 	if err != nil {
 		t.Fatalf("syncManagementPlatform returned error: %v", err)
 	}
-	if observedV1AuthHeader != "Bearer managed-key" {
+	if observedV1AuthHeader != "Bearer sk-managed-key" {
 		t.Fatalf("expected /v1/models to use managed key, got %q", observedV1AuthHeader)
 	}
 	if len(snapshot.models) != 2 || snapshot.models[0].ModelName != "gpt-4.1" || snapshot.models[1].ModelName != "gpt-4o-mini" {
@@ -580,9 +580,9 @@ func TestSyncManagementPlatformFallsBackPerFailedGroupWithoutOverwritingExactMod
 		case r.URL.Path == "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			switch r.Header.Get("Authorization") {
-			case "Bearer managed-key-default":
+			case "Bearer sk-managed-key-default":
 				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
-			case "Bearer managed-key-vip":
+			case "Bearer sk-managed-key-vip":
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
 			default:
@@ -674,9 +674,9 @@ func TestSyncManagementPlatformReturnsPartialWhenSomeGroupsRemainUnresolved(t *t
 		case r.URL.Path == "/v1/models":
 			w.Header().Set("Content-Type", "application/json")
 			switch r.Header.Get("Authorization") {
-			case "Bearer managed-key-default":
+			case "Bearer sk-managed-key-default":
 				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
-			case "Bearer managed-key-vip":
+			case "Bearer sk-managed-key-vip":
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
 			default:
@@ -836,9 +836,9 @@ func TestSyncManagementPlatformAssignsModelsPerTokenGroup(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"},{"id":"vip","name":"VIP"}]}`))
 		case r.URL.Path == "/v1/models":
 			switch r.Header.Get("Authorization") {
-			case "Bearer managed-key-vip":
+			case "Bearer sk-managed-key-vip":
 				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o-mini"}]}`))
-			case "Bearer managed-key-default":
+			case "Bearer sk-managed-key-default":
 				_, _ = w.Write([]byte(`{"data":[{"id":"claude-3-5-sonnet"}]}`))
 			default:
 				w.WriteHeader(http.StatusUnauthorized)
