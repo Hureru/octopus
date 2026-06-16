@@ -636,7 +636,7 @@ func TestUpdateSiteSourceKeysNormalizesPrefix(t *testing.T) {
 		t.Fatalf("expected updated name to be saved, got %q", saved[0].Name)
 	}
 	if saved[1].Token != "backup-key" {
-		t.Fatalf("expected added token to be normalized, got %q", saved[1].Token)
+		t.Fatalf("expected added token to be stored verbatim, got %q", saved[1].Token)
 	}
 }
 
