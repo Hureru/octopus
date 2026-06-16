@@ -167,24 +167,6 @@ function buildReferenceTree(references: ProxyConfigurationReference[]) {
     return roots;
 }
 
-export function ProxyPoolHeaderAction() {
-    const t = useTranslations('proxyPool');
-    const open = useProxyPoolDialogStore((state) => state.open);
-    return (
-        <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="rounded-xl transition-none hover:bg-transparent text-muted-foreground hover:text-foreground"
-            aria-label={t('name')}
-            title={t('name')}
-            onClick={() => open()}
-        >
-            <Network className="size-4" />
-        </Button>
-    );
-}
-
 export function ProxyPoolDialog() {
     const t = useTranslations('proxyPool.dialog');
     const isOpen = useProxyPoolDialogStore((state) => state.isOpen);

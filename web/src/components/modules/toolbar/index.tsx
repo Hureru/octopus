@@ -92,6 +92,7 @@ function CreateDialogContent({ activeItem }: { activeItem: ToolbarPage }) {
 
 export function Toolbar() {
     const t = useTranslations('toolbar');
+    const tProxyPool = useTranslations('proxyPool');
     const { activeItem } = useNavStore();
     const toolbarItem = isToolbarPage(activeItem) ? activeItem : null;
     const searchTerm = useSearchStore((s) => (toolbarItem ? s.searchTerms[toolbarItem] || '' : ''));
@@ -147,7 +148,7 @@ export function Toolbar() {
                 {
                     id: 'proxy-pool',
                     icon: <Network className="size-4" />,
-                    label: '代理池',
+                    label: tProxyPool('name'),
                     onClick: () => openProxyPool(),
                     priority: 'large', // xl以上可见
                 },
@@ -237,6 +238,7 @@ export function Toolbar() {
         requestOpenCreateSite,
         openCompletionDialog,
         requestLogRefresh,
+        tProxyPool,
     ]);
 
     if (!toolbarItem) return null;
