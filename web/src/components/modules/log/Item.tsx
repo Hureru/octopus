@@ -129,11 +129,6 @@ function makeDisableTargetKey(target: LogSiteActionTarget | null | undefined) {
     return `${target.site_id}\u0000${target.account_id}\u0000${target.group_key}\u0000${target.model_name}`;
 }
 
-function formatOptionalTokenCount(value: number | null | undefined) {
-    if (typeof value !== 'number') return '—';
-    return value.toLocaleString();
-}
-
 function formatCompactTokenCount(value: number): string {
     if (value < 1000) return value.toLocaleString();
     if (value < 10000) return `${(value / 1000).toFixed(1)}K`;
