@@ -327,6 +327,8 @@
                 "maxCost": "最大金額",
                 "maxCostPlaceholder": "請輸入金額",
                 "unlimited": "無限制",
+                "maxRPM": "每分鐘最大請求數 (RPM)",
+                "maxRPMPlaceholder": "請輸入限制",
                 "expireAt": "過期日期",
                 "selectDate": "選擇日期",
                 "neverExpire": "永不過期",
@@ -916,7 +918,8 @@
             "api_key_missing": "缺少 API Key。",
             "password_incorrect": "原密碼不正確。",
             "api_key_disabled": "API Key 已被停用。",
-            "api_key_cost_exceeded": "API Key 已達到最大費用限制。"
+            "api_key_cost_exceeded": "API Key 已達到最大費用限制。",
+            "api_key_rate_limited": "API Key 已超出速率限制，請稍後重試。"
         },
         "site_channel": {
             "account_not_found": "站點帳號不存在。",

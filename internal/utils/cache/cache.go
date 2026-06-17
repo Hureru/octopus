@@ -14,6 +14,7 @@ func keyToString[K comparable](key K) string {
 type Cache[K comparable, V any] interface {
 	Set(k K, v V)
 	Get(k K) (V, bool)
+	GetOrSet(k K, v V) (V, bool)
 	GetAll() map[K]V
 	Del(keys ...K) int
 	Exists(keys ...K) bool
@@ -52,6 +53,12 @@ func (c *cache[K, V]) Get(k K) (V, bool) {
 	hashedKey := xxhash.Sum64String(keyToString(k))
 	shard := c.getShard(hashedKey)
 	return shard.get(k)
+}
+
+func (c *cache[K, V]) GetOrSet(k K, v V) (V, bool) {
+	hashedKey := xxhash.Sum64String(keyToString(k))
+	shard := c.getShard(hashedKey)
+	return shard.getOrSet(k, v)
 }
 
 func (c *cache[K, V]) GetAll() map[K]V {

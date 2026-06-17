@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/auth"
@@ -53,6 +54,10 @@ func createAPIKey(c *gin.Context) {
 		resp.InvalidJSON(c)
 		return
 	}
+	if req.MaxRPM < 0 {
+		resp.ErrorWithAppError(c, http.StatusBadRequest, apperror.New(apperror.CodeCommonInvalidParam, "max_rpm must be non-negative").WithStatus(http.StatusBadRequest))
+		return
+	}
 	req.APIKey = auth.GenerateAPIKey()
 	if err := op.APIKeyCreate(&req, c.Request.Context()); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
@@ -74,6 +79,10 @@ func updateAPIKey(c *gin.Context) {
 	var req model.APIKey
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.InvalidJSON(c)
+		return
+	}
+	if req.MaxRPM < 0 {
+		resp.ErrorWithAppError(c, http.StatusBadRequest, apperror.New(apperror.CodeCommonInvalidParam, "max_rpm must be non-negative").WithStatus(http.StatusBadRequest))
 		return
 	}
 	if err := op.APIKeyUpdate(&req, c.Request.Context()); err != nil {
