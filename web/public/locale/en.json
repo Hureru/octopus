@@ -690,6 +690,7 @@
             "errorInfo": "Error Info",
             "firstToken": "TTFT",
             "totalTime": "Total",
+            "duration": "Latency",
             "input": "Input",
             "output": "Output",
             "cost": "Cost",

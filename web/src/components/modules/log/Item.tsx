@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Cpu, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Info, Link } from 'lucide-react';
+import { Clock, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Link } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -34,7 +34,6 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/animate-ui/components/animate/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from '@/components/common/Toast';
 import { useUpdateSiteChannelModelDisabled } from '@/api/endpoints/site-channel';
 
@@ -55,6 +54,14 @@ function formatTime(timestamp: number): string {
 function formatDuration(ms: number): string {
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function formatDurationCompact(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    const s = ms / 1000;
+    if (s < 10) return `${s.toFixed(2)}s`;
+    if (s < 100) return `${s.toFixed(1)}s`;
+    return `${Math.round(s)}s`;
 }
 
 function sanitizeErrorMessage(raw: string | undefined | null): string {
@@ -127,19 +134,21 @@ function formatOptionalTokenCount(value: number | null | undefined) {
     return value.toLocaleString();
 }
 
-function hasInputTokenDetails(log: RelayLog) {
-    return (
-        log.transport_input_tokens != null ||
-        log.bill_input_tokens != null ||
-        log.cache_read_tokens != null ||
-        log.cache_write_tokens != null
-    );
+function formatCompactTokenCount(value: number): string {
+    if (value < 1000) return value.toLocaleString();
+    if (value < 10000) return `${(value / 1000).toFixed(1)}K`;
+    if (value < 1000000) return `${Math.round(value / 1000)}K`;
+    return `${(value / 1000000).toFixed(1)}M`;
+}
+
+function hasCacheTokens(log: RelayLog) {
+    return (log.cache_read_tokens != null && log.cache_read_tokens > 0)
+        || (log.cache_write_tokens != null && log.cache_write_tokens > 0);
 }
 
 function getHeadlineInputTokens(log: RelayLog) {
-    const hasCache = log.cache_read_tokens != null || log.cache_write_tokens != null;
-    if (!hasCache) return log.input_tokens;
-    return log.input_tokens + (log.cache_write_tokens ?? 0);
+    if (!hasCacheTokens(log)) return log.input_tokens;
+    return log.input_tokens - (log.cache_read_tokens ?? 0) + (log.cache_write_tokens ?? 0);
 }
 
 function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
@@ -363,49 +372,6 @@ function WSModeBadge({ log }: { log: RelayLog }) {
                 </Tooltip>
             ) : null}
         </div>
-    );
-}
-
-function InputTokenDetailsPopover({ log }: { log: RelayLog }) {
-    const t = useTranslations('log.card');
-
-    if (!hasInputTokenDetails(log)) return null;
-
-    return (
-        <Popover>
-            <PopoverTrigger asChild>
-                <button
-                    type="button"
-                    aria-label={t('inputDetails')}
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/80 transition hover:bg-muted/70 hover:text-foreground"
-                >
-                    <Info className="size-3.5" />
-                </button>
-            </PopoverTrigger>
-            <PopoverContent
-                side="top"
-                align="start"
-                onOpenAutoFocus={(event) => event.preventDefault()}
-                className="w-56 rounded-2xl border border-border/70 bg-card p-3 shadow-xl"
-            >
-                <div className="space-y-2">
-                    <div className="text-xs font-semibold text-foreground">{t('inputDetails')}</div>
-                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
-                        <span className="text-muted-foreground">{t('transportInput')}</span>
-                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.transport_input_tokens)}</span>
-                        <span className="text-muted-foreground">{t('billInput')}</span>
-                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.bill_input_tokens)}</span>
-                        <span className="text-muted-foreground">{t('cacheRead')}</span>
-                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.cache_read_tokens)}</span>
-                        <span className="text-muted-foreground">{t('cacheWrite')}</span>
-                        <span className="text-right font-mono text-foreground">{formatOptionalTokenCount(log.cache_write_tokens)}</span>
-                    </div>
-                </div>
-            </PopoverContent>
-        </Popover>
     );
 }
 
@@ -693,7 +659,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 </div>
                                 <WSModeBadge log={log} />
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-7 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
+                            <div className="grid grid-cols-2 md:grid-cols-6 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
                                     <Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />
                                     <span>{formatTime(log.time)}</span>
@@ -708,17 +674,18 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 ) : null}
                                 <div className="flex items-center gap-1.5">
                                     <Zap className="size-3.5 shrink-0 text-amber-500" />
-                                    <span>{t('firstToken')} {formatDuration(log.ftut)}</span>
+                                    <span>{t('duration')} {formatDurationCompact(log.ftut)}/{formatDurationCompact(log.use_time)}</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                    <Cpu className="size-3.5 shrink-0 text-blue-500" />
-                                    <span>{t('totalTime')} {formatDuration(log.use_time)}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                    <ArrowDownToLine className="size-3.5 shrink-0 text-green-500" />
-                                    <span className="flex items-center gap-1">
-                                        <span>{t('input')} {getHeadlineInputTokens(log).toLocaleString()}</span>
-                                        <InputTokenDetailsPopover log={log} />
+                                    <ArrowDownToLine className={cn('size-3.5 shrink-0', hasCacheTokens(log) ? 'text-sky-500' : 'text-green-500')} />
+                                    <span>
+                                        {t('input')}{' '}
+                                        <span className="whitespace-nowrap">
+                                            {getHeadlineInputTokens(log).toLocaleString()}
+                                            {hasCacheTokens(log) && log.cache_read_tokens != null && log.cache_read_tokens > 0 ? (
+                                                <span className="text-sky-500 text-[11px] ml-1">R {formatCompactTokenCount(log.cache_read_tokens)}</span>
+                                            ) : null}
+                                        </span>
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
@@ -998,11 +965,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                             ) : null}
                             <div className="flex items-center gap-1.5">
                                 <Zap className="size-3.5 text-amber-500" />
-                                <span>{t('firstTokenTime')}: {formatDuration(log.ftut)}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                                <Cpu className="size-3.5 text-blue-500" />
-                                <span>{t('totalTime')}: {formatDuration(log.use_time)}</span>
+                                <span>{t('duration')}: {formatDurationCompact(log.ftut)}/{formatDurationCompact(log.use_time)}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <DollarSign className="size-3.5 text-emerald-500" />

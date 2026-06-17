@@ -690,6 +690,7 @@
             "errorInfo": "錯誤訊息",
             "firstToken": "首字",
             "totalTime": "總耗時",
+            "duration": "耗時",
             "input": "輸入",
             "output": "輸出",
             "cost": "費用",

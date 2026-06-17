@@ -690,6 +690,7 @@
             "errorInfo": "错误信息",
             "firstToken": "首字",
             "totalTime": "总耗时",
+            "duration": "耗时",
             "input": "输入",
             "output": "输出",
             "cost": "费用",
