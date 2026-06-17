@@ -65,7 +65,6 @@ func APIKeyDelete(id int, ctx context.Context) error {
 	if err := StatsAPIKeyDel(id); err != nil {
 		return fmt.Errorf("failed to delete stats API key: %v", err)
 	}
-	RateLimitDel(id)
 	result := db.GetDB().WithContext(ctx).Delete(&k)
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("API key not found")
@@ -73,6 +72,7 @@ func APIKeyDelete(id int, ctx context.Context) error {
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete API key: %w", result.Error)
 	}
+	RateLimitDel(id)
 	apiKeyCache.Del(k.ID)
 	apiKeyIDMap.Del(k.APIKey)
 	return nil

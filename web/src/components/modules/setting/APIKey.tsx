@@ -170,9 +170,14 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
 
     const handleMaxRPMChange = useCallback((val: string) => {
         const cleaned = val.replace(/[^\d]/g, '');
-        setMaxRPMInput(cleaned);
         const num = parseInt(cleaned, 10);
-        updateForm({ max_rpm: Number.isFinite(num) && num > 0 ? num : undefined });
+        if (Number.isFinite(num) && num > 0) {
+            setMaxRPMInput(cleaned);
+            updateForm({ max_rpm: num });
+        } else {
+            setMaxRPMInput('');
+            updateForm({ max_rpm: undefined });
+        }
     }, [updateForm]);
 
     const handleClearMaxRPM = useCallback(() => {

@@ -23,11 +23,7 @@ func RateLimitCheck(apiKeyID int, maxRPM int) (bool, int) {
 	now := time.Now()
 	currentMinute := now.Unix() / 60
 
-	entry, ok := rateLimitCache.Get(apiKeyID)
-	if !ok {
-		entry = &rateLimitEntry{}
-		rateLimitCache.Set(apiKeyID, entry)
-	}
+	entry, _ := rateLimitCache.GetOrSet(apiKeyID, &rateLimitEntry{})
 
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
