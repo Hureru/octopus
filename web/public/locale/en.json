@@ -327,6 +327,8 @@
                 "maxCost": "Max Cost",
                 "maxCostPlaceholder": "Enter amount",
                 "unlimited": "Unlimited",
+                "maxRPM": "Max RPM (Requests/Min)",
+                "maxRPMPlaceholder": "Enter limit",
                 "expireAt": "Expire Date",
                 "selectDate": "Select date",
                 "neverExpire": "Never Expire",
@@ -916,7 +918,8 @@
             "api_key_missing": "The API key is missing.",
             "password_incorrect": "The old password is incorrect.",
             "api_key_disabled": "The API key is disabled.",
-            "api_key_cost_exceeded": "The API key has reached the maximum cost limit."
+            "api_key_cost_exceeded": "The API key has reached the maximum cost limit.",
+            "api_key_rate_limited": "The API key has exceeded the rate limit. Please wait and try again."
         },
         "site_channel": {
             "account_not_found": "The site account was not found.",
