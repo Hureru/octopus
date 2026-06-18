@@ -141,12 +141,12 @@ function hasCacheTokens(log: RelayLog) {
         || (log.cache_write_tokens != null && log.cache_write_tokens > 0);
 }
 
-// 投影渠道命名：新格式 "站点/账号/分组-端点后缀"，旧格式 "... [端点全名]"。
+// 投影渠道命名 "站点/账号/分组-端点后缀"，Anthropic 端点后缀为 -Anthropic。
 // 仅 Anthropic 端点的 input_tokens 不含 cache_read（Anthropic 原生语义），不应做减法；
 // OpenAI/Gemini 等的 input_tokens 已含 cache_read。见 SiteModelRouteType 后缀映射。
 function isAnthropicChannel(channelName: string): boolean {
     if (!channelName) return false;
-    return /-Anthropic$/.test(channelName) || /\[Anthropic\]/.test(channelName);
+    return /-Anthropic$/.test(channelName);
 }
 
 function getHeadlineInputTokens(log: RelayLog) {
