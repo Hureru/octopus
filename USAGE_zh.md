@@ -147,9 +147,11 @@ docker compose up -d
 | **站点名称** | 随便起，方便自己区分，例如「主站 OneAPI」 |
 | **平台类型** | 见下表；不确定可留「自动检测」（新建时才有，偶尔检测不准就手动选） |
 | **站点地址** | **只填域名**，如 `https://example.com`，**不要带** `/v1`、`/api` 等路径 |
+| **默认协议** | 仅「API 直连」平台需要：选择该站点默认走哪种协议（OpenAI Chat / Anthropic / Gemini） |
 | **手动签到 URL**（可选） | 填了之后可在站点总览里"一键打开"该页面手动签到 |
 | **代理** | 直连 / 系统代理 / 代理池（见 [12.x 代理池](#1213-代理池)） |
 | **启用站点** | 停用后不再投影托管渠道 |
+| **高级设置 → 按协议 Base URL**（可选） | 某些上游不同协议的路径前缀不一样（如 OpenAI 在 `<base>/v1`，Anthropic 在 `<base>/anthropic/v1`），可为每种协议单独指定 Base URL |
 | **高级设置 → 自定义 Header**（可选） | 给该站点所有请求统一附加的 Header |
 
 支持的**平台类型**：
@@ -160,7 +162,9 @@ docker compose up -d
 | **AnyRouter** | L 站登录的 any 类站点（凭据填 cookie，见下） |
 | **One API / One Hub / Done Hub** | 对应同名开源面板 |
 | **Sub2API** | sub2api 类站点 |
-| **OpenAI / Claude / Gemini** | 官方/直连类 |
+| **API 直连** | 官方或直连类供应商（OpenAI / Claude / Gemini），需要额外选择**默认协议**（见下方说明） |
+
+> 💡 **API 直连平台的「默认协议」**：选择 API 直连后，需要指定一个**默认协议类型**（OpenAI Chat / Anthropic / Gemini），告诉 octopus 该站点默认走哪种协议。平台检测时会自动推荐合适的协议。旧版本中的 OpenAI / Claude / Gemini 三个平台类型已自动合并为「API 直连」，升级后无需手动操作。
 
 ### 5.2 新增账号（关键：Access Token 怎么填）
 
@@ -175,7 +179,7 @@ docker compose up -d
 | **New API 类** | Access Token | 站点的**「系统访问令牌」**（不是登录密码！） | 必填 **Platform User ID**（站点里的用户 ID） |
 | **AnyRouter（any）** | Access Token | **cookie**，格式 `session=MTc1234567890` | — |
 | **Sub2API** | Access Token | 站点的 access token | 建议同时填 `refresh_token` 与 `token_expires_at`（F12 拿，401 会自动续期）|
-| **OpenAI/Claude/Gemini** | API Key 或 Access Token | 对应的密钥 | — |
+| **OpenAI/Claude/Gemini（API 直连）** | API Key | 对应的密钥 | — |
 
 > 🔎 **New API 类站点的「系统访问令牌」在哪？**
 > 登录中转站 → 个人设置 → 账户管理 → 安全设置 → **系统访问令牌**，生成的那串就是 Access Token。
@@ -333,6 +337,7 @@ docker compose up -d
 | 名称 | 仅用于区分，**不是 Key 本身** |
 | 最大金额 | 该 Key 的费用上限，可设"无限制" |
 | 过期日期 | 可设"永不过期" |
+| 每分钟请求数（RPM） | 该 Key 每分钟最大请求次数，0 或留空 = 不限制；超限时返回 HTTP 429 |
 | 支持的模型 | **不选 = 无限制**；选了就只能用选中的分组 |
 | 是否启用 | — |
 
@@ -451,7 +456,7 @@ Octopus 支持 **OpenAI Chat / OpenAI Responses / Anthropic** 三种格式互相
 
 ### 11.4 日志卡片能看什么
 
-每条日志可展开看：错误信息、**首字时间**、总耗时、输入/输出 Token、费用、**重试详情**（每次尝试成功/失败/跳过/熔断）、以及 WS 相关标记（直通/转换/续传/回放/降级等）。
+每条日志可展开看：错误信息、**首字时间**、总耗时、输入/输出 Token、费用、**重试详情**（每次尝试成功/失败/跳过/熔断）、以及 WS 相关标记（直通/转换/续传/回放/降级等）。日志卡片还会内联显示**缓存 Token**（如 `R 148K`），方便直观看到命中了多少提示缓存。
 
 ---
 
@@ -467,7 +472,7 @@ Octopus 支持 **OpenAI Chat / OpenAI Responses / Anthropic** 三种格式互相
 | **站点自动化** | 站点自动同步间隔（小时）、自动签到间隔（小时）、手动全量同步 / 全量签到 |
 | **日志设置** | 启用历史日志、日志保存天数、清空历史日志 |
 | **备份 / 恢复** | 导出（可选含日志/统计，含日志强制 ZIP）、导入（增量） |
-| **API 密钥** | 创建/管理 `sk-octopus-*`（见[第八章](#八第四步创建密钥并接入客户端)） |
+| **API 密钥** | 创建/管理 `sk-octopus-*`，可设置**每 Key RPM 限流**（见[第八章](#八第四步创建密钥并接入客户端)） |
 | **账户设置** | 修改用户名 / 密码 |
 | **版本信息** | 当前/最新版本、一键更新（更新前请先备份） |
 | **外观** | 主题（浅色/深色/跟随系统）、语言 |
@@ -496,7 +501,8 @@ Octopus 支持 **OpenAI Chat / OpenAI Responses / Anthropic** 三种格式互相
 ### Q4. Access Token 到底填什么？
 - **New API 类**：填站点「个人设置 → 账户管理 → 安全设置 → **系统访问令牌**」生成的那串，**不要用账号密码登录**；并且 New API 还要填 **Platform User ID**。
 - **any（AnyRouter）**：填 **cookie**，格式 `session=MTc1234567890`，平台类型记得选 **AnyRouter** 而不是 New API。
-- 除 any 外的站点都填系统访问令牌，**不要填 cookie**。
+- **API 直连（OpenAI/Claude/Gemini）**：填对应的 API Key，并选择正确的**默认协议**。
+- 除 any 和 API 直连 外的站点都填系统访问令牌，**不要填 cookie**。
 
 ### Q5. 站点网址要怎么填？
 **只填域名**，例如 `https://wzw.pp.ua`，**不要带** `/v1` 等路径。
