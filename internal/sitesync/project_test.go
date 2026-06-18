@@ -323,7 +323,7 @@ func TestProjectAccountReusesOrphanManagedChannelWithSameName(t *testing.T) {
 	}
 
 	group := model.SiteUserGroup{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
-	orphanName := buildLegacyManagedChannelName(site, account, group, outbound.OutboundTypeOpenAIChat, shouldSplitByOutboundType(site))
+	orphanName := buildManagedChannelName(site, account, group, outbound.OutboundTypeOpenAIChat)
 	orphanChannel := model.Channel{
 		Name:      orphanName,
 		Type:      outbound.OutboundTypeOpenAIChat,

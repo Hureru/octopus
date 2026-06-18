@@ -146,7 +146,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 
 			binding, exists := bindingMap[bindingKey]
 			if !exists {
-				reusedBinding, reused, err := reuseManagedChannelByName(ctx, siteRecord, account, group, bindingKey, channelPayload, buildLegacyManagedChannelName(siteRecord, account, group, obType, shouldSplit))
+				reusedBinding, reused, err := reuseManagedChannelByName(ctx, siteRecord, account, group, bindingKey, channelPayload)
 				if err != nil {
 					return nil, err
 				}
@@ -354,22 +354,8 @@ func buildManagedChannelName(siteRecord *model.Site, account *model.SiteAccount,
 	return fmt.Sprintf("%s/%s/%s-%s", siteRecord.Name, account.Name, groupName, formatName)
 }
 
-func buildLegacyManagedChannelName(siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, obType outbound.OutboundType, split bool) string {
-	base := fmt.Sprintf("[Site] %s / %s / %s (%s)", siteRecord.Name, account.Name, model.NormalizeSiteGroupName(group.GroupKey, group.Name), model.NormalizeSiteGroupKey(group.GroupKey))
-	if !split {
-		return base
-	}
-	if suffix := model.SiteModelRouteTypeName(model.SiteModelRouteTypeFromOutboundType(obType)); suffix != "" {
-		return base + " [" + suffix + "]"
-	}
-	return base
-}
-
-func reuseManagedChannelByName(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, bindingKey string, channelPayload model.Channel, legacyName string) (*model.SiteChannelBinding, bool, error) {
+func reuseManagedChannelByName(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, group model.SiteUserGroup, bindingKey string, channelPayload model.Channel) (*model.SiteChannelBinding, bool, error) {
 	existingChannel, err := op.ChannelGetByName(channelPayload.Name, ctx)
-	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) && strings.TrimSpace(legacyName) != "" && legacyName != channelPayload.Name {
-		existingChannel, err = op.ChannelGetByName(legacyName, ctx)
-	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, false, nil
