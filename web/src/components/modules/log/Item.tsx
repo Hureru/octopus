@@ -143,7 +143,7 @@ function hasCacheTokens(log: RelayLog) {
 
 function getHeadlineInputTokens(log: RelayLog) {
     if (!hasCacheTokens(log)) return log.input_tokens;
-    return log.input_tokens - (log.cache_read_tokens ?? 0) + (log.cache_write_tokens ?? 0);
+    return Math.max(0, log.input_tokens - (log.cache_read_tokens ?? 0) + (log.cache_write_tokens ?? 0));
 }
 
 function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
