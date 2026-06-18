@@ -216,6 +216,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
             }
 
             let platform = siteForm.platform;
+            let defaultRouteType = siteForm.default_route_type;
             if (!platform && !site) {
                 try {
                     const detected = await detectPlatform.mutateAsync(
@@ -223,6 +224,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                     );
                     platform = detected.platform as SitePlatform;
                     if (detected.default_route_type) {
+                        defaultRouteType = detected.default_route_type;
                         setSiteForm((current) => ({
                             ...current,
                             default_route_type: detected.default_route_type!,
@@ -290,7 +292,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 route_base_urls: routeBaseURLs,
                 tags: siteForm.tags,
                 default_route_type:
-                    platform === SitePlatform.API ? siteForm.default_route_type : undefined,
+                    platform === SitePlatform.API ? defaultRouteType : undefined,
             };
 
             try {

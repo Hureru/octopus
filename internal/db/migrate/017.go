@@ -28,17 +28,23 @@ func migrateUnifyAPIPlatform(db *gorm.DB) error {
 		}
 	}
 
-	db.Model(&model.Site{}).Where("platform = ?", "openai").Updates(map[string]any{
+	if err := db.Model(&model.Site{}).Where("platform = ?", "openai").Updates(map[string]any{
 		"platform":           "api",
 		"default_route_type": model.SiteModelRouteTypeOpenAIChat,
-	})
-	db.Model(&model.Site{}).Where("platform = ?", "claude").Updates(map[string]any{
+	}).Error; err != nil {
+		return err
+	}
+	if err := db.Model(&model.Site{}).Where("platform = ?", "claude").Updates(map[string]any{
 		"platform":           "api",
 		"default_route_type": model.SiteModelRouteTypeAnthropic,
-	})
-	db.Model(&model.Site{}).Where("platform = ?", "gemini").Updates(map[string]any{
+	}).Error; err != nil {
+		return err
+	}
+	if err := db.Model(&model.Site{}).Where("platform = ?", "gemini").Updates(map[string]any{
 		"platform":           "api",
 		"default_route_type": model.SiteModelRouteTypeGemini,
-	})
+	}).Error; err != nil {
+		return err
+	}
 	return nil
 }
