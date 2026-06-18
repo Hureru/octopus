@@ -501,8 +501,8 @@ Octopus 支持 **OpenAI Chat / OpenAI Responses / Anthropic** 三种格式互相
 ### Q4. Access Token 到底填什么？
 - **New API 类**：填站点「个人设置 → 账户管理 → 安全设置 → **系统访问令牌**」生成的那串，**不要用账号密码登录**；并且 New API 还要填 **Platform User ID**。
 - **any（AnyRouter）**：填 **cookie**，格式 `session=MTc1234567890`，平台类型记得选 **AnyRouter** 而不是 New API。
-- **API 直连（OpenAI/Claude/Gemini）**：填对应的 API Key 或 Access Token，并选择正确的**默认协议**。
-- 除 any 外的站点都填系统访问令牌，**不要填 cookie**。
+- **API 直连（OpenAI/Claude/Gemini）**：填对应的 API Key，并选择正确的**默认协议**。
+- 除 any 和 API 直连 外的站点都填系统访问令牌，**不要填 cookie**。
 
 ### Q5. 站点网址要怎么填？
 **只填域名**，例如 `https://wzw.pp.ua`，**不要带** `/v1` 等路径。
