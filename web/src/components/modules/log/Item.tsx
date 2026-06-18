@@ -654,7 +654,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 </div>
                                 <WSModeBadge log={log} />
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-6 gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
+                            <div className="grid grid-cols-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
                                     <Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />
                                     <span>{formatTime(log.time)}</span>
@@ -673,14 +673,17 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                     <ArrowDownToLine className={cn('size-3.5 shrink-0', hasCacheTokens(log) ? 'text-sky-500' : 'text-green-500')} />
-                                    <span>
-                                        {t('input')}{' '}
-                                        <span className="whitespace-nowrap">
-                                            {getHeadlineInputTokens(log).toLocaleString()}
-                                            {hasCacheTokens(log) && log.cache_read_tokens != null && log.cache_read_tokens > 0 ? (
-                                                <span className="text-sky-500 text-[11px] ml-1">R {formatCompactTokenCount(log.cache_read_tokens)}</span>
-                                            ) : null}
-                                        </span>
+                                    <span className="flex items-center gap-1">
+                                        {t('input')}
+                                        <span className="tabular-nums">{getHeadlineInputTokens(log).toLocaleString()}</span>
+                                        {hasCacheTokens(log) && log.cache_read_tokens != null && log.cache_read_tokens > 0 ? (
+                                            <Badge
+                                                variant="secondary"
+                                                className="shrink-0 px-1.5 py-0 text-[11px] bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                                            >
+                                                R {formatCompactTokenCount(log.cache_read_tokens)}
+                                            </Badge>
+                                        ) : null}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
