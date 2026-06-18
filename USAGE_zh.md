@@ -179,7 +179,7 @@ docker compose up -d
 | **New API 类** | Access Token | 站点的**「系统访问令牌」**（不是登录密码！） | 必填 **Platform User ID**（站点里的用户 ID） |
 | **AnyRouter（any）** | Access Token | **cookie**，格式 `session=MTc1234567890` | — |
 | **Sub2API** | Access Token | 站点的 access token | 建议同时填 `refresh_token` 与 `token_expires_at`（F12 拿，401 会自动续期）|
-| **OpenAI/Claude/Gemini（API 直连）** | API Key 或 Access Token | 对应的密钥 | — |
+| **OpenAI/Claude/Gemini（API 直连）** | API Key | 对应的密钥 | — |
 
 > 🔎 **New API 类站点的「系统访问令牌」在哪？**
 > 登录中转站 → 个人设置 → 账户管理 → 安全设置 → **系统访问令牌**，生成的那串就是 Access Token。
