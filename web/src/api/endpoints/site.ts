@@ -11,9 +11,7 @@ export enum SitePlatform {
   OneHub = "one-hub",
   DoneHub = "done-hub",
   Sub2API = "sub2api",
-  OpenAI = "openai",
-  Claude = "claude",
-  Gemini = "gemini",
+  API = "api",
 }
 
 export enum SiteCredentialType {
@@ -131,6 +129,7 @@ export type Site = {
   custom_header: CustomHeader[];
   route_base_urls: SiteRouteBaseURL[];
   tags: string[];
+  default_route_type?: string;
   archived: boolean;
   archived_at?: string | null;
   accounts: SiteAccount[];
@@ -154,6 +153,7 @@ type SiteServer = Omit<
   custom_header: CustomHeader[] | null;
   route_base_urls: SiteRouteBaseURL[] | null;
   tags: string[] | null;
+  default_route_type?: string | null;
 };
 
 export type SiteSyncResult = {
@@ -235,6 +235,7 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
     custom_header: site.custom_header ?? [],
     route_base_urls: site.route_base_urls ?? [],
     tags: site.tags ?? [],
+    default_route_type: site.default_route_type ?? undefined,
     proxy_mode: site.proxy_mode ?? "direct",
     proxy_config_id: site.proxy_config_id ?? null,
     external_checkin_url: site.external_checkin_url ?? null,
@@ -620,7 +621,7 @@ export function useImportMetAPI() {
 export function useDetectSitePlatform() {
   return useMutation({
     mutationFn: async (url: string) =>
-      apiClient.post<{ platform: string }>("/api/v1/site/detect", { url }),
+      apiClient.post<{ platform: string; default_route_type?: string }>("/api/v1/site/detect", { url }),
     onError: (error) => logger.error("平台检测失败:", error),
   });
 }

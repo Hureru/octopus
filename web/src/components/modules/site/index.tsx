@@ -111,15 +111,13 @@ import {
 } from "lucide-react";
 
 const PLATFORM_LABELS: Record<SitePlatform, string> = {
+  [SitePlatform.API]: "API 直连",
   [SitePlatform.NewAPI]: "New API",
   [SitePlatform.AnyRouter]: "AnyRouter",
   [SitePlatform.OneAPI]: "One API",
   [SitePlatform.OneHub]: "One Hub",
   [SitePlatform.DoneHub]: "Done Hub",
   [SitePlatform.Sub2API]: "Sub2API",
-  [SitePlatform.OpenAI]: "OpenAI",
-  [SitePlatform.Claude]: "Claude",
-  [SitePlatform.Gemini]: "Gemini",
 };
 
 const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {

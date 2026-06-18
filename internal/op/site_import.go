@@ -61,11 +61,12 @@ var supportedImportPlatforms = map[string]model.SitePlatform{
 	"done-hub":  model.SitePlatformDoneHub,
 	"donehub":   model.SitePlatformDoneHub,
 	"sub2api":   model.SitePlatformSub2API,
-	"openai":    model.SitePlatformOpenAI,
-	"anthropic": model.SitePlatformClaude,
-	"claude":    model.SitePlatformClaude,
-	"google":    model.SitePlatformGemini,
-	"gemini":    model.SitePlatformGemini,
+	"openai":    model.SitePlatformAPI,
+	"anthropic": model.SitePlatformAPI,
+	"claude":    model.SitePlatformAPI,
+	"google":    model.SitePlatformAPI,
+	"gemini":    model.SitePlatformAPI,
+	"api":       model.SitePlatformAPI,
 }
 
 var unsupportedImportHints = []string{
@@ -76,9 +77,7 @@ var unsupportedImportHints = []string{
 }
 
 var directImportPlatforms = map[model.SitePlatform]struct{}{
-	model.SitePlatformOpenAI: {},
-	model.SitePlatformClaude: {},
-	model.SitePlatformGemini: {},
+	model.SitePlatformAPI: {},
 }
 
 func SiteImportAllAPIHub(ctx context.Context, body []byte) (*model.AllAPIHubImportResult, []int, error) {
@@ -1087,16 +1086,14 @@ func resolveImportedProfilePlatform(rawType any, baseURL string) (model.SitePlat
 	}
 
 	switch strings.ToLower(strings.TrimSpace(asString(rawType))) {
-	case "openai":
-		return model.SitePlatformOpenAI, true
+	case "openai", "openai-compatible", "":
+		return model.SitePlatformAPI, true
 	case "anthropic":
-		return model.SitePlatformClaude, true
+		return model.SitePlatformAPI, true
 	case "google":
-		return model.SitePlatformGemini, true
-	case "openai-compatible", "":
-		return model.SitePlatformOpenAI, true
+		return model.SitePlatformAPI, true
 	default:
-		return model.SitePlatformOpenAI, true
+		return model.SitePlatformAPI, true
 	}
 }
 
@@ -1117,13 +1114,13 @@ func detectSupportedPlatform(values ...any) (model.SitePlatform, bool) {
 
 	switch {
 	case strings.Contains(combined, "api.openai.com"):
-		return model.SitePlatformOpenAI, false
+		return model.SitePlatformAPI, false
 	case strings.Contains(combined, "api.anthropic.com"), strings.Contains(combined, "anthropic.com/v1"):
-		return model.SitePlatformClaude, false
+		return model.SitePlatformAPI, false
 	case strings.Contains(combined, "generativelanguage.googleapis.com"),
 		strings.Contains(combined, "googleapis.com/v1beta/openai"),
 		strings.Contains(combined, "gemini.google.com"):
-		return model.SitePlatformGemini, false
+		return model.SitePlatformAPI, false
 	case strings.Contains(combined, "anyrouter"):
 		return model.SitePlatformAnyRouter, false
 	case strings.Contains(combined, "donehub"), strings.Contains(combined, "done-hub"):
@@ -1145,7 +1142,7 @@ func isDirectImportPlatform(platform model.SitePlatform) bool {
 
 func platformSupportsCheckin(platform model.SitePlatform) bool {
 	switch platform {
-	case model.SitePlatformDoneHub, model.SitePlatformSub2API, model.SitePlatformOpenAI, model.SitePlatformClaude, model.SitePlatformGemini:
+	case model.SitePlatformDoneHub, model.SitePlatformSub2API, model.SitePlatformAPI:
 		return false
 	default:
 		return true

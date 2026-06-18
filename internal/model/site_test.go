@@ -57,9 +57,9 @@ func TestNormalizeSiteSyncTokenValueForPlatform(t *testing.T) {
 		{name: "new-api adds prefix", platform: SitePlatformNewAPI, input: "abc123", expected: "sk-abc123"},
 		{name: "new-api keeps existing prefix", platform: SitePlatformNewAPI, input: "sk-abc123", expected: "sk-abc123"},
 		{name: "one-hub adds prefix", platform: SitePlatformOneHub, input: "abc123", expected: "sk-abc123"},
-		{name: "openai keeps verbatim", platform: SitePlatformOpenAI, input: "abc123", expected: "abc123"},
-		{name: "gemini keeps verbatim", platform: SitePlatformGemini, input: "AIzaXXXX", expected: "AIzaXXXX"},
-		{name: "claude keeps verbatim and trims", platform: SitePlatformClaude, input: "  sk-ant-abc  ", expected: "sk-ant-abc"},
+		{name: "api keeps verbatim", platform: SitePlatformAPI, input: "abc123", expected: "abc123"},
+		{name: "api keeps verbatim 2", platform: SitePlatformAPI, input: "AIzaXXXX", expected: "AIzaXXXX"},
+		{name: "api keeps verbatim and trims", platform: SitePlatformAPI, input: "  sk-ant-abc  ", expected: "sk-ant-abc"},
 	}
 
 	for _, tt := range tests {

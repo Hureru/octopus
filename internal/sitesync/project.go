@@ -117,7 +117,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 		group := groupMap[groupKey]
 		groupTokens := tokenGroups[groupKey]
 		groupModels := modelsByGroup[groupKey]
-		modelBuckets := partitionSiteModelsByRouteType(groupModels, shouldSplit, siteRecord.Platform)
+		modelBuckets := partitionSiteModelsByRouteType(groupModels, shouldSplit, siteRecord)
 		proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
 		enabled := siteRecord.Enabled && account.Enabled && hasUsableToken(groupTokens)
 		for routeType, bucketModels := range modelBuckets {
@@ -229,7 +229,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 
 	desiredSet := make(map[string]struct{})
 	for _, groupKey := range desiredKeys {
-		modelBuckets := partitionSiteModelsByRouteType(modelsByGroup[groupKey], shouldSplit, siteRecord.Platform)
+		modelBuckets := partitionSiteModelsByRouteType(modelsByGroup[groupKey], shouldSplit, siteRecord)
 		for routeType, bucketModels := range modelBuckets {
 			if len(bucketModels) == 0 {
 				continue
@@ -536,19 +536,26 @@ func syncProjectedModelPrices(ctx context.Context, modelsByGroup map[string][]mo
 	return helper.LLMPriceAddToDB(modelNames, ctx)
 }
 
-func platformOutboundType(platform model.SitePlatform) outbound.OutboundType {
-	switch platform {
-	case model.SitePlatformClaude:
-		return outbound.OutboundTypeAnthropic
-	case model.SitePlatformGemini:
-		return outbound.OutboundTypeGemini
-	default:
-		return outbound.OutboundTypeOpenAIChat
+func platformOutboundType(site *model.Site) outbound.OutboundType {
+	if site.Platform == model.SitePlatformAPI {
+		switch site.ResolveDefaultRouteType() {
+		case model.SiteModelRouteTypeAnthropic:
+			return outbound.OutboundTypeAnthropic
+		case model.SiteModelRouteTypeGemini:
+			return outbound.OutboundTypeGemini
+		default:
+			return outbound.OutboundTypeOpenAIChat
+		}
 	}
+	return outbound.OutboundTypeOpenAIChat
 }
 
 // shouldSplitByOutboundType 判断是否需要按模型端点格式拆分 Channel
+// 当站点配置了协议路径覆盖时，强制启用拆分以确保每个协议使用正确的 base URL
 func shouldSplitByOutboundType(site *model.Site) bool {
+	if site != nil && len(site.RouteBaseURLs) > 0 {
+		return true
+	}
 	return model.ShouldSplitSiteChannelRoutes(site.Platform)
 }
 
@@ -569,10 +576,9 @@ func classifyModelRouteType(modelName string) model.SiteModelRouteType {
 }
 
 // partitionModelsByOutboundType 将模型列表按端点格式分桶
-func partitionModelsByOutboundType(modelNames []string, split bool, platform model.SitePlatform) map[outbound.OutboundType][]string {
+func partitionModelsByOutboundType(modelNames []string, split bool, site *model.Site) map[outbound.OutboundType][]string {
 	if !split {
-		// 不拆分时，所有模型放入平台默认的单一桶
-		obType := platformOutboundType(platform)
+		obType := platformOutboundType(site)
 		return map[outbound.OutboundType][]string{obType: modelNames}
 	}
 	buckets := make(map[outbound.OutboundType][]string)
@@ -583,9 +589,9 @@ func partitionModelsByOutboundType(modelNames []string, split bool, platform mod
 	return buckets
 }
 
-func partitionSiteModelsByRouteType(items []model.SiteModel, split bool, platform model.SitePlatform) map[model.SiteModelRouteType][]model.SiteModel {
+func partitionSiteModelsByRouteType(items []model.SiteModel, split bool, site *model.Site) map[model.SiteModelRouteType][]model.SiteModel {
 	if !split {
-		routeType := model.SiteModelRouteTypeFromOutboundType(platformOutboundType(platform))
+		routeType := model.SiteModelRouteTypeFromOutboundType(platformOutboundType(site))
 		if len(items) == 0 {
 			return map[model.SiteModelRouteType][]model.SiteModel{}
 		}

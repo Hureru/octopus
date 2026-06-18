@@ -410,12 +410,16 @@ func detectSitePlatform(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	platform, err := sitesvc.DetectPlatform(ctx, request.URL)
+	platform, defaultRouteType, err := sitesvc.DetectPlatform(ctx, request.URL)
 	if err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp.Success(c, gin.H{"platform": platform})
+	result := gin.H{"platform": platform}
+	if defaultRouteType != "" {
+		result["default_route_type"] = defaultRouteType
+	}
+	resp.Success(c, result)
 }
 
 func batchSite(c *gin.Context) {

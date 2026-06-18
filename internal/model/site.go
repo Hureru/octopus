@@ -19,10 +19,8 @@ const (
 	SitePlatformOneAPI    SitePlatform = "one-api"
 	SitePlatformOneHub    SitePlatform = "one-hub"
 	SitePlatformDoneHub   SitePlatform = "done-hub"
-	SitePlatformSub2API   SitePlatform = "sub2api"
-	SitePlatformOpenAI    SitePlatform = "openai"
-	SitePlatformClaude    SitePlatform = "claude"
-	SitePlatformGemini    SitePlatform = "gemini"
+	SitePlatformSub2API SitePlatform = "sub2api"
+	SitePlatformAPI     SitePlatform = "api"
 )
 
 type SiteCredentialType string
@@ -176,6 +174,7 @@ type Site struct {
 	GlobalWeight       float64            `json:"global_weight" gorm:"default:1"`
 	CustomHeader       []CustomHeader     `json:"custom_header" gorm:"serializer:json"`
 	RouteBaseURLs      []SiteRouteBaseURL `json:"route_base_urls" gorm:"serializer:json"`
+	DefaultRouteType   SiteModelRouteType `json:"default_route_type" gorm:"type:varchar(32);not null;default:''"`
 	Tags               []string           `json:"tags" gorm:"serializer:json"`
 	Archived           bool               `json:"archived" gorm:"default:false;index"`
 	ArchivedAt         *time.Time         `json:"archived_at"`
@@ -551,7 +550,7 @@ func NormalizeSiteSyncTokenValue(value string) string {
 // their keys verbatim, so they must never have a prefix forced on them.
 func (p SitePlatform) usesSyncTokenSkPrefix() bool {
 	switch p {
-	case SitePlatformOpenAI, SitePlatformClaude, SitePlatformGemini:
+	case SitePlatformAPI:
 		return false
 	default:
 		return true
@@ -786,7 +785,7 @@ func ParseSiteChannelBindingKey(groupKey string) (string, SiteModelRouteType) {
 
 func ShouldSplitSiteChannelRoutes(platform SitePlatform) bool {
 	switch platform {
-	case SitePlatformClaude, SitePlatformGemini, SitePlatformOpenAI:
+	case SitePlatformAPI:
 		return false
 	default:
 		return true
@@ -830,7 +829,7 @@ func SiteModelRouteTypeFromOutboundType(t outbound.OutboundType) SiteModelRouteT
 func (p SitePlatform) Validate() error {
 	switch p {
 	case SitePlatformNewAPI, SitePlatformAnyRouter, SitePlatformOneAPI, SitePlatformOneHub, SitePlatformDoneHub,
-		SitePlatformSub2API, SitePlatformOpenAI, SitePlatformClaude, SitePlatformGemini:
+		SitePlatformSub2API, SitePlatformAPI:
 		return nil
 	default:
 		return fmt.Errorf("unsupported site platform: %s", p)
@@ -879,6 +878,34 @@ func (s *Site) Normalize() {
 	}
 	s.Tags = NormalizeSiteTags(s.Tags)
 	s.RouteBaseURLs = NormalizeSiteRouteBaseURLs(s.RouteBaseURLs)
+	s.normalizeLegacyAPIPlatform()
+}
+
+func (s *Site) normalizeLegacyAPIPlatform() {
+	switch s.Platform {
+	case "openai":
+		s.Platform = SitePlatformAPI
+		if s.DefaultRouteType == "" {
+			s.DefaultRouteType = SiteModelRouteTypeOpenAIChat
+		}
+	case "claude":
+		s.Platform = SitePlatformAPI
+		if s.DefaultRouteType == "" {
+			s.DefaultRouteType = SiteModelRouteTypeAnthropic
+		}
+	case "gemini":
+		s.Platform = SitePlatformAPI
+		if s.DefaultRouteType == "" {
+			s.DefaultRouteType = SiteModelRouteTypeGemini
+		}
+	}
+}
+
+func (s *Site) ResolveDefaultRouteType() SiteModelRouteType {
+	if s.DefaultRouteType != "" {
+		return s.DefaultRouteType
+	}
+	return SiteModelRouteTypeOpenAIChat
 }
 
 func (s *Site) Validate() error {

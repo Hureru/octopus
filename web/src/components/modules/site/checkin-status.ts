@@ -40,9 +40,7 @@ export function sitePlatformSupportsCheckin(platform: Site["platform"]) {
   switch (platform) {
     case SitePlatform.DoneHub:
     case SitePlatform.Sub2API:
-    case SitePlatform.OpenAI:
-    case SitePlatform.Claude:
-    case SitePlatform.Gemini:
+    case SitePlatform.API:
       return false;
     default:
       return true;

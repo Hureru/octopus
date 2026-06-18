@@ -117,9 +117,7 @@ function credentialOptions(platform: SitePlatform) {
     switch (platform) {
         case SitePlatform.Sub2API:
             return [SiteCredentialType.AccessToken, SiteCredentialType.APIKey];
-        case SitePlatform.OpenAI:
-        case SitePlatform.Claude:
-        case SitePlatform.Gemini:
+        case SitePlatform.API:
             return [SiteCredentialType.AccessToken, SiteCredentialType.APIKey];
         default:
             return [

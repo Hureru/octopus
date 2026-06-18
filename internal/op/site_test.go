@@ -730,16 +730,16 @@ func TestSiteImportAllAPIHubImportsAndUpdatesAccounts(t *testing.T) {
 		}
 	})
 
-	var openAISiteCount int64
-	if err := dbpkg.GetDB().Model(&model.Site{}).Where("platform = ? AND base_url = ?", model.SitePlatformOpenAI, "https://api.openai.com").Count(&openAISiteCount).Error; err != nil {
-		t.Fatalf("count openai sites failed: %v", err)
+	var apiSiteCount int64
+	if err := dbpkg.GetDB().Model(&model.Site{}).Where("platform = ? AND base_url = ?", model.SitePlatformAPI, "https://api.openai.com").Count(&apiSiteCount).Error; err != nil {
+		t.Fatalf("count api sites failed: %v", err)
 	}
-	if openAISiteCount != 1 {
-		t.Fatalf("expected one normalized OpenAI site, got %d", openAISiteCount)
+	if apiSiteCount != 1 {
+		t.Fatalf("expected one normalized API site, got %d", apiSiteCount)
 	}
 
 	var compatSite model.Site
-	if err := dbpkg.GetDB().Where("platform = ? AND base_url = ?", model.SitePlatformOpenAI, "https://compat.example.com").First(&compatSite).Error; err != nil {
+	if err := dbpkg.GetDB().Where("platform = ? AND base_url = ?", model.SitePlatformAPI, "https://compat.example.com").First(&compatSite).Error; err != nil {
 		t.Fatalf("query compat site failed: %v", err)
 	}
 

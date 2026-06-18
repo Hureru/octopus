@@ -12,14 +12,15 @@ import (
 )
 
 var urlPlatformHints = []struct {
-	pattern  string
-	platform model.SitePlatform
+	pattern          string
+	platform         model.SitePlatform
+	defaultRouteType model.SiteModelRouteType
 }{
-	{"api.openai.com", model.SitePlatformOpenAI},
-	{"api.anthropic.com", model.SitePlatformClaude},
-	{"anthropic.com/v1", model.SitePlatformClaude},
-	{"generativelanguage.googleapis.com", model.SitePlatformGemini},
-	{"googleapis.com/v1beta/openai", model.SitePlatformGemini},
+	{"api.openai.com", model.SitePlatformAPI, model.SiteModelRouteTypeOpenAIChat},
+	{"api.anthropic.com", model.SitePlatformAPI, model.SiteModelRouteTypeAnthropic},
+	{"anthropic.com/v1", model.SitePlatformAPI, model.SiteModelRouteTypeAnthropic},
+	{"generativelanguage.googleapis.com", model.SitePlatformAPI, model.SiteModelRouteTypeGemini},
+	{"googleapis.com/v1beta/openai", model.SitePlatformAPI, model.SiteModelRouteTypeGemini},
 }
 
 var titlePlatformHints = []struct {
@@ -38,32 +39,32 @@ var titlePlatformHints = []struct {
 	{"oneapi", model.SitePlatformOneAPI},
 }
 
-func DetectPlatform(ctx context.Context, rawURL string) (model.SitePlatform, error) {
+func DetectPlatform(ctx context.Context, rawURL string) (model.SitePlatform, model.SiteModelRouteType, error) {
 	normalizedURL := strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	if normalizedURL == "" {
-		return "", fmt.Errorf("url is empty")
+		return "", "", fmt.Errorf("url is empty")
 	}
 	loweredURL := strings.ToLower(normalizedURL)
 
 	for _, hint := range urlPlatformHints {
 		if strings.Contains(loweredURL, hint.pattern) {
-			return hint.platform, nil
+			return hint.platform, hint.defaultRouteType, nil
 		}
 	}
 
 	// Try fetching the page title
 	platform, err := detectByPageTitle(ctx, normalizedURL)
 	if err == nil && platform != "" {
-		return platform, nil
+		return platform, "", nil
 	}
 
 	// Try /api/status endpoint
 	platform, err = detectByStatusEndpoint(ctx, normalizedURL)
 	if err == nil && platform != "" {
-		return platform, nil
+		return platform, "", nil
 	}
 
-	return "", fmt.Errorf("could not detect platform for %s", normalizedURL)
+	return "", "", fmt.Errorf("could not detect platform for %s", normalizedURL)
 }
 
 func detectByPageTitle(ctx context.Context, baseURL string) (model.SitePlatform, error) {

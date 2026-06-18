@@ -87,6 +87,9 @@ func detectSiteModelRoutes(
 	case model.SitePlatformAnyRouter:
 		return detectAnyRouterPricingRoutes(ctx, siteRecord, account, accessToken, platformUserID, modelFilter)
 	default:
+		if siteRecord.Platform == model.SitePlatformAPI && len(siteRecord.RouteBaseURLs) > 0 {
+			return detectManagedPricingRoutes(ctx, siteRecord, account, accessToken, modelToken, modelFilter)
+		}
 		return nil
 	}
 }

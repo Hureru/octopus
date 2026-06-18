@@ -29,18 +29,18 @@ func TestBuildProjectedChannelBaseURL(t *testing.T) {
 			expected: "https://example.com/v1",
 		},
 		{
-			name:     "openai preserves custom path and appends v1",
-			site:     &model.Site{Platform: model.SitePlatformOpenAI, BaseURL: "https://example.com/openai"},
+			name:     "api platform preserves custom path and appends v1",
+			site:     &model.Site{Platform: model.SitePlatformAPI, BaseURL: "https://example.com/openai"},
 			expected: "https://example.com/openai/v1",
 		},
 		{
-			name:     "claude appends v1",
-			site:     &model.Site{Platform: model.SitePlatformClaude, BaseURL: "https://api.anthropic.com"},
+			name:     "api platform with anthropic default appends v1",
+			site:     &model.Site{Platform: model.SitePlatformAPI, DefaultRouteType: model.SiteModelRouteTypeAnthropic, BaseURL: "https://api.anthropic.com"},
 			expected: "https://api.anthropic.com/v1",
 		},
 		{
-			name:     "gemini appends v1",
-			site:     &model.Site{Platform: model.SitePlatformGemini, BaseURL: "https://gemini.example.com"},
+			name:     "api platform with gemini default appends v1",
+			site:     &model.Site{Platform: model.SitePlatformAPI, DefaultRouteType: model.SiteModelRouteTypeGemini, BaseURL: "https://gemini.example.com"},
 			expected: "https://gemini.example.com/v1",
 		},
 		{
@@ -706,9 +706,9 @@ func TestBuildChannelKeysAppliesPlatformPrefix(t *testing.T) {
 		t.Fatalf("expected new-api keys to carry sk- prefix, got %q and %q", newAPIKeys[0].ChannelKey, newAPIKeys[1].ChannelKey)
 	}
 
-	openAIKeys := buildChannelKeys(tokens, model.SitePlatformOpenAI)
-	if openAIKeys[0].ChannelKey != "key-primary" || openAIKeys[1].ChannelKey != "sk-key-backup" {
-		t.Fatalf("expected openai keys to stay verbatim, got %q and %q", openAIKeys[0].ChannelKey, openAIKeys[1].ChannelKey)
+	apiKeys := buildChannelKeys(tokens, model.SitePlatformAPI)
+	if apiKeys[0].ChannelKey != "key-primary" || apiKeys[1].ChannelKey != "sk-key-backup" {
+		t.Fatalf("expected api keys to stay verbatim, got %q and %q", apiKeys[0].ChannelKey, apiKeys[1].ChannelKey)
 	}
 }
 

@@ -254,7 +254,7 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 	)
 
 	for _, baseURL := range buildModelFetchBaseURLs(siteRecord) {
-		channel := model.Channel{Type: platformOutboundType(siteRecord.Platform), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: tokenValue}}, ProxyMode: proxyMode, ProxyConfigID: proxyConfigID, CustomHeader: siteRecord.CustomHeader}
+		channel := model.Channel{Type: platformOutboundType(siteRecord), BaseUrls: []model.BaseUrl{{URL: baseURL, Delay: 0}}, Keys: []model.ChannelKey{{Enabled: true, ChannelKey: tokenValue}}, ProxyMode: proxyMode, ProxyConfigID: proxyConfigID, CustomHeader: siteRecord.CustomHeader}
 		fetched, err := helper.FetchModels(ctx, channel)
 		if err == nil && len(fetched) > 0 {
 			return normalizeModelNames(fetched), nil
@@ -483,7 +483,7 @@ func buildModelFetchBaseURLs(siteRecord *model.Site) []string {
 	}
 
 	candidates := []string{baseURL}
-	if sitePlatformUsesV1ModelEndpoint(siteRecord.Platform) && !strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
+	if sitePlatformUsesV1ModelEndpoint(siteRecord) && !strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
 		candidates = append(candidates, baseURL+"/v1")
 	}
 	return candidates
@@ -560,13 +560,12 @@ func stringSliceContainsFold(values []string, target string) bool {
 	return false
 }
 
-func sitePlatformUsesV1ModelEndpoint(platform model.SitePlatform) bool {
-	switch platform {
-	case model.SitePlatformClaude, model.SitePlatformGemini:
-		return false
-	default:
-		return true
+func sitePlatformUsesV1ModelEndpoint(site *model.Site) bool {
+	if site.Platform == model.SitePlatformAPI {
+		rt := site.ResolveDefaultRouteType()
+		return rt == model.SiteModelRouteTypeOpenAIChat || rt == ""
 	}
+	return true
 }
 
 func buildSiteModels(names []string, groupKey string, source string) []model.SiteModel {

@@ -76,7 +76,7 @@ func DeleteSiteAccount(ctx context.Context, accountID int) error {
 	return sitesync.DeleteSiteAccount(ctx, accountID)
 }
 
-func DetectPlatform(ctx context.Context, rawURL string) (model.SitePlatform, error) {
+func DetectPlatform(ctx context.Context, rawURL string) (model.SitePlatform, model.SiteModelRouteType, error) {
 	return sitesync.DetectPlatform(ctx, rawURL)
 }
 

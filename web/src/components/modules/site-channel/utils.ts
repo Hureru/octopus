@@ -127,12 +127,8 @@ export function platformLabel(platform: SiteChannelCard['platform']) {
             return 'Done Hub';
         case 'sub2api':
             return 'Sub2API';
-        case 'openai':
-            return 'OpenAI';
-        case 'claude':
-            return 'Claude';
-        case 'gemini':
-            return 'Gemini';
+        case 'api':
+            return 'API 直连';
         default:
             return platform;
     }
