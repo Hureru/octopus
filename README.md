@@ -6,7 +6,7 @@
 
 **A Simple, Beautiful, and Elegant LLM API Aggregation & Load Balancing Service for Individuals**
 
- English | [简体中文](README_zh.md)
+ English | [简体中文](README_zh.md) | [Getting Started](USAGE.md)
 
 </div>
 
@@ -25,6 +25,8 @@
 - 📊 **Analytics** - Comprehensive request statistics, token consumption, and cost tracking
 - 🎨 **Elegant UI** - Clean and beautiful web management panel
 - 🗄️ **Multi-Database Support** - Support for SQLite, MySQL, PostgreSQL
+
+> 📖 **First time using Octopus?** Check out the **[Getting Started Guide](USAGE.md)** for a complete walkthrough from deployment to client integration — get up and running in 5 minutes.
 
 
 ## 🚀 Quick Start
