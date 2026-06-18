@@ -141,9 +141,25 @@ function hasCacheTokens(log: RelayLog) {
         || (log.cache_write_tokens != null && log.cache_write_tokens > 0);
 }
 
+// 投影渠道命名：新格式 "站点/账号/分组-端点后缀"，旧格式 "... [端点全名]"。
+// 仅 Anthropic 端点的 input_tokens 不含 cache_read（Anthropic 原生语义），不应做减法；
+// OpenAI/Gemini 等的 input_tokens 已含 cache_read。见 SiteModelRouteType 后缀映射。
+function isAnthropicChannel(channelName: string): boolean {
+    if (!channelName) return false;
+    return /-Anthropic$/.test(channelName) || /\[Anthropic\]/.test(channelName);
+}
+
 function getHeadlineInputTokens(log: RelayLog) {
     if (!hasCacheTokens(log)) return log.input_tokens;
-    return Math.max(0, log.input_tokens - (log.cache_read_tokens ?? 0) + (log.cache_write_tokens ?? 0));
+    const cacheRead = log.cache_read_tokens ?? 0;
+    const cacheWrite = log.cache_write_tokens ?? 0;
+    // OpenAI 等语义：input 已含 cache_read（必然 input ≥ cache_read），减去命中得新输入；
+    // Anthropic：input 不含 cache_read，绝不减（含恢复对话等 input ≥ cache_read 的情况）；
+    // 数值兜底：input < cache_read 时即便误判为含缓存语义也不减，避免畸形上游归零。
+    const dedupedInput = !isAnthropicChannel(log.channel_name) && log.input_tokens >= cacheRead
+        ? log.input_tokens - cacheRead
+        : log.input_tokens;
+    return Math.max(0, dedupedInput + cacheWrite);
 }
 
 function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {
