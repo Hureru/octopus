@@ -52,6 +52,10 @@ func (p *Prober) RunCandidate(ctx context.Context, channel model.Channel, usedKe
 	}
 
 	applyCustomHeaders(request, channel.CustomHeader)
+	// 防止 Go 默认 User-Agent 泄露到上游
+	if request.Header.Get("User-Agent") == "" {
+		request.Header.Set("User-Agent", "")
+	}
 	if err := helper.ApplyParamOverride(request, channel.ParamOverride); err != nil {
 		result.ErrorMessage = err.Error()
 		result.DurationMS = time.Since(startedAt).Milliseconds()
