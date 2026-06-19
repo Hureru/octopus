@@ -656,6 +656,11 @@ func copyHeadersToUpstream(req *http.Request, c *gin.Context, channel *model.Cha
 	}
 	req.Header.Set("Authorization", "Bearer "+channelKey)
 
+	// 防止 Go 默认 User-Agent 泄露到上游
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "")
+	}
+
 	if len(channel.CustomHeader) > 0 {
 		for _, h := range channel.CustomHeader {
 			req.Header.Set(h.HeaderKey, h.HeaderValue)
