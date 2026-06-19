@@ -131,9 +131,14 @@ function makeDisableTargetKey(target: LogSiteActionTarget | null | undefined) {
 
 function formatCompactTokenCount(value: number): string {
     if (value < 1000) return value.toLocaleString();
-    if (value < 10000) return `${(value / 1000).toFixed(1)}K`;
-    if (value < 1000000) return `${Math.round(value / 1000)}K`;
-    return `${(value / 1000000).toFixed(1)}M`;
+    // 截断到指定小数位（非四舍五入）：先放大取 floor 再缩回，1e-9 修正浮点下溢。
+    const trunc = (n: number, decimals: number) => {
+        const factor = 10 ** decimals;
+        return (Math.floor(n * factor + 1e-9) / factor).toFixed(decimals);
+    };
+    if (value < 10000) return `${trunc(value / 1000, 2)}K`;
+    if (value < 1000000) return `${trunc(value / 1000, 1)}K`;
+    return `${trunc(value / 1000000, 2)}M`;
 }
 
 function hasCacheTokens(log: RelayLog) {
@@ -670,7 +675,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 </div>
                                 <WSModeBadge log={log} />
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
+                            <div className="grid grid-cols-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
                                     <Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />
                                     <span>{formatTime(log.time)}</span>
@@ -697,7 +702,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                 variant="secondary"
                                                 className="shrink-0 px-1.5 py-0 text-[11px] bg-sky-500/15 text-sky-600 dark:text-sky-400"
                                             >
-                                                R {formatCompactTokenCount(log.cache_read_tokens)}
+                                                {formatCompactTokenCount(log.cache_read_tokens)}
                                             </Badge>
                                         ) : null}
                                     </span>
