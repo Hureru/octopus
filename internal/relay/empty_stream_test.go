@@ -106,7 +106,9 @@ func TestHandleStreamResponseWithPayloadSucceeds(t *testing.T) {
 func TestPassthroughOpenAIResponsesEmptyStreamFails(t *testing.T) {
 	ra, _ := newEmptyStreamTestAttempt(t, inbound.InboundTypeOpenAIResponse, transformerModel.APIFormatOpenAIResponse, outbound.OutboundTypeOpenAIResponse)
 
-	err := ra.handleStreamResponsePassthroughOpenAIResponses(context.Background(), sseTestResponse(""))
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	err := ra.handleStreamResponsePassthroughV2(context.Background(), sseTestResponse(""), cfg)
 	if !errors.Is(err, errEmptyUpstreamStream) {
 		t.Fatalf("expected errEmptyUpstreamStream for empty passthrough stream, got %v", err)
 	}
@@ -115,7 +117,9 @@ func TestPassthroughOpenAIResponsesEmptyStreamFails(t *testing.T) {
 func TestPassthroughAnthropicEmptyStreamFails(t *testing.T) {
 	ra, _ := newEmptyStreamTestAttempt(t, inbound.InboundTypeAnthropic, transformerModel.APIFormatAnthropicMessage, outbound.OutboundTypeAnthropic)
 
-	err := ra.handleStreamResponsePassthroughAnthropic(context.Background(), sseTestResponse(""))
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	err := ra.handleStreamResponsePassthroughV2(context.Background(), sseTestResponse(""), cfg)
 	if !errors.Is(err, errEmptyUpstreamStream) {
 		t.Fatalf("expected errEmptyUpstreamStream for empty passthrough stream, got %v", err)
 	}

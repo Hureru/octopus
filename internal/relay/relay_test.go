@@ -80,8 +80,10 @@ func TestHandleStreamResponsePassthroughAnthropicPreservesRawSSE(t *testing.T) {
 		Body: io.NopCloser(bytes.NewReader([]byte(rawSSE))),
 	}
 
-	if err := ra.handleStreamResponsePassthroughAnthropic(context.Background(), response); err != nil {
-		t.Fatalf("handleStreamResponsePassthroughAnthropic() error = %v", err)
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	if err := ra.handleStreamResponsePassthroughV2(context.Background(), response, cfg); err != nil {
+		t.Fatalf("handleStreamResponsePassthroughV2() error = %v", err)
 	}
 
 	if got := recorder.Body.String(); got != rawSSE {
@@ -131,8 +133,10 @@ func TestHandleStreamResponsePassthroughOpenAIResponsesPreservesRawSSE(t *testin
 		Body: io.NopCloser(bytes.NewReader([]byte(rawSSE))),
 	}
 
-	if err := ra.handleStreamResponsePassthroughOpenAIResponses(context.Background(), response); err != nil {
-		t.Fatalf("handleStreamResponsePassthroughOpenAIResponses() error = %v", err)
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	if err := ra.handleStreamResponsePassthroughV2(context.Background(), response, cfg); err != nil {
+		t.Fatalf("handleStreamResponsePassthroughV2() error = %v", err)
 	}
 	if got := recorder.Body.String(); got != rawSSE {
 		t.Fatalf("expected raw SSE to be preserved exactly, got %q want %q", got, rawSSE)
@@ -236,7 +240,9 @@ func TestHandleStreamResponsePassthroughOpenAIResponsesClientCancelAfterTerminal
 		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
 	}
 
-	if err := ra.handleStreamResponsePassthroughOpenAIResponses(ctx, response); err != nil {
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	if err := ra.handleStreamResponsePassthroughV2(ctx, response, cfg); err != nil {
 		t.Fatalf("expected stream with terminal event to finish successfully, got error: %v", err)
 	}
 	if got := writer.buf.String(); got != rawSSE {
@@ -273,7 +279,9 @@ func TestHandleStreamResponsePassthroughOpenAIResponsesClientCancelMidStream(t *
 		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
 	}
 
-	err := ra.handleStreamResponsePassthroughOpenAIResponses(ctx, response)
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	err := ra.handleStreamResponsePassthroughV2(ctx, response, cfg)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled for mid-stream disconnect, got: %v", err)
 	}
@@ -338,7 +346,9 @@ func TestHandleStreamResponsePassthroughAnthropicClientCancelAfterTerminal(t *te
 		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
 	}
 
-	if err := ra.handleStreamResponsePassthroughAnthropic(ctx, response); err != nil {
+	pt := ra.outAdapter.(transformerModel.PassthroughCapable)
+	cfg := pt.PassthroughConfig()
+	if err := ra.handleStreamResponsePassthroughV2(ctx, response, cfg); err != nil {
 		t.Fatalf("expected stream with terminal event to finish successfully, got error: %v", err)
 	}
 	if got := writer.buf.String(); got != rawSSE {
