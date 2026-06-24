@@ -272,6 +272,11 @@ func (p *StreamProcessor) finalize() error {
 	return nil
 }
 
+// PayloadWritten returns whether any payload has been written to the client.
+func (p *StreamProcessor) PayloadWritten() bool {
+	return p.payloadWritten
+}
+
 // streamReachedTerminal checks if buffered stream contains a terminal event.
 func (p *StreamProcessor) streamReachedTerminal() bool {
 	if p.rawBuffer.Len() == 0 {

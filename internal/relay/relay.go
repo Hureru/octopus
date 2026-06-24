@@ -17,6 +17,7 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/outlierwindow"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/relay/stream"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/model"
@@ -781,7 +782,8 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 
 	// 处理响应
 	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		if err := ra.handleStreamResponse(ctx, response); err != nil {
+		// Use V2 StreamProcessor-based implementation
+		if err := ra.handleStreamResponseV2(ctx, response); err != nil {
 			return 0, err
 		}
 		return response.StatusCode, nil
@@ -1084,6 +1086,68 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			ra.getStreamWriter().Flush()
 		}
 	}
+}
+
+// handleStreamResponseV2 uses StreamProcessor for unified stream handling.
+func (ra *relayAttempt) handleStreamResponseV2(ctx context.Context, response *http.Response) error {
+	defer ra.closeFirstTokenBudget()
+
+	// Content-Type validation
+	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
+		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
+	}
+
+	// Hand off early heartbeat
+	ra.heartbeat.Hand()
+
+	// Build transform function
+	transform := func(ctx context.Context, data []byte) ([]byte, error) {
+		return ra.transformStreamData(ctx, string(data))
+	}
+
+	// Determine first token timeout
+	var firstTokenTimeout time.Duration
+	if ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
+		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
+	}
+
+	// Create StreamProcessor
+	processor := stream.NewStreamProcessor(stream.StreamConfig{
+		Source:            stream.NewSSESource(response.Body, maxSSEEventSize),
+		Transform:         transform,
+		Writer:            ra.getStreamWriter(),
+		Context:           ctx,
+		FirstTokenTimeout: firstTokenTimeout,
+		HeartbeatInterval: streamHeartbeatInterval(),
+		OnFirstToken: func() {
+			ra.metrics.SetFirstTokenTime(time.Now())
+			ra.stopFirstTokenTimer()
+		},
+	})
+
+	// Run processor
+	err := processor.Run()
+
+	// Track payload written for metrics collection
+	if processor.PayloadWritten() {
+		ra.streamPayloadWritten.Store(true)
+	}
+
+	// Handle first token timeout specifically
+	if err != nil && strings.Contains(err.Error(), "first token timeout") {
+		_ = response.Body.Close()
+		return ra.firstTokenTimeoutError()
+	}
+
+	// Check for context cancellation with first token timeout
+	if err != nil {
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
+		}
+	}
+
+	return err
 }
 
 // transformStreamData 转换流式数据
