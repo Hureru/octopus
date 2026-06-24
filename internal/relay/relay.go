@@ -601,6 +601,10 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 }
 
 func isContinuationTransportFailure(err error) bool {
+	// Check for empty stream error (both old message and new error type)
+	if errors.Is(err, stream.ErrEmptyUpstreamStream) {
+		return true
+	}
 	message := relayErrorMessage(err)
 	return isUpstreamWSConnectionBroken(err) ||
 		needsConversationRestart(message) ||
