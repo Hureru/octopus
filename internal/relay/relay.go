@@ -776,16 +776,110 @@ func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *ws
 
 // forwardViaHTTP forwards the request using traditional HTTP.
 func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
-	// Anthropic→Anthropic 同格式直通：绕过 Internal model 往返转换，避免字段丢失、
-	// 内容块重排、thinking 签名错位等在长上下文下触发上游 520 的问题。
-	if ra.shouldPassthroughAnthropic() {
-		return ra.forwardViaHTTPPassthroughAnthropic(ctx)
-	}
-	if ra.shouldPassthroughOpenAIResponses() {
-		return ra.forwardViaHTTPPassthroughOpenAIResponses(ctx)
+	// Check for passthrough capability using interface
+	if pt, ok := ra.outAdapter.(model.PassthroughCapable); ok &&
+		len(ra.rawBody) > 0 &&
+		pt.CanPassthrough(ra.internalRequest.RawAPIFormat) {
+		// Additional checks for OpenAI Responses edge cases
+		if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+			if ra.c == nil || ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
+				// Fall through to standard path
+			} else {
+				return ra.forwardViaHTTPPassthrough(ctx, pt)
+			}
+		} else {
+			return ra.forwardViaHTTPPassthrough(ctx, pt)
+		}
 	}
 
-	// 构建出站请求
+	return ra.forwardViaHTTPStandard(ctx)
+}
+
+// forwardViaHTTPPassthrough handles unified passthrough for any PassthroughCapable transformer.
+func (ra *relayAttempt) forwardViaHTTPPassthrough(ctx context.Context, pt model.PassthroughCapable) (int, error) {
+	// Build request via TransformRequestRaw
+	outboundRequest, err := pt.TransformRequestRaw(
+		ctx,
+		ra.rawBody,
+		ra.internalRequest.Model,
+		ra.channel.GetBaseUrl(),
+		ra.usedKey.ChannelKey,
+		ra.internalRequest.Query,
+	)
+	if err != nil {
+		log.Warnf("failed to create passthrough request: %v", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Apply param overrides
+	if err := ra.applyParamOverride(outboundRequest); err != nil {
+		return 0, err
+	}
+
+	// Copy headers
+	ra.copyHeaders(outboundRequest)
+
+	// Send request
+	response, err := ra.sendRequest(outboundRequest)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer response.Body.Close()
+
+	// Check status
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
+		body, _ := io.ReadAll(response.Body)
+		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
+		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+	}
+
+	// Get passthrough config
+	cfg := pt.PassthroughConfig()
+
+	// Branch: streaming vs non-streaming
+	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
+		if err := ra.handleStreamResponsePassthroughV2(ctx, response, cfg); err != nil {
+			return 0, err
+		}
+		return response.StatusCode, nil
+	}
+	return response.StatusCode, ra.handleResponsePassthrough(ctx, response, cfg)
+}
+
+// handleResponsePassthrough handles non-streaming passthrough responses.
+func (ra *relayAttempt) handleResponsePassthrough(ctx context.Context, response *http.Response, cfg model.PassthroughConfig) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	contentType := response.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	ra.c.Data(http.StatusOK, contentType, body)
+
+	// Sidecar metrics parse
+	sidecarResp := &http.Response{
+		StatusCode: response.StatusCode,
+		Header:     response.Header.Clone(),
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}
+	if internalResponse, err := ra.outAdapter.TransformResponse(ctx, sidecarResp); err == nil && internalResponse != nil {
+		ra.inAdapter.TransformResponse(ctx, internalResponse)
+		if cfg.CollectMetrics {
+			ra.collectResponse()
+		}
+	}
+
+	return nil
+}
+
+// forwardViaHTTPStandard 是 forwardViaHTTP 的原路径（直通判定失败时的兜底）。
+// 留作显式出口，避免 passthrough 失败时的递归。
+func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error) {
 	outboundRequest, err := ra.outAdapter.TransformRequest(
 		ctx,
 		ra.internalRequest,
@@ -1847,50 +1941,6 @@ func (ra *relayAttempt) forwardViaHTTPPassthroughAnthropic(ctx context.Context) 
 
 // forwardViaHTTPStandard 是 forwardViaHTTP 的原路径（直通判定失败时的兜底）。
 // 留作显式出口，避免 passthrough 失败时的递归。
-func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error) {
-	outboundRequest, err := ra.outAdapter.TransformRequest(
-		ctx,
-		ra.internalRequest,
-		ra.channel.GetBaseUrl(),
-		ra.usedKey.ChannelKey,
-	)
-	if err != nil {
-		log.Warnf("failed to create request: %v", err)
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-	if err := ra.applyParamOverride(outboundRequest); err != nil {
-		return 0, err
-	}
-	ra.copyHeaders(outboundRequest)
-
-	response, err := ra.sendRequest(outboundRequest)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
-		body, readErr := io.ReadAll(response.Body)
-		if readErr != nil {
-			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
-		}
-		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
-		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
-		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
-	}
-
-	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		if err := ra.handleStreamResponse(ctx, response); err != nil {
-			return 0, err
-		}
-		return response.StatusCode, nil
-	}
-	if err := ra.handleResponse(ctx, response); err != nil {
-		return 0, err
-	}
-	return response.StatusCode, nil
-}
 
 // handleStreamResponsePassthroughAnthropic 将上游 SSE 事件**原样**转发给客户端（不经过
 // outbound→inbound 双向转换），同时用 outbound.TransformStream 旁路解析事件供 metrics 聚合使用。
