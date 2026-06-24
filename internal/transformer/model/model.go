@@ -847,8 +847,6 @@ func (m *Message) ReasoningBlocksByProvider(provider string) []ReasoningBlock {
 }
 
 func (m *Message) ClearHelpFields() {
-	m.ReasoningContent = nil
-	m.Reasoning = nil
 	m.ReasoningSignature = nil
 	m.RedactedThinkingBlocks = nil
 	m.ReasoningBlocks = nil
