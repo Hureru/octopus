@@ -58,7 +58,7 @@ func sseTestResponse(body string) *http.Response {
 func TestHandleStreamResponseEmptyStreamFails(t *testing.T) {
 	ra, _ := newEmptyStreamTestAttempt(t, inbound.InboundTypeOpenAIChat, transformerModel.APIFormatOpenAIChatCompletion, outbound.OutboundTypeOpenAIResponse)
 
-	err := ra.handleStreamResponse(context.Background(), sseTestResponse(""))
+	err := ra.handleStreamResponseV2(context.Background(), sseTestResponse(""))
 	if !errors.Is(err, errEmptyUpstreamStream) {
 		t.Fatalf("expected errEmptyUpstreamStream for empty stream, got %v", err)
 	}
@@ -75,7 +75,7 @@ func TestHandleStreamResponseUnconvertibleEventsOnlyFails(t *testing.T) {
 		`data: {"type":"response.another_unknown_event"}`,
 		"",
 	}, "\n")
-	err := ra.handleStreamResponse(context.Background(), sseTestResponse(body))
+	err := ra.handleStreamResponseV2(context.Background(), sseTestResponse(body))
 	if !errors.Is(err, errEmptyUpstreamStream) {
 		t.Fatalf("expected errEmptyUpstreamStream for unconvertible-only stream, got %v", err)
 	}
@@ -95,7 +95,7 @@ func TestHandleStreamResponseWithPayloadSucceeds(t *testing.T) {
 		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-4o","created_at":1,"output":[],"status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
 		"",
 	}, "\n")
-	if err := ra.handleStreamResponse(context.Background(), sseTestResponse(body)); err != nil {
+	if err := ra.handleStreamResponseV2(context.Background(), sseTestResponse(body)); err != nil {
 		t.Fatalf("expected stream with payload to succeed, got %v", err)
 	}
 	if recorder.Body.Len() == 0 {

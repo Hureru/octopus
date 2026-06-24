@@ -15,6 +15,11 @@ import (
 	"github.com/tmaxmax/go-sse"
 )
 
+// ErrEmptyUpstreamStream marks 200 SSE streams that ended without forwarding
+// any payload (all events skipped by transform or no events at all).
+// Relay should fail over to another channel.
+var ErrEmptyUpstreamStream = errors.New("upstream stream ended without forwarding any payload")
+
 // StreamSource abstracts different event sources (SSE, WebSocket, raw bytes).
 type StreamSource interface {
 	// ReadEvent blocks until the next event is available or returns an error.
@@ -257,7 +262,7 @@ func (p *StreamProcessor) handleFirstTokenTimeout() error {
 // finalize completes the stream and calls OnFinish callback.
 func (p *StreamProcessor) finalize() error {
 	if !p.payloadWritten {
-		return errors.New("upstream stream ended without forwarding any payload")
+		return ErrEmptyUpstreamStream
 	}
 
 	log.Debugf("stream end (payload_written=%t)", p.payloadWritten)

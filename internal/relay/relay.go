@@ -1076,7 +1076,10 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 // detectRouteMismatchTarget trigger substrings ("text/event-stream",
 // "/responses", "/messages", "anthropic-version", "responses api"), which
 // would corrupt managed route learning.
-var errEmptyUpstreamStream = errors.New("upstream stream ended without forwarding any payload")
+//
+// Note: This is kept for backward compatibility. New code should use
+// stream.ErrEmptyUpstreamStream directly.
+var errEmptyUpstreamStream = stream.ErrEmptyUpstreamStream
 
 // handleStreamResponse 处理流式响应
 func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http.Response) error {
@@ -1328,7 +1331,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 		},
 		OnFinish: func(ctx context.Context, rawStream []byte) error {
 			if len(rawStream) == 0 {
-				return errEmptyUpstreamStream
+				return stream.ErrEmptyUpstreamStream
 			}
 			// Copy to buffer for metrics collection
 			rawStreamBuf.Write(rawStream)
