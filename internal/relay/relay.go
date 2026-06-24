@@ -327,10 +327,8 @@ func (ra *relayAttempt) attempt() attemptResult {
 
 	if fwdErr == nil {
 		// ====== 成功 ======
-		// Only collect response if NOT using passthrough (passthrough collects at stream end)
-		if !ra.shouldPassthroughAnthropic() {
-			ra.collectResponse()
-		}
+		// Passthrough handlers collect response at stream end via PassthroughConfig.CollectMetrics
+		ra.collectResponse()
 		ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
 		op.ChannelKeyUpdate(ra.usedKey)
 
@@ -431,9 +429,8 @@ func (ra *relayAttempt) forward() (int, error) {
 		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 
 		shouldTryWS := false
-		if ra.shouldPassthroughOpenAIResponses() {
-			shouldTryWS = false
-		} else if ra.internalRequest.IsOpenAIExactReplayRequest() {
+		// Passthrough is now handled by forwardViaHTTP via PassthroughCapable interface
+		if ra.internalRequest.IsOpenAIExactReplayRequest() {
 			shouldTryWS = false
 		} else if ra.c == nil {
 			wsMode := effectiveResponsesWSMode(ra.channel)
