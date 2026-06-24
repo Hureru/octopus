@@ -520,7 +520,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
 	}
 	reader := newWSUpstreamReader(pc, ra.channel.ID, ra.usedKey.ID)
-	err = ra.handleWSStreamResponse(ctx, reader)
+	err = ra.handleWSStreamResponseV2(ctx, reader)
 	if err != nil {
 		reader.CloseWithError()
 		log.Debugf("upstream WS stream failed (channel=%s, key=%d, continuation=%t, written=%t, status=%d, err=%v)",
@@ -578,7 +578,7 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 	}
 	ra.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReconnect)
 	reader := newWSUpstreamReader(redialed, ra.channel.ID, ra.usedKey.ID)
-	streamErr := ra.handleWSStreamResponse(ctx, reader)
+	streamErr := ra.handleWSStreamResponseV2(ctx, reader)
 	if streamErr != nil {
 		reader.CloseWithError()
 		log.Debugf("fresh upstream WS redial stream failed (channel=%s, key=%d, status=%d, err=%v)",
@@ -727,6 +727,51 @@ func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUp
 			writer.Flush()
 		}
 	}
+}
+
+// handleWSStreamResponseV2 uses StreamProcessor for WebSocket upstream.
+func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *wsUpstreamReader) error {
+	// Hand off early heartbeat
+	ra.heartbeat.Hand()
+
+	// Build transform function
+	transform := func(ctx context.Context, data []byte) ([]byte, error) {
+		return ra.transformStreamData(ctx, string(data))
+	}
+
+	// Determine first token timeout
+	var firstTokenTimeout time.Duration
+	if ra.firstTokenTimeOutSec > 0 {
+		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
+	}
+
+	// Create StreamProcessor
+	processor := stream.NewStreamProcessor(stream.StreamConfig{
+		Source:            stream.NewWSSource(reader),
+		Transform:         transform,
+		Writer:            ra.getStreamWriter(),
+		Context:           ctx,
+		FirstTokenTimeout: firstTokenTimeout,
+		HeartbeatInterval: streamHeartbeatInterval(),
+		OnFirstToken: func() {
+			ra.metrics.SetFirstTokenTime(time.Now())
+		},
+	})
+
+	// Run processor
+	err := processor.Run()
+
+	// Track payload written for metrics collection
+	if processor.PayloadWritten() {
+		ra.streamPayloadWritten.Store(true)
+	}
+
+	// Handle first token timeout specifically
+	if err != nil && strings.Contains(err.Error(), "first token timeout") {
+		return ra.firstTokenTimeoutError()
+	}
+
+	return err
 }
 
 // forwardViaHTTP forwards the request using traditional HTTP.

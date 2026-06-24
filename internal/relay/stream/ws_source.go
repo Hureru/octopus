@@ -8,7 +8,7 @@ import (
 // This avoids circular dependency with internal/relay package.
 type WSUpstreamReader interface {
 	ReadEvent(ctx context.Context) ([]byte, error)
-	Close()
+	Close() error
 	CloseWithError()
 	StatusCode() int
 }
