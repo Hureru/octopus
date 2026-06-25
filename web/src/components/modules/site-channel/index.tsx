@@ -1,6 +1,7 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useTranslations } from 'next-intl';
 import { motion } from 'motion/react';
 import dayjs from 'dayjs';
@@ -69,14 +70,6 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table';
 import { toast } from '@/components/common/Toast';
 import { cn, formatCount, formatMoney } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
@@ -147,9 +140,6 @@ import {
 type SiteChannelPendingJump = PendingJump & { target: SiteChannelJumpTarget };
 type UnifiedCompletionInputState = Record<number, string>;
 type UnifiedCompletionErrorState = Record<string, string>;
-
-const SITE_PANEL_INITIAL_DISPLAY_LIMIT = 15;
-const SITE_PANEL_DISPLAY_PAGE_SIZE = 30;
 
 function makeAccountKey(siteId: number, accountId: number) {
     return `${siteId}:${accountId}`;
@@ -955,12 +945,43 @@ function MoveRoutePopover({
     );
 }
 
-const STICKY_HEAD_CELL = 'sticky top-0 z-10 bg-card';
+type SiteChannelTableHandle = { scrollToModelKey: (key: string) => void };
 
-function SiteChannelTableView({
+// 10 columns: checkbox / 模型 / 分组 / 端点格式 / 来源 / Key / 状态 / 最近请求 / 渠道 / 操作.
+// Shared by the sticky header row and every body row so columns stay aligned, and
+// the explicit widths drive horizontal scroll inside the min-w-[74rem] block.
+const SITE_CHANNEL_GRID_TEMPLATE =
+    '3rem minmax(13rem,1.4fr) minmax(10rem,1fr) 9rem 6rem 5.5rem 7.5rem 9rem 6rem 7.5rem';
+
+// Match VirtualizedGrid: measure layout height (offsetHeight) rather than the
+// transformed visual height, so animations/scale don't shrink row measurements.
+const measureRowHeight = (element: Element) =>
+    element instanceof HTMLElement
+        ? element.offsetHeight
+        : element.getBoundingClientRect().height;
+
+const SiteChannelTableView = forwardRef<
+    SiteChannelTableHandle,
+    {
+        models: SiteModelView[];
+        resetKey: string;
+        allVisibleSelected: boolean;
+        pendingModelKeys: Set<string>;
+        selectedModelKeys: Set<string>;
+        compactMode: boolean;
+        tableSort: SiteChannelTableSort;
+        highlightedModelKey: string | null;
+        onToggleModelSelection: (modelKey: string, checked: boolean) => void;
+        onToggleAllVisible: (checked: boolean) => void;
+        onSortChange: (field: SiteChannelTableSortField) => void;
+        onMoveModel: (model: SiteModelView, routeType: SiteModelRouteType) => void;
+        onToggleDisabled: (model: SiteModelView) => void;
+        onDeleteManualModel: (model: SiteModelView) => void;
+        onNavigateToChannel: (channelId: number) => void;
+    }
+>(function SiteChannelTableView({
     models,
-    hasMore,
-    onReachEnd,
+    resetKey,
     allVisibleSelected,
     pendingModelKeys,
     selectedModelKeys,
@@ -974,46 +995,42 @@ function SiteChannelTableView({
     onToggleDisabled,
     onDeleteManualModel,
     onNavigateToChannel,
-    registerModelRef,
-}: {
-    models: SiteModelView[];
-    hasMore: boolean;
-    onReachEnd: () => void;
-    allVisibleSelected: boolean;
-    pendingModelKeys: Set<string>;
-    selectedModelKeys: Set<string>;
-    compactMode: boolean;
-    tableSort: SiteChannelTableSort;
-    highlightedModelKey: string | null;
-    onToggleModelSelection: (modelKey: string, checked: boolean) => void;
-    onToggleAllVisible: (checked: boolean) => void;
-    onSortChange: (field: SiteChannelTableSortField) => void;
-    onMoveModel: (model: SiteModelView, routeType: SiteModelRouteType) => void;
-    onToggleDisabled: (model: SiteModelView) => void;
-    onDeleteManualModel: (model: SiteModelView) => void;
-    onNavigateToChannel: (channelId: number) => void;
-    registerModelRef: (modelKey: string, node: HTMLElement | null) => void;
-}) {
-    const sentinelRef = useRef<HTMLDivElement | null>(null);
+}, ref) {
+    'use no memo';
 
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+
+    // eslint-disable-next-line react-hooks/incompatible-library
+    const rowVirtualizer = useVirtualizer({
+        count: models.length,
+        getScrollElement: () => scrollRef.current,
+        getItemKey: (index) => makeModelKey(models[index].group_key, models[index].model_name),
+        estimateSize: () => (compactMode ? 44 : 64),
+        measureElement: measureRowHeight,
+        overscan: 8,
+    });
+
+    useImperativeHandle(ref, () => ({
+        scrollToModelKey: (key: string) => {
+            const index = models.findIndex(
+                (model) => makeModelKey(model.group_key, model.model_name) === key,
+            );
+            if (index >= 0) {
+                rowVirtualizer.scrollToIndex(index, { align: 'center' });
+            }
+        },
+    }), [models, rowVirtualizer]);
+
+    // Scroll back to the top whenever the filter / search / quick-filter scope changes.
     useEffect(() => {
-        if (!hasMore) return;
-        const node = sentinelRef.current;
-        if (!node) return;
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting) {
-                        onReachEnd();
-                        break;
-                    }
-                }
-            },
-            { rootMargin: '200px', threshold: 0 },
-        );
-        observer.observe(node);
-        return () => observer.disconnect();
-    }, [hasMore, onReachEnd]);
+        rowVirtualizer.scrollToIndex(0);
+    }, [resetKey, rowVirtualizer]);
+
+    // Re-estimate off-screen row heights when compact mode toggles; visible rows are
+    // re-measured automatically via measureElement.
+    useEffect(() => {
+        rowVirtualizer.measure();
+    }, [compactMode, rowVirtualizer]);
 
     const renderSortHead = (field: SiteChannelTableSortField, label: string) => (
         <button
@@ -1026,35 +1043,41 @@ function SiteChannelTableView({
         </button>
     );
 
+    const cellPaddingClass = compactMode ? 'py-2' : 'py-3';
+
     return (
-        <>
-            <Table
-                containerClassName="overflow-x-auto overflow-y-visible"
-                className="min-w-[74rem]"
-            >
-                <TableHeader>
-                    <TableRow>
-                        <TableHead className={cn(STICKY_HEAD_CELL, 'w-12')}>
-                            <SelectionCheckbox
-                                checked={allVisibleSelected}
-                                disabled={models.length === 0}
-                                ariaLabel="选择当前可见模型"
-                                onCheckedChange={onToggleAllVisible}
-                            />
-                        </TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('model_name', '模型')}</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('group_name', '分组')}</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('route_type', '端点格式')}</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>来源</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>Key</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>状态</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>{renderSortHead('last_request_at', '最近请求')}</TableHead>
-                        <TableHead className={STICKY_HEAD_CELL}>渠道</TableHead>
-                        <TableHead className={cn(STICKY_HEAD_CELL, 'text-right')}>操作</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {models.map((model) => {
+        <div
+            ref={scrollRef}
+            role="table"
+            className="h-full w-full overflow-auto overscroll-contain"
+        >
+            <div className="min-w-[74rem]">
+                <div
+                    role="row"
+                    className="sticky top-0 z-10 grid items-center gap-2 border-b border-border/70 bg-card px-4 py-2.5"
+                    style={{ gridTemplateColumns: SITE_CHANNEL_GRID_TEMPLATE }}
+                >
+                    <div role="columnheader">
+                        <SelectionCheckbox
+                            checked={allVisibleSelected}
+                            disabled={models.length === 0}
+                            ariaLabel="选择当前可见模型"
+                            onCheckedChange={onToggleAllVisible}
+                        />
+                    </div>
+                    <div role="columnheader">{renderSortHead('model_name', '模型')}</div>
+                    <div role="columnheader">{renderSortHead('group_name', '分组')}</div>
+                    <div role="columnheader">{renderSortHead('route_type', '端点格式')}</div>
+                    <div role="columnheader" className="text-xs font-medium text-muted-foreground">来源</div>
+                    <div role="columnheader" className="text-xs font-medium text-muted-foreground">Key</div>
+                    <div role="columnheader" className="text-xs font-medium text-muted-foreground">状态</div>
+                    <div role="columnheader">{renderSortHead('last_request_at', '最近请求')}</div>
+                    <div role="columnheader" className="text-xs font-medium text-muted-foreground">渠道</div>
+                    <div role="columnheader" className="text-right text-xs font-medium text-muted-foreground">操作</div>
+                </div>
+                <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const model = models[virtualRow.index];
                         const modelKey = makeModelKey(model.group_key, model.model_name);
                         const { Avatar: ModelAvatar } = getModelIcon(model.model_name);
                         const isPending = pendingModelKeys.has(modelKey);
@@ -1062,32 +1085,41 @@ function SiteChannelTableView({
                         const historyCount = getModelHistoryCount(model);
 
                         return (
-                            <TableRow
+                            <div
                                 key={modelKey}
-                                ref={(node) => registerModelRef(modelKey, node)}
+                                data-index={virtualRow.index}
+                                ref={rowVirtualizer.measureElement}
+                                role="row"
                                 data-state={isSelected ? 'selected' : undefined}
                                 className={cn(
+                                    'absolute left-0 grid w-full items-center gap-2 border-b border-border/60 px-4',
+                                    cellPaddingClass,
+                                    isSelected && 'bg-muted/40',
                                     model.disabled && 'opacity-60',
                                     isPending && 'opacity-70',
                                     highlightedModelKey === modelKey && 'ring-2 ring-primary/35 ring-inset',
                                 )}
+                                style={{
+                                    top: `${virtualRow.start}px`,
+                                    gridTemplateColumns: SITE_CHANNEL_GRID_TEMPLATE,
+                                }}
                             >
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                <div role="cell" className="min-w-0">
                                     <SelectionCheckbox
                                         checked={isSelected}
                                         disabled={isPending}
                                         ariaLabel={`选择模型 ${model.model_name}`}
                                         onCheckedChange={(checked) => onToggleModelSelection(modelKey, checked)}
                                     />
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="flex min-w-0 items-center gap-2">
                                         <ModelAvatar size={18} />
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex-1">
                                             <div className="flex min-w-0 items-center gap-1.5">
-                                                <span className="truncate text-sm font-medium">{model.model_name}</span>
+                                                <span className="min-w-0 truncate text-sm font-medium">{model.model_name}</span>
                                                 {model.source === 'manual' ? (
-                                                    <Badge variant="outline" className="h-5 px-1.5 text-[10px] border-primary/30 bg-primary/10 text-primary">自定义</Badge>
+                                                    <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[10px] border-primary/30 bg-primary/10 text-primary">自定义</Badge>
                                                 ) : null}
                                             </div>
                                             {!compactMode ? (
@@ -1097,11 +1129,11 @@ function SiteChannelTableView({
                                             ) : null}
                                         </div>
                                     </div>
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="max-w-[14rem] truncate text-sm">{model.group_name || model.group_key}</div>
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="flex flex-wrap gap-1.5">
                                         <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteTypeTone(model.route_type))}>
                                             {routeTypeLabel(model.route_type)}
@@ -1125,21 +1157,21 @@ function SiteChannelTableView({
                                             </Badge>
                                         ) : null}
                                     </div>
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <Badge variant="outline" className={cn('h-6 px-2 text-[11px]', getRouteSourceTone(model.route_source))}>
                                         {routeSourceLabel(model.route_source)}
                                     </Badge>
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="text-sm">
                                         {model.enabled_key_count}/{model.key_count}
                                     </div>
                                     {!model.has_keys ? (
                                         <div className="text-[11px] text-amber-700 dark:text-amber-300">缺少 Key</div>
                                     ) : null}
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="flex flex-wrap gap-1.5">
                                         {model.disabled ? (
                                             <Badge variant="outline" className="h-6 px-2 text-[11px] border-destructive/30 bg-destructive/10 text-destructive">
@@ -1156,12 +1188,12 @@ function SiteChannelTableView({
                                             </Badge>
                                         ) : null}
                                     </div>
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="text-sm">{formatHistoryTime(getModelLastRequestAt(model))}</div>
                                     <div className="text-[11px] text-muted-foreground">{historyCount} 次记录</div>
-                                </TableCell>
-                                <TableCell className={compactMode ? 'py-2' : undefined}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     {model.projected_channel_id ? (
                                         <button
                                             type="button"
@@ -1173,8 +1205,8 @@ function SiteChannelTableView({
                                     ) : (
                                         <span className="text-sm text-muted-foreground">-</span>
                                     )}
-                                </TableCell>
-                                <TableCell className={cn('text-right', compactMode ? 'py-2' : undefined)}>
+                                </div>
+                                <div role="cell" className="min-w-0">
                                     <div className="flex justify-end gap-1">
                                         <MoveRoutePopover
                                             currentRouteType={model.route_type}
@@ -1223,16 +1255,15 @@ function SiteChannelTableView({
                                             <CircleOff className="size-4" />
                                         </button>
                                     </div>
-                                </TableCell>
-                            </TableRow>
+                                </div>
+                            </div>
                         );
                     })}
-                </TableBody>
-            </Table>
-            {hasMore ? <div ref={sentinelRef} aria-hidden className="h-px" /> : null}
-        </>
+                </div>
+            </div>
+        </div>
     );
-}
+});
 
 function SiteAccountPanel({
     siteId,
@@ -1279,8 +1310,7 @@ function SiteAccountPanel({
     const [modelSearchTerm, setModelSearchTerm] = useState('');
     const [bulkMoveTarget, setBulkMoveTarget] = useState<SiteModelRouteType>('openai_chat');
     const [deletingManualModelKey, setDeletingManualModelKey] = useState<string | null>(null);
-    const [displayLimit, setDisplayLimit] = useState(SITE_PANEL_INITIAL_DISPLAY_LIMIT);
-    const modelElementRefs = useRef<Map<string, HTMLElement>>(new Map());
+    const tableHandleRef = useRef<SiteChannelTableHandle | null>(null);
     const panelKey = `${siteId}:${account.account_id}`;
 
     const panelPreferences = useSiteChannelPanelViewStore(
@@ -1305,14 +1335,6 @@ function SiteAccountPanel({
         (error: unknown, fallback: string) => translateSiteMessage(locale, getErrorMessage(error, fallback), t),
         [locale, t],
     );
-
-    const registerModelRef = useCallback((modelKey: string, node: HTMLElement | null) => {
-        if (node) {
-            modelElementRefs.current.set(modelKey, node);
-            return;
-        }
-        modelElementRefs.current.delete(modelKey);
-    }, []);
 
     const forcedModelKey =
         jumpRequest?.target.kind === 'site-channel-model' &&
@@ -1347,7 +1369,12 @@ function SiteAccountPanel({
 
         return scopedModels.filter((model) => {
             const modelKey = makeModelKey(model.group_key, model.model_name);
-            if (forcedModelKey === modelKey) return true;
+            // Pin the jump target across the whole highlight window: forcedModelKey holds it
+            // while jumpRequest is live, then highlightedModelKey keeps it pinned after the
+            // request is cleared until the ring fades (~1.8s). Without this the row would be
+            // dropped the instant onJumpHandled clears jumpRequest when an active search /
+            // quick-filter excludes it, leaving the highlight on an unmounted row.
+            if (forcedModelKey === modelKey || highlightedModelKey === modelKey) return true;
 
             const matchesSearch =
                 !normalizedSearch ||
@@ -1358,7 +1385,7 @@ function SiteAccountPanel({
 
             return matchesQuickFilters(model, panelPreferences.quickFilters);
         });
-    }, [scopedModels, modelSearchTerm, panelPreferences.quickFilters, forcedModelKey]);
+    }, [scopedModels, modelSearchTerm, panelPreferences.quickFilters, forcedModelKey, highlightedModelKey]);
 
     const visibleModels = useMemo(
         () => sortModels(filteredModels, panelPreferences.tableSort),
@@ -1373,17 +1400,9 @@ function SiteAccountPanel({
         [visibleModels],
     );
 
-    const displayedModels = useMemo(
-        () => visibleModels.slice(0, displayLimit),
-        [visibleModels, displayLimit],
-    );
-
-    const displayLimitResetKey = `${account.account_id}|${activeFilter.kind}|${activeFilter.kind === 'group' ? activeFilter.groupKey : ''}|${modelSearchTerm}|${panelPreferences.quickFilters.join(',')}`;
-    const [prevDisplayLimitResetKey, setPrevDisplayLimitResetKey] = useState(displayLimitResetKey);
-    if (prevDisplayLimitResetKey !== displayLimitResetKey) {
-        setPrevDisplayLimitResetKey(displayLimitResetKey);
-        setDisplayLimit(SITE_PANEL_INITIAL_DISPLAY_LIMIT);
-    }
+    // Scope key for the models list; changing filter / search / quick-filters tells the
+    // virtualized table to scroll back to the top (see SiteChannelTableView resetKey).
+    const modelsScopeKey = `${account.account_id}|${activeFilter.kind}|${activeFilter.kind === 'group' ? activeFilter.groupKey : ''}|${modelSearchTerm}|${panelPreferences.quickFilters.join(',')}`;
 
     const selectedModels = useMemo(
         () => Array.from(selectedModelKeys).map((key) => visibleModelMap.get(key)).filter((model): model is SiteModelView => !!model),
@@ -1406,11 +1425,11 @@ function SiteAccountPanel({
         }
 
         const modelKey = makeModelKey(targetGroupKey, target.modelName);
-        const node = modelElementRefs.current.get(modelKey);
-        if (!node) return;
 
         const timer = window.setTimeout(() => {
-            node.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            // forcedModelKey keeps the target in visibleModels even when it doesn't match
+            // the active search / quick-filters, so the virtualizer can always find it.
+            tableHandleRef.current?.scrollToModelKey(modelKey);
             setHighlightedModelKey(modelKey);
             window.setTimeout(() => {
                 setHighlightedModelKey((current) => (current === modelKey ? null : current));
@@ -1447,10 +1466,6 @@ function SiteAccountPanel({
             checked,
         );
     }, [visibleModels, setSelectionForKeys]);
-
-    const handleLoadMoreModels = useCallback(() => {
-        setDisplayLimit((prev) => Math.min(prev + SITE_PANEL_DISPLAY_PAGE_SIZE, visibleModels.length));
-    }, [visibleModels.length]);
 
     const allVisibleSelected = useMemo(
         () =>
@@ -2568,11 +2583,11 @@ function SiteAccountPanel({
                     当前筛选和搜索条件下没有匹配模型
                 </div>
             ) : (
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden rounded-3xl border border-border/70 bg-card/70">
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border/70 bg-card/70">
                     <SiteChannelTableView
-                        models={displayedModels}
-                        hasMore={displayedModels.length < visibleModels.length}
-                        onReachEnd={handleLoadMoreModels}
+                        ref={tableHandleRef}
+                        models={visibleModels}
+                        resetKey={modelsScopeKey}
                         allVisibleSelected={allVisibleSelected}
                         pendingModelKeys={pendingModelKeys}
                         selectedModelKeys={selectedModelKeys}
@@ -2586,7 +2601,6 @@ function SiteAccountPanel({
                         onToggleDisabled={handleToggleDisabled}
                         onDeleteManualModel={handleDeleteManualModel}
                         onNavigateToChannel={onNavigateToChannel}
-                        registerModelRef={registerModelRef}
                     />
                 </div>
             )}
