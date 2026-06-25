@@ -247,6 +247,11 @@ type InternalLLMRequest struct {
 	// EnableThinking is used by Alibaba Qwen models to enable thinking/reasoning output.
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 
+	// Thinking is used by DeepSeek models to control thinking/reasoning mode.
+	// Valid values: {"type": "enabled"} or {"type": "disabled"}
+	// Ref: https://api-docs.deepseek.com/guides/thinking_mode
+	Thinking *ThinkingConfig `json:"thinking,omitempty"`
+
 	// Specifies the processing type used for serving the request.
 	ServiceTier *string `json:"service_tier,omitempty"`
 
@@ -717,6 +722,13 @@ func (s *Stop) UnmarshalJSON(data []byte) error {
 	}
 
 	return errors.New("invalid stop type")
+}
+
+// ThinkingConfig represents the thinking mode configuration for DeepSeek models.
+// Ref: https://api-docs.deepseek.com/guides/thinking_mode
+type ThinkingConfig struct {
+	// Type controls whether thinking mode is enabled. Valid values: "enabled" or "disabled".
+	Type string `json:"type,omitempty"`
 }
 
 // Message represents a message in the conversation.

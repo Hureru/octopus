@@ -45,6 +45,7 @@ type ChatCompletionsRequest struct {
 	Modalities          []string              `json:"modalities,omitempty"`
 	Audio               *ChatCompletionsAudio `json:"audio,omitempty"`
 	ReasoningEffort     string                `json:"reasoning_effort,omitempty"`
+	Thinking            *model.ThinkingConfig `json:"thinking,omitempty"`
 	ServiceTier         *string               `json:"service_tier,omitempty"`
 	Stop                *model.Stop           `json:"stop,omitempty"`
 	Stream              *bool                 `json:"stream,omitempty"`
@@ -180,6 +181,7 @@ func buildChatCompletionsRequest(request *model.InternalLLMRequest) *ChatComplet
 		Metadata:            request.Metadata,
 		Modalities:          request.Modalities,
 		ReasoningEffort:     request.ReasoningEffort,
+		Thinking:            request.Thinking,
 		ServiceTier:         request.ServiceTier,
 		Stop:                request.Stop,
 		Stream:              request.Stream,
