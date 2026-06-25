@@ -57,12 +57,12 @@ type StreamConfig struct {
 	HeartbeatInterval time.Duration // 0 to disable
 
 	// Callbacks
-	OnFirstToken func()                                              // Called when first payload written
+	OnFirstToken func()                                            // Called when first payload written
 	OnFinish     func(ctx context.Context, rawStream []byte) error // Called on stream end
 
 	// Passthrough-specific
-	BufferRawStream bool                   // Enable raw stream buffering for metrics
-	TerminalEvents  map[string]struct{}    // Protocol terminal events for early completion
+	BufferRawStream bool                // Enable raw stream buffering for metrics
+	TerminalEvents  map[string]struct{} // Protocol terminal events for early completion
 }
 
 // StreamProcessor unifies all stream handling logic.

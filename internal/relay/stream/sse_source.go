@@ -10,10 +10,10 @@ import (
 
 // SSESource wraps an SSE event stream (tmaxmax/go-sse).
 type SSESource struct {
-	reader   io.ReadCloser
-	cfg      *sse.ReadConfig
-	events   chan sseReadResult
-	done     chan struct{}
+	reader    io.ReadCloser
+	cfg       *sse.ReadConfig
+	events    chan sseReadResult
+	done      chan struct{}
 	closeOnce sync.Once
 	closeErr  error
 }

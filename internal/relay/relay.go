@@ -966,18 +966,6 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 	return response, nil
 }
 
-// errEmptyUpstreamStream marks 200 SSE streams that ended without forwarding
-// any payload to the client; they must fail the attempt instead of being
-// recorded as zero-token successes (issue #65). The message must not contain
-// detectRouteMismatchTarget trigger substrings ("text/event-stream",
-// "/responses", "/messages", "anthropic-version", "responses api"), which
-// would corrupt managed route learning.
-//
-// Note: This is kept for backward compatibility. New code should use
-// stream.ErrEmptyUpstreamStream directly.
-var errEmptyUpstreamStream = stream.ErrEmptyUpstreamStream
-
-
 // handleStreamResponseV2 uses StreamProcessor for unified stream handling.
 func (ra *relayAttempt) handleStreamResponseV2(ctx context.Context, response *http.Response) error {
 	defer ra.closeFirstTokenBudget()
