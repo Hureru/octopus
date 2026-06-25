@@ -110,7 +110,7 @@ func ProjectAccount(ctx context.Context, accountID int) ([]int, error) {
 	slices.Sort(desiredKeys)
 
 	managedChannelIDs := make([]int, 0, len(desiredKeys))
-	shouldSplit := shouldSplitByOutboundType(siteRecord)
+	shouldSplit := shouldSplitForAccount(account, siteRecord)
 	bindingChannelByKey := make(map[string]int)
 
 	for _, groupKey := range desiredKeys {
@@ -757,4 +757,52 @@ func rewriteManagedGroupItemsForAccount(ctx context.Context, siteRecord *model.S
 		return fmt.Errorf("failed to refresh group cache after rewrite: %w", err)
 	}
 	return nil
+}
+
+// shouldSplitForAccount 决定是否为账号启用渠道拆分。
+// 当检测到账号内有多种手动覆盖的 RouteType 时，自动启用拆分，
+// 使得不同端点格式的模型可以分配到不同的投影渠道。
+func shouldSplitForAccount(account *model.SiteAccount, site *model.Site) bool {
+	// 防御性检查：确保不会因 nil 输入而 panic
+	if site == nil || account == nil {
+		return false
+	}
+
+	// 优先级 1: 站点配置了协议路径覆盖，强制拆分
+	if len(site.RouteBaseURLs) > 0 {
+		return true
+	}
+
+	// 优先级 2: 平台默认策略
+	if model.ShouldSplitSiteChannelRoutes(site.Platform) {
+		return true
+	}
+
+	// 优先级 3: 检测手动覆盖是否与平台默认类型不同
+	// 只要有任何手动覆盖与默认不同，或有多种手动覆盖类型，就启用拆分
+	siteDefaultRoute := model.SiteModelRouteTypeFromOutboundType(platformOutboundType(site))
+	routeTypes := make(map[model.SiteModelRouteType]struct{})
+	for _, m := range account.Models {
+		if m.Disabled {
+			continue // 跳过禁用的模型
+		}
+		if !m.ManualOverride {
+			continue // 跳过自动推断的模型
+		}
+		rt := model.NormalizeSiteModelRouteType(m.RouteType)
+		if !model.IsProjectedSiteModelRouteType(rt) {
+			continue // 跳过非投影类型
+		}
+		// 如果手动覆盖与平台默认不同，需要拆分
+		if rt != siteDefaultRoute {
+			return true
+		}
+		routeTypes[rt] = struct{}{}
+		if len(routeTypes) > 1 {
+			return true // 检测到混合类型，提前返回
+		}
+	}
+
+	// 所有手动覆盖都与平台默认相同，不需要拆分
+	return false
 }
