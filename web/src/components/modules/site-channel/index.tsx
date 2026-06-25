@@ -1369,7 +1369,12 @@ function SiteAccountPanel({
 
         return scopedModels.filter((model) => {
             const modelKey = makeModelKey(model.group_key, model.model_name);
-            if (forcedModelKey === modelKey) return true;
+            // Pin the jump target across the whole highlight window: forcedModelKey holds it
+            // while jumpRequest is live, then highlightedModelKey keeps it pinned after the
+            // request is cleared until the ring fades (~1.8s). Without this the row would be
+            // dropped the instant onJumpHandled clears jumpRequest when an active search /
+            // quick-filter excludes it, leaving the highlight on an unmounted row.
+            if (forcedModelKey === modelKey || highlightedModelKey === modelKey) return true;
 
             const matchesSearch =
                 !normalizedSearch ||
@@ -1380,7 +1385,7 @@ function SiteAccountPanel({
 
             return matchesQuickFilters(model, panelPreferences.quickFilters);
         });
-    }, [scopedModels, modelSearchTerm, panelPreferences.quickFilters, forcedModelKey]);
+    }, [scopedModels, modelSearchTerm, panelPreferences.quickFilters, forcedModelKey, highlightedModelKey]);
 
     const visibleModels = useMemo(
         () => sortModels(filteredModels, panelPreferences.tableSort),
