@@ -253,10 +253,12 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 			site.Accounts = nil
 			remapProxyConfigID(&site.ProxyMode, &site.ProxyConfigID, proxyConfigIDMap)
 
-			normalizedURL := normalizeImportBaseURL(site.BaseURL)
-			if normalizedURL != "" {
-				site.BaseURL = normalizedURL
-			}
+			// Preserve the path in base_url (e.g. https://opencode.ai/zen/v1):
+			// native backups already hold full, canonical URLs. Only trim like
+			// Site.Normalize so dedup compares against the stored value. (Do not
+			// use normalizeImportBaseURL here — it strips the path, which is only
+			// correct for third-party imports.)
+			site.BaseURL = strings.TrimRight(strings.TrimSpace(site.BaseURL), "/")
 
 			var existing model.Site
 			if err := tx.Where("platform = ? AND base_url = ?", site.Platform, site.BaseURL).First(&existing).Error; err == nil {
