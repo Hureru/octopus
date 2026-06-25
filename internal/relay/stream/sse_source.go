@@ -3,16 +3,19 @@ package stream
 import (
 	"context"
 	"io"
+	"sync"
 
 	"github.com/tmaxmax/go-sse"
 )
 
 // SSESource wraps an SSE event stream (tmaxmax/go-sse).
 type SSESource struct {
-	reader io.ReadCloser
-	cfg    *sse.ReadConfig
-	events chan sseReadResult
-	done   chan struct{}
+	reader   io.ReadCloser
+	cfg      *sse.ReadConfig
+	events   chan sseReadResult
+	done     chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
 type sseReadResult struct {
@@ -72,9 +75,11 @@ func (s *SSESource) ReadEvent(ctx context.Context) ([]byte, error) {
 
 // Close releases the underlying reader.
 func (s *SSESource) Close() error {
-	close(s.done)
-	if s.reader != nil {
-		return s.reader.Close()
-	}
-	return nil
+	s.closeOnce.Do(func() {
+		close(s.done)
+		if s.reader != nil {
+			s.closeErr = s.reader.Close()
+		}
+	})
+	return s.closeErr
 }

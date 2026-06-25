@@ -614,6 +614,8 @@ func (ra *relayAttempt) clientRequestHeaders() http.Header {
 }
 
 func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *wsUpstreamReader) error {
+	defer ra.closeFirstTokenBudget()
+
 	// Hand off early heartbeat
 	ra.heartbeat.Hand()
 
@@ -624,7 +626,7 @@ func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *ws
 
 	// Determine first token timeout
 	var firstTokenTimeout time.Duration
-	if ra.firstTokenTimeOutSec > 0 {
+	if ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
 		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
 	}
 
@@ -638,6 +640,7 @@ func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *ws
 		HeartbeatInterval: streamHeartbeatInterval(),
 		OnFirstToken: func() {
 			ra.metrics.SetFirstTokenTime(time.Now())
+			ra.stopFirstTokenTimer()
 		},
 	})
 
@@ -652,6 +655,13 @@ func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *ws
 	// Handle first token timeout specifically
 	if err != nil && strings.Contains(err.Error(), "first token timeout") {
 		return ra.firstTokenTimeoutError()
+	}
+
+	// Check for context cancellation with first token timeout
+	if err != nil {
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
+		}
 	}
 
 	return err
@@ -701,6 +711,9 @@ func (ra *relayAttempt) forwardViaHTTPPassthrough(ctx context.Context, pt model.
 
 	// Copy headers
 	ra.copyHeaders(outboundRequest)
+	if ra.channel.Type == outbound.OutboundTypeOpenAIResponse {
+		outboundRequest.Header.Set("Content-Type", "application/json")
+	}
 
 	// Send request
 	response, err := ra.sendRequest(outboundRequest)
@@ -1240,6 +1253,9 @@ func (ra *relayAttempt) handleResponse(ctx context.Context, response *http.Respo
 // collectResponse 收集响应信息
 func (ra *relayAttempt) collectResponse() {
 	if ra == nil || ra.inAdapter == nil || ra.metrics == nil {
+		return
+	}
+	if !ra.responseCollected.CompareAndSwap(false, true) {
 		return
 	}
 	internalResponse, err := ra.inAdapter.GetInternalResponse(ra.requestContext())

@@ -166,7 +166,7 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 		if m.TransportInputTokens != nil {
 			fallbackInput = *m.TransportInputTokens
 		}
-		log.Warnw("relay.usage_missing",
+		log.Debugw("relay.usage_missing",
 			"actual_model", m.ActualModel,
 			"channel_id", channelID,
 			"channel", channelName,

@@ -114,7 +114,11 @@ func (p *StreamProcessor) Run() error {
 		}()
 	}
 
-	// Async read from source
+	// Async read from source — use a derived context so we can unblock on any exit.
+	readCtx, readCancel := context.WithCancel(p.config.Context)
+	defer readCancel()
+	defer p.config.Source.Close()
+
 	type readResult struct {
 		data []byte
 		err  error
@@ -122,10 +126,13 @@ func (p *StreamProcessor) Run() error {
 	results := make(chan readResult, 1)
 	safe.Go("stream-processor-read", func() {
 		defer close(results)
-		defer p.config.Source.Close()
 		for {
-			data, err := p.config.Source.ReadEvent(p.config.Context)
-			results <- readResult{data: data, err: err}
+			data, err := p.config.Source.ReadEvent(readCtx)
+			select {
+			case results <- readResult{data: data, err: err}:
+			case <-readCtx.Done():
+				return
+			}
 			if err != nil {
 				return
 			}
@@ -297,16 +304,9 @@ func (p *StreamProcessor) streamReachedTerminal() bool {
 		// Extract event type
 		typ := strings.TrimSpace(ev.Type)
 		if typ == "" {
-			// Try parsing from JSON data
 			data := ev.Data
 			if len(data) > 0 && data[0] == '{' {
-				// Quick check if looks like JSON
-				if idx := bytes.IndexByte([]byte(data), ':'); idx > 0 {
-					if strings.Contains(data[:idx], `"type"`) {
-						// Has type field, parse it
-						typ = extractJSONType(data)
-					}
-				}
+				typ = extractJSONType(data)
 			}
 		}
 
