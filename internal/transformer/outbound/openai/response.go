@@ -1846,3 +1846,23 @@ func convertResponsesUsage(usage *ResponsesUsage) *model.Usage {
 
 	return result
 }
+
+// CanPassthrough implements model.PassthroughCapable.
+// Returns true when the inbound format is OpenAI Responses API.
+func (o *ResponseOutbound) CanPassthrough(inboundFormat model.APIFormat) bool {
+	return inboundFormat == model.APIFormatOpenAIResponse
+}
+
+// PassthroughConfig implements model.PassthroughCapable.
+// Returns OpenAI Responses-specific passthrough settings.
+func (o *ResponseOutbound) PassthroughConfig() model.PassthroughConfig {
+	return model.PassthroughConfig{
+		TerminalEvents: map[string]struct{}{
+			"response.completed":  {},
+			"response.failed":     {},
+			"response.incomplete": {},
+			"error":               {},
+		},
+		CollectMetrics: false, // OpenAI Responses uses different metrics semantics
+	}
+}

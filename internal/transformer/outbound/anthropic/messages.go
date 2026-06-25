@@ -337,11 +337,10 @@ func (o *MessageOutbound) TransformStreamEvent(ctx context.Context, eventData []
 		if streamEvent.Message != nil {
 			o.streamID = streamEvent.Message.ID
 			o.streamModel = streamEvent.Message.Model
-			if streamEvent.Message.Usage != nil &&
-				(streamEvent.Message.Usage.InputTokens > 0 ||
-					streamEvent.Message.Usage.OutputTokens > 0 ||
-					streamEvent.Message.Usage.CacheReadInputTokens > 0 ||
-					streamEvent.Message.Usage.CacheCreationInputTokens > 0) {
+			// 上游只要返回了 usage 对象就采纳（即便全为 0），以便 message_delta
+			// 能继承 PromptTokens。部分第三方兼容商在 message_start 返回全零 usage，
+			// 之前的 >0 过滤会整体丢弃，导致后续 input 计为 0。
+			if streamEvent.Message.Usage != nil {
 				o.streamUsage = convertAnthropicUsage(streamEvent.Message.Usage)
 			}
 		}
@@ -409,7 +408,12 @@ func (o *MessageOutbound) TransformStreamEvent(ctx context.Context, eventData []
 		if streamEvent.Usage != nil {
 			usage := convertAnthropicUsage(streamEvent.Usage)
 			if o.streamUsage != nil {
-				usage.PromptTokens = o.streamUsage.PromptTokens
+				// message_delta 自身通常只带 output；input 来自 message_start。
+				// 仅当 delta 未携带 input 时才继承，避免上游把真实 input 放在
+				// message_delta 时被 message_start 的零值覆盖。
+				if usage.PromptTokens == 0 {
+					usage.PromptTokens = o.streamUsage.PromptTokens
+				}
 				if usage.CacheCreationInputTokens == 0 {
 					usage.CacheCreationInputTokens = o.streamUsage.CacheCreationInputTokens
 				}
@@ -510,11 +514,8 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 			resp.ID = o.streamID
 			resp.Model = o.streamModel
 
-			if streamEvent.Message.Usage != nil &&
-				(streamEvent.Message.Usage.InputTokens > 0 ||
-					streamEvent.Message.Usage.OutputTokens > 0 ||
-					streamEvent.Message.Usage.CacheReadInputTokens > 0 ||
-					streamEvent.Message.Usage.CacheCreationInputTokens > 0) {
+			// 上游只要返回了 usage 对象就采纳（即便全为 0），避免后续 input 计为 0。
+			if streamEvent.Message.Usage != nil {
 				o.streamUsage = convertAnthropicUsage(streamEvent.Message.Usage)
 				resp.Usage = o.streamUsage
 			}
@@ -639,7 +640,10 @@ func (o *MessageOutbound) TransformStream(ctx context.Context, eventData []byte)
 				// Carry forward cache metadata captured at message_start so the
 				// aggregate reflects all four buckets (input / output / cache_read /
 				// cache_write) rather than collapsing to input+output.
-				usage.PromptTokens = o.streamUsage.PromptTokens
+				// 仅当 delta 未自带 input 时才继承，避免真实 input 被零值覆盖。
+				if usage.PromptTokens == 0 {
+					usage.PromptTokens = o.streamUsage.PromptTokens
+				}
 				if usage.CacheCreationInputTokens == 0 {
 					usage.CacheCreationInputTokens = o.streamUsage.CacheCreationInputTokens
 				}
@@ -2024,4 +2028,22 @@ func convertAnthropicUsage(usage *anthropicModel.Usage) *model.Usage {
 		}
 	}
 	return result
+}
+
+// CanPassthrough implements model.PassthroughCapable.
+// Returns true when the inbound format is Anthropic Messages API.
+func (o *MessageOutbound) CanPassthrough(inboundFormat model.APIFormat) bool {
+	return inboundFormat == model.APIFormatAnthropicMessage
+}
+
+// PassthroughConfig implements model.PassthroughCapable.
+// Returns Anthropic-specific passthrough settings.
+func (o *MessageOutbound) PassthroughConfig() model.PassthroughConfig {
+	return model.PassthroughConfig{
+		TerminalEvents: map[string]struct{}{
+			"message_stop": {},
+			"error":        {},
+		},
+		CollectMetrics: true, // Anthropic requires full response aggregation for metrics
+	}
 }

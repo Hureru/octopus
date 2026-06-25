@@ -89,29 +89,42 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	m.InternalResponse = resp
 	m.ActualModel = actualModel
 
-	if resp == nil || resp.Usage == nil {
+	if resp == nil {
 		return
 	}
 
-	usage := resp.Usage
-	nonCachedInput := usage.BillableNonCachedInput()
-	cacheReadTokens := usage.BillableCacheReadInput()
-	cacheWriteTokens := usage.BillableCacheWriteInput()
+	inputReported := false
+	if usage := resp.Usage; usage != nil {
+		nonCachedInput := usage.BillableNonCachedInput()
+		cacheReadTokens := usage.BillableCacheReadInput()
+		cacheWriteTokens := usage.BillableCacheWriteInput()
 
-	m.BillInputTokens = intPtr(int(nonCachedInput))
-	m.CacheReadTokens = intPtr(int(cacheReadTokens))
-	m.CacheWriteTokens = intPtr(int(cacheWriteTokens))
-	m.Stats.InputToken = usage.PromptTokens
-	m.Stats.OutputToken = usage.CompletionTokens
+		m.BillInputTokens = intPtr(int(nonCachedInput))
+		m.CacheReadTokens = intPtr(int(cacheReadTokens))
+		m.CacheWriteTokens = intPtr(int(cacheWriteTokens))
+		m.Stats.InputToken = usage.PromptTokens
+		m.Stats.OutputToken = usage.CompletionTokens
+		inputReported = usage.EffectiveInputTokens() > 0
 
-	modelPrice := resolveModelPrice(actualModel)
-	if modelPrice == nil {
-		return
+		if modelPrice := resolveModelPrice(actualModel); modelPrice != nil {
+			m.Stats.InputCost = (float64(cacheReadTokens)*modelPrice.CacheRead +
+				float64(cacheWriteTokens)*modelPrice.CacheWrite +
+				float64(nonCachedInput)*modelPrice.Input) * 1e-6
+			m.Stats.OutputCost = float64(usage.CompletionTokens) * modelPrice.Output * 1e-6
+		}
 	}
-	m.Stats.InputCost = (float64(cacheReadTokens)*modelPrice.CacheRead +
-		float64(cacheWriteTokens)*modelPrice.CacheWrite +
-		float64(nonCachedInput)*modelPrice.Input) * 1e-6
-	m.Stats.OutputCost = float64(usage.CompletionTokens) * modelPrice.Output * 1e-6
+
+	// 降级：上游未上报 input（usage 缺失，或 usage 中输入侧全为 0）时，用请求侧
+	// 估算的 TransportInputTokens 兜底，使 input token/费用不为 0；output 无法从
+	// 请求侧估算，保持 0。tiktoken 统一用 o200k_base，对 Claude/Gemini 为近似值。
+	if !inputReported && m.TransportInputTokens != nil && *m.TransportInputTokens > 0 {
+		estimated := int64(*m.TransportInputTokens)
+		m.Stats.InputToken = estimated
+		m.BillInputTokens = intPtr(int(estimated))
+		if modelPrice := resolveModelPrice(actualModel); modelPrice != nil {
+			m.Stats.InputCost = float64(estimated) * modelPrice.Input * 1e-6
+		}
+	}
 }
 
 func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
@@ -145,6 +158,22 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 		updateFinalChannelUsageStats(channelID, globalStats)
 	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
+
+	// 上游未上报 usage（或输入侧全为 0）时打告警，便于定位是哪个通道缺失 usage。
+	if success && (m.InternalResponse == nil || m.InternalResponse.Usage == nil ||
+		m.InternalResponse.Usage.EffectiveInputTokens() == 0) {
+		fallbackInput := 0
+		if m.TransportInputTokens != nil {
+			fallbackInput = *m.TransportInputTokens
+		}
+		log.Debugw("relay.usage_missing",
+			"actual_model", m.ActualModel,
+			"channel_id", channelID,
+			"channel", channelName,
+			"had_usage", m.InternalResponse != nil && m.InternalResponse.Usage != nil,
+			"fallback_input_tokens", fallbackInput,
+		)
+	}
 
 	if conf.AppConfig.Log.Relay.Summary || !success {
 		fields := []interface{}{
@@ -215,12 +244,11 @@ func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, dur
 		relayLog.Ftut = int(m.FirstTokenTime.Sub(m.StartTime).Milliseconds())
 	}
 
-	// Usage
-	if m.InternalResponse != nil && m.InternalResponse.Usage != nil {
-		relayLog.InputTokens = int(m.InternalResponse.Usage.PromptTokens)
-		relayLog.OutputTokens = int(m.InternalResponse.Usage.CompletionTokens)
-		relayLog.Cost = m.Stats.InputCost + m.Stats.OutputCost
-	}
+	// Usage：统一从 Stats 读取。Stats 在 SetInternalResponse 中已由上游 usage 填充，
+	// 或在 usage 缺失时由 TransportInputTokens 降级填充，确保降级值也写入日志。
+	relayLog.InputTokens = int(m.Stats.InputToken)
+	relayLog.OutputTokens = int(m.Stats.OutputToken)
+	relayLog.Cost = m.Stats.InputCost + m.Stats.OutputCost
 	relayLog.TransportInputTokens = m.TransportInputTokens
 	relayLog.BillInputTokens = m.BillInputTokens
 	relayLog.CacheReadTokens = m.CacheReadTokens

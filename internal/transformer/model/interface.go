@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"net/http"
+	"net/url"
 )
 
 type Inbound interface {
@@ -61,3 +62,38 @@ client		-> inbound.TransformRequest(ctx, body)
         	-> inbound.TransformStream(ctx, chunk)
 															-> client
 */
+
+// PassthroughCapable is an optional interface for Outbound transformers that support
+// same-format passthrough (bypassing Internal Model round-trip).
+//
+// When both inbound and outbound use the same protocol (e.g., Anthropic→Anthropic or
+// OpenAI Responses→OpenAI Responses), passthrough preserves request byte-stability
+// (critical for prompt caching) and avoids transformation overhead.
+type PassthroughCapable interface {
+	// CanPassthrough returns true if this outbound can accept raw bytes from the given inbound format.
+	// Example: Anthropic MessageOutbound returns true when inboundFormat == APIFormatAnthropicMessage.
+	CanPassthrough(inboundFormat APIFormat) bool
+
+	// TransformRequestRaw builds an HTTP request from raw client bytes, rewriting only essential
+	// fields (model name, authorization) while preserving request structure.
+	//
+	// This method maintains byte-level stability for features like Anthropic's prompt caching,
+	// where field order and whitespace matter.
+	TransformRequestRaw(ctx context.Context, rawBody []byte, model, baseUrl, key string, query url.Values) (*http.Request, error)
+
+	// PassthroughConfig returns passthrough-specific settings for this protocol.
+	PassthroughConfig() PassthroughConfig
+}
+
+// PassthroughConfig provides protocol-specific settings for passthrough operation.
+type PassthroughConfig struct {
+	// TerminalEvents defines protocol-specific terminal event types for early completion detection.
+	// When a stream contains a terminal event (e.g., "message_stop" for Anthropic, "response.completed"
+	// for OpenAI Responses), the relay can treat client disconnection as success rather than failure.
+	TerminalEvents map[string]struct{}
+
+	// CollectMetrics defines whether to call collectResponse() after passthrough stream ends.
+	// Set to true for protocols that require full response aggregation for cost/token tracking
+	// (Anthropic), false for protocols with different metrics semantics (OpenAI Responses).
+	CollectMetrics bool
+}

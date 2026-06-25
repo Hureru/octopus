@@ -106,6 +106,7 @@ type relayRequest struct {
 	heartbeat *earlyHeartbeat
 
 	streamPayloadWritten atomic.Bool
+	responseCollected    atomic.Bool
 }
 
 // requestContext returns the request context from gin or the standalone context.

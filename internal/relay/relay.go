@@ -17,14 +17,13 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/outlierwindow"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/relay/stream"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
-	outAnthropic "github.com/bestruirui/octopus/internal/transformer/outbound/anthropic"
 	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 	"github.com/bestruirui/octopus/internal/utils/log"
-	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
 	"github.com/tmaxmax/go-sse"
 )
@@ -326,10 +325,8 @@ func (ra *relayAttempt) attempt() attemptResult {
 
 	if fwdErr == nil {
 		// ====== 成功 ======
-		// Only collect response if NOT using passthrough (passthrough collects at stream end)
-		if !ra.shouldPassthroughAnthropic() {
-			ra.collectResponse()
-		}
+		// Passthrough handlers collect response at stream end via PassthroughConfig.CollectMetrics
+		ra.collectResponse()
 		ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
 		op.ChannelKeyUpdate(ra.usedKey)
 
@@ -430,9 +427,8 @@ func (ra *relayAttempt) forward() (int, error) {
 		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 
 		shouldTryWS := false
-		if ra.shouldPassthroughOpenAIResponses() {
-			shouldTryWS = false
-		} else if ra.internalRequest.IsOpenAIExactReplayRequest() {
+		// Passthrough is now handled by forwardViaHTTP via PassthroughCapable interface
+		if ra.internalRequest.IsOpenAIExactReplayRequest() {
 			shouldTryWS = false
 		} else if ra.c == nil {
 			wsMode := effectiveResponsesWSMode(ra.channel)
@@ -519,7 +515,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
 	}
 	reader := newWSUpstreamReader(pc, ra.channel.ID, ra.usedKey.ID)
-	err = ra.handleWSStreamResponse(ctx, reader)
+	err = ra.handleWSStreamResponseV2(ctx, reader)
 	if err != nil {
 		reader.CloseWithError()
 		log.Debugf("upstream WS stream failed (channel=%s, key=%d, continuation=%t, written=%t, status=%d, err=%v)",
@@ -577,7 +573,7 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 	}
 	ra.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReconnect)
 	reader := newWSUpstreamReader(redialed, ra.channel.ID, ra.usedKey.ID)
-	streamErr := ra.handleWSStreamResponse(ctx, reader)
+	streamErr := ra.handleWSStreamResponseV2(ctx, reader)
 	if streamErr != nil {
 		reader.CloseWithError()
 		log.Debugf("fresh upstream WS redial stream failed (channel=%s, key=%d, status=%d, err=%v)",
@@ -600,6 +596,10 @@ func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []b
 }
 
 func isContinuationTransportFailure(err error) bool {
+	// Check for empty stream error (both old message and new error type)
+	if errors.Is(err, stream.ErrEmptyUpstreamStream) {
+		return true
+	}
 	message := relayErrorMessage(err)
 	return isUpstreamWSConnectionBroken(err) ||
 		needsConversationRestart(message) ||
@@ -613,133 +613,169 @@ func (ra *relayAttempt) clientRequestHeaders() http.Header {
 	return ra.c.Request.Header
 }
 
-// handleWSStreamResponse processes events from an upstream WebSocket reader.
-func (ra *relayAttempt) handleWSStreamResponse(ctx context.Context, reader *wsUpstreamReader) error {
-	// 交接早期心跳给本函数内层 ticker
+func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *wsUpstreamReader) error {
+	defer ra.closeFirstTokenBudget()
+
+	// Hand off early heartbeat
 	ra.heartbeat.Hand()
 
-	// Determine client writer
-	writer := ra.getStreamWriter()
-
-	// Set SSE response headers (for HTTP clients; WS clients handle this differently)
-	writer.Header().Set("Content-Type", "text/event-stream")
-	writer.Header().Set("Cache-Control", "no-cache")
-	writer.Header().Set("Connection", "keep-alive")
-	writer.Header().Set("X-Accel-Buffering", "no")
-
-	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
-	if heartbeatTicker != nil {
-		defer heartbeatTicker.Stop()
+	// Build transform function
+	transform := func(ctx context.Context, data []byte) ([]byte, error) {
+		return ra.transformStreamData(ctx, string(data))
 	}
 
-	firstToken := true
-	var firstTokenTimer *time.Timer
-	var firstTokenC <-chan time.Time
-	if ra.firstTokenTimeOutSec > 0 {
-		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
-		firstTokenC = firstTokenTimer.C
-		defer func() {
-			if firstTokenTimer != nil {
-				firstTokenTimer.Stop()
-			}
-		}()
+	// Determine first token timeout
+	var firstTokenTimeout time.Duration
+	if ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
+		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
 	}
 
-	// 异步读取上游 WS 事件，使主循环可以与 heartbeat/ctx/firstToken 并行 select
-	type wsReadResult struct {
-		data []byte
-		err  error
-	}
-	results := make(chan wsReadResult, 1)
-	safe.Go("relay-ws-stream-read", func() {
-		defer close(results)
-		for {
-			eventData, err := reader.ReadEvent(ctx)
-			results <- wsReadResult{data: eventData, err: err}
-			if err != nil {
-				return
-			}
-		}
+	// Create StreamProcessor
+	processor := stream.NewStreamProcessor(stream.StreamConfig{
+		Source:            stream.NewWSSource(reader),
+		Transform:         transform,
+		Writer:            ra.getStreamWriter(),
+		Context:           ctx,
+		FirstTokenTimeout: firstTokenTimeout,
+		HeartbeatInterval: streamHeartbeatInterval(),
+		OnFirstToken: func() {
+			ra.metrics.SetFirstTokenTime(time.Now())
+			ra.stopFirstTokenTimer()
+		},
 	})
 
-	for {
-		select {
-		case <-ctx.Done():
-			if isLocalRelayBudgetExceeded(ctx, contextError(ctx)) {
-				return contextError(ctx)
-			}
-			log.Debugf("client disconnected during ws stream")
-			return nil
-		case <-firstTokenC:
-			log.Warnf("first token timeout (%ds) on ws stream, switching channel", ra.firstTokenTimeOutSec)
-			return ra.firstTokenTimeoutError()
-		case <-heartbeatC:
-			if err := writeSSEHeartbeat(writer); err != nil {
-				return err
-			}
-		case r, ok := <-results:
-			if !ok {
-				if firstToken {
-					return fmt.Errorf("ws stream ended before first event")
-				}
-				log.Debugf("ws stream end")
-				return nil
-			}
-			if r.err != nil {
-				if r.err == io.EOF {
-					if firstToken {
-						return fmt.Errorf("ws stream ended before first event")
-					}
-					log.Debugf("ws stream end")
-					return nil
-				}
-				return fmt.Errorf("ws stream read error: %w", r.err)
-			}
+	// Run processor
+	err := processor.Run()
 
-			// Transform through outbound → internal → inbound pipeline
-			data, err := ra.transformStreamData(ctx, string(r.data))
-			if err != nil || len(data) == 0 {
-				continue
-			}
+	// Track payload written for metrics collection
+	if processor.PayloadWritten() {
+		ra.streamPayloadWritten.Store(true)
+	}
 
-			if firstToken {
-				ra.metrics.SetFirstTokenTime(time.Now())
-				firstToken = false
-				if firstTokenTimer != nil {
-					if !firstTokenTimer.Stop() {
-						select {
-						case <-firstTokenTimer.C:
-						default:
-						}
-					}
-					firstTokenTimer = nil
-					firstTokenC = nil
-				}
-			}
+	// Handle first token timeout specifically
+	if err != nil && strings.Contains(err.Error(), "first token timeout") {
+		return ra.firstTokenTimeoutError()
+	}
 
-			if _, writeErr := writer.Write(data); writeErr != nil {
-				return writeErr
-			}
-			if writer.Written() {
-				ra.streamPayloadWritten.Store(true)
-			}
-			writer.Flush()
+	// Check for context cancellation with first token timeout
+	if err != nil {
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
 		}
 	}
+
+	return err
 }
 
 // forwardViaHTTP forwards the request using traditional HTTP.
 func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
-	// Anthropic→Anthropic 同格式直通：绕过 Internal model 往返转换，避免字段丢失、
-	// 内容块重排、thinking 签名错位等在长上下文下触发上游 520 的问题。
-	if ra.shouldPassthroughAnthropic() {
-		return ra.forwardViaHTTPPassthroughAnthropic(ctx)
-	}
-	if ra.shouldPassthroughOpenAIResponses() {
-		return ra.forwardViaHTTPPassthroughOpenAIResponses(ctx)
+	// Check for passthrough capability using interface
+	if pt, ok := ra.outAdapter.(model.PassthroughCapable); ok &&
+		len(ra.rawBody) > 0 &&
+		pt.CanPassthrough(ra.internalRequest.RawAPIFormat) {
+		// Additional checks for OpenAI Responses edge cases
+		if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+			if ra.c == nil || ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
+				// Fall through to standard path
+			} else {
+				return ra.forwardViaHTTPPassthrough(ctx, pt)
+			}
+		} else {
+			return ra.forwardViaHTTPPassthrough(ctx, pt)
+		}
 	}
 
-	// 构建出站请求
+	return ra.forwardViaHTTPStandard(ctx)
+}
+
+// forwardViaHTTPPassthrough handles unified passthrough for any PassthroughCapable transformer.
+func (ra *relayAttempt) forwardViaHTTPPassthrough(ctx context.Context, pt model.PassthroughCapable) (int, error) {
+	// Build request via TransformRequestRaw
+	outboundRequest, err := pt.TransformRequestRaw(
+		ctx,
+		ra.rawBody,
+		ra.internalRequest.Model,
+		ra.channel.GetBaseUrl(),
+		ra.usedKey.ChannelKey,
+		ra.internalRequest.Query,
+	)
+	if err != nil {
+		log.Warnf("failed to create passthrough request: %v", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Apply param overrides
+	if err := ra.applyParamOverride(outboundRequest); err != nil {
+		return 0, err
+	}
+
+	// Copy headers
+	ra.copyHeaders(outboundRequest)
+	if ra.channel.Type == outbound.OutboundTypeOpenAIResponse {
+		outboundRequest.Header.Set("Content-Type", "application/json")
+	}
+
+	// Send request
+	response, err := ra.sendRequest(outboundRequest)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer response.Body.Close()
+
+	// Check status
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
+		body, _ := io.ReadAll(response.Body)
+		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
+		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
+		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
+	}
+
+	// Get passthrough config
+	cfg := pt.PassthroughConfig()
+
+	// Branch: streaming vs non-streaming
+	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
+		if err := ra.handleStreamResponsePassthroughV2(ctx, response, cfg); err != nil {
+			return 0, err
+		}
+		return response.StatusCode, nil
+	}
+	return response.StatusCode, ra.handleResponsePassthrough(ctx, response, cfg)
+}
+
+// handleResponsePassthrough handles non-streaming passthrough responses.
+func (ra *relayAttempt) handleResponsePassthrough(ctx context.Context, response *http.Response, cfg model.PassthroughConfig) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	contentType := response.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	ra.c.Data(http.StatusOK, contentType, body)
+
+	// Sidecar metrics parse
+	sidecarResp := &http.Response{
+		StatusCode: response.StatusCode,
+		Header:     response.Header.Clone(),
+		Body:       io.NopCloser(bytes.NewReader(body)),
+	}
+	if internalResponse, err := ra.outAdapter.TransformResponse(ctx, sidecarResp); err == nil && internalResponse != nil {
+		ra.inAdapter.TransformResponse(ctx, internalResponse)
+		if cfg.CollectMetrics {
+			ra.collectResponse()
+		}
+	}
+
+	return nil
+}
+
+// forwardViaHTTPStandard 是 forwardViaHTTP 的原路径（直通判定失败时的兜底）。
+// 留作显式出口，避免 passthrough 失败时的递归。
+func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error) {
 	outboundRequest, err := ra.outAdapter.TransformRequest(
 		ctx,
 		ra.internalRequest,
@@ -781,7 +817,8 @@ func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 
 	// 处理响应
 	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		if err := ra.handleStreamResponse(ctx, response); err != nil {
+		// Use V2 StreamProcessor-based implementation
+		if err := ra.handleStreamResponseV2(ctx, response); err != nil {
 			return 0, err
 		}
 		return response.StatusCode, nil
@@ -929,159 +966,189 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 	return response, nil
 }
 
-// errEmptyUpstreamStream marks 200 SSE streams that ended without forwarding
-// any payload to the client; they must fail the attempt instead of being
-// recorded as zero-token successes (issue #65). The message must not contain
-// detectRouteMismatchTarget trigger substrings ("text/event-stream",
-// "/responses", "/messages", "anthropic-version", "responses api"), which
-// would corrupt managed route learning.
-var errEmptyUpstreamStream = errors.New("upstream stream ended without forwarding any payload")
-
-// handleStreamResponse 处理流式响应
-func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http.Response) error {
+// handleStreamResponseV2 uses StreamProcessor for unified stream handling.
+func (ra *relayAttempt) handleStreamResponseV2(ctx context.Context, response *http.Response) error {
 	defer ra.closeFirstTokenBudget()
 
+	// Content-Type validation
 	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
 		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
 	}
 
-	// 交接早期心跳给本函数内层 ticker，避免双路 flush 竞争
+	// Hand off early heartbeat
 	ra.heartbeat.Hand()
 
-	writer := ra.getStreamWriter()
-
-	// 设置 SSE 响应头
-	writer.Header().Set("Content-Type", "text/event-stream")
-	writer.Header().Set("Cache-Control", "no-cache")
-	writer.Header().Set("Connection", "keep-alive")
-	writer.Header().Set("X-Accel-Buffering", "no")
-
-	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
-	if heartbeatTicker != nil {
-		defer heartbeatTicker.Stop()
+	// Build transform function
+	transform := func(ctx context.Context, data []byte) ([]byte, error) {
+		return ra.transformStreamData(ctx, string(data))
 	}
 
-	firstToken := true
+	// Determine first token timeout
+	var firstTokenTimeout time.Duration
+	if ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
+		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
+	}
 
-	disconnect := func() error {
-		err := contextError(ctx)
+	// Create StreamProcessor
+	processor := stream.NewStreamProcessor(stream.StreamConfig{
+		Source:            stream.NewSSESource(response.Body, maxSSEEventSize),
+		Transform:         transform,
+		Writer:            ra.getStreamWriter(),
+		Context:           ctx,
+		FirstTokenTimeout: firstTokenTimeout,
+		HeartbeatInterval: streamHeartbeatInterval(),
+		OnFirstToken: func() {
+			ra.metrics.SetFirstTokenTime(time.Now())
+			ra.stopFirstTokenTimer()
+		},
+	})
+
+	// Run processor
+	err := processor.Run()
+
+	// Track payload written for metrics collection
+	if processor.PayloadWritten() {
+		ra.streamPayloadWritten.Store(true)
+	}
+
+	// Handle first token timeout specifically
+	if err != nil && strings.Contains(err.Error(), "first token timeout") {
+		_ = response.Body.Close()
+		return ra.firstTokenTimeoutError()
+	}
+
+	// Check for context cancellation with first token timeout
+	if err != nil {
 		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
 			return timeoutErr
 		}
-		if isLocalRelayBudgetExceeded(ctx, err) {
-			return err
-		}
-		log.Debugf("client disconnected, stopping stream: written=%t first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), !firstToken, time.Since(ra.metrics.StartTime))
-		return err
 	}
 
-	type sseReadResult struct {
-		data string
-		err  error
+	return err
+}
+
+// handleStreamResponsePassthroughV2 uses StreamProcessor for unified passthrough handling.
+// Works with any PassthroughCapable transformer (Anthropic, OpenAI Responses, etc.).
+func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, response *http.Response, cfg model.PassthroughConfig) error {
+	defer ra.closeFirstTokenBudget()
+
+	// Content-Type validation
+	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
+		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
 	}
-	results := make(chan sseReadResult, 1)
-	safe.Go("relay-stream-read", func() {
-		defer close(results)
-		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
-		for ev, err := range sse.Read(response.Body, readCfg) {
-			if err != nil {
-				results <- sseReadResult{err: err}
-				return
+
+	// Hand off early heartbeat
+	ra.heartbeat.Hand()
+
+	// Determine first token timeout
+	var firstTokenTimeout time.Duration
+	if ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
+		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
+	}
+
+	// Buffer for raw stream (for metrics collection)
+	var rawStreamBuf bytes.Buffer
+
+	// Create StreamProcessor
+	processor := stream.NewStreamProcessor(stream.StreamConfig{
+		Source:            stream.NewRawSource(response.Body, 32*1024),
+		Transform:         nil, // Passthrough: no transformation
+		Writer:            ra.getStreamWriter(),
+		Context:           ctx,
+		FirstTokenTimeout: firstTokenTimeout,
+		HeartbeatInterval: streamHeartbeatInterval(),
+		BufferRawStream:   true,
+		TerminalEvents:    cfg.TerminalEvents,
+		OnFirstToken: func() {
+			ra.metrics.SetFirstTokenTime(time.Now())
+			ra.stopFirstTokenTimer()
+		},
+		OnFinish: func(ctx context.Context, rawStream []byte) error {
+			if len(rawStream) == 0 {
+				return stream.ErrEmptyUpstreamStream
 			}
-			results <- sseReadResult{data: ev.Data}
-		}
+			// Copy to buffer for metrics collection
+			rawStreamBuf.Write(rawStream)
+
+			// Collect passthrough metrics
+			ra.collectPassthroughMetrics(ctx, rawStream)
+
+			// Collect response if configured
+			if cfg.CollectMetrics {
+				ra.collectResponse()
+			}
+
+			log.Debugf("passthrough stream end")
+			return nil
+		},
 	})
 
-	var firstTokenTimer *time.Timer
-	var firstTokenC <-chan time.Time
-	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
-		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
-		firstTokenC = firstTokenTimer.C
-		defer func() {
-			if firstTokenTimer != nil {
-				firstTokenTimer.Stop()
-			}
-		}()
+	// Run processor
+	err := processor.Run()
+
+	// Track payload written for metrics collection
+	if processor.PayloadWritten() {
+		ra.streamPayloadWritten.Store(true)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			// 上游 EOF 与客户端断连可能同时发生，select 在多就绪 case 中随机选择，
-			// 此时优先消费 results 中已就绪的终止信号，避免把正常结束的流误判为断连。
-			select {
-			case r, ok := <-results:
-				if !ok || (r.err != nil && r.err == io.EOF) {
-					if !ra.streamPayloadWritten.Load() {
-						return errEmptyUpstreamStream
-					}
-					log.Debugf("stream end")
-					return nil
-				}
-				if r.err != nil {
-					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
-						return timeoutErr
-					}
-					// 断连取消沿出站请求传播、被读侧先观察到时，按断连处理而非上游流失败
-					if !errors.Is(r.err, context.Canceled) {
-						log.Warnf("failed to read event: %v", r.err)
-						return fmt.Errorf("failed to read stream event: %w", r.err)
-					}
-				}
-			default:
-			}
-			return disconnect()
-		case <-firstTokenC:
-			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
-			_ = response.Body.Close()
-			return ra.firstTokenTimeoutError()
-		case <-heartbeatC:
-			if err := writeSSEHeartbeat(writer); err != nil {
-				return err
-			}
-		case r, ok := <-results:
-			if !ok {
-				if !ra.streamPayloadWritten.Load() {
-					return errEmptyUpstreamStream
-				}
-				log.Debugf("stream end")
-				return nil
-			}
-			if r.err != nil {
-				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
-					return timeoutErr
-				}
-				if errors.Is(r.err, context.Canceled) && contextError(ctx) != nil {
-					return disconnect()
-				}
-				log.Warnf("failed to read event: %v", r.err)
-				return fmt.Errorf("failed to read stream event: %w", r.err)
-			}
+	// Handle first token timeout specifically
+	if err != nil && strings.Contains(err.Error(), "first token timeout") {
+		_ = response.Body.Close()
+		return ra.firstTokenTimeoutError()
+	}
 
-			data, err := ra.transformStreamData(ctx, r.data)
-			if err != nil || len(data) == 0 {
-				continue
-			}
-			if firstToken {
-				ra.metrics.SetFirstTokenTime(time.Now())
-				firstToken = false
-				ra.stopFirstTokenTimer()
-				if firstTokenTimer != nil {
-					if !firstTokenTimer.Stop() {
-						select {
-						case <-firstTokenTimer.C:
-						default:
-						}
-					}
-					firstTokenTimer = nil
-					firstTokenC = nil
-				}
-			}
+	// Check for context cancellation with first token timeout
+	if err != nil {
+		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
+			return timeoutErr
+		}
+	}
 
-			ra.streamPayloadWritten.Store(true)
-			ra.getStreamWriter().Write(data)
-			ra.getStreamWriter().Flush()
+	// On disconnect with partial data, still try to collect metrics
+	if err != nil && errors.Is(err, context.Canceled) && rawStreamBuf.Len() > 0 {
+		ra.collectPassthroughMetrics(context.Background(), rawStreamBuf.Bytes())
+		if cfg.CollectMetrics {
+			ra.collectResponse()
+		}
+	}
+
+	return err
+}
+
+// collectPassthroughMetrics parses raw SSE stream for metrics aggregation without mutating response.
+func (ra *relayAttempt) collectPassthroughMetrics(ctx context.Context, rawStream []byte) {
+	if len(rawStream) == 0 {
+		return
+	}
+
+	// Try stream event adapter first (preferred)
+	outEventAdapter, outOk := ra.outAdapter.(model.OutboundStreamEventTransformer)
+	inEventAdapter, inOk := ra.inAdapter.(model.InboundStreamEventTransformer)
+	if outOk && inOk {
+		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+		for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+			if err != nil {
+				log.Debugf("passthrough metrics parse skipped: %v", err)
+				return
+			}
+			if events, terr := outEventAdapter.TransformStreamEvent(ctx, []byte(ev.Data)); terr == nil && len(events) > 0 {
+				_, _ = inEventAdapter.TransformStreamEvents(ctx, events)
+			}
+		}
+		return
+	}
+
+	// Fallback to traditional stream transformer
+	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
+	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
+		if err != nil {
+			log.Debugf("passthrough metrics parse skipped: %v", err)
+			return
+		}
+		if chunk, terr := ra.outAdapter.TransformStream(ctx, []byte(ev.Data)); terr == nil && chunk != nil {
+			_, _ = ra.inAdapter.TransformStream(ctx, chunk)
 		}
 	}
 }
@@ -1176,6 +1243,9 @@ func (ra *relayAttempt) collectResponse() {
 	if ra == nil || ra.inAdapter == nil || ra.metrics == nil {
 		return
 	}
+	if !ra.responseCollected.CompareAndSwap(false, true) {
+		return
+	}
 	internalResponse, err := ra.inAdapter.GetInternalResponse(ra.requestContext())
 	if err != nil {
 		log.Debugf("collectResponse: failed to get internal response: %v", err)
@@ -1191,261 +1261,6 @@ func (ra *relayAttempt) collectResponse() {
 		actualModel = strings.TrimSpace(ra.internalRequest.Model)
 	}
 	ra.metrics.SetInternalResponse(internalResponse, actualModel)
-}
-
-// shouldPassthroughAnthropic 判定是否走 Anthropic→Anthropic 原生直通路径。
-// 条件：客户端以 Anthropic Messages 格式到达、通道出站类型为 Anthropic、原始 body 已保留。
-func (ra *relayAttempt) shouldPassthroughAnthropic() bool {
-	if ra == nil || ra.internalRequest == nil || ra.channel == nil {
-		return false
-	}
-	if len(ra.rawBody) == 0 {
-		return false
-	}
-	if ra.internalRequest.RawAPIFormat != model.APIFormatAnthropicMessage {
-		return false
-	}
-	return ra.channel.Type == outbound.OutboundTypeAnthropic
-}
-
-// shouldPassthroughOpenAIResponses 判定是否走 OpenAI Responses→OpenAI Responses 原生直通路径。
-// 同协议 HTTP/SSE 请求默认直通，避免 Responses 原生事件、未知字段或输出项在内部模型往返时被重组。
-func (ra *relayAttempt) shouldPassthroughOpenAIResponses() bool {
-	if ra == nil || ra.internalRequest == nil || ra.channel == nil {
-		return false
-	}
-	if ra.c == nil {
-		return false
-	}
-	if len(ra.rawBody) == 0 {
-		return false
-	}
-	if ra.internalRequest.RawAPIFormat != model.APIFormatOpenAIResponse {
-		return false
-	}
-	if ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
-		return false
-	}
-	return ra.channel.Type == outbound.OutboundTypeOpenAIResponse
-}
-
-// forwardViaHTTPPassthroughOpenAIResponses 直通 OpenAI Responses 原始 JSON/SSE。
-// 客户端原始 body 只改顶层 model 后发上游，响应原样写回客户端；旁路解析仅用于 metrics。
-func (ra *relayAttempt) forwardViaHTTPPassthroughOpenAIResponses(ctx context.Context) (int, error) {
-	openaiOut, ok := ra.outAdapter.(*openaiOutbound.ResponseOutbound)
-	if !ok {
-		return ra.forwardViaHTTPStandard(ctx)
-	}
-
-	outboundRequest, err := openaiOut.TransformRequestRaw(
-		ctx,
-		ra.rawBody,
-		ra.internalRequest.Model,
-		ra.channel.GetBaseUrl(),
-		ra.usedKey.ChannelKey,
-		ra.internalRequest.Query,
-	)
-	if err != nil {
-		log.Warnf("failed to create passthrough request: %v", err)
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if err := ra.applyParamOverride(outboundRequest); err != nil {
-		return 0, err
-	}
-	ra.copyHeaders(outboundRequest)
-	outboundRequest.Header.Set("Content-Type", "application/json")
-
-	response, err := ra.sendRequest(outboundRequest)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
-		body, readErr := io.ReadAll(response.Body)
-		if readErr != nil {
-			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
-		}
-		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
-		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
-		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
-	}
-
-	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		if err := ra.handleStreamResponsePassthroughOpenAIResponses(ctx, response); err != nil {
-			return 0, err
-		}
-		return response.StatusCode, nil
-	}
-	if err := ra.handleResponsePassthroughOpenAIResponses(ctx, response); err != nil {
-		return 0, err
-	}
-	return response.StatusCode, nil
-}
-
-func (ra *relayAttempt) handleStreamResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
-	defer ra.closeFirstTokenBudget()
-
-	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
-		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
-	}
-
-	// 交接早期心跳给本函数内层 ticker
-	ra.heartbeat.Hand()
-
-	writer := ra.getStreamWriter()
-	writer.Header().Set("Content-Type", "text/event-stream")
-	writer.Header().Set("Cache-Control", "no-cache")
-	writer.Header().Set("Connection", "keep-alive")
-	writer.Header().Set("X-Accel-Buffering", "no")
-
-	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
-	if heartbeatTicker != nil {
-		defer heartbeatTicker.Stop()
-	}
-
-	firstToken := true
-	type rawReadResult struct {
-		chunk []byte
-		err   error
-	}
-	results := make(chan rawReadResult, 1)
-	safe.Go("relay-stream-read", func() {
-		defer close(results)
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := response.Body.Read(buf)
-			if n > 0 {
-				chunk := append([]byte(nil), buf[:n]...)
-				results <- rawReadResult{chunk: chunk}
-			}
-			if err != nil {
-				results <- rawReadResult{err: err}
-				return
-			}
-		}
-	})
-	var rawStream bytes.Buffer
-
-	finishStream := func(c context.Context) error {
-		if !ra.streamPayloadWritten.Load() {
-			return errEmptyUpstreamStream
-		}
-		ra.collectOpenAIResponsesPassthroughMetrics(c, rawStream.Bytes())
-		log.Debugf("stream end")
-		return nil
-	}
-
-	disconnect := func() error {
-		err := contextError(ctx)
-		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
-			return timeoutErr
-		}
-		if isLocalRelayBudgetExceeded(ctx, err) {
-			return err
-		}
-		// 客户端收到终态事件后立即断连是 SDK 标准行为，此时上游 EOF 可能尚未到达；
-		// 缓存流已含终态事件说明响应已完整送达，按正常结束处理，避免误记失败且丢失 usage。
-		if streamReachedTerminalEvent(rawStream.Bytes(), responsesPassthroughTerminalEvents) {
-			return finishStream(context.Background())
-		}
-		log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
-		if rawStream.Len() > 0 {
-			ra.collectOpenAIResponsesPassthroughMetrics(context.Background(), rawStream.Bytes())
-		}
-		return err
-	}
-
-	var firstTokenTimer *time.Timer
-	var firstTokenC <-chan time.Time
-	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
-		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
-		firstTokenC = firstTokenTimer.C
-		defer func() {
-			if firstTokenTimer != nil {
-				firstTokenTimer.Stop()
-			}
-		}()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			// 上游 EOF 与客户端断连可能同时发生，select 在多就绪 case 中随机选择，
-			// 此时优先消费 results 中已就绪的终止信号，避免把正常结束的流误判为断连。
-			select {
-			case r, ok := <-results:
-				if !ok || (r.err != nil && r.err == io.EOF) {
-					return finishStream(context.Background())
-				}
-				if r.err != nil {
-					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
-						return timeoutErr
-					}
-					// 断连取消沿出站请求传播、被读侧先观察到时，按断连处理而非上游流失败
-					if !errors.Is(r.err, context.Canceled) {
-						log.Warnf("failed to read event: %v", r.err)
-						return fmt.Errorf("failed to read stream event: %w", r.err)
-					}
-				}
-			default:
-			}
-			return disconnect()
-		case <-firstTokenC:
-			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
-			_ = response.Body.Close()
-			return ra.firstTokenTimeoutError()
-		case <-heartbeatC:
-			if err := writeSSEHeartbeat(writer); err != nil {
-				return err
-			}
-		case r, ok := <-results:
-			if !ok {
-				return finishStream(ctx)
-			}
-			if r.err != nil {
-				if r.err == io.EOF {
-					return finishStream(ctx)
-				}
-				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
-					return timeoutErr
-				}
-				if errors.Is(r.err, context.Canceled) && contextError(ctx) != nil {
-					return disconnect()
-				}
-				log.Warnf("failed to read event: %v", r.err)
-				return fmt.Errorf("failed to read stream event: %w", r.err)
-			}
-			if len(r.chunk) == 0 {
-				continue
-			}
-			if _, werr := writer.Write(r.chunk); werr != nil {
-				return werr
-			}
-			ra.streamPayloadWritten.Store(true)
-			_, _ = rawStream.Write(r.chunk)
-			writer.Flush()
-
-			if firstToken {
-				ra.metrics.SetFirstTokenTime(time.Now())
-				firstToken = false
-				ra.stopFirstTokenTimer()
-				if firstTokenTimer != nil {
-					if !firstTokenTimer.Stop() {
-						select {
-						case <-firstTokenTimer.C:
-						default:
-						}
-					}
-					firstTokenTimer = nil
-					firstTokenC = nil
-				}
-			}
-		}
-	}
 }
 
 func (ra *relayAttempt) collectOpenAIResponsesPassthroughMetrics(ctx context.Context, rawStream []byte) {
@@ -1522,307 +1337,8 @@ func streamReachedTerminalEvent(rawStream []byte, terminalTypes map[string]struc
 	return false
 }
 
-func (ra *relayAttempt) handleResponsePassthroughOpenAIResponses(ctx context.Context, response *http.Response) error {
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	contentType := response.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/json"
-	}
-	ra.c.Data(response.StatusCode, contentType, body)
-
-	sidecarResp := &http.Response{
-		StatusCode: response.StatusCode,
-		Header:     response.Header.Clone(),
-		Body:       io.NopCloser(bytes.NewReader(body)),
-	}
-	if internalResponse, terr := ra.outAdapter.TransformResponse(ctx, sidecarResp); terr == nil && internalResponse != nil {
-		_, _ = ra.inAdapter.TransformResponse(ctx, internalResponse)
-	}
-	return nil
-}
-
-// forwardViaHTTPPassthroughAnthropic 直通路径：客户端原始 body 原样转发；上游响应原样写回客户端；
-// 旁路解析 SSE/JSON 仅用于 metrics（token 统计、计费），不参与写回客户端的字节流。
-func (ra *relayAttempt) forwardViaHTTPPassthroughAnthropic(ctx context.Context) (int, error) {
-	anthropicOut, ok := ra.outAdapter.(*outAnthropic.MessageOutbound)
-	if !ok {
-		// 通道注册异常，回退到标准路径
-		return ra.forwardViaHTTPStandard(ctx)
-	}
-
-	outboundRequest, err := anthropicOut.TransformRequestRaw(
-		ctx,
-		ra.rawBody,
-		ra.internalRequest.Model,
-		ra.channel.GetBaseUrl(),
-		ra.usedKey.ChannelKey,
-		ra.internalRequest.Query,
-	)
-	if err != nil {
-		log.Warnf("failed to create passthrough request: %v", err)
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// 记录实际上行 payload；直通路径会在这里把顶层 model 改写成命中的上游模型。
-	if err := ra.applyParamOverride(outboundRequest); err != nil {
-		return 0, err
-	}
-
-	// 复制客户端请求头（hop-by-hop 过滤保证 x-api-key/authorization/host/content-length
-	// /accept-encoding 不会覆盖出站设置的关键头；anthropic-beta / anthropic-version /
-	// user-agent / x-stainless-* 等原样透传）
-	ra.copyHeaders(outboundRequest)
-
-	// 发送请求
-	response, err := ra.sendRequest(outboundRequest)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
-		body, readErr := io.ReadAll(response.Body)
-		if readErr != nil {
-			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
-		}
-		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
-		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
-		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
-	}
-
-	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		if err := ra.handleStreamResponsePassthroughAnthropic(ctx, response); err != nil {
-			return 0, err
-		}
-		return response.StatusCode, nil
-	}
-	if err := ra.handleResponsePassthroughAnthropic(ctx, response); err != nil {
-		return 0, err
-	}
-	return response.StatusCode, nil
-}
-
 // forwardViaHTTPStandard 是 forwardViaHTTP 的原路径（直通判定失败时的兜底）。
 // 留作显式出口，避免 passthrough 失败时的递归。
-func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error) {
-	outboundRequest, err := ra.outAdapter.TransformRequest(
-		ctx,
-		ra.internalRequest,
-		ra.channel.GetBaseUrl(),
-		ra.usedKey.ChannelKey,
-	)
-	if err != nil {
-		log.Warnf("failed to create request: %v", err)
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
-	if err := ra.applyParamOverride(outboundRequest); err != nil {
-		return 0, err
-	}
-	ra.copyHeaders(outboundRequest)
-
-	response, err := ra.sendRequest(outboundRequest)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		ra.retryAfter = parseRetryAfter(response.Header.Get("Retry-After"))
-		body, readErr := io.ReadAll(response.Body)
-		if readErr != nil {
-			return response.StatusCode, fmt.Errorf("failed to read response body: %w", readErr)
-		}
-		statusCode := normalizeUpstreamStatusCode(response.StatusCode, string(body))
-		log.Warnf("upstream error from channel %s: status=%d, body=%s", ra.channel.Name, response.StatusCode, string(body))
-		return statusCode, fmt.Errorf("upstream error: %d: %s", response.StatusCode, string(body))
-	}
-
-	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		if err := ra.handleStreamResponse(ctx, response); err != nil {
-			return 0, err
-		}
-		return response.StatusCode, nil
-	}
-	if err := ra.handleResponse(ctx, response); err != nil {
-		return 0, err
-	}
-	return response.StatusCode, nil
-}
-
-// handleStreamResponsePassthroughAnthropic 将上游 SSE 事件**原样**转发给客户端（不经过
-// outbound→inbound 双向转换），同时用 outbound.TransformStream 旁路解析事件供 metrics 聚合使用。
-func (ra *relayAttempt) handleStreamResponsePassthroughAnthropic(ctx context.Context, response *http.Response) error {
-	defer ra.closeFirstTokenBudget()
-
-	if ct := response.Header.Get("Content-Type"); ct != "" && !strings.Contains(strings.ToLower(ct), "text/event-stream") {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
-		return fmt.Errorf("upstream returned non-SSE content-type %q for stream request: %s", ct, string(body))
-	}
-
-	// 交接早期心跳给本函数内层 ticker
-	ra.heartbeat.Hand()
-
-	writer := ra.getStreamWriter()
-
-	// 设置 SSE 响应头
-	writer.Header().Set("Content-Type", "text/event-stream")
-	writer.Header().Set("Cache-Control", "no-cache")
-	writer.Header().Set("Connection", "keep-alive")
-	writer.Header().Set("X-Accel-Buffering", "no")
-
-	heartbeatTicker, heartbeatC := newStreamHeartbeatTicker()
-	if heartbeatTicker != nil {
-		defer heartbeatTicker.Stop()
-	}
-
-	firstToken := true
-	type rawReadResult struct {
-		chunk []byte
-		err   error
-	}
-	results := make(chan rawReadResult, 1)
-	safe.Go("relay-stream-read", func() {
-		defer close(results)
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := response.Body.Read(buf)
-			if n > 0 {
-				chunk := append([]byte(nil), buf[:n]...)
-				results <- rawReadResult{chunk: chunk}
-			}
-			if err != nil {
-				results <- rawReadResult{err: err}
-				return
-			}
-		}
-	})
-	var rawStream bytes.Buffer
-
-	finishStream := func(c context.Context) error {
-		if !ra.streamPayloadWritten.Load() {
-			return errEmptyUpstreamStream
-		}
-		ra.collectAnthropicPassthroughMetrics(c, rawStream.Bytes())
-		ra.collectResponse()
-		log.Debugf("stream end")
-		return nil
-	}
-
-	disconnect := func() error {
-		err := contextError(ctx)
-		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
-			return timeoutErr
-		}
-		if isLocalRelayBudgetExceeded(ctx, err) {
-			return err
-		}
-		// 客户端收到终态事件后立即断连是 SDK 标准行为，此时上游 EOF 可能尚未到达；
-		// 缓存流已含终态事件说明响应已完整送达，按正常结束处理，避免误记失败且丢失 usage。
-		if streamReachedTerminalEvent(rawStream.Bytes(), anthropicPassthroughTerminalEvents) {
-			return finishStream(context.Background())
-		}
-		log.Debugf("client disconnected, stopping stream: written=%t raw_bytes=%d first_token_seen=%t elapsed=%s", ra.streamPayloadWritten.Load(), rawStream.Len(), !firstToken, time.Since(ra.metrics.StartTime))
-		if rawStream.Len() > 0 {
-			ra.collectAnthropicPassthroughMetrics(context.Background(), rawStream.Bytes())
-			ra.collectResponse()
-		}
-		return err
-	}
-
-	var firstTokenTimer *time.Timer
-	var firstTokenC <-chan time.Time
-	if firstToken && ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
-		firstTokenTimer = time.NewTimer(time.Duration(ra.firstTokenTimeOutSec) * time.Second)
-		firstTokenC = firstTokenTimer.C
-		defer func() {
-			if firstTokenTimer != nil {
-				firstTokenTimer.Stop()
-			}
-		}()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			// 上游 EOF 与客户端断连可能同时发生，select 在多就绪 case 中随机选择，
-			// 此时优先消费 results 中已就绪的终止信号，避免把正常结束的流误判为断连。
-			select {
-			case r, ok := <-results:
-				if !ok || (r.err != nil && r.err == io.EOF) {
-					return finishStream(context.Background())
-				}
-				if r.err != nil {
-					if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
-						return timeoutErr
-					}
-					// 断连取消沿出站请求传播、被读侧先观察到时，按断连处理而非上游流失败
-					if !errors.Is(r.err, context.Canceled) {
-						log.Warnf("failed to read event: %v", r.err)
-						return fmt.Errorf("failed to read stream event: %w", r.err)
-					}
-				}
-			default:
-			}
-			return disconnect()
-		case <-firstTokenC:
-			log.Warnf("first token timeout (%ds), switching channel", ra.firstTokenTimeOutSec)
-			_ = response.Body.Close()
-			return ra.firstTokenTimeoutError()
-		case <-heartbeatC:
-			if err := writeSSEHeartbeat(writer); err != nil {
-				return err
-			}
-		case r, ok := <-results:
-			if !ok {
-				return finishStream(ctx)
-			}
-			if r.err != nil {
-				if r.err == io.EOF {
-					return finishStream(ctx)
-				}
-				if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, r.err); timeoutErr != nil {
-					return timeoutErr
-				}
-				if errors.Is(r.err, context.Canceled) && contextError(ctx) != nil {
-					return disconnect()
-				}
-				log.Warnf("failed to read event: %v", r.err)
-				return fmt.Errorf("failed to read stream event: %w", r.err)
-			}
-
-			if len(r.chunk) == 0 {
-				continue
-			}
-			if _, werr := writer.Write(r.chunk); werr != nil {
-				return werr
-			}
-			ra.streamPayloadWritten.Store(true)
-			_, _ = rawStream.Write(r.chunk)
-			writer.Flush()
-
-			if firstToken {
-				ra.metrics.SetFirstTokenTime(time.Now())
-				firstToken = false
-				ra.stopFirstTokenTimer()
-				if firstTokenTimer != nil {
-					if !firstTokenTimer.Stop() {
-						select {
-						case <-firstTokenTimer.C:
-						default:
-						}
-					}
-					firstTokenTimer = nil
-					firstTokenC = nil
-				}
-			}
-		}
-	}
-}
 
 func (ra *relayAttempt) collectAnthropicPassthroughMetrics(ctx context.Context, rawStream []byte) {
 	if len(rawStream) == 0 {
@@ -1853,31 +1369,4 @@ func (ra *relayAttempt) collectAnthropicPassthroughMetrics(ctx context.Context, 
 			_, _ = ra.inAdapter.TransformStream(ctx, internalStream)
 		}
 	}
-}
-
-// handleResponsePassthroughAnthropic 非流式直通：upstream JSON 原样写回客户端；旁路解析用于 metrics。
-func (ra *relayAttempt) handleResponsePassthroughAnthropic(ctx context.Context, response *http.Response) error {
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	contentType := response.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/json"
-	}
-	ra.c.Data(http.StatusOK, contentType, body)
-
-	// 旁路解析：复用 outbound.TransformResponse → inbound.TransformResponse 的 storedResponse
-	// 写入，以便 collectResponse 收集 usage 与成本。
-	sidecarResp := &http.Response{
-		StatusCode: response.StatusCode,
-		Header:     response.Header.Clone(),
-		Body:       io.NopCloser(bytes.NewReader(body)),
-	}
-	if internalResponse, terr := ra.outAdapter.TransformResponse(ctx, sidecarResp); terr == nil && internalResponse != nil {
-		_, _ = ra.inAdapter.TransformResponse(ctx, internalResponse)
-		ra.collectResponse()
-	}
-	return nil
 }
