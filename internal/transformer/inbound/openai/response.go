@@ -952,7 +952,8 @@ type ResponsesItem struct {
 	Arguments string `json:"arguments,omitempty"`
 
 	// Function call output
-	Output *ResponsesInput `json:"output,omitempty"`
+	Output        *ResponsesInput `json:"output,omitempty"`
+	ItemReference *string         `json:"item_reference,omitempty"`
 
 	// Image generation fields
 	Result       *string `json:"result,omitempty"`
