@@ -95,8 +95,19 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 					apiKeyID, group.ID, requestModel, prevID, responsesReplayState.ChannelID, responsesReplayState.ChannelKeyID)
 				// 转换请求为自包含形式（移除 previous_response_id，合并历史）
 				if replayed := responsesReplayState.BuildReplayRequest(internalRequest); replayed != nil {
-					internalRequest = replayed
-					log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
+					// 验证历史合并是否成功（必须有 RawInputItems）
+					if len(replayed.OpenAIRawInputItems()) > 0 {
+						internalRequest = replayed
+						log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
+					} else {
+						log.Warnf("HTTP replay history merge failed (apikey=%d, group=%d, model=%s, previous_response_id=%s), keeping original request",
+							apiKeyID, group.ID, requestModel, prevID)
+						responsesReplayState = nil // 放弃 replay，使用原始请求
+					}
+				} else {
+					log.Warnf("HTTP replay request transformation failed (apikey=%d, group=%d, model=%s, previous_response_id=%s)",
+						apiKeyID, group.ID, requestModel, prevID)
+					responsesReplayState = nil
 				}
 			} else {
 				log.Debugf("no HTTP replay state found (apikey=%d, group=%d, model=%s, previous_response_id=%s)",
@@ -295,21 +306,35 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 			// === HTTP Replay 状态保存 ===
 			// 成功后，如果是 OpenAI Responses HTTP 请求，保存 replay 状态供后续续接
+			// 注意：exact replay 请求成功后也需要保存新状态，否则只能续接一轮
 			if inboundType == inbound.InboundTypeOpenAIResponse &&
-				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse &&
-				!req.internalRequest.IsOpenAIExactReplayRequest() {
-				if internalResponse, err := inAdapter.GetInternalResponse(c.Request.Context()); err == nil && internalResponse != nil {
-					newState := &wsConversationState{
-						RequestModel: requestModel,
-						ChannelID:    channel.ID,
-						ChannelKeyID: usedKey.ID,
+				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+				internalResponse, err := inAdapter.GetInternalResponse(c.Request.Context())
+				if err != nil {
+					log.Debugf("failed to get internal response for replay state save: %v", err)
+				} else if internalResponse != nil {
+					// 如果是 exact replay 请求，基于已有状态继续累积
+					var newState *wsConversationState
+					if req.internalRequest.IsOpenAIExactReplayRequest() && responsesReplayState != nil {
+						newState = cloneWSConversationState(responsesReplayState)
+						if newState != nil {
+							newState.ChannelID = channel.ID
+							newState.ChannelKeyID = usedKey.ID
+						}
+					}
+					if newState == nil {
+						newState = &wsConversationState{
+							RequestModel: requestModel,
+							ChannelID:    channel.ID,
+							ChannelKeyID: usedKey.ID,
+						}
 					}
 					newState.ApplySuccessfulTurn(req.internalRequest, internalResponse)
 					if newState.LastResponseID != "" {
 						ttl := wsConversationStateTTL(group.SessionKeepTime)
 						storeResponsesReplayState(apiKeyID, group.ID, requestModel, newState, ttl)
-						log.Debugf("saved HTTP replay state (apikey=%d, group=%d, model=%s, response_id=%s, channel=%d, key=%d, ttl=%v)",
-							apiKeyID, group.ID, requestModel, newState.LastResponseID, channel.ID, usedKey.ID, ttl)
+						log.Debugf("saved HTTP replay state (apikey=%d, group=%d, model=%s, response_id=%s, channel=%d, key=%d, ttl=%v, is_replay=%t)",
+							apiKeyID, group.ID, requestModel, newState.LastResponseID, channel.ID, usedKey.ID, ttl, req.internalRequest.IsOpenAIExactReplayRequest())
 					}
 				}
 			}
