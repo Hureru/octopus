@@ -83,8 +83,38 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		return
 	}
 
+	// === HTTP Replay 机制 ===
+	// 当 HTTP 请求携带 previous_response_id 时，尝试从本地加载上一次成功的 replay 状态，
+	// 优先路由到同一渠道/key，并将请求转为自包含形式（合并历史，移除 previous_response_id）。
+	var responsesReplayState *wsConversationState
+	if inboundType == inbound.InboundTypeOpenAIResponse && internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+		if prevID := internalRequest.OpenAIPreviousResponseID(); prevID != "" {
+			responsesReplayState = resolveResponsesReplayState(apiKeyID, group.ID, requestModel, internalRequest)
+			if responsesReplayState != nil {
+				log.Debugf("loaded HTTP replay state (apikey=%d, group=%d, model=%s, previous_response_id=%s, channel=%d, key=%d)",
+					apiKeyID, group.ID, requestModel, prevID, responsesReplayState.ChannelID, responsesReplayState.ChannelKeyID)
+				// 转换请求为自包含形式（移除 previous_response_id，合并历史）
+				if replayed := responsesReplayState.BuildReplayRequest(internalRequest); replayed != nil {
+					internalRequest = replayed
+					log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
+				}
+			} else {
+				log.Debugf("no HTTP replay state found (apikey=%d, group=%d, model=%s, previous_response_id=%s)",
+					apiKeyID, group.ID, requestModel, prevID)
+			}
+		}
+	}
+
 	// 创建迭代器（策略排序 + 粘性优先）
-	iter := balancer.NewIterator(group, apiKeyID, requestModel)
+	// 如果有 replay state，注入为 sticky 偏好
+	var preferredSticky *balancer.SessionEntry
+	if responsesReplayState != nil {
+		preferredSticky = responsesReplayStateToSticky(responsesReplayState)
+		if preferredSticky != nil {
+			log.Debugf("HTTP replay sticky routing preference (channel=%d, key=%d)", preferredSticky.ChannelID, preferredSticky.ChannelKeyID)
+		}
+	}
+	iter := balancer.NewIteratorWithPreference(group, apiKeyID, requestModel, preferredSticky)
 	if iter.Len() == 0 {
 		resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no available channel")
 		return
@@ -101,6 +131,11 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 	// 初始化 Metrics
 	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, internalRequest)
+	// 如果触发了 HTTP replay，记录 ws_mode=replay 和 ws_recovery=replay
+	if responsesReplayState != nil {
+		metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
+		metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
+	}
 	responsesPassthroughRequired := internalRequest.HasOpenAIResponsesPassthrough()
 	responsesPassthroughCapableFound := false
 
@@ -257,6 +292,28 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 		if result.Success {
 			outlierwindow.Report(channel.ID, true, result.StatusCode, time.Now())
+
+			// === HTTP Replay 状态保存 ===
+			// 成功后，如果是 OpenAI Responses HTTP 请求，保存 replay 状态供后续续接
+			if inboundType == inbound.InboundTypeOpenAIResponse &&
+				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse &&
+				!req.internalRequest.IsOpenAIExactReplayRequest() {
+				if internalResponse, err := inAdapter.GetInternalResponse(c.Request.Context()); err == nil && internalResponse != nil {
+					newState := &wsConversationState{
+						RequestModel: requestModel,
+						ChannelID:    channel.ID,
+						ChannelKeyID: usedKey.ID,
+					}
+					newState.ApplySuccessfulTurn(req.internalRequest, internalResponse)
+					if newState.LastResponseID != "" {
+						ttl := wsConversationStateTTL(group.SessionKeepTime)
+						storeResponsesReplayState(apiKeyID, group.ID, requestModel, newState, ttl)
+						log.Debugf("saved HTTP replay state (apikey=%d, group=%d, model=%s, response_id=%s, channel=%d, key=%d, ttl=%v)",
+							apiKeyID, group.ID, requestModel, newState.LastResponseID, channel.ID, usedKey.ID, ttl)
+					}
+				}
+			}
+
 			metrics.SaveWithChannelStats(c.Request.Context(), true, nil, iter.Attempts(), false)
 			return
 		}
