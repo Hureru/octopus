@@ -136,6 +136,42 @@ func TestSanitizeResponsesRawItemsFixesNullItemReference(t *testing.T) {
 	}
 }
 
+func TestSanitizeResponsesRawItemsBackfillsMissingFunctionCallID(t *testing.T) {
+	rawItems := json.RawMessage(`[
+		{
+			"type": "function_call",
+			"call_id": "call_noid",
+			"name": "do_thing",
+			"arguments": "{}"
+		},
+		{
+			"type": "function_call_output",
+			"call_id": "call_noid",
+			"output": {"text": "done"}
+		}
+	]`)
+
+	sanitized := sanitizeResponsesRawItems(rawItems)
+
+	var items []map[string]interface{}
+	if err := json.Unmarshal(sanitized, &items); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	generatedID, ok := items[0]["id"].(string)
+	if !ok || generatedID == "" {
+		t.Fatal("function_call missing generated id")
+	}
+
+	ref, ok := items[1]["item_reference"].(string)
+	if !ok || ref == "" {
+		t.Fatal("function_call_output missing item_reference")
+	}
+	if ref != generatedID {
+		t.Errorf("item_reference=%s doesn't match generated id=%s", ref, generatedID)
+	}
+}
+
 func TestMarshalResponsesInputItemsPreservesItemReference(t *testing.T) {
 	// Test end-to-end: Messages -> Items -> JSON preserves item_reference
 	msgs := []model.Message{
@@ -171,18 +207,35 @@ func TestMarshalResponsesInputItemsPreservesItemReference(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	// Find function_call_output
-	var foundItemRef bool
+	// Find function_call and function_call_output, then verify item_reference matches function_call.id
+	var functionCallID string
+	var itemReference string
+	var foundCall, foundOutput bool
 	for _, item := range items {
-		if item["type"] == "function_call_output" {
-			if _, ok := item["item_reference"]; ok {
-				foundItemRef = true
-				break
+		switch item["type"] {
+		case "function_call":
+			if id, ok := item["id"].(string); ok {
+				functionCallID = id
+				foundCall = true
+			}
+		case "function_call_output":
+			if ref, ok := item["item_reference"].(string); ok {
+				itemReference = ref
+				foundOutput = true
 			}
 		}
 	}
 
-	if !foundItemRef {
-		t.Error("MarshalResponsesInputItems didn't preserve item_reference")
+	if !foundCall {
+		t.Fatal("function_call item not found in marshaled output")
+	}
+	if functionCallID == "" {
+		t.Fatal("function_call item has empty id")
+	}
+	if !foundOutput {
+		t.Fatal("function_call_output item missing item_reference")
+	}
+	if itemReference != functionCallID {
+		t.Errorf("item_reference=%s doesn't match function_call id=%s", itemReference, functionCallID)
 	}
 }

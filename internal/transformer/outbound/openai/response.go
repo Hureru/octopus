@@ -1685,19 +1685,32 @@ func sanitizeResponsesRawItems(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 
-	// Build call_id -> item_id mapping from function_call items
+	changed := false
+
+	// Build call_id -> item_id mapping from function_call items.
+	// Generate an id for any function_call that has call_id but no id,
+	// so the function_call_output backfill can always resolve item_reference.
 	callIDToItemID := make(map[string]string)
 	for _, item := range items {
 		if decodeRawString(item["type"]) == "function_call" {
 			callID := decodeRawString(item["call_id"])
+			if callID == "" {
+				continue
+			}
 			itemID := decodeRawString(item["id"])
-			if callID != "" && itemID != "" {
+			if itemID == "" {
+				itemID = generateResponsesItemID()
+				if b, err := json.Marshal(itemID); err == nil {
+					item["id"] = b
+					changed = true
+				}
+			}
+			if itemID != "" {
 				callIDToItemID[callID] = itemID
 			}
 		}
 	}
 
-	changed := false
 	for _, item := range items {
 		itemType := decodeRawString(item["type"])
 
