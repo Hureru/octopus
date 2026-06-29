@@ -60,16 +60,20 @@ func sweepExpiredResponsesReplayStates() {
 	responsesReplayStore.Range(func(key, value interface{}) bool {
 		entry, ok := value.(*responsesReplayStateEntry)
 		if !ok || entry == nil {
-			responsesReplayStore.Delete(key)
-			responsesReplayStoreStats.entries.Add(-1)
-			removed++
+			// 使用 CompareAndDelete 确保只删除我们检查过的这个 entry
+			if responsesReplayStore.CompareAndDelete(key, value) {
+				responsesReplayStoreStats.entries.Add(-1)
+				removed++
+			}
 			return true
 		}
 		if !entry.expiresAt.IsZero() && now.After(entry.expiresAt) {
-			responsesReplayStore.Delete(key)
-			responsesReplayStoreStats.entries.Add(-1)
-			responsesReplayStoreStats.totalSize.Add(-int64(entry.size))
-			removed++
+			// 使用 CompareAndDelete 防止误删并发写入的新 entry
+			if responsesReplayStore.CompareAndDelete(key, entry) {
+				responsesReplayStoreStats.entries.Add(-1)
+				responsesReplayStoreStats.totalSize.Add(-int64(entry.size))
+				removed++
+			}
 		}
 		return true
 	})
@@ -103,14 +107,18 @@ func loadResponsesReplayState(apiKeyID, groupID int, requestModel, responseID st
 
 	entry, ok := v.(*responsesReplayStateEntry)
 	if !ok || entry == nil || entry.state == nil {
-		responsesReplayStore.Delete(key)
-		responsesReplayStoreStats.entries.Add(-1)
+		// 使用 CompareAndDelete 确保只删除我们检查过的这个 entry
+		if responsesReplayStore.CompareAndDelete(key, v) {
+			responsesReplayStoreStats.entries.Add(-1)
+		}
 		return nil
 	}
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-		responsesReplayStore.Delete(key)
-		responsesReplayStoreStats.entries.Add(-1)
-		responsesReplayStoreStats.totalSize.Add(-int64(entry.size))
+		// 使用 CompareAndDelete 防止误删并发写入的新 entry
+		if responsesReplayStore.CompareAndDelete(key, entry) {
+			responsesReplayStoreStats.entries.Add(-1)
+			responsesReplayStoreStats.totalSize.Add(-int64(entry.size))
+		}
 		return nil
 	}
 
@@ -158,16 +166,17 @@ func storeResponsesReplayState(apiKeyID, groupID int, requestModel string, state
 			responsesReplayStoreStats.totalSize.Add(int64(estimatedSize))
 		}
 	} else {
-		// 新 key：检查容量
+		// 新 key：增加 entries，检查容量，超限则回滚
 		currentEntries := responsesReplayStoreStats.entries.Add(1)
 		responsesReplayStoreStats.totalSize.Add(int64(estimatedSize))
 
 		if currentEntries > responsesReplayStoreMaxEntries ||
 			responsesReplayStoreStats.totalSize.Load() > responsesReplayStoreMaxSize {
-			// 超出容量，回滚
-			responsesReplayStore.Delete(key)
-			responsesReplayStoreStats.entries.Add(-1)
-			responsesReplayStoreStats.totalSize.Add(-int64(estimatedSize))
+			// 超出容量，使用 CompareAndDelete 回滚（只删除我们刚写入的 newEntry）
+			if responsesReplayStore.CompareAndDelete(key, newEntry) {
+				responsesReplayStoreStats.entries.Add(-1)
+				responsesReplayStoreStats.totalSize.Add(-int64(estimatedSize))
+			}
 			log.Warnf("HTTP replay store capacity limit reached (entries=%d, size=%d), skipping save",
 				currentEntries-1, responsesReplayStoreStats.totalSize.Load())
 		}
