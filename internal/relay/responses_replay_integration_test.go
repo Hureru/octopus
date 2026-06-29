@@ -401,7 +401,7 @@ func TestHTTPReplayMultiTurnChain(t *testing.T) {
 	}
 }
 
-// TestHTTPReplayFailedMergeKeepsOriginalRequest tests that failed history merge preserves previous_response_id
+// TestHTTPReplayFailedMergeKeepsOriginalRequest tests that failed history merge returns nil
 func TestHTTPReplayFailedMergeKeepsOriginalRequest(t *testing.T) {
 	resetResponsesReplayStore()
 	defer resetResponsesReplayStore()
@@ -441,23 +441,12 @@ func TestHTTPReplayFailedMergeKeepsOriginalRequest(t *testing.T) {
 		t.Fatal("expected to load state")
 	}
 
+	// BuildReplayRequest now returns nil on merge failure
 	replayedReq := loadedState.BuildReplayRequest(req)
-	if replayedReq == nil {
-		t.Fatal("BuildReplayRequest returned nil")
+	if replayedReq != nil {
+		t.Fatal("expected BuildReplayRequest to return nil on merge failure, but got non-nil")
 	}
 
-	// Critical: if merge failed (no RawInputItems), the caller should detect this
-	// The current implementation of BuildReplayRequest still removes previous_response_id
-	// even when merge fails, so we verify the caller-side validation in relay.go works
-	if len(replayedReq.OpenAIRawInputItems()) == 0 {
-		// This is the expected failure case - merge didn't work
-		// The caller (relay.go) checks for this and should reject the replayed request
-		if replayedReq.IsOpenAIExactReplayRequest() {
-			t.Logf("BuildReplayRequest marked as exact replay despite empty RawInputItems - relay.go validates this")
-		}
-		// The replayed request will have empty previous_response_id, but relay.go should detect
-		// the empty RawInputItems and fall back to the original request
-	} else {
-		t.Fatal("Expected merge to fail with empty state and empty request, but got RawInputItems")
-	}
+	// The caller (relay.go) should detect nil and keep the original request
+	// This ensures previous_response_id is preserved and can fall back to native continuation
 }

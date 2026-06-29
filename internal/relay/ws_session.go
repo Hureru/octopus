@@ -158,6 +158,11 @@ func (s *wsConversationState) RememberReplayAlias(responseID string) {
 	s.ReplayAliases = filtered
 }
 
+// BuildReplayRequest transforms a continuation request into a self-contained replay request
+// by merging historical context from the stored state and removing previous_response_id.
+//
+// Returns nil if the transformation fails (e.g., unable to build replay raw input items).
+// Callers should fall back to the original request when nil is returned.
 func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalLLMRequest) *transformerModel.InternalLLMRequest {
 	if s == nil || req == nil {
 		return nil
@@ -170,10 +175,16 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	replayed.SetOpenAIResponsesOptions(responsesOptions)
 	replayed.SetOpenAIRawInputItems(nil)
 	replayed.Messages = retainInstructionMessages(req.Messages)
-	if mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.OpenAIRawInputItems(), req.Messages); ok {
-		replayed.SetOpenAIRawInputItems(mergedRawInputItems)
-		replayed.TransformOptions.ArrayInputs = boolPtr(true)
+
+	// Merge historical replay window and current request into raw input items
+	mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.OpenAIRawInputItems(), req.Messages)
+	if !ok || len(mergedRawInputItems) == 0 {
+		// Merge failed - return nil to signal caller to use original request
+		return nil
 	}
+
+	replayed.SetOpenAIRawInputItems(mergedRawInputItems)
+	replayed.TransformOptions.ArrayInputs = boolPtr(true)
 	if replayed.TransformerMetadata == nil {
 		replayed.TransformerMetadata = map[string]string{}
 	}

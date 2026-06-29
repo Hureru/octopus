@@ -94,20 +94,14 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				log.Debugf("loaded HTTP replay state (apikey=%d, group=%d, model=%s, previous_response_id=%s, channel=%d, key=%d)",
 					apiKeyID, group.ID, requestModel, prevID, responsesReplayState.ChannelID, responsesReplayState.ChannelKeyID)
 				// 转换请求为自包含形式（移除 previous_response_id，合并历史）
+				// BuildReplayRequest 返回 nil 表示合并失败，应保留原始请求
 				if replayed := responsesReplayState.BuildReplayRequest(internalRequest); replayed != nil {
-					// 验证历史合并是否成功（必须有 RawInputItems）
-					if len(replayed.OpenAIRawInputItems()) > 0 {
-						internalRequest = replayed
-						log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
-					} else {
-						log.Warnf("HTTP replay history merge failed (apikey=%d, group=%d, model=%s, previous_response_id=%s), keeping original request",
-							apiKeyID, group.ID, requestModel, prevID)
-						responsesReplayState = nil // 放弃 replay，使用原始请求
-					}
+					internalRequest = replayed
+					log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
 				} else {
-					log.Warnf("HTTP replay request transformation failed (apikey=%d, group=%d, model=%s, previous_response_id=%s)",
+					log.Warnf("HTTP replay history merge failed (apikey=%d, group=%d, model=%s, previous_response_id=%s), keeping original request",
 						apiKeyID, group.ID, requestModel, prevID)
-					responsesReplayState = nil
+					responsesReplayState = nil // 放弃 replay，使用原始请求
 				}
 			} else {
 				log.Debugf("no HTTP replay state found (apikey=%d, group=%d, model=%s, previous_response_id=%s)",
