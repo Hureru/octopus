@@ -307,12 +307,18 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			// === HTTP Replay 状态保存 ===
 			// 成功后，如果是 OpenAI Responses HTTP 请求，保存 replay 状态供后续续接
 			// 注意：exact replay 请求成功后也需要保存新状态，否则只能续接一轮
+			// 优先使用 metrics.InternalResponse（streaming 安全），避免二次 GetInternalResponse 消耗聚合器
 			if inboundType == inbound.InboundTypeOpenAIResponse &&
 				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
-				internalResponse, err := inAdapter.GetInternalResponse(c.Request.Context())
-				if err != nil {
-					log.Debugf("failed to get internal response for replay state save: %v", err)
-				} else if internalResponse != nil {
+				internalResponse := metrics.InternalResponse
+				if internalResponse == nil {
+					var err error
+					internalResponse, err = inAdapter.GetInternalResponse(c.Request.Context())
+					if err != nil {
+						log.Debugf("failed to get internal response for replay state save: %v", err)
+					}
+				}
+				if internalResponse != nil {
 					// 如果是 exact replay 请求，基于已有状态继续累积
 					var newState *wsConversationState
 					if req.internalRequest.IsOpenAIExactReplayRequest() && responsesReplayState != nil {

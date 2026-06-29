@@ -15,52 +15,45 @@ import (
 )
 
 const (
-	responsesReplayStoreMaxEntries = 10000                // 最大条目数
-	responsesReplayStoreMaxSize    = 100 * 1024 * 1024    // 最大总大小 100MB（估算）
-	responsesReplayStoreSweepInterval = 5 * time.Minute   // 清理间隔
+	responsesReplayStoreMaxEntries    = 10000
+	responsesReplayStoreMaxSize       = 100 * 1024 * 1024
+	responsesReplayStoreSweepInterval = 5 * time.Minute
 )
 
-// responsesReplayStateEntry stores HTTP replay state with TTL.
 type responsesReplayStateEntry struct {
 	state     *wsConversationState
 	expiresAt time.Time
-	size      int // 估算大小
+	size      int
 }
 
-// responsesReplayStore is an in-process map keyed by apiKeyID:groupID:requestModel:hash(responseID).
 var responsesReplayStore sync.Map
 
 var responsesReplayStoreStats struct {
-	entries     atomic.Int64
-	totalSize   atomic.Int64
-	sweepTicker *time.Ticker
-	sweepStop   chan struct{}
-	sweepOnce   sync.Once
+	entries   atomic.Int64
+	totalSize atomic.Int64
 }
 
 func init() {
 	startResponsesReplayStoreSweeper()
 }
 
-// startResponsesReplayStoreSweeper 启动后台清理协程
+var responsesReplayStoreSweepStop = make(chan struct{})
+
 func startResponsesReplayStoreSweeper() {
-	responsesReplayStoreStats.sweepOnce.Do(func() {
-		responsesReplayStoreStats.sweepTicker = time.NewTicker(responsesReplayStoreSweepInterval)
-		responsesReplayStoreStats.sweepStop = make(chan struct{})
-		go func() {
-			for {
-				select {
-				case <-responsesReplayStoreStats.sweepTicker.C:
-					sweepExpiredResponsesReplayStates()
-				case <-responsesReplayStoreStats.sweepStop:
-					return
-				}
+	go func() {
+		ticker := time.NewTicker(responsesReplayStoreSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sweepExpiredResponsesReplayStates()
+			case <-responsesReplayStoreSweepStop:
+				return
 			}
-		}()
-	})
+		}
+	}()
 }
 
-// sweepExpiredResponsesReplayStates 清理过期条目
 func sweepExpiredResponsesReplayStates() {
 	now := time.Now()
 	removed := 0
@@ -86,7 +79,6 @@ func sweepExpiredResponsesReplayStates() {
 	}
 }
 
-// responsesReplayStateKey generates the store key for a given replay state.
 func responsesReplayStateKey(apiKeyID, groupID int, requestModel, responseID string) string {
 	requestModel = strings.TrimSpace(requestModel)
 	responseID = strings.TrimSpace(responseID)
@@ -94,11 +86,10 @@ func responsesReplayStateKey(apiKeyID, groupID int, requestModel, responseID str
 		return ""
 	}
 	hash := sha256.Sum256([]byte(responseID))
-	hashStr := hex.EncodeToString(hash[:])[:32] // 使用 128-bit 降低碰撞风险
+	hashStr := hex.EncodeToString(hash[:])[:32]
 	return fmt.Sprintf("%d:%d:%s:%s", apiKeyID, groupID, requestModel, hashStr)
 }
 
-// loadResponsesReplayState retrieves replay state by previous_response_id.
 func loadResponsesReplayState(apiKeyID, groupID int, requestModel, responseID string) *wsConversationState {
 	key := responsesReplayStateKey(apiKeyID, groupID, requestModel, responseID)
 	if key == "" {
@@ -113,17 +104,19 @@ func loadResponsesReplayState(apiKeyID, groupID int, requestModel, responseID st
 	entry, ok := v.(*responsesReplayStateEntry)
 	if !ok || entry == nil || entry.state == nil {
 		responsesReplayStore.Delete(key)
+		responsesReplayStoreStats.entries.Add(-1)
 		return nil
 	}
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
 		responsesReplayStore.Delete(key)
+		responsesReplayStoreStats.entries.Add(-1)
+		responsesReplayStoreStats.totalSize.Add(-int64(entry.size))
 		return nil
 	}
 
 	return cloneWSConversationState(entry.state)
 }
 
-// storeResponsesReplayState saves replay state after a successful HTTP turn.
 func storeResponsesReplayState(apiKeyID, groupID int, requestModel string, state *wsConversationState, ttl time.Duration) {
 	requestModel = strings.TrimSpace(requestModel)
 	if requestModel == "" || state == nil {
@@ -137,13 +130,6 @@ func storeResponsesReplayState(apiKeyID, groupID int, requestModel string, state
 		ttl = wsClientMaxAge
 	}
 
-	// 容量检查
-	currentEntries := responsesReplayStoreStats.entries.Load()
-	if currentEntries >= responsesReplayStoreMaxEntries {
-		log.Warnf("HTTP replay store capacity limit reached (%d entries), skipping save", currentEntries)
-		return
-	}
-
 	key := responsesReplayStateKey(apiKeyID, groupID, requestModel, responseID)
 	if key == "" {
 		return
@@ -155,46 +141,51 @@ func storeResponsesReplayState(apiKeyID, groupID int, requestModel string, state
 	}
 	cloned.RequestModel = requestModel
 
-	// 估算大小
 	estimatedSize := estimateStateSize(cloned)
-	currentSize := responsesReplayStoreStats.totalSize.Load()
-	if currentSize+int64(estimatedSize) > responsesReplayStoreMaxSize {
-		log.Warnf("HTTP replay store size limit reached (%d bytes), skipping save", currentSize)
-		return
-	}
-
-	// 检查是否更新已有条目
-	if existing, ok := responsesReplayStore.Load(key); ok {
-		if oldEntry, ok := existing.(*responsesReplayStateEntry); ok && oldEntry != nil {
-			responsesReplayStoreStats.totalSize.Add(-int64(oldEntry.size))
-		}
-	} else {
-		responsesReplayStoreStats.entries.Add(1)
-	}
-
-	responsesReplayStore.Store(key, &responsesReplayStateEntry{
+	newEntry := &responsesReplayStateEntry{
 		state:     cloned,
 		expiresAt: time.Now().Add(ttl),
 		size:      estimatedSize,
-	})
-	responsesReplayStoreStats.totalSize.Add(int64(estimatedSize))
+	}
+
+	// 使用 Swap 保证统计一致性：先尝试存入，再根据旧值调整统计
+	old, loaded := responsesReplayStore.Swap(key, newEntry)
+	if loaded {
+		// 更新已有 key：调整 size 差值，entries 不变
+		if oldEntry, ok := old.(*responsesReplayStateEntry); ok && oldEntry != nil {
+			responsesReplayStoreStats.totalSize.Add(int64(estimatedSize) - int64(oldEntry.size))
+		} else {
+			responsesReplayStoreStats.totalSize.Add(int64(estimatedSize))
+		}
+	} else {
+		// 新 key：检查容量
+		currentEntries := responsesReplayStoreStats.entries.Add(1)
+		responsesReplayStoreStats.totalSize.Add(int64(estimatedSize))
+
+		if currentEntries > responsesReplayStoreMaxEntries ||
+			responsesReplayStoreStats.totalSize.Load() > responsesReplayStoreMaxSize {
+			// 超出容量，回滚
+			responsesReplayStore.Delete(key)
+			responsesReplayStoreStats.entries.Add(-1)
+			responsesReplayStoreStats.totalSize.Add(-int64(estimatedSize))
+			log.Warnf("HTTP replay store capacity limit reached (entries=%d, size=%d), skipping save",
+				currentEntries-1, responsesReplayStoreStats.totalSize.Load())
+		}
+	}
 }
 
-// estimateStateSize 估算状态大小（字节）
 func estimateStateSize(state *wsConversationState) int {
 	if state == nil {
 		return 0
 	}
-	size := 256 // 基础结构
+	size := 256
 	size += len(state.DownstreamSessionID) + len(state.RequestModel) + len(state.LastResponseID)
 	size += len(state.ReplayWindowItems)
-	size += len(state.Transcript) * 512 // 每条消息估算 512 字节
+	size += len(state.Transcript) * 512
 	size += len(state.ReplayAliases) * 64
 	return size
 }
 
-// resolveResponsesReplayState attempts to load replay state from the HTTP replay store
-// when the request contains previous_response_id.
 func resolveResponsesReplayState(apiKeyID, groupID int, requestModel string, req *transformerModel.InternalLLMRequest) *wsConversationState {
 	requestModel = strings.TrimSpace(requestModel)
 	if requestModel == "" || req == nil {
@@ -207,8 +198,6 @@ func resolveResponsesReplayState(apiKeyID, groupID int, requestModel string, req
 	return loadResponsesReplayState(apiKeyID, groupID, requestModel, prevID)
 }
 
-// responsesReplayStateToSticky converts replay state into a sticky balancer entry
-// to preferentially route to the last successful channel/key.
 func responsesReplayStateToSticky(state *wsConversationState) *balancer.SessionEntry {
 	if state == nil || state.ChannelID <= 0 {
 		return nil
@@ -220,7 +209,8 @@ func responsesReplayStateToSticky(state *wsConversationState) *balancer.SessionE
 	}
 }
 
-// resetResponsesReplayStore clears the entire replay store (for testing).
 func resetResponsesReplayStore() {
 	responsesReplayStore = sync.Map{}
+	responsesReplayStoreStats.entries.Store(0)
+	responsesReplayStoreStats.totalSize.Store(0)
 }
