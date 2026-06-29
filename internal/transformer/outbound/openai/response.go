@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
 
@@ -416,7 +419,8 @@ type ResponsesItem struct {
 	Arguments string `json:"arguments,omitempty"`
 
 	// Function call output
-	Output *ResponsesInput `json:"output,omitempty"`
+	Output        *ResponsesInput `json:"output,omitempty"`
+	ItemReference *string         `json:"item_reference,omitempty"`
 
 	// Image generation fields
 	Result       *string `json:"result,omitempty"`
@@ -1038,6 +1042,8 @@ func convertInputFromMessages(msgs []model.Message, transformOptions model.Trans
 		return ResponsesInput{Text: nonSystemMsgs[0].Content.Content}
 	}
 
+	// Build call_id -> item_id mapping for function_call_output reference
+	callIDToItemID := make(map[string]string)
 	var items []ResponsesItem
 	for _, msg := range msgs {
 		switch msg.Role {
@@ -1046,9 +1052,15 @@ func convertInputFromMessages(msgs []model.Message, transformOptions model.Trans
 		case "user":
 			items = append(items, convertUserMessageToResponses(msg))
 		case "assistant":
-			items = append(items, convertAssistantMessageToResponses(msg)...)
+			assistantItems := convertAssistantMessageToResponses(msg)
+			for _, item := range assistantItems {
+				if item.Type == "function_call" && item.ID != "" && item.CallID != "" {
+					callIDToItemID[item.CallID] = item.ID
+				}
+			}
+			items = append(items, assistantItems...)
 		case "tool":
-			items = append(items, convertToolMessageToResponses(msg))
+			items = append(items, convertToolMessageToResponses(msg, callIDToItemID))
 		}
 	}
 
@@ -1148,6 +1160,7 @@ func convertAssistantMessageToResponses(msg model.Message) []ResponsesItem {
 	// Handle tool calls
 	for _, tc := range msg.ToolCalls {
 		items = append(items, ResponsesItem{
+			ID:        generateResponsesItemID(),
 			Type:      "function_call",
 			CallID:    tc.ID,
 			Name:      tc.Function.Name,
@@ -1185,7 +1198,7 @@ func convertAssistantMessageToResponses(msg model.Message) []ResponsesItem {
 	return sanitizeResponsesItems(items)
 }
 
-func convertToolMessageToResponses(msg model.Message) ResponsesItem {
+func convertToolMessageToResponses(msg model.Message, callIDToItemID map[string]string) ResponsesItem {
 	var output ResponsesInput
 
 	if msg.Content.Content != nil {
@@ -1205,11 +1218,20 @@ func convertToolMessageToResponses(msg model.Message) ResponsesItem {
 		output.Text = lo.ToPtr("")
 	}
 
-	return ResponsesItem{
+	item := ResponsesItem{
 		Type:   "function_call_output",
 		CallID: lo.FromPtr(msg.ToolCallID),
 		Output: &output,
 	}
+
+	// Set item_reference to the corresponding function_call's ID
+	if msg.ToolCallID != nil {
+		if itemID, ok := callIDToItemID[*msg.ToolCallID]; ok {
+			item.ItemReference = lo.ToPtr(itemID)
+		}
+	}
+
+	return item
 }
 
 func convertToolsToResponses(tools []model.Tool) []ResponsesTool {
@@ -1664,8 +1686,54 @@ func sanitizeResponsesRawItems(raw json.RawMessage) json.RawMessage {
 	}
 
 	changed := false
+
+	// Build call_id -> item_id mapping from function_call items.
+	// Generate an id for any function_call that has call_id but no id,
+	// so the function_call_output backfill can always resolve item_reference.
+	callIDToItemID := make(map[string]string)
 	for _, item := range items {
-		if decodeRawString(item["type"]) != "reasoning" {
+		if decodeRawString(item["type"]) == "function_call" {
+			callID := decodeRawString(item["call_id"])
+			if callID == "" {
+				continue
+			}
+			itemID := decodeRawString(item["id"])
+			if itemID == "" {
+				itemID = generateResponsesItemID()
+				if b, err := json.Marshal(itemID); err == nil {
+					item["id"] = b
+					changed = true
+				}
+			}
+			if itemID != "" {
+				callIDToItemID[callID] = itemID
+			}
+		}
+	}
+
+	for _, item := range items {
+		itemType := decodeRawString(item["type"])
+
+		// Sanitize function_call_output: add missing item_reference
+		if itemType == "function_call_output" {
+			refRaw, hasRef := item["item_reference"]
+			refMissing := !hasRef || len(bytes.TrimSpace(refRaw)) == 0 ||
+				bytes.Equal(bytes.TrimSpace(refRaw), []byte("null")) ||
+				bytes.Equal(bytes.TrimSpace(refRaw), []byte(`""`))
+			if refMissing {
+				callID := decodeRawString(item["call_id"])
+				if callID != "" {
+					if itemID, ok := callIDToItemID[callID]; ok {
+						if b, err := json.Marshal(itemID); err == nil {
+							item["item_reference"] = b
+							changed = true
+						}
+					}
+				}
+			}
+		}
+
+		if itemType != "reasoning" {
 			continue
 		}
 
@@ -1866,3 +1934,20 @@ func (o *ResponseOutbound) PassthroughConfig() model.PassthroughConfig {
 		CollectMetrics: false, // OpenAI Responses uses different metrics semantics
 	}
 }
+
+// generateResponsesItemID generates a unique ID for Responses API items (function_call, etc.).
+// Format matches OpenAI's pattern: item_<random_base62_string>
+func generateResponsesItemID() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		// fallback: use timestamp + counter
+		return fmt.Sprintf("item_%016x%08x", time.Now().UnixNano(), itemIDCounter.Add(1))
+	}
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return "item_" + string(b)
+}
+
+var itemIDCounter atomic.Uint64
