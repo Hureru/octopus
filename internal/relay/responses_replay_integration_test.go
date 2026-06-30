@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,7 +247,7 @@ func TestHTTPReplayWithToolCalls(t *testing.T) {
 				},
 			},
 		},
-		RawResponsesOutputItems: json.RawMessage(`[{"type":"message","role":"assistant","content":[{"type":"function_call_output","call_id":"call_abc"}]}]`),
+		RawResponsesOutputItems: json.RawMessage(`[{"type":"function_call","call_id":"call_abc","name":"get_weather","arguments":"{}"}]`),
 	}
 
 	state := &wsConversationState{
@@ -398,6 +399,25 @@ func TestHTTPReplayMultiTurnChain(t *testing.T) {
 	}
 	if !replayedReq3.IsOpenAIExactReplayRequest() {
 		t.Fatal("turn 3: expected exact replay request")
+	}
+
+	// Verify turn 2 history survives into turn 3's replayed input items
+	rawItems3 := replayedReq3.OpenAIRawInputItems()
+	if len(rawItems3) == 0 {
+		t.Fatal("turn 3: expected non-empty RawInputItems")
+	}
+	rawItems3Str := string(rawItems3)
+	if !strings.Contains(rawItems3Str, "How are you?") {
+		t.Fatalf("turn 3: expected RawInputItems to contain turn 2 user message 'How are you?', got %s", rawItems3Str)
+	}
+	if !strings.Contains(rawItems3Str, "I'm good!") {
+		t.Fatalf("turn 3: expected RawInputItems to contain turn 2 assistant message 'I'm good!', got %s", rawItems3Str)
+	}
+	if !strings.Contains(rawItems3Str, "Hello") {
+		t.Fatalf("turn 3: expected RawInputItems to contain turn 1 user message 'Hello', got %s", rawItems3Str)
+	}
+	if !strings.Contains(rawItems3Str, "Great!") {
+		t.Fatalf("turn 3: expected RawInputItems to contain turn 3 user message 'Great!', got %s", rawItems3Str)
 	}
 }
 

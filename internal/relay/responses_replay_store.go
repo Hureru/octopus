@@ -162,6 +162,16 @@ func storeResponsesReplayState(apiKeyID, groupID int, requestModel string, state
 		// 更新已有 key：调整 size 差值，entries 不变
 		if oldEntry, ok := old.(*responsesReplayStateEntry); ok && oldEntry != nil {
 			responsesReplayStoreStats.totalSize.Add(int64(estimatedSize) - int64(oldEntry.size))
+			// 替换后也需检查容量：新 entry 可能远大于旧 entry
+			if int64(estimatedSize) > int64(oldEntry.size) &&
+				responsesReplayStoreStats.totalSize.Load() > responsesReplayStoreMaxSize {
+				// 超出容量，回滚为旧 entry
+				if responsesReplayStore.CompareAndSwap(key, newEntry, oldEntry) {
+					responsesReplayStoreStats.totalSize.Add(int64(oldEntry.size) - int64(estimatedSize))
+				}
+				log.Warnf("HTTP replay store size limit reached after replacement (size=%d), rolling back",
+					responsesReplayStoreStats.totalSize.Load())
+			}
 		} else {
 			responsesReplayStoreStats.totalSize.Add(int64(estimatedSize))
 		}
@@ -190,8 +200,47 @@ func estimateStateSize(state *wsConversationState) int {
 	size := 256
 	size += len(state.DownstreamSessionID) + len(state.RequestModel) + len(state.LastResponseID)
 	size += len(state.ReplayWindowItems)
-	size += len(state.Transcript) * 512
-	size += len(state.ReplayAliases) * 64
+	for _, msg := range state.Transcript {
+		size += estimateMessageSize(msg)
+	}
+	for _, alias := range state.ReplayAliases {
+		size += len(alias) + 16
+	}
+	return size
+}
+
+func estimateMessageSize(msg transformerModel.Message) int {
+	size := 128
+	if msg.Content.Content != nil {
+		size += len(*msg.Content.Content)
+	}
+	for _, part := range msg.Content.MultipleContent {
+		size += 64
+		if part.Text != nil {
+			size += len(*part.Text)
+		}
+		if part.ImageURL != nil {
+			size += len(part.ImageURL.URL)
+		}
+	}
+	for _, tc := range msg.ToolCalls {
+		size += len(tc.ID) + len(tc.Function.Name) + len(tc.Function.Arguments) + 32
+	}
+	if msg.ToolCallID != nil {
+		size += len(*msg.ToolCallID)
+	}
+	if msg.ReasoningContent != nil {
+		size += len(*msg.ReasoningContent)
+	}
+	for _, img := range msg.Images {
+		size += 64
+		if img.Text != nil {
+			size += len(*img.Text)
+		}
+		if img.ImageURL != nil {
+			size += len(img.ImageURL.URL)
+		}
+	}
 	return size
 }
 
