@@ -290,13 +290,18 @@ export function useWebDAVBackupList(enabled = true) {
             return apiClient.get<WebDAVBackupInfo[]>('/api/v1/webdav-backup/list');
         },
         enabled,
+        refetchInterval: 30000,
     });
 }
 
 export function useRestoreWebDAVBackup() {
+    const queryClient = useQueryClient();
     return useMutation({
         mutationFn: async (filename: string) => {
             return apiClient.post<DBImportResult>('/api/v1/webdav-backup/restore', { filename });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings', 'list'] });
         },
     });
 }

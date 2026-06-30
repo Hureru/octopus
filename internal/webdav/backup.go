@@ -150,5 +150,8 @@ func enforceRetention(c *gowebdav.Client, backupPath string, count int) {
 }
 
 func isBackupFile(name string) bool {
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return false
+	}
 	return strings.HasPrefix(name, backupPrefix) && strings.HasSuffix(name, backupSuffix)
 }

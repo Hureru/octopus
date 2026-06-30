@@ -97,7 +97,9 @@ func setSetting(c *gin.Context) {
 			return
 		}
 		if hours > 0 {
-			task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
+			interval := time.Duration(hours) * time.Hour
+			task.Register(string(setting.Key), interval, false, task.WebDAVBackupTask)
+			task.Update(string(setting.Key), interval)
 		} else {
 			task.Update(string(setting.Key), 0)
 		}

@@ -47,7 +47,10 @@ export function SettingWebDAVBackup() {
 
     const [restoringFile, setRestoringFile] = useState<string | null>(null);
 
-    const backups = useMemo(() => backupList.data ?? [], [backupList.data]);
+    const backups = useMemo(() => {
+        if (backupList.isPending || backupList.isError) return null;
+        return backupList.data ?? [];
+    }, [backupList.data, backupList.isPending, backupList.isError]);
 
     const handleTest = async () => {
         try {
@@ -204,9 +207,13 @@ export function SettingWebDAVBackup() {
                                 {t('refresh')}
                             </Button>
                         </div>
-                        {backups.length === 0 ? (
+                        {backupList.isPending ? (
+                            <p className="text-sm text-muted-foreground">{t('loading') || 'Loading...'}</p>
+                        ) : backupList.isError ? (
+                            <p className="text-sm text-red-500">{t('loadError') || 'Failed to load backups'}</p>
+                        ) : backups && backups.length === 0 ? (
                             <p className="text-sm text-muted-foreground">{t('noBackups')}</p>
-                        ) : (
+                        ) : backups ? (
                             <div className="space-y-1">
                                 {backups.map((backup) => (
                                     <div
@@ -232,7 +239,7 @@ export function SettingWebDAVBackup() {
                                     </div>
                                 ))}
                             </div>
-                        )}
+                        ) : null}
                     </div>
                 </>
             )}

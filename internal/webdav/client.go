@@ -7,6 +7,7 @@ import (
 	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/studio-b12/gowebdav"
 )
 
@@ -69,9 +70,11 @@ func getHTTPClient() *http.Client {
 	proxyURL, _ := op.SettingGetString(model.SettingKeyProxyURL)
 	if proxyURL != "" {
 		httpClient, err := client.GetHTTPClientSystemProxy(true)
-		if err == nil {
-			return httpClient
+		if err != nil {
+			log.Warnf("failed to create proxied HTTP client: %v", err)
+			return nil
 		}
+		return httpClient
 	}
 	httpClient, err := client.GetHTTPClientSystemProxy(false)
 	if err != nil {
