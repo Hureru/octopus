@@ -40,6 +40,13 @@ const (
 	SettingKeyOutlierReapMinutes               SettingKey = "outlier_reap_minutes"                 // POR 窗口内存回收 TTL(分钟)
 	SettingKeyOutlierCFRecoverMinutes          SettingKey = "outlier_cf_recover_minutes"           // POR CF 退役渠道恢复探活冷却(分钟)
 	SettingKeyApiBaseUrl                       SettingKey = "api_base_url"                         // 对外服务基础地址，用于一键导出客户端配置，为空时不显示导出入口
+	SettingKeyWebDAVURL                        SettingKey = "webdav_url"                            // WebDAV 服务器地址
+	SettingKeyWebDAVUsername                   SettingKey = "webdav_username"                       // WebDAV 用户名
+	SettingKeyWebDAVPassword                   SettingKey = "webdav_password"                       // WebDAV 密码
+	SettingKeyWebDAVBackupPath                 SettingKey = "webdav_backup_path"                    // WebDAV 远程备份目录
+	SettingKeyWebDAVBackupInterval             SettingKey = "webdav_backup_interval"                // WebDAV 自动备份间隔(小时)，0=禁用
+	SettingKeyWebDAVRetentionCount             SettingKey = "webdav_retention_count"                // WebDAV 保留备份份数
+	SettingKeyWebDAVIncludeStats               SettingKey = "webdav_include_stats"                  // WebDAV 备份是否包含统计数据
 )
 
 type Setting struct {
@@ -79,7 +86,14 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyOutlierRecoverStreak, Value: "2"},     // 连续探活成功 2 次恢复
 		{Key: SettingKeyOutlierReapMinutes, Value: "30"},      // 窗口 30 分钟无流量回收
 		{Key: SettingKeyOutlierCFRecoverMinutes, Value: "30"}, // CF 退役渠道 30 分钟后才探活恢复
-		{Key: SettingKeyApiBaseUrl, Value: ""},                // 默认为空，不显示客户端导出入口
+		{Key: SettingKeyApiBaseUrl, Value: ""},                  // 默认为空，不显示客户端导出入口
+		{Key: SettingKeyWebDAVURL, Value: ""},                   // 默认为空，未配置
+		{Key: SettingKeyWebDAVUsername, Value: ""},              // 默认为空
+		{Key: SettingKeyWebDAVPassword, Value: ""},              // 默认为空
+		{Key: SettingKeyWebDAVBackupPath, Value: "/octopus-backups"}, // 默认远程目录
+		{Key: SettingKeyWebDAVBackupInterval, Value: "0"},       // 默认禁用自动备份
+		{Key: SettingKeyWebDAVRetentionCount, Value: "10"},      // 默认保留10份
+		{Key: SettingKeyWebDAVIncludeStats, Value: "true"},      // 默认包含统计数据
 	}
 }
 
@@ -101,10 +115,11 @@ func (s *Setting) Validate() error {
 		return validateIntRange(s.Value, 1, 100)
 	case SettingKeyOutlierRetireInterval, SettingKeyOutlierWindowMinutes, SettingKeyOutlierMinSamples,
 		SettingKeyOutlierConsecFails, SettingKeyOutlierRecoverStreak,
-		SettingKeyOutlierReapMinutes, SettingKeyOutlierCFRecoverMinutes:
+		SettingKeyOutlierReapMinutes, SettingKeyOutlierCFRecoverMinutes,
+		SettingKeyWebDAVRetentionCount:
 		// 时间窗/样本/连击/间隔等：0 或负值无意义，下限为 1。
 		return validateIntMin(s.Value, 1)
-	case SettingKeySSEHeartbeatInterval, SettingKeySSEPreStreamHeartbeatDelay:
+	case SettingKeySSEHeartbeatInterval, SettingKeySSEPreStreamHeartbeatDelay, SettingKeyWebDAVBackupInterval:
 		value, err := strconv.Atoi(s.Value)
 		if err != nil {
 			return fmt.Errorf("setting value must be an integer")
@@ -113,7 +128,7 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("setting value must be non-negative")
 		}
 		return nil
-	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyStatsSiteModelBackfilled, SettingKeyOutlierRetireEnabled:
+	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyStatsSiteModelBackfilled, SettingKeyOutlierRetireEnabled, SettingKeyWebDAVIncludeStats:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")
 		}
@@ -163,6 +178,21 @@ func (s *Setting) Validate() error {
 		}
 		if parsedURL.Host == "" {
 			return fmt.Errorf("api base URL must have a host")
+		}
+		return nil
+	case SettingKeyWebDAVURL:
+		if s.Value == "" {
+			return nil
+		}
+		parsedURL, err := url.Parse(s.Value)
+		if err != nil {
+			return fmt.Errorf("WebDAV URL is invalid: %w", err)
+		}
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return fmt.Errorf("WebDAV URL scheme must be http or https")
+		}
+		if parsedURL.Host == "" {
+			return fmt.Errorf("WebDAV URL must have a host")
 		}
 		return nil
 	}
