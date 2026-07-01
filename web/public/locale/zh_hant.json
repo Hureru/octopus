@@ -461,6 +461,57 @@
         },
         "data": {
             "title": "資料管理"
+        },
+        "webdavBackup": {
+            "title": "WebDAV 備份",
+            "url": {
+                "label": "WebDAV 地址",
+                "placeholder": "https://dav.example.com/dav"
+            },
+            "username": {
+                "label": "使用者名稱",
+                "placeholder": "使用者名稱"
+            },
+            "password": {
+                "label": "密碼",
+                "placeholder": "密碼"
+            },
+            "backupPath": {
+                "label": "遠端目錄",
+                "placeholder": "/octopus-backups"
+            },
+            "interval": {
+                "label": "自動備份間隔(小時)",
+                "placeholder": "0 = 停用",
+                "description": "設為 0 表示停用自動備份"
+            },
+            "retentionCount": {
+                "label": "保留份數",
+                "placeholder": "10"
+            },
+            "includeStats": "包含統計資料",
+            "testConnection": "測試連線",
+            "testSuccess": "連線成功",
+            "testFailed": "連線失敗",
+            "testing": "測試中...",
+            "triggerBackup": "立即備份",
+            "triggerSuccess": "備份成功",
+            "triggerFailed": "備份失敗",
+            "triggering": "備份中...",
+            "backupList": "遠端備份列表",
+            "loading": "載入中...",
+            "loadError": "載入備份列表失敗",
+            "noBackups": "暫無備份檔案",
+            "restore": "恢復",
+            "restoring": "恢復中...",
+            "restoreSuccess": "恢復成功",
+            "restoreFailed": "恢復失敗",
+            "restoreConfirm": "確認從此備份恢復？已有資料將被增量覆蓋。",
+            "fileName": "檔案名稱",
+            "fileSize": "大小",
+            "modifiedAt": "修改時間",
+            "refresh": "重新整理",
+            "notConfigured": "WebDAV 未設定"
         }
     },
     "group": {

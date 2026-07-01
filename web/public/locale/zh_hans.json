@@ -461,6 +461,57 @@
         },
         "data": {
             "title": "数据管理"
+        },
+        "webdavBackup": {
+            "title": "WebDAV 备份",
+            "url": {
+                "label": "WebDAV 地址",
+                "placeholder": "https://dav.example.com/dav"
+            },
+            "username": {
+                "label": "用户名",
+                "placeholder": "用户名"
+            },
+            "password": {
+                "label": "密码",
+                "placeholder": "密码"
+            },
+            "backupPath": {
+                "label": "远程目录",
+                "placeholder": "/octopus-backups"
+            },
+            "interval": {
+                "label": "自动备份间隔(小时)",
+                "placeholder": "0 = 禁用",
+                "description": "设为 0 表示禁用自动备份"
+            },
+            "retentionCount": {
+                "label": "保留份数",
+                "placeholder": "10"
+            },
+            "includeStats": "包含统计数据",
+            "testConnection": "测试连接",
+            "testSuccess": "连接成功",
+            "testFailed": "连接失败",
+            "testing": "测试中...",
+            "triggerBackup": "立即备份",
+            "triggerSuccess": "备份成功",
+            "triggerFailed": "备份失败",
+            "triggering": "备份中...",
+            "backupList": "远程备份列表",
+            "loading": "加载中...",
+            "loadError": "加载备份列表失败",
+            "noBackups": "暂无备份文件",
+            "restore": "恢复",
+            "restoring": "恢复中...",
+            "restoreSuccess": "恢复成功",
+            "restoreFailed": "恢复失败",
+            "restoreConfirm": "确认从此备份恢复？已有数据将被增量覆盖。",
+            "fileName": "文件名",
+            "fileSize": "大小",
+            "modifiedAt": "修改时间",
+            "refresh": "刷新",
+            "notConfigured": "WebDAV 未配置"
         }
     },
     "group": {

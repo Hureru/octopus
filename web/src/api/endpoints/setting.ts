@@ -41,6 +41,13 @@ export const SettingKey = {
     OutlierReapMinutes: 'outlier_reap_minutes',
     OutlierCFRecoverMinutes: 'outlier_cf_recover_minutes',
     ApiBaseUrl: 'api_base_url',
+    WebDAVURL: 'webdav_url',
+    WebDAVUsername: 'webdav_username',
+    WebDAVPassword: 'webdav_password',
+    WebDAVBackupPath: 'webdav_backup_path',
+    WebDAVBackupInterval: 'webdav_backup_interval',
+    WebDAVRetentionCount: 'webdav_retention_count',
+    WebDAVIncludeStats: 'webdav_include_stats',
 } as const;
 
 /**
@@ -243,6 +250,58 @@ export function useImportDB() {
         },
         onError: (error) => {
             logger.error('导入数据库失败:', error);
+        },
+    });
+}
+
+/**
+ * WebDAV Backup
+ */
+export interface WebDAVBackupInfo {
+    name: string;
+    size: number;
+    modified_at: string;
+}
+
+export function useTestWebDAV() {
+    return useMutation({
+        mutationFn: async () => {
+            return apiClient.post<{ ok: boolean }>('/api/v1/webdav-backup/test', {});
+        },
+    });
+}
+
+export function useTriggerWebDAVBackup() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async () => {
+            return apiClient.post<{ message: string }>('/api/v1/webdav-backup/trigger', {});
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['webdav-backups'] });
+        },
+    });
+}
+
+export function useWebDAVBackupList(enabled = true) {
+    return useQuery({
+        queryKey: ['webdav-backups'],
+        queryFn: async () => {
+            return apiClient.get<WebDAVBackupInfo[]>('/api/v1/webdav-backup/list');
+        },
+        enabled,
+        refetchInterval: 30000,
+    });
+}
+
+export function useRestoreWebDAVBackup() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (filename: string) => {
+            return apiClient.post<DBImportResult>('/api/v1/webdav-backup/restore', { filename });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['settings', 'list'] });
         },
     });
 }

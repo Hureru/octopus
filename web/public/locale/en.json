@@ -461,6 +461,57 @@
         },
         "data": {
             "title": "Data Management"
+        },
+        "webdavBackup": {
+            "title": "WebDAV Backup",
+            "url": {
+                "label": "WebDAV URL",
+                "placeholder": "https://dav.example.com/dav"
+            },
+            "username": {
+                "label": "Username",
+                "placeholder": "Username"
+            },
+            "password": {
+                "label": "Password",
+                "placeholder": "Password"
+            },
+            "backupPath": {
+                "label": "Remote Path",
+                "placeholder": "/octopus-backups"
+            },
+            "interval": {
+                "label": "Auto Backup Interval (hours)",
+                "placeholder": "0 = disabled",
+                "description": "Set to 0 to disable auto backup"
+            },
+            "retentionCount": {
+                "label": "Retention Count",
+                "placeholder": "10"
+            },
+            "includeStats": "Include Statistics",
+            "testConnection": "Test Connection",
+            "testSuccess": "Connection successful",
+            "testFailed": "Connection failed",
+            "testing": "Testing...",
+            "triggerBackup": "Backup Now",
+            "triggerSuccess": "Backup successful",
+            "triggerFailed": "Backup failed",
+            "triggering": "Backing up...",
+            "backupList": "Remote Backups",
+            "loading": "Loading...",
+            "loadError": "Failed to load backups",
+            "noBackups": "No backup files found",
+            "restore": "Restore",
+            "restoring": "Restoring...",
+            "restoreSuccess": "Restore successful",
+            "restoreFailed": "Restore failed",
+            "restoreConfirm": "Restore from this backup? Existing data will be incrementally overwritten.",
+            "fileName": "File Name",
+            "fileSize": "Size",
+            "modifiedAt": "Modified",
+            "refresh": "Refresh",
+            "notConfigured": "WebDAV not configured"
         }
     },
     "group": {

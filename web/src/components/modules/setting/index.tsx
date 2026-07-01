@@ -9,6 +9,7 @@ import { SettingNetwork } from './Network';
 import { SettingReliability } from './Reliability';
 import { SettingSyncTasks } from './SyncTasks';
 import { SettingData } from './Data';
+import { SettingWebDAVBackup } from './WebDAVBackup';
 
 export function Setting() {
     return (
@@ -22,6 +23,7 @@ export function Setting() {
                 <SettingReliability key="setting-reliability" />
                 <SettingSyncTasks key="setting-sync-tasks" />
                 <SettingData key="setting-data" />
+                <SettingWebDAVBackup key="setting-webdav-backup" />
             </PageWrapper>
         </div>
     );
