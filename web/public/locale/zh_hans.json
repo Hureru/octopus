@@ -499,6 +499,8 @@
             "triggerFailed": "备份失败",
             "triggering": "备份中...",
             "backupList": "远程备份列表",
+            "loading": "加载中...",
+            "loadError": "加载备份列表失败",
             "noBackups": "暂无备份文件",
             "restore": "恢复",
             "restoring": "恢复中...",

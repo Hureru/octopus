@@ -3,6 +3,7 @@ package webdav
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
@@ -55,40 +56,47 @@ func LoadConfig() (*Config, error) {
 	}, nil
 }
 
-func NewClient(cfg *Config) *gowebdav.Client {
+func NewClient(cfg *Config) (*gowebdav.Client, error) {
 	c := gowebdav.NewClient(cfg.URL, cfg.Username, cfg.Password)
+	c.SetTimeout(30 * time.Second)
 
-	httpClient := getHTTPClient()
+	httpClient, err := getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
 	if httpClient != nil {
 		c.SetTransport(httpClient.Transport)
 	}
 
-	return c
+	return c, nil
 }
 
-func getHTTPClient() *http.Client {
+func getHTTPClient() (*http.Client, error) {
 	proxyURL, _ := op.SettingGetString(model.SettingKeyProxyURL)
-	if proxyURL != "" {
-		httpClient, err := client.GetHTTPClientSystemProxy(true)
-		if err != nil {
-			log.Warnf("failed to create proxied HTTP client: %v", err)
-			return nil
-		}
-		return httpClient
-	}
-	httpClient, err := client.GetHTTPClientSystemProxy(false)
+	useProxy := proxyURL != ""
+	httpClient, err := client.GetHTTPClientSystemProxy(useProxy)
 	if err != nil {
-		return nil
+		if useProxy {
+			return nil, fmt.Errorf("failed to create proxied HTTP client: %w", err)
+		}
+		log.Warnf("failed to create HTTP client: %v", err)
+		return nil, nil
 	}
-	return httpClient
+	return httpClient, nil
 }
 
 func TestConnection(cfg *Config) error {
-	c := NewClient(cfg)
-	_, err := c.ReadDir(cfg.BackupPath)
+	c, err := NewClient(cfg)
 	if err != nil {
+		return err
+	}
+	_, err = c.ReadDir(cfg.BackupPath)
+	if err != nil {
+		if !gowebdav.IsErrNotFound(err) {
+			return fmt.Errorf("cannot access backup directory: %w", err)
+		}
 		if err := c.MkdirAll(cfg.BackupPath, 0755); err != nil {
-			return fmt.Errorf("cannot access or create backup directory: %w", err)
+			return fmt.Errorf("cannot create backup directory: %w", err)
 		}
 	}
 	return nil

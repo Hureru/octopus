@@ -40,7 +40,10 @@ func RunBackup(ctx context.Context) error {
 		return fmt.Errorf("failed to marshal backup: %w", err)
 	}
 
-	c := NewClient(cfg)
+	c, err := NewClient(cfg)
+	if err != nil {
+		return err
+	}
 	_ = c.MkdirAll(cfg.BackupPath, 0755)
 
 	filename := backupPrefix + time.Now().Format("20060102150405") + backupSuffix
@@ -62,7 +65,10 @@ func ListBackups(ctx context.Context) ([]BackupInfo, error) {
 		return nil, err
 	}
 
-	c := NewClient(cfg)
+	c, err := NewClient(cfg)
+	if err != nil {
+		return nil, err
+	}
 	files, err := c.ReadDir(cfg.BackupPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list backup directory: %w", err)
@@ -96,7 +102,10 @@ func RestoreFromBackup(ctx context.Context, filename string) (*model.DBImportRes
 		return nil, err
 	}
 
-	c := NewClient(cfg)
+	c, err := NewClient(cfg)
+	if err != nil {
+		return nil, err
+	}
 	remotePath := path.Join(cfg.BackupPath, filename)
 
 	data, err := c.Read(remotePath)

@@ -76,9 +76,9 @@ export function SettingWebDAVBackup() {
         try {
             await restoreBackup.mutateAsync(filename);
             toast.success(t('restoreSuccess'));
+            window.location.reload();
         } catch (e) {
             toast.error(t('restoreFailed'), { description: e instanceof Error ? e.message : undefined });
-        } finally {
             setRestoringFile(null);
         }
     };
@@ -208,9 +208,9 @@ export function SettingWebDAVBackup() {
                             </Button>
                         </div>
                         {backupList.isPending ? (
-                            <p className="text-sm text-muted-foreground">{t('loading') || 'Loading...'}</p>
+                            <p className="text-sm text-muted-foreground">{t('loading')}</p>
                         ) : backupList.isError ? (
-                            <p className="text-sm text-red-500">{t('loadError') || 'Failed to load backups'}</p>
+                            <p className="text-sm text-red-500">{t('loadError')}</p>
                         ) : backups && backups.length === 0 ? (
                             <p className="text-sm text-muted-foreground">{t('noBackups')}</p>
                         ) : backups ? (
