@@ -55,3 +55,22 @@ export function useStartTailscaleFunnel() {
 export function useStopTailscaleFunnel() {
     return useTailscaleAction('stop');
 }
+
+export function useInstallTailscale() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (sudoPassword: string) =>
+            apiClient.post<TailscaleStatus>('/api/v1/tailscale/install', { sudo_password: sudoPassword }),
+        onSuccess: (status) => queryClient.setQueryData(statusQueryKey, status),
+        onSettled: () => queryClient.invalidateQueries({ queryKey: statusQueryKey }),
+    });
+}
+
+export function useLoginTailscale() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: () => apiClient.post<TailscaleStatus>('/api/v1/tailscale/login'),
+        onSuccess: (status) => queryClient.setQueryData(statusQueryKey, status),
+        onSettled: () => queryClient.invalidateQueries({ queryKey: statusQueryKey }),
+    });
+}

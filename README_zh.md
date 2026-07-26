@@ -315,13 +315,14 @@ http://localhost:3000
 
 Octopus 可以在 **设置 → Tailscale Funnel** 中通过系统已安装的 Tailscale CLI 暴露本地 API。
 
-使用前准备：
+使用步骤：
 
-1. 安装 Tailscale，并确保 Octopus 进程可以找到 `tailscale` CLI。
-2. 修改默认的 `admin/admin` 密码，执行 `tailscale login` 登录，并确保当前 tailnet 已允许使用 Funnel。
-3. 在设置页点击 **启动 Funnel**，页面会显示公网地址和 API 地址（`<公网地址>/v1`）。
+1. 打开 **设置 → Tailscale Funnel**。如果缺少 `tailscale` CLI，点击 **自动安装**（支持 Linux/macOS；非 root 运行时需输入 sudo 密码，密码仅传给本次 `sudo` 调用，不会被保存）。Windows 请从 [tailscale.com/download](https://tailscale.com/download) 安装。
+2. 点击 **登录 Tailscale**，打开页面显示的授权链接完成登录。也可以手动执行 `tailscale login`。
+3. 修改默认的 `admin/admin` 密码，并确保当前 tailnet 已允许使用 Funnel。
+4. 点击 **启动 Funnel**，页面会显示公网地址和 API 地址（`<公网地址>/v1`）。
 
-该功能只调用 `tailscale funnel --bg`，不会自动安装 Tailscale，也不会索取 sudo 密码。默认管理员凭据仍为 admin/admin 时，功能会拒绝启动。HTTPS 443 上已有 Serve/Funnel 配置时会提示冲突，不会执行 reset 覆盖配置。如果二进制文件不在 `PATH` 中，可设置 `OCTOPUS_TAILSCALE_BIN=/path/to/tailscale`。
+该功能只调用 `tailscale funnel --bg`。默认管理员凭据仍为 admin/admin 时，功能会拒绝启动。HTTPS 443 上已有 Serve/Funnel 配置时会提示冲突，不会执行 reset 覆盖配置。如果二进制文件不在 `PATH` 中，可设置 `OCTOPUS_TAILSCALE_BIN=/path/to/tailscale`。
 
 > ⚠️ Funnel 会将已认证的 Octopus 服务发布到公网。请保持认证开启，不要不必要地分享地址或 API 密钥。
 

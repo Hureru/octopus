@@ -1,12 +1,15 @@
 'use client';
-
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Cloud, ExternalLink, LoaderCircle, Play, RefreshCw, Square, Terminal } from 'lucide-react';
+import { Cloud, Download, ExternalLink, LoaderCircle, LogIn, Play, RefreshCw, Square, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { CopyIconButton } from '@/components/common/CopyButton';
 import { toast } from '@/components/common/Toast';
 import {
     type TailscalePhase,
+    useInstallTailscale,
+    useLoginTailscale,
     useStartTailscaleFunnel,
     useStopTailscaleFunnel,
     useTailscaleStatus,
@@ -53,9 +56,12 @@ export function SettingTailscale() {
     const statusQuery = useTailscaleStatus();
     const startFunnel = useStartTailscaleFunnel();
     const stopFunnel = useStopTailscaleFunnel();
+    const installTailscale = useInstallTailscale();
+    const loginTailscale = useLoginTailscale();
+    const [sudoPassword, setSudoPassword] = useState('');
     const status = statusQuery.data;
     const actionPending = startFunnel.isPending || stopFunnel.isPending;
-
+    const setupPending = installTailscale.isPending || loginTailscale.isPending;
     const handleToggle = async () => {
         if (!status) return;
         if (!status.running && !window.confirm(t('confirmStart'))) return;
@@ -70,6 +76,24 @@ export function SettingTailscale() {
             }
         } catch (error) {
             toast.error(t('actionFailed'), { description: (error as ApiError)?.message });
+        }
+    };
+    const handleInstall = async () => {
+        try {
+            await installTailscale.mutateAsync(sudoPassword);
+            setSudoPassword('');
+            toast.success(t('installSuccess'));
+        } catch (error) {
+            toast.error(t('installFailed'), { description: (error as ApiError)?.message });
+        }
+    };
+
+    const handleLogin = async () => {
+        try {
+            await loginTailscale.mutateAsync();
+            toast.success(t('loginStarted'));
+        } catch (error) {
+            toast.error(t('loginFailed'), { description: (error as ApiError)?.message });
         }
     };
 
@@ -119,17 +143,39 @@ export function SettingTailscale() {
             ) : null}
 
             {status?.phase === 'not_installed' ? (
-                <p className="rounded-2xl bg-muted/60 p-3 text-xs text-muted-foreground">
-                    {t('installHint')}{' '}
-                    <a
-                        href="https://tailscale.com/download"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-primary hover:underline"
-                    >
-                        {t('installLink')} <ExternalLink className="size-3" />
-                    </a>
-                </p>
+                <div className="space-y-3 rounded-2xl bg-muted/60 p-3">
+                    <p className="text-xs text-muted-foreground">{t('installDesc')}</p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                        <Input
+                            type="password"
+                            value={sudoPassword}
+                            onChange={(event) => setSudoPassword(event.target.value)}
+                            placeholder={t('sudoPlaceholder')}
+                            autoComplete="off"
+                            className="rounded-xl text-sm"
+                        />
+                        <Button
+                            size="sm"
+                            className="shrink-0 rounded-xl"
+                            onClick={handleInstall}
+                            disabled={setupPending}
+                        >
+                            {installTailscale.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                            {installTailscale.isPending ? t('installing') : t('installAction')}
+                        </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        {t('sudoHint')}{' '}
+                        <a
+                            href="https://tailscale.com/download"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                        >
+                            {t('installLink')} <ExternalLink className="size-3" />
+                        </a>
+                    </p>
+                </div>
             ) : null}
 
             {status?.phase === 'credentials_needed' ? (
@@ -137,9 +183,19 @@ export function SettingTailscale() {
             ) : null}
 
             {status?.phase === 'needs_login' ? (
-                <p className="rounded-2xl bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
-                    {t('loginHint')} <code>tailscale login</code>
-                </p>
+                <div className="flex flex-col gap-2 rounded-2xl bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">{t('loginHint')}</p>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 rounded-xl"
+                        onClick={handleLogin}
+                        disabled={setupPending}
+                    >
+                        {loginTailscale.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+                        {loginTailscale.isPending ? t('loggingIn') : t('loginAction')}
+                    </Button>
+                </div>
             ) : null}
 
             {status?.approval_url ? (
@@ -162,8 +218,8 @@ export function SettingTailscale() {
                     variant="ghost"
                     size="sm"
                     className="rounded-xl"
-                    onClick={() => statusQuery.refetch()}
-                    disabled={statusQuery.isFetching || actionPending}
+                        onClick={() => statusQuery.refetch()}
+                        disabled={statusQuery.isFetching || actionPending || setupPending}
                 >
                     <RefreshCw className={`size-4 ${statusQuery.isFetching ? 'animate-spin' : ''}`} />
                     {t('refresh')}

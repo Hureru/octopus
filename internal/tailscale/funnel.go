@@ -28,6 +28,7 @@ const (
 	envBinaryPath   = "OCTOPUS_TAILSCALE_BIN"
 	statusTimeout   = 5 * time.Second
 	actionTimeout   = 30 * time.Second
+	installTimeout  = 5 * time.Minute
 	maxErrorLength  = 2048
 )
 
@@ -50,6 +51,9 @@ var (
 	ErrNeedsLogin        = errors.New("tailscale is not logged in; run 'tailscale login' first")
 	ErrConflict          = errors.New("HTTPS port 443 already has a Tailscale Serve or Funnel configuration")
 	ErrDefaultCredential = errors.New("change the default admin password before enabling Tailscale Funnel")
+	ErrSudoRequired      = errors.New("sudo password is required to install Tailscale")
+	ErrWindowsInstall    = errors.New("automatic install is not supported on Windows; download Tailscale from https://tailscale.com/download")
+	ErrBrewMissing       = errors.New("Homebrew is required to install Tailscale on macOS; install it from https://brew.sh")
 
 	operationMu sync.Mutex
 	recent      struct {
@@ -83,6 +87,7 @@ type Status struct {
 
 type nodeStatus struct {
 	BackendState string `json:"BackendState"`
+	AuthURL      string `json:"AuthURL"`
 	Self         *struct {
 		DNSName string `json:"DNSName"`
 	} `json:"Self"`
@@ -152,8 +157,8 @@ func GetStatus(ctx context.Context) Status {
 		if node.BackendState == "NeedsLogin" || node.BackendState == "NoState" {
 			status.Phase = PhaseNeedsLogin
 			status.LastError = ErrNeedsLogin.Error()
+			status.ApprovalURL = node.AuthURL
 		} else {
-			status.Phase = PhaseError
 			status.LastError = fmt.Sprintf("tailscale backend is %s", strings.ToLower(node.BackendState))
 		}
 		return status
@@ -525,4 +530,218 @@ func recentError() (string, string) {
 	recent.RLock()
 	defer recent.RUnlock()
 	return recent.message, recent.approvalURL
+}
+
+// Install 自动安装 Tailscale 并启动 tailscaled。sudo 密码只通过
+// stdin 传给本次 sudo 调用，不写入日志、不落盘、不保存。
+func Install(ctx context.Context, sudoPassword string) (Status, error) {
+	operationMu.Lock()
+	defer operationMu.Unlock()
+
+	status := GetStatus(ctx)
+	switch {
+	case !status.Supported:
+		return fail(status, ErrUnsupported)
+	case status.Installed:
+		return status, nil
+	case runtime.GOOS == "windows":
+		return fail(status, ErrWindowsInstall)
+	case os.Geteuid() != 0 && strings.TrimSpace(sudoPassword) == "":
+		return fail(status, ErrSudoRequired)
+	}
+
+	var output []byte
+	var err error
+	if runtime.GOOS == "darwin" {
+		output, err = installMac(ctx, sudoPassword)
+	} else {
+		output, err = installLinux(ctx, sudoPassword)
+	}
+
+	if err == nil {
+		err = ensureDaemon(ctx, sudoPassword)
+	}
+
+	status = GetStatus(ctx)
+	if err != nil {
+		message := err.Error()
+		if len(output) > 0 {
+			message = cliError(output, err)
+		}
+		setRecentError(message)
+		status.LastError = message
+		return status, errors.New(message)
+	}
+
+	clearRecentError()
+	status.LastError = ""
+	status.ApprovalURL = ""
+	return status, nil
+}
+
+// Login 在后台发起 tailscale login，授权链接通过 Status.ApprovalURL 返回。
+func Login(ctx context.Context) (Status, error) {
+	operationMu.Lock()
+	defer operationMu.Unlock()
+
+	status := GetStatus(ctx)
+	switch {
+	case !status.Supported:
+		return fail(status, ErrUnsupported)
+	case !status.Installed:
+		return fail(status, ErrNotInstalled)
+	case status.LoggedIn:
+		return status, nil
+	case !status.DaemonRunning:
+		return fail(status, errors.New("tailscaled is not running"))
+	}
+
+	cmd := exec.Command(status.BinaryPath, "login")
+	detach(cmd)
+	if err := cmd.Start(); err != nil {
+		return fail(status, err)
+	}
+
+	// 授权可能需要几分钟，后台等待，避免阻塞接口；前台只等 AuthURL 出现。
+	go func() { _ = cmd.Wait() }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		status = GetStatus(ctx)
+		if status.LoggedIn || status.ApprovalURL != "" {
+			break
+		}
+	}
+
+	if status.ApprovalURL == "" && !status.LoggedIn {
+		return fail(status, errors.New("tailscale did not return a login URL; run 'tailscale login' manually"))
+	}
+	return status, nil
+}
+
+func installLinux(ctx context.Context, password string) ([]byte, error) {
+	fetch := "curl -fsSL"
+	if _, err := exec.LookPath("curl"); err != nil {
+		fetch = "wget -qO-"
+	}
+	return runPrivileged(ctx, installTimeout, password, true, "sh", "-c", fetch+" https://tailscale.com/install.sh | sh")
+}
+
+func installMac(ctx context.Context, password string) ([]byte, error) {
+	brew, err := findBrew()
+	if err != nil {
+		return nil, err
+	}
+	output, err := runPrivileged(ctx, installTimeout, password, false, brew, "install", "tailscale")
+	if err != nil {
+		return output, err
+	}
+	// 注册 launchd 系统守护进程；tailscaled 与 tailscale 同目录。
+	binaryPath, err := resolveBinary()
+	if err != nil {
+		return nil, err
+	}
+	daemon := filepath.Join(filepath.Dir(binaryPath), "tailscaled")
+	return runPrivileged(ctx, actionTimeout, password, true, daemon, "install-system-daemon")
+}
+
+func ensureDaemon(ctx context.Context, password string) error {
+	binaryPath, err := resolveBinary()
+	if err != nil {
+		return err
+	}
+	if daemonResponds(ctx, binaryPath) {
+		return nil
+	}
+
+	if hasSystemd() {
+		output, err := runPrivileged(ctx, actionTimeout, password, true, "systemctl", "enable", "--now", "tailscaled")
+		if err != nil {
+			return errors.New(cliError(output, err))
+		}
+	} else {
+		daemon := filepath.Join(filepath.Dir(binaryPath), "tailscaled")
+		if info, statErr := os.Stat(daemon); statErr != nil || info.IsDir() {
+			daemon = "tailscaled"
+		}
+		args := []string{"--statedir=/var/lib/tailscale"}
+		if _, statErr := os.Stat("/dev/net/tun"); statErr != nil {
+			args = append(args, "--tun=userspace-networking")
+		}
+		if err := startDaemonDetached(daemon, password, args...); err != nil {
+			return err
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if daemonResponds(ctx, binaryPath) {
+			return nil
+		}
+	}
+	return errors.New("tailscaled did not start")
+}
+
+func daemonResponds(ctx context.Context, binaryPath string) bool {
+	output, err := runCLI(ctx, statusTimeout, binaryPath, "status", "--json")
+	return err == nil || isLoginError(cliError(output, err))
+}
+
+// startDaemonDetached 以后台方式拉起 tailscaled，进程脱离 Octopus 生命周期。
+func startDaemonDetached(daemon, password string, args ...string) error {
+	name := daemon
+	if os.Geteuid() != 0 {
+		args = append([]string{"-S", "-p", "", daemon}, args...)
+		name = "sudo"
+	}
+	cmd := exec.Command(name, args...)
+	if name == "sudo" {
+		cmd.Stdin = strings.NewReader(password + "\n")
+	}
+	detach(cmd)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+// runPrivileged 在需要 root 且当前非 root 时经 sudo -S 执行，密码只走 stdin。
+func runPrivileged(ctx context.Context, timeout time.Duration, password string, needsRoot bool, name string, args ...string) ([]byte, error) {
+	if needsRoot && os.Geteuid() != 0 {
+		args = append([]string{"-S", "-p", "", name}, args...)
+		name = "sudo"
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, name, args...)
+	if name == "sudo" {
+		cmd.Stdin = strings.NewReader(password + "\n")
+	}
+	output, err := cmd.CombinedOutput()
+	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		return output, errors.New("command timed out")
+	}
+	return output, err
+}
+
+func hasSystemd() bool {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+	info, err := os.Stat("/run/systemd/system")
+	return err == nil && info.IsDir()
+}
+
+func findBrew() (string, error) {
+	if path, err := exec.LookPath("brew"); err == nil {
+		return path, nil
+	}
+	for _, candidate := range []string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", ErrBrewMissing
 }

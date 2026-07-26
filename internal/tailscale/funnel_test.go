@@ -1,6 +1,10 @@
 package tailscale
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/conf"
@@ -133,5 +137,29 @@ func TestExtractApprovalURL(t *testing.T) {
 	message := "Enable Funnel at https://login.tailscale.com/admin/settings/features)."
 	if got := extractApprovalURL(message); got != "https://login.tailscale.com/admin/settings/features" {
 		t.Fatalf("approval URL = %q", got)
+	}
+}
+
+func TestGetStatusNeedsLoginExposesAuthURL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake CLI")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tailscale")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"status\" ]; then\n" +
+		"echo '{\"BackendState\":\"NeedsLogin\",\"AuthURL\":\"https://login.tailscale.com/a/test123\"}'\n" +
+		"exit 0\nfi\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envBinaryPath, bin)
+
+	status := GetStatus(context.Background())
+	if status.Phase != PhaseNeedsLogin {
+		t.Fatalf("phase = %q, want %q (error: %s)", status.Phase, PhaseNeedsLogin, status.LastError)
+	}
+	if status.ApprovalURL != "https://login.tailscale.com/a/test123" {
+		t.Fatalf("approval URL = %q", status.ApprovalURL)
 	}
 }
