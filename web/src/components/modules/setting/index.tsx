@@ -10,6 +10,7 @@ import { SettingReliability } from './Reliability';
 import { SettingSyncTasks } from './SyncTasks';
 import { SettingData } from './Data';
 import { SettingWebDAVBackup } from './WebDAVBackup';
+import { SettingTailscale } from './Tailscale';
 
 export function Setting() {
     return (
@@ -24,6 +25,7 @@ export function Setting() {
                 <SettingSyncTasks key="setting-sync-tasks" />
                 <SettingData key="setting-data" />
                 <SettingWebDAVBackup key="setting-webdav-backup" />
+                <SettingTailscale key="setting-tailscale" />
             </PageWrapper>
         </div>
     );

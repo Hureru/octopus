@@ -310,6 +310,21 @@ Since the program handles numerous statistics, writing to the database on every 
 
 > ⚠️ **Important**: When exiting the program, use proper shutdown methods (like `Ctrl+C` or sending `SIGTERM` signal) to ensure in-memory statistics are correctly written to the database. **Do NOT use `kill -9` or other forced termination methods**, as this may result in statistics data loss.
 
+**Tailscale Funnel:**
+
+Octopus can expose the local API through the system-installed Tailscale CLI from **Settings → Tailscale Funnel**.
+
+Setup:
+
+1. Open **Settings → Tailscale Funnel**. If the `tailscale` CLI is missing, click **Install Tailscale** (Linux/macOS; a sudo password is required when Octopus is not running as root - it is passed to `sudo` once and never stored). Windows users install from [tailscale.com/download](https://tailscale.com/download).
+2. Click **Log in to Tailscale** and open the authorization link shown in the page. Manual `tailscale login` works too.
+3. Change the default `admin/admin` password and ensure Funnel is allowed for the tailnet.
+4. Click **Start Funnel**. The UI shows the public URL and the API URL (`<public-url>/v1`).
+
+The feature runs `tailscale funnel --bg`. It refuses to start while the default admin credentials are active. Existing Serve/Funnel configuration on HTTPS port 443 is treated as a conflict rather than reset. If the binary is outside `PATH`, set `OCTOPUS_TAILSCALE_BIN=/path/to/tailscale`.
+
+> ⚠️ Funnel publishes the authenticated Octopus service to the public internet. Keep authentication enabled and do not share the URL or API keys unnecessarily.
+
 ---
 
 ## 🔌 Client Integration
