@@ -543,7 +543,11 @@ func Install(ctx context.Context, sudoPassword string) (Status, error) {
 	case !status.Supported:
 		return fail(status, ErrUnsupported)
 	case status.Installed:
-		return status, nil
+		// 已安装也要确保守护进程在跑（上次安装可能启动失败）。
+		if err := ensureDaemon(ctx, sudoPassword); err != nil {
+			return fail(GetStatus(ctx), err)
+		}
+		return GetStatus(ctx), nil
 	case runtime.GOOS == "windows":
 		return fail(status, ErrWindowsInstall)
 	case os.Geteuid() != 0 && strings.TrimSpace(sudoPassword) == "":
@@ -557,8 +561,17 @@ func Install(ctx context.Context, sudoPassword string) (Status, error) {
 	} else {
 		output, err = installLinux(ctx, sudoPassword)
 	}
+	if err != nil {
+		// 安装脚本在无 init 的环境（容器）里最后一步启动服务会失败，
+		// 但软件包往往已装好；以 CLI 是否可用为准。
+		if _, lookErr := resolveBinary(); lookErr == nil {
+			err = nil
+		}
+	}
 
 	if err == nil {
+		// 清空安装日志，避免后续守护进程的错误被安装输出掩盖。
+		output = nil
 		err = ensureDaemon(ctx, sudoPassword)
 	}
 
@@ -637,13 +650,12 @@ func installMac(ctx context.Context, password string) ([]byte, error) {
 	if err != nil {
 		return output, err
 	}
-	// 注册 launchd 系统守护进程；tailscaled 与 tailscale 同目录。
+	// 注册 launchd 系统守护进程。
 	binaryPath, err := resolveBinary()
 	if err != nil {
 		return nil, err
 	}
-	daemon := filepath.Join(filepath.Dir(binaryPath), "tailscaled")
-	return runPrivileged(ctx, actionTimeout, password, true, daemon, "install-system-daemon")
+	return runPrivileged(ctx, actionTimeout, password, true, resolveDaemon(binaryPath), "install-system-daemon")
 }
 
 func ensureDaemon(ctx context.Context, password string) error {
@@ -661,10 +673,7 @@ func ensureDaemon(ctx context.Context, password string) error {
 			return errors.New(cliError(output, err))
 		}
 	} else {
-		daemon := filepath.Join(filepath.Dir(binaryPath), "tailscaled")
-		if info, statErr := os.Stat(daemon); statErr != nil || info.IsDir() {
-			daemon = "tailscaled"
-		}
+		daemon := resolveDaemon(binaryPath)
 		args := []string{"--statedir=/var/lib/tailscale"}
 		if _, statErr := os.Stat("/dev/net/tun"); statErr != nil {
 			args = append(args, "--tun=userspace-networking")
@@ -686,6 +695,24 @@ func ensureDaemon(ctx context.Context, password string) error {
 func daemonResponds(ctx context.Context, binaryPath string) bool {
 	output, err := runCLI(ctx, statusTimeout, binaryPath, "status", "--json")
 	return err == nil || isLoginError(cliError(output, err))
+}
+
+// resolveDaemon 找 tailscaled：先看 CLI 同目录，再查 PATH 和常见 sbin 位置。
+// Alpine 等发行版把 tailscale 放 /usr/bin、tailscaled 放 /usr/sbin。
+func resolveDaemon(binaryPath string) string {
+	sibling := filepath.Join(filepath.Dir(binaryPath), "tailscaled")
+	if info, err := os.Stat(sibling); err == nil && !info.IsDir() {
+		return sibling
+	}
+	if path, err := exec.LookPath("tailscaled"); err == nil {
+		return path
+	}
+	for _, candidate := range []string{"/usr/sbin/tailscaled", "/usr/local/sbin/tailscaled", "/sbin/tailscaled"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return sibling
 }
 
 // startDaemonDetached 以后台方式拉起 tailscaled，进程脱离 Octopus 生命周期。

@@ -163,3 +163,17 @@ func TestGetStatusNeedsLoginExposesAuthURL(t *testing.T) {
 		t.Fatalf("approval URL = %q", status.ApprovalURL)
 	}
 }
+
+func TestResolveDaemonPrefersSibling(t *testing.T) {
+	dir := t.TempDir()
+	cli := filepath.Join(dir, "tailscale")
+	daemon := filepath.Join(dir, "tailscaled")
+	for _, f := range []string{cli, daemon} {
+		if err := os.WriteFile(f, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := resolveDaemon(cli); got != daemon {
+		t.Fatalf("resolveDaemon = %q, want sibling %q", got, daemon)
+	}
+}
