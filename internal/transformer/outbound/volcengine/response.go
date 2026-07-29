@@ -36,9 +36,13 @@ func (o *ResponseOutbound) TransformRequest(ctx context.Context, request *model.
 	if _, ok := supportedReasoningEffortModel[request.Model]; !ok {
 		openaiReq.Reasoning = nil
 	}
+	input, err := convertToResponsesInput(openaiReq.Input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert responses input: %w", err)
+	}
 	responsesReq := ResponsesRequest{
 		ResponsesRequest: openaiReq,
-		Input:            convertToResponsesInput(openaiReq.Input),
+		Input:            input,
 	}
 	switch request.ReasoningEffort {
 	case "minimal":
@@ -132,20 +136,29 @@ type ResponsesItem struct {
 	Partial bool `json:"partial,omitempty"`
 }
 
-func convertToResponsesInput(input openai.ResponsesInput) ResponsesInput {
-	result := ResponsesInput{}
+func convertToResponsesInput(input openai.ResponsesInput) (ResponsesInput, error) {
+	result := ResponsesInput{Items: make([]ResponsesItem, 0)}
 	if input.Text != nil {
 		result.Text = input.Text
-		return result
+		return result, nil
 	}
 
-	for _, item := range input.Items {
+	items := input.Items
+	if len(input.Raw) > 0 {
+		if err := json.Unmarshal(input.Raw, &items); err != nil {
+			return ResponsesInput{}, err
+		}
+	}
+
+	for _, item := range items {
 		result.Items = append(result.Items, ResponsesItem{ResponsesItem: item})
 	}
 	// If the role of the last message is the assistant, needs set partial.
-	idx := len(input.Items) - 1
-	if result.Items[idx].Role == "assistant" {
-		result.Items[idx].Partial = true
+	if len(result.Items) > 0 {
+		idx := len(result.Items) - 1
+		if result.Items[idx].Role == "assistant" {
+			result.Items[idx].Partial = true
+		}
 	}
-	return result
+	return result, nil
 }

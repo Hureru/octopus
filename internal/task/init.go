@@ -104,8 +104,8 @@ func Init() {
 	webdavIntervalHours, err := op.SettingGetInt(model.SettingKeyWebDAVBackupInterval)
 	if err != nil {
 		log.Warnf("failed to get webdav backup interval: %v", err)
-	} else if webdavIntervalHours > 0 {
-		webdavInterval := time.Duration(webdavIntervalHours) * time.Hour
-		Register(string(model.SettingKeyWebDAVBackupInterval), webdavInterval, false, WebDAVBackupTask)
+		webdavIntervalHours = 0
 	}
+	webdavInterval := time.Duration(webdavIntervalHours) * time.Hour
+	Register(string(model.SettingKeyWebDAVBackupInterval), webdavInterval, false, WebDAVBackupTask)
 }

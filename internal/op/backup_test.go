@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	dbpkg "github.com/bestruirui/octopus/internal/db"
@@ -169,35 +170,63 @@ func TestDBImportDeduplicatesOnSecondImport(t *testing.T) {
 	}
 }
 
-func TestDBImportSkipsOrphanedStats(t *testing.T) {
-	ctx := setupBackupTestDB(t)
+func TestDBImportRejectsOrphanedStats(t *testing.T) {
+	tests := []struct {
+		name      string
+		field     string
+		addOrphan func(*model.DBDump)
+	}{
+		{
+			name:  "model channel",
+			field: "channel_id 999",
+			addOrphan: func(dump *model.DBDump) {
+				dump.StatsModel = []model.StatsModel{{ID: 2, ChannelID: 999, Name: "orphan"}}
+			},
+		},
+		{
+			name:  "channel",
+			field: "channel_id 999",
+			addOrphan: func(dump *model.DBDump) {
+				dump.StatsChannel = []model.StatsChannel{{ChannelID: 999}}
+			},
+		},
+		{
+			name:  "api key",
+			field: "api_key_id 999",
+			addOrphan: func(dump *model.DBDump) {
+				dump.StatsAPIKey = []model.StatsAPIKey{{APIKeyID: 999}}
+			},
+		},
+		{
+			name:  "site account",
+			field: "site_account_id 999",
+			addOrphan: func(dump *model.DBDump) {
+				dump.StatsSiteModelHourly = []model.StatsSiteModelHourly{{
+					Hour: 1, SiteAccountID: 999, GroupKey: "default", ModelName: "orphan", Date: "20260729",
+				}}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := setupBackupTestDB(t)
+			dump := buildTestDump()
+			dump.IncludeStats = true
+			test.addOrphan(dump)
 
-	dump := buildTestDump()
-	dump.IncludeStats = true
-	dump.StatsChannel = []model.StatsChannel{
-		{ChannelID: 1, StatsMetrics: model.StatsMetrics{RequestSuccess: 1}},
-		{ChannelID: 999, StatsMetrics: model.StatsMetrics{RequestSuccess: 2}},
-	}
-	dump.StatsModel = []model.StatsModel{
-		{ID: 1, ChannelID: 1, Name: "gpt-4", StatsMetrics: model.StatsMetrics{RequestSuccess: 1}},
-		{ID: 2, ChannelID: 999, Name: "orphan", StatsMetrics: model.StatsMetrics{RequestSuccess: 2}},
-	}
-	dump.StatsAPIKey = []model.StatsAPIKey{
-		{APIKeyID: 999, StatsMetrics: model.StatsMetrics{RequestSuccess: 2}},
-	}
-
-	result, err := DBImportIncremental(ctx, dump)
-	if err != nil {
-		t.Fatalf("DBImportIncremental failed: %v", err)
-	}
-	if result.RowsAffected["stats_channel"] != 1 {
-		t.Fatalf("expected 1 stats_channel imported, got %d", result.RowsAffected["stats_channel"])
-	}
-	if result.RowsAffected["stats_model"] != 1 {
-		t.Fatalf("expected 1 stats_model imported, got %d", result.RowsAffected["stats_model"])
-	}
-	if result.RowsAffected["stats_api_key"] != 0 {
-		t.Fatalf("expected 0 stats_api_key imported, got %d", result.RowsAffected["stats_api_key"])
+			if _, err := DBImportIncremental(ctx, dump); err == nil ||
+				!strings.Contains(err.Error(), test.field+" has no imported parent") {
+				t.Fatalf("orphaned stats row was not rejected: %v", err)
+			}
+			var channelCount int64
+			if err := dbpkg.GetDB().WithContext(ctx).Model(&model.Channel{}).
+				Count(&channelCount).Error; err != nil {
+				t.Fatalf("count channels after rollback: %v", err)
+			}
+			if channelCount != 0 {
+				t.Fatalf("orphan rejection did not roll back imported parents: %d", channelCount)
+			}
+		})
 	}
 }
 

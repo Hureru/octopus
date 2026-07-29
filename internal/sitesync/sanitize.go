@@ -12,7 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/apperror"
 )
 
-const maxSiteStatusMessageRunes = 300
+const maxSiteStatusMessageRunes = 2048
 
 var (
 	bearerTokenPattern     = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._~+/=-]+`)

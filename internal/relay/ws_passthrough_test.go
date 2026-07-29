@@ -37,7 +37,7 @@ func TestForwardViaWSPassthroughNormalizesPayloadAndRecordsMetrics(t *testing.T)
 		if err != nil {
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer conn.CloseNow()
 		_, data, err := conn.Read(r.Context())
 		if err != nil {
 			return
@@ -64,10 +64,16 @@ func TestForwardViaWSPassthroughNormalizesPayloadAndRecordsMetrics(t *testing.T)
 	if err := op.ChannelCreate(channel, ctx); err != nil {
 		t.Fatalf("ChannelCreate failed: %v", err)
 	}
+	poolKey := newWSPoolKey(
+		channel.ID,
+		channel.Keys[0].ID,
+		buildUpstreamWSHeaders(nil, channel, channel.Keys[0].ChannelKey),
+	)
+	defer wsUpstreamPool.Remove(poolKey)
 
 	clientConn, serverConn := newTestWSConnPair(t)
-	defer clientConn.Close(websocket.StatusNormalClosure, "")
-	defer serverConn.Close(websocket.StatusNormalClosure, "")
+	defer clientConn.CloseNow()
+	defer serverConn.CloseNow()
 
 	rawBody := []byte(`{"type":"response.create","model":"client-model","input":"hello","stream":false,"background":true}`)
 	internalReq := &transformerModel.InternalLLMRequest{Model: "gpt-4o", Stream: boolPtr(true), RawAPIFormat: transformerModel.APIFormatOpenAIResponse}
@@ -148,7 +154,7 @@ func newTestWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 		}
 		serverConnCh <- conn
 		<-r.Context().Done()
-		_ = conn.Close(websocket.StatusNormalClosure, "")
+		_ = conn.CloseNow()
 	}))
 	t.Cleanup(server.Close)
 	clientConn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http"), nil)
@@ -159,7 +165,7 @@ func newTestWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	case serverConn := <-serverConnCh:
 		return clientConn, serverConn
 	case <-time.After(5 * time.Second):
-		clientConn.Close(websocket.StatusNormalClosure, "")
+		clientConn.CloseNow()
 		t.Fatalf("timed out waiting for server side websocket")
 		return nil, nil
 	}

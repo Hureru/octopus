@@ -92,17 +92,9 @@ func (r *wsUpstreamReader) ReadEvent(ctx context.Context) ([]byte, error) {
 			} else if r.statusCode < 400 {
 				r.statusCode = http.StatusBadGateway
 			}
-			errCode := ""
-			errMsg := "upstream ws error"
-			if event.Error != nil {
-				errMsg = event.Error.Message
-				errCode = event.Error.Code
-			}
-			if event.Response != nil && event.Response.Error != nil {
-				errMsg = event.Response.Error.Message
-				errCode = event.Response.Error.Code
-			}
-			return nil, fmt.Errorf("%s (code=%s, status=%d)", errMsg, errCode, r.statusCode)
+			// Semantic error/terminal frames must reach the transformer and
+			// downstream client. Returning an error here used to swallow
+			// response.failed after partial output and lose its usage.
 		}
 	}
 

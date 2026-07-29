@@ -27,7 +27,7 @@ func TestEmbeddedHTMLSummaryForStatusSanitizesPrefix(t *testing.T) {
 }
 
 func TestEmbeddedHTMLSummaryForStatusCases(t *testing.T) {
-	longPrefix := "api_key=long-secret " + strings.Repeat("long-prefix ", 40)
+	longPrefix := "api_key=long-secret " + strings.Repeat("long-prefix ", 300)
 
 	cases := []struct {
 		name            string

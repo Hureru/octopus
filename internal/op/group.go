@@ -176,6 +176,10 @@ func GroupUpdate(req *model.GroupUpdateRequest, ctx context.Context) (*model.Gro
 			return nil, fmt.Errorf("failed to create items: %w", err)
 		}
 	}
+	if err := ensureRouteCandidatesForGroupTx(tx, req.ID); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to sync route candidates: %w", err)
+	}
 
 	// 若该 Group 有 active preset，把当前实时状态回写到 preset（live binding）
 	if err := syncActivePresetTx(tx, req.ID); err != nil {
@@ -246,6 +250,10 @@ func GroupDel(id int, ctx context.Context) error {
 		tx.Rollback()
 		return fmt.Errorf("failed to delete group items: %w", err)
 	}
+	if err := ensureRouteCandidatesForGroupTx(tx, id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to retire route candidates: %w", err)
+	}
 
 	if err := tx.Where("group_id = ?", id).Delete(&model.GroupPreset{}).Error; err != nil {
 		tx.Rollback()
@@ -274,7 +282,12 @@ func GroupItemAdd(item *model.GroupItem, ctx context.Context) error {
 		return fmt.Errorf("group not found")
 	}
 
-	if err := db.GetDB().WithContext(ctx).Create(item).Error; err != nil {
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(item).Error; err != nil {
+			return err
+		}
+		return ensureRouteCandidatesForGroupTx(tx, item.GroupID)
+	}); err != nil {
 		return err
 	}
 
@@ -331,12 +344,17 @@ func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context
 		nextPriority++
 	}
 
-	if err := db.GetDB().WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "group_id"}, {Name: "channel_id"}, {Name: "model_name"}},
-			DoNothing: true,
-		}).
-		Create(&newItems).Error; err != nil {
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "group_id"}, {Name: "channel_id"}, {Name: "model_name"}},
+				DoNothing: true,
+			}).
+			Create(&newItems).Error; err != nil {
+			return err
+		}
+		return ensureRouteCandidatesForGroupTx(tx, groupID)
+	}); err != nil {
 		return fmt.Errorf("failed to create group items: %w", err)
 	}
 
@@ -352,9 +370,25 @@ func GroupItemBatchAdd(groupID int, items []model.GroupIDAndLLMName, ctx context
 }
 
 func GroupItemUpdate(item *model.GroupItem, ctx context.Context) error {
-	if err := db.GetDB().WithContext(ctx).Model(item).
-		Select("ModelName", "Priority", "Weight").
-		Updates(item).Error; err != nil {
+	if item == nil || item.ID <= 0 {
+		return fmt.Errorf("group item is required")
+	}
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing model.GroupItem
+		if err := tx.First(&existing, item.ID).Error; err != nil {
+			return err
+		}
+		item.GroupID = existing.GroupID
+		if item.ChannelID == 0 {
+			item.ChannelID = existing.ChannelID
+		}
+		if err := tx.Model(&existing).
+			Select("ModelName", "Priority", "Weight").
+			Updates(item).Error; err != nil {
+			return err
+		}
+		return ensureRouteCandidatesForGroupTx(tx, existing.GroupID)
+	}); err != nil {
 		return err
 	}
 
@@ -367,11 +401,15 @@ func GroupItemUpdate(item *model.GroupItem, ctx context.Context) error {
 
 func GroupItemDel(id int, ctx context.Context) error {
 	var item model.GroupItem
-	if err := db.GetDB().WithContext(ctx).First(&item, id).Error; err != nil {
-		return fmt.Errorf("group item not found")
-	}
-
-	if err := db.GetDB().WithContext(ctx).Delete(&item).Error; err != nil {
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&item, id).Error; err != nil {
+			return fmt.Errorf("group item not found")
+		}
+		if err := tx.Delete(&item).Error; err != nil {
+			return err
+		}
+		return ensureRouteCandidatesForGroupTx(tx, item.GroupID)
+	}); err != nil {
 		return err
 	}
 
@@ -406,10 +444,20 @@ func GroupItemBatchDelByChannelAndModels(keys []model.GroupIDAndLLMName, ctx con
 		return nil
 	}
 
-	if err := db.GetDB().WithContext(ctx).
-		Where("(channel_id, model_name) IN ?", conditions).
-		Delete(&model.GroupItem{}).Error; err != nil {
-		return fmt.Errorf("failed to delete group items: %w", err)
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Where("(channel_id, model_name) IN ?", conditions).
+			Delete(&model.GroupItem{}).Error; err != nil {
+			return fmt.Errorf("failed to delete group items: %w", err)
+		}
+		for _, groupID := range groupIDs {
+			if err := ensureRouteCandidatesForGroupTx(tx, groupID); err != nil {
+				return fmt.Errorf("failed to sync route candidates for group %d: %w", groupID, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if err := groupRefreshCacheByIDs(groupIDs, ctx); err != nil {

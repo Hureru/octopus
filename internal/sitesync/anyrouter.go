@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 )
 
 const anyRouterUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
@@ -767,28 +768,26 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 		}
 	}
 
-	mergedHeaders := map[string]string{
-		"User-Agent": anyRouterUserAgent,
-	}
+	mergedHeaders := make(map[string]string, len(headers)+1)
 	if len(payloadBytes) > 0 {
 		mergedHeaders["Content-Type"] = "application/json"
 	}
-	for _, item := range siteRecord.CustomHeader {
-		if strings.TrimSpace(item.HeaderKey) != "" {
-			mergedHeaders[strings.TrimSpace(item.HeaderKey)] = item.HeaderValue
-		}
-	}
 	for key, value := range headers {
-		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+		if !strings.EqualFold(strings.TrimSpace(key), "Cookie") &&
+			strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
 			mergedHeaders[key] = value
 		}
 	}
 
-	cookieHeader := firstNonEmptyString(mergedHeaders["Cookie"], mergedHeaders["cookie"])
-	delete(mergedHeaders, "cookie")
-	if cookieHeader != "" {
-		mergedHeaders["Cookie"] = cookieHeader
+	cookieHeader := ""
+	for key, value := range headers {
+		if strings.EqualFold(strings.TrimSpace(key), "Cookie") {
+			cookieHeader = mergeCookieHeaderValues(cookieHeader, value)
+		}
 	}
+	account := firstSiteAccount(accounts...)
+	policy := resolveSiteRequestHeaderPolicy(ctx, siteRecord, account)
+	verificationCookie, verificationUserAgent := siteVerificationHeaders(ctx, siteRecord, account)
 
 	for attempt := 0; attempt < 3; attempt++ {
 		var bodyReader io.Reader
@@ -800,9 +799,19 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 		if err != nil {
 			return nil, cookieHeader, err
 		}
+		applyDefaultSiteRequestHeaders(req, len(payloadBytes) > 0)
+		op.ApplyHeaderPolicy(req.Header, nil, siteRecord.CustomHeader, policy)
+		attemptHeaders := make(map[string]string, len(mergedHeaders)+1)
 		for key, value := range mergedHeaders {
-			req.Header.Set(key, value)
+			attemptHeaders[key] = value
 		}
+		attemptHeaders["Cookie"] = cookieHeader
+		applyTrustedSiteRequestHeaders(
+			req.Header,
+			attemptHeaders,
+			verificationCookie,
+			verificationUserAgent,
+		)
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
@@ -816,12 +825,19 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 		}
 
 		cookieHeader = anyRouterMergeSetCookiePairs(cookieHeader, resp.Header.Values("Set-Cookie"))
-		if cookieHeader != "" {
-			mergedHeaders["Cookie"] = cookieHeader
-		}
 
 		if payload, ok := anyRouterParseJSONObject(bodyBytes); ok {
+			if IsCloudflareProtectionResponse(resp.StatusCode, resp.Header, bodyBytes) {
+				return nil, cookieHeader, wrapCloudflareProtectionError(
+					newCloudflareProtectionError(resp.StatusCode, resp.Header),
+				)
+			}
 			return payload, cookieHeader, nil
+		}
+		if IsCloudflareProtectionResponse(resp.StatusCode, resp.Header, bodyBytes) {
+			return nil, cookieHeader, wrapCloudflareProtectionError(
+				newCloudflareProtectionError(resp.StatusCode, resp.Header),
+			)
 		}
 
 		text := strings.TrimSpace(string(bodyBytes))
@@ -830,11 +846,19 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 				acwScV2 := anyRouterSolveAcwScV2(text)
 				if acwScV2 != "" {
 					cookieHeader = anyRouterUpsertCookie(cookieHeader, "acw_sc__v2", acwScV2)
-					mergedHeaders["Cookie"] = cookieHeader
 					continue
 				}
 			}
-			return nil, cookieHeader, nil
+			if IsCloudflareProtectionResponse(resp.StatusCode, resp.Header, bodyBytes) {
+				return nil, cookieHeader, wrapCloudflareProtectionError(
+					newCloudflareProtectionError(resp.StatusCode, resp.Header),
+				)
+			}
+			return nil, cookieHeader, formatSiteDecodeError(
+				resp.Header.Get("Content-Type"),
+				bodyBytes,
+				fmt.Errorf("expected JSON object"),
+			)
 		}
 
 		return nil, cookieHeader, anyRouterFormatHTTPError(resp.StatusCode, resp.Header, text)
@@ -957,7 +981,7 @@ func anyRouterUpsertCookie(cookieHeader string, name string, value string) strin
 			next = append(next, part)
 			continue
 		}
-		if strings.TrimSpace(segments[0]) == name {
+		if strings.EqualFold(strings.TrimSpace(segments[0]), name) {
 			next = append(next, name+"="+value)
 			replaced = true
 			continue

@@ -13,16 +13,19 @@ import (
 )
 
 type syncSnapshot struct {
-	accessToken  string
-	groups       []model.SiteUserGroup
-	tokens       []model.SiteToken
-	models       []model.SiteModel
-	groupResults []siteGroupSyncResult
-	status       model.SiteExecutionStatus
-	balance      float64
-	balanceUsed  float64
-	todayIncome  float64
-	message      string
+	accessToken   string
+	groups        []model.SiteUserGroup
+	tokens        []model.SiteToken
+	models        []model.SiteModel
+	groupResults  []siteGroupSyncResult
+	status        model.SiteExecutionStatus
+	balance       float64
+	balanceUsed   float64
+	todayIncome   float64
+	message       string
+	proxyMode     model.ProxyUsageMode
+	proxyConfigID *int
+	clashNode     string
 }
 
 type siteBatchAccount struct {
@@ -36,7 +39,7 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		return nil, sanitizeSiteError(err)
 	}
 
-	snapshot, syncErr := syncAccountState(ctx, siteRecord, account)
+	snapshot, syncErr := syncAccountStateWithRecovery(ctx, siteRecord, account)
 	if snapshot == nil && syncErr != nil {
 		message := sanitizeSiteStatusMessage(syncErr)
 		updateErr := updateAccountSyncState(ctx, account.ID, model.SiteExecutionStatusFailed, message, "")
@@ -48,7 +51,6 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		}
 		return nil, sanitizeSiteError(syncErr)
 	}
-
 	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
 		return nil, sanitizeSiteError(err)
 	}
@@ -56,6 +58,22 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 	channelIDs, err := ProjectAccount(ctx, account.ID)
 	if err != nil {
 		return nil, sanitizeSiteError(err)
+	}
+	_, catalogErr := op.CatalogSync(ctx)
+
+	if catalogErr == nil {
+		pricingAccount := *account
+		pricingAccount.ProxyMode = snapshot.proxyMode
+		pricingAccount.ProxyConfigID = cloneInt(snapshot.proxyConfigID)
+		pricingAccount.PreferredClashNode = snapshot.clashNode
+		if priceErr := refreshSitePricingQuotes(
+			ctx,
+			siteRecord,
+			&pricingAccount,
+			snapshot.accessToken,
+		); priceErr != nil {
+			log.Debugf("site pricing refresh skipped (account=%d): %v", account.ID, sanitizeSiteError(priceErr))
+		}
 	}
 
 	modelNames := make([]string, 0, len(snapshot.models))
@@ -77,6 +95,25 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		GroupResults:    exportSiteSyncGroupResults(snapshot.groupResults),
 		Message:         sanitizeSiteStatusText(snapshot.message),
 	}
+	if catalogErr != nil {
+		message := sanitizeSiteStatusText(
+			result.Message + "；模型目录投影失败：" + sanitizeSiteStatusMessage(catalogErr),
+		)
+		if result.Status == model.SiteExecutionStatusSuccess {
+			result.Status = model.SiteExecutionStatusPartial
+		}
+		result.Message = message
+		if updateErr := updateAccountSyncState(
+			ctx,
+			account.ID,
+			result.Status,
+			message,
+			snapshot.accessToken,
+		); updateErr != nil {
+			log.Warnf("failed to persist partial catalog sync state (account=%d): %v", account.ID, updateErr)
+		}
+		return result, sanitizeSiteError(catalogErr)
+	}
 	if syncErr != nil {
 		return result, sanitizeSiteError(syncErr)
 	}
@@ -89,7 +126,7 @@ func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResul
 		return nil, sanitizeSiteError(err)
 	}
 
-	result, resolvedAccessToken, err := checkinAccountState(ctx, siteRecord, account)
+	result, resolvedAccessToken, err := checkinAccountStateWithRecovery(ctx, siteRecord, account)
 	if err != nil {
 		status := model.SiteExecutionStatusFailed
 		lowered := strings.ToLower(err.Error())

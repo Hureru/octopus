@@ -10,6 +10,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 )
@@ -51,7 +52,14 @@ func (p *Prober) RunCandidate(ctx context.Context, channel model.Channel, usedKe
 		return result
 	}
 
-	applyCustomHeaders(request, channel.CustomHeader)
+	policy, policyErr := op.ResolveHeaderPolicy(probeCtx, channel.ID, 0, 0)
+	if policyErr != nil {
+		policy = op.HeaderPolicyFailureFallback()
+	}
+	// The transformer has already placed the channel credential on the
+	// request. ApplyHeaderPolicy filters legacy/custom headers and preserves
+	// protected trusted headers (including provider-specific credentials).
+	op.ApplyHeaderPolicy(request.Header, nil, channel.CustomHeader, policy)
 	// 防止 Go 默认 User-Agent 泄露到上游
 	if request.Header.Get("User-Agent") == "" {
 		request.Header.Set("User-Agent", "")
@@ -171,18 +179,5 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 			Stream:       &stream,
 			MaxTokens:    &one,
 		}
-	}
-}
-
-func applyCustomHeaders(request *http.Request, headers []model.CustomHeader) {
-	if request == nil {
-		return
-	}
-	for _, header := range headers {
-		key := strings.TrimSpace(header.HeaderKey)
-		if key == "" {
-			continue
-		}
-		request.Header.Set(key, header.HeaderValue)
 	}
 }

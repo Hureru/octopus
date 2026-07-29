@@ -96,17 +96,28 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 	}
 
 	// supported_models 校验（复用 APIKeyAuth 注入）
+	routingModel := requestModel
+	var canonicalModel *model.CanonicalModel
+	if canonical, ok := op.CatalogResolveIdentity(requestModel); ok {
+		if !canonical.Enabled {
+			resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "model disabled")
+			return
+		}
+		routingModel = canonical.Name
+		canonicalModel = &canonical
+	}
 	supportedModels := strings.TrimSpace(c.GetString("supported_models"))
 	if supportedModels != "" {
 		supportedModelsArray := strings.Split(supportedModels, ",")
-		if !slices.Contains(supportedModelsArray, requestModel) {
+		if !slices.Contains(supportedModelsArray, requestModel) &&
+			!slices.Contains(supportedModelsArray, routingModel) {
 			resp.ErrorWithCode(c, http.StatusBadRequest, CodeRelayModelNotSupported, "model not supported")
 			return
 		}
 	}
 
 	// 获取通道分组
-	group, err := op.GroupGetEnabledMap(requestModel, ctx)
+	group, err := op.GroupGetEnabledMap(routingModel, ctx)
 	if err != nil {
 		resp.ErrorWithCode(c, http.StatusNotFound, CodeRelayModelNotFound, "model not found")
 		return
@@ -121,6 +132,9 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 
 	// 初始化 Metrics（Images 独立，避免 b64_json 内存膨胀）
 	metrics := newImagesRelayMetrics(apiKeyID, requestModel)
+	if canonicalModel != nil {
+		metrics.CanonicalModelName = canonicalModel.Name
+	}
 	metrics.RequestContent = buildImagesRequestContentForLog(isMultipart, bc, jsonPayload)
 
 	// === 早期心跳 ===
@@ -135,7 +149,14 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 		select {
 		case <-ctx.Done():
 			log.Debugf("request context canceled, stopping retry")
-			metrics.SaveWithChannelStats(ctx, false, context.Canceled, iter.Attempts(), false)
+			metrics.TransportTermination = model.TransportTerminationClientCanceled
+			metrics.SaveOutcomeWithChannelStats(
+				ctx,
+				model.RequestOutcomeClientCanceled,
+				context.Canceled,
+				iter.Attempts(),
+				false,
+			)
 			return
 		default:
 		}
@@ -160,6 +181,29 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 			iter.Skip(channel.ID, 0, channel.Name, fmt.Sprintf("unsupported channel type: %d", channel.Type))
 			continue
 		}
+		candidateID := 0
+		canonicalModelID := 0
+		if canonicalModel != nil {
+			canonicalModelID = canonicalModel.ID
+			if candidate, candidateErr := op.CatalogCandidateFor(
+				ctx,
+				canonicalModel.ID,
+				channel.ID,
+				item.ModelName,
+			); candidateErr == nil {
+				candidateID = candidate.ID
+			}
+		}
+		metrics.RouteCandidateID = candidateID
+		metrics.EffectivePrice = nil
+		metrics.PriceOriginalCost = 0
+		if effectivePrice, priceErr := op.EffectivePriceForCandidate(
+			ctx,
+			candidateID,
+			item.ModelName,
+		); priceErr == nil {
+			metrics.EffectivePrice = &effectivePrice
+		}
 
 		usedKey := channel.GetChannelKey()
 		if usedKey.ChannelKey == "" {
@@ -177,9 +221,27 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 			iter.Index()+1, iter.Len(), iter.IsSticky(), stream)
 
 		span := iter.StartAttempt(channel.ID, usedKey.ID, channel.Name)
+		span.SetRouteCandidateID(candidateID)
 
 		// 尝试一次转发
-		statusCode, written, usage, upstreamCT, fwdErr := imagesAttempt(ctx, endpoint, c, bc, isMultipart, boundary, jsonPayload, stream, channel, usedKey.ChannelKey, group.FirstTokenTimeOut, metrics, item.ModelName, hb)
+		statusCode, written, usage, upstreamCT, fwdErr := imagesAttempt(
+			ctx,
+			endpoint,
+			c,
+			bc,
+			isMultipart,
+			boundary,
+			jsonPayload,
+			stream,
+			channel,
+			usedKey.ChannelKey,
+			group.FirstTokenTimeOut,
+			metrics,
+			item.ModelName,
+			canonicalModelID,
+			candidateID,
+			hb,
+		)
 
 		// 更新 channel key 状态
 		usedKey.StatusCode = statusCode
@@ -191,12 +253,27 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 			if usage != nil {
 				metrics.SetUsageFromImages(item.ModelName, *usage)
 			}
+			span.SetUsage(metrics.AttemptUsageSnapshot())
 			metrics.ResponseContent = buildImagesResponseContentForLog(stream, upstreamCT, usage)
 
 			usedKey.TotalCost += metrics.Stats.InputCost + metrics.Stats.OutputCost
 			op.ChannelKeyUpdate(usedKey)
 
-			span.End(model.AttemptSuccess, statusCode, "")
+			if stream {
+				metrics.TransportTermination = model.TransportTerminationUpstreamEOF
+				metrics.CompletionEvidence = model.CompletionEvidenceUpstreamEOF
+			} else {
+				metrics.TransportTermination = model.TransportTerminationHTTPCompleted
+				metrics.CompletionEvidence = model.CompletionEvidenceHTTP2xx
+			}
+			span.EndDetailed(
+				model.AttemptSuccess,
+				statusCode,
+				"",
+				model.RequestOutcomeSuccess,
+				model.AttemptAttributionNone,
+				metrics.CompletionEvidence,
+			)
 
 			// Channel 维度统计
 			op.StatsChannelUpdate(channel.ID, model.StatsMetrics{
@@ -209,13 +286,65 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 			// 会话保持：更新粘性记录
 			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
 
-			metrics.SaveWithChannelStats(ctx, true, nil, iter.Attempts(), false)
+			metrics.SaveOutcomeWithChannelStats(
+				ctx,
+				model.RequestOutcomeSuccess,
+				nil,
+				iter.Attempts(),
+				false,
+			)
+			return
+		}
+
+		if isClientCancellation(ctx, fwdErr) {
+			metrics.ActualModel = item.ModelName
+			if usage != nil {
+				metrics.SetUsageFromImages(item.ModelName, *usage)
+			}
+			span.SetUsage(metrics.AttemptUsageSnapshot())
+			metrics.ResponseContent = buildImagesResponseContentForLog(
+				stream,
+				upstreamCT,
+				usage,
+			)
+			usedKey.TotalCost += metrics.Stats.InputCost + metrics.Stats.OutputCost
+			op.ChannelKeyUpdate(usedKey)
+			metrics.TransportTermination = model.TransportTerminationClientCanceled
+			metrics.CompletionEvidence = model.CompletionEvidenceNone
+			span.EndDetailed(
+				model.AttemptCanceled,
+				statusCode,
+				fwdErr.Error(),
+				model.RequestOutcomeClientCanceled,
+				model.AttemptAttributionClient,
+				model.CompletionEvidenceNone,
+			)
+			metrics.SaveOutcomeWithChannelStats(
+				ctx,
+				model.RequestOutcomeClientCanceled,
+				fwdErr,
+				iter.Attempts(),
+				false,
+			)
 			return
 		}
 
 		// ====== 失败 ======
+		if usage != nil {
+			metrics.SetUsageFromImages(item.ModelName, *usage)
+			span.SetUsage(metrics.AttemptUsageSnapshot())
+		}
 		op.ChannelKeyUpdate(usedKey)
-		span.End(model.AttemptFailed, statusCode, fwdErr.Error())
+		metrics.TransportTermination = model.TransportTerminationUpstreamError
+		metrics.CompletionEvidence = model.CompletionEvidenceNone
+		span.EndDetailed(
+			model.AttemptFailed,
+			statusCode,
+			fwdErr.Error(),
+			model.RequestOutcomeFailed,
+			model.AttemptAttributionUpstream,
+			model.CompletionEvidenceNone,
+		)
 
 		// Channel 维度统计
 		op.StatsChannelUpdate(channel.ID, model.StatsMetrics{
@@ -227,7 +356,13 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 		balancer.RecordFailure(channel.ID, usedKey.ID, item.ModelName, circuitFailureKind(group.RetryEnabled, statusCode))
 
 		if written {
-			metrics.SaveWithChannelStats(ctx, false, fwdErr, iter.Attempts(), false)
+			metrics.SaveOutcomeWithChannelStats(
+				ctx,
+				model.RequestOutcomeFailed,
+				fwdErr,
+				iter.Attempts(),
+				false,
+			)
 			return
 		}
 
@@ -235,7 +370,14 @@ func ImagesHandler(endpoint string, c *gin.Context) {
 	}
 
 	// 所有通道都失败
-	metrics.SaveWithChannelStats(ctx, false, lastErr, iter.Attempts(), false)
+	metrics.TransportTermination = model.TransportTerminationUpstreamError
+	metrics.SaveOutcomeWithChannelStats(
+		ctx,
+		model.RequestOutcomeFailed,
+		lastErr,
+		iter.Attempts(),
+		false,
+	)
 	hb.FlushOrError(c, http.StatusBadGateway, "all channels failed")
 }
 
@@ -246,16 +388,24 @@ type imagesUsage struct {
 }
 
 type imagesRelayMetrics struct {
-	APIKeyID     int
-	RequestModel string
-	ActualModel  string
-	StartTime    time.Time
-	FirstToken   time.Time
+	APIKeyID           int
+	RequestModel       string
+	ActualModel        string
+	CanonicalModelName string
+	RouteCandidateID   int
+	StartTime          time.Time
+	FirstToken         time.Time
 
-	Stats model.StatsMetrics
+	Stats                model.StatsMetrics
+	EffectivePrice       *model.EffectivePrice
+	PriceOriginalCost    float64
+	Outcome              model.RequestOutcome
+	TransportTermination model.TransportTermination
+	CompletionEvidence   model.CompletionEvidence
 
-	RequestContent  string
-	ResponseContent string
+	RequestContent    string
+	ResponseContent   string
+	HeaderPolicyTrace string
 }
 
 func newImagesRelayMetrics(apiKeyID int, requestModel string) *imagesRelayMetrics {
@@ -277,13 +427,75 @@ func (m *imagesRelayMetrics) SetUsageFromImages(actualModel string, u imagesUsag
 	m.Stats.InputToken = int64(u.InputTokens)
 	m.Stats.OutputToken = int64(u.OutputTokens)
 
-	modelPrice := price.GetLLMPrice(actualModel)
-	if modelPrice == nil {
-		return
+	effective := m.EffectivePrice
+	if effective == nil || effective.Source == model.PriceQuoteSourceUnknown {
+		if modelPrice := price.GetLLMPrice(actualModel); modelPrice != nil {
+			effective = &model.EffectivePrice{
+				RouteCandidateID:  m.RouteCandidateID,
+				Source:            model.PriceQuoteSourceGlobal,
+				Unit:              model.PriceUnitPerMillionTokens,
+				Currency:          "USD",
+				Input:             modelPrice.Input,
+				Output:            modelPrice.Output,
+				CacheRead:         modelPrice.CacheRead,
+				CacheWrite:        modelPrice.CacheWrite,
+				GroupMultiplier:   1,
+				ExchangeRateToUSD: 1,
+				Convertible:       true,
+				MatchReason:       "global model fallback",
+			}
+			m.EffectivePrice = effective
+		}
 	}
+	inputRaw, outputRaw, inputUSD, outputUSD := effectivePriceCosts(
+		effective,
+		int64(u.InputTokens),
+		0,
+		0,
+		int64(u.OutputTokens),
+	)
+	m.PriceOriginalCost = inputRaw + outputRaw
+	m.Stats.InputCost = inputUSD
+	m.Stats.OutputCost = outputUSD
+}
 
-	m.Stats.InputCost = float64(u.InputTokens) * modelPrice.Input * 1e-6
-	m.Stats.OutputCost = float64(u.OutputTokens) * modelPrice.Output * 1e-6
+func (m *imagesRelayMetrics) AttemptUsageSnapshot() *model.AttemptUsageSnapshot {
+	if m == nil {
+		return nil
+	}
+	costUSD := m.Stats.InputCost + m.Stats.OutputCost
+	if m.Stats.InputToken == 0 && m.Stats.OutputToken == 0 && costUSD == 0 {
+		return nil
+	}
+	snapshot := &model.AttemptUsageSnapshot{
+		InputTokens:       m.Stats.InputToken,
+		OutputTokens:      m.Stats.OutputToken,
+		CostUSD:           costUSD,
+		TokenSource:       model.UsageValueSourceReported,
+		PriceOriginalCost: m.PriceOriginalCost,
+	}
+	if !m.FirstToken.IsZero() {
+		snapshot.FTUTKnown = true
+		snapshot.FTUTMS = m.FirstToken.Sub(m.StartTime).Milliseconds()
+	}
+	if m.EffectivePrice != nil {
+		snapshot.PriceQuoteID = m.EffectivePrice.QuoteID
+		snapshot.PriceSource = m.EffectivePrice.Source
+		snapshot.PriceUnit = m.EffectivePrice.Unit
+		snapshot.PriceCurrency = m.EffectivePrice.Currency
+		snapshot.PriceInput = m.EffectivePrice.Input
+		snapshot.PriceOutput = m.EffectivePrice.Output
+		snapshot.PriceCacheRead = m.EffectivePrice.CacheRead
+		snapshot.PriceCacheWrite = m.EffectivePrice.CacheWrite
+		snapshot.PricePerRequest = m.EffectivePrice.PerRequest
+		snapshot.PriceMultiplier = m.EffectivePrice.GroupMultiplier
+		snapshot.PriceRateToUSD = m.EffectivePrice.ExchangeRateToUSD
+		snapshot.PriceObservedAt = m.EffectivePrice.ObservedAt
+		snapshot.PriceStale = m.EffectivePrice.Stale
+		snapshot.PriceConvertible = m.EffectivePrice.Convertible
+		snapshot.PriceMatchReason = m.EffectivePrice.MatchReason
+	}
+	return snapshot
 }
 
 func (m *imagesRelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
@@ -291,6 +503,26 @@ func (m *imagesRelayMetrics) Save(ctx context.Context, success bool, err error, 
 }
 
 func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt, updateChannelStats bool) {
+	outcome := model.RequestOutcomeFailed
+	if success {
+		outcome = model.RequestOutcomeSuccess
+	} else if isClientCancellation(ctx, err) {
+		outcome = model.RequestOutcomeClientCanceled
+	}
+	m.SaveOutcomeWithChannelStats(ctx, outcome, err, attempts, updateChannelStats)
+}
+
+func (m *imagesRelayMetrics) SaveOutcomeWithChannelStats(
+	ctx context.Context,
+	outcome model.RequestOutcome,
+	err error,
+	attempts []model.ChannelAttempt,
+	updateChannelStats bool,
+) {
+	if outcome == "" {
+		outcome = model.RequestOutcomeIndeterminate
+	}
+	m.Outcome = outcome
 	duration := time.Since(m.StartTime)
 
 	globalStats := model.StatsMetrics{
@@ -300,10 +532,15 @@ func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success b
 		InputCost:   m.Stats.InputCost,
 		OutputCost:  m.Stats.OutputCost,
 	}
-	if success {
+	switch outcome {
+	case model.RequestOutcomeSuccess:
 		globalStats.RequestSuccess = 1
-	} else {
+	case model.RequestOutcomeFailed:
 		globalStats.RequestFailed = 1
+	case model.RequestOutcomeClientCanceled:
+		globalStats.RequestCanceled = 1
+	default:
+		globalStats.RequestIndeterminate = 1
 	}
 
 	channelID, channelName := finalChannel(attempts)
@@ -311,20 +548,23 @@ func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success b
 	op.StatsHourlyUpdate(globalStats)
 	op.StatsDailyUpdate(context.Background(), globalStats)
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
+	channelStats := globalStats
+	channelStats.RequestCanceled = 0
+	channelStats.RequestIndeterminate = 0
 	if updateChannelStats {
-		op.StatsChannelUpdate(channelID, globalStats)
+		op.StatsChannelUpdate(channelID, channelStats)
 	} else {
-		updateFinalChannelUsageStats(channelID, globalStats)
+		updateFinalChannelUsageStats(channelID, channelStats)
 	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 
-	if conf.AppConfig.Log.Relay.Summary || !success {
+	if conf.AppConfig.Log.Relay.Summary || outcome != model.RequestOutcomeSuccess {
 		fields := []interface{}{
 			"model", m.RequestModel,
 			"actual_model", m.ActualModel,
 			"channel_id", channelID,
 			"channel", channelName,
-			"success", success,
+			"outcome", outcome,
 			"duration_ms", duration.Milliseconds(),
 			"input_token", m.Stats.InputToken,
 			"output_token", m.Stats.OutputToken,
@@ -333,33 +573,68 @@ func (m *imagesRelayMetrics) SaveWithChannelStats(ctx context.Context, success b
 			"total_cost", m.Stats.InputCost + m.Stats.OutputCost,
 			"attempts", len(attempts),
 		}
-		if success {
+		if outcome == model.RequestOutcomeSuccess {
+			log.Infow("relay.images.complete", fields...)
+		} else if outcome == model.RequestOutcomeClientCanceled {
 			log.Infow("relay.images.complete", fields...)
 		} else {
 			log.Warnw("relay.images.complete", fields...)
 		}
 	}
 
-	m.saveLog(ctx, success, err, duration, attempts, channelID, channelName)
+	m.saveLog(ctx, outcome, err, duration, attempts, channelID, channelName)
 }
 
-func (m *imagesRelayMetrics) saveLog(ctx context.Context, success bool, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
+func (m *imagesRelayMetrics) saveLog(
+	ctx context.Context,
+	outcome model.RequestOutcome,
+	err error,
+	duration time.Duration,
+	attempts []model.ChannelAttempt,
+	channelID int,
+	channelName string,
+) {
 	actualModel := m.ActualModel
 	if actualModel == "" {
 		actualModel = m.RequestModel
 	}
 
 	relayLog := model.RelayLog{
-		Time:             m.StartTime.Unix(),
-		RequestModelName: m.RequestModel,
-		ChannelName:      channelName,
-		ChannelId:        channelID,
-		ActualModelName:  actualModel,
-		UseTime:          int(duration.Milliseconds()),
-		Attempts:         attempts,
-		TotalAttempts:    len(attempts),
-		RequestContent:   m.RequestContent,
-		ResponseContent:  m.ResponseContent,
+		Time:                 m.StartTime.Unix(),
+		RequestModelName:     m.RequestModel,
+		RequestAPIKeyID:      m.APIKeyID,
+		ChannelName:          channelName,
+		ChannelId:            channelID,
+		ActualModelName:      actualModel,
+		CanonicalModelName:   m.CanonicalModelName,
+		RouteCandidateID:     m.RouteCandidateID,
+		UseTime:              int(duration.Milliseconds()),
+		Attempts:             attempts,
+		TotalAttempts:        len(attempts),
+		RequestContent:       m.RequestContent,
+		ResponseContent:      m.ResponseContent,
+		Outcome:              outcome,
+		TransportTermination: m.TransportTermination,
+		CompletionEvidence:   m.CompletionEvidence,
+		HeaderPolicyTrace:    m.HeaderPolicyTrace,
+	}
+	if m.EffectivePrice != nil {
+		relayLog.PriceQuoteID = m.EffectivePrice.QuoteID
+		relayLog.PriceSource = m.EffectivePrice.Source
+		relayLog.PriceUnit = m.EffectivePrice.Unit
+		relayLog.PriceCurrency = m.EffectivePrice.Currency
+		relayLog.PriceInput = m.EffectivePrice.Input
+		relayLog.PriceOutput = m.EffectivePrice.Output
+		relayLog.PriceCacheRead = m.EffectivePrice.CacheRead
+		relayLog.PriceCacheWrite = m.EffectivePrice.CacheWrite
+		relayLog.PricePerRequest = m.EffectivePrice.PerRequest
+		relayLog.PriceGroupMultiplier = m.EffectivePrice.GroupMultiplier
+		relayLog.PriceExchangeRateUSD = m.EffectivePrice.ExchangeRateToUSD
+		relayLog.PriceObservedAt = m.EffectivePrice.ObservedAt
+		relayLog.PriceStale = m.EffectivePrice.Stale
+		relayLog.PriceConvertible = m.EffectivePrice.Convertible
+		relayLog.PriceOriginalCost = m.PriceOriginalCost
+		relayLog.PriceMatchReason = m.EffectivePrice.MatchReason
 	}
 
 	if apiKey, getErr := op.APIKeyGet(m.APIKeyID, ctx); getErr == nil {
@@ -381,7 +656,7 @@ func (m *imagesRelayMetrics) saveLog(ctx context.Context, success bool, err erro
 	if err != nil {
 		relayLog.Error = err.Error()
 	}
-	relayLog.Success = success
+	relayLog.Success = outcome == model.RequestOutcomeSuccess
 
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)
@@ -540,6 +815,8 @@ func imagesAttempt(
 	firstTokenTimeOutSec int,
 	metrics *imagesRelayMetrics,
 	actualModel string,
+	canonicalModelID int,
+	routeCandidateID int,
 	hb *earlyHeartbeat,
 ) (statusCode int, written bool, usage *imagesUsage, upstreamCT string, err error) {
 	// 构建 URL（baseUrl.Path 后追加 endpoint）
@@ -601,7 +878,21 @@ func imagesAttempt(
 	req.Method = http.MethodPost
 
 	// Header 透传：复制下游 header，过滤 hop-by-hop 与鉴权相关
-	copyHeadersToUpstream(req, c, channel, channelKey, contentType, stream)
+	policy := copyHeadersToUpstream(
+		req,
+		c,
+		channel,
+		channelKey,
+		contentType,
+		stream,
+		canonicalModelID,
+		routeCandidateID,
+	)
+	if len(policy.Trace) > 0 {
+		if payload, marshalErr := json.Marshal(policy.Trace); marshalErr == nil {
+			metrics.HeaderPolicyTrace = string(payload)
+		}
+	}
 
 	// 发送请求
 	httpClient, err := helper.ChannelHTTPClientWithContext(ctx, channel)
@@ -637,15 +928,27 @@ func imagesAttempt(
 	return respUp.StatusCode, w, u, upstreamCT, err
 }
 
-func copyHeadersToUpstream(req *http.Request, c *gin.Context, channel *model.Channel, channelKey string, contentType string, stream bool) {
-	for k, values := range c.Request.Header {
-		if hopByHopHeaders[strings.ToLower(k)] {
-			continue
-		}
-		for _, v := range values {
-			req.Header.Add(k, v)
-		}
+func copyHeadersToUpstream(
+	req *http.Request,
+	c *gin.Context,
+	channel *model.Channel,
+	channelKey string,
+	contentType string,
+	stream bool,
+	canonicalModelID int,
+	routeCandidateID int,
+) model.ResolvedHeaderPolicy {
+	policy, err := op.ResolveHeaderPolicy(
+		c.Request.Context(),
+		channel.ID,
+		canonicalModelID,
+		routeCandidateID,
+	)
+	if err != nil {
+		log.Warnf("resolve image header policy failed (channel=%d): %v", channel.ID, err)
+		policy = op.HeaderPolicyFailureFallback()
 	}
+	op.ApplyHeaderPolicy(req.Header, c.Request.Header, channel.CustomHeader, policy)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -661,11 +964,7 @@ func copyHeadersToUpstream(req *http.Request, c *gin.Context, channel *model.Cha
 		req.Header.Set("User-Agent", "")
 	}
 
-	if len(channel.CustomHeader) > 0 {
-		for _, h := range channel.CustomHeader {
-			req.Header.Set(h.HeaderKey, h.HeaderValue)
-		}
-	}
+	return policy
 }
 
 func copyMultipartReplaceModel(src io.Reader, boundary string, dst *multipart.Writer, newModel string) error {

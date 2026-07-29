@@ -85,6 +85,53 @@ func (o *EmbeddingOutbound) TransformRequest(ctx context.Context, request *model
 	return req, nil
 }
 
+func (o *EmbeddingOutbound) TransformRequestRaw(
+	ctx context.Context,
+	rawBody []byte,
+	modelName, baseUrl, key string,
+	query url.Values,
+) (*http.Request, error) {
+	if len(rawBody) == 0 {
+		return nil, fmt.Errorf("raw body is empty")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to decode raw embedding request: %w", err)
+	}
+	if strings.TrimSpace(modelName) != "" {
+		payload["model"] = strings.TrimSpace(modelName)
+	}
+	rewrittenBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode raw embedding request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(rewrittenBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.ContentLength = int64(len(rewrittenBody))
+	bodyBytes := rewrittenBody
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	parsedURL, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base url: %w", err)
+	}
+	parsedURL.Path = parsedURL.Path + "/embeddings"
+	if query != nil {
+		parsedURL.RawQuery = query.Encode()
+	}
+	req.URL = parsedURL
+	req.Method = http.MethodPost
+	return req, nil
+}
+
 func (o *EmbeddingOutbound) TransformResponse(ctx context.Context, response *http.Response) (*model.InternalLLMResponse, error) {
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -117,4 +164,12 @@ func (o *EmbeddingOutbound) TransformResponse(ctx context.Context, response *htt
 func (o *EmbeddingOutbound) TransformStream(ctx context.Context, eventData []byte) (*model.InternalLLMResponse, error) {
 	// Embedding API does not support streaming
 	return nil, errors.New("streaming is not supported for embedding API")
+}
+
+func (o *EmbeddingOutbound) CanPassthrough(inboundFormat model.APIFormat) bool {
+	return inboundFormat == model.APIFormatOpenAIEmbedding
+}
+
+func (o *EmbeddingOutbound) PassthroughConfig() model.PassthroughConfig {
+	return model.PassthroughConfig{}
 }

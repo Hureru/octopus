@@ -2,8 +2,12 @@ package webdav
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -15,8 +19,12 @@ import (
 	"github.com/studio-b12/gowebdav"
 )
 
-const backupPrefix = "octopus-backup-"
-const backupSuffix = ".json"
+const (
+	backupPrefix            = "octopus-backup-"
+	backupJSONSuffix        = ".json"
+	backupZipSuffix         = ".zip"
+	maxWebDAVBackupFileSize = 128 << 20
+)
 
 type BackupInfo struct {
 	Name       string    `json:"name"`
@@ -25,19 +33,36 @@ type BackupInfo struct {
 }
 
 func RunBackup(ctx context.Context) error {
+	return runBackupWithLimit(ctx, maxWebDAVBackupFileSize)
+}
+
+func runBackupWithLimit(ctx context.Context, maxSize int64) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return err
 	}
 
-	dump, err := op.DBExportAll(ctx, false, cfg.IncludeStats)
+	temp, err := os.CreateTemp("", "octopus-webdav-backup-*.zip")
 	if err != nil {
+		return fmt.Errorf("failed to create temporary backup: %w", err)
+	}
+	tempName := temp.Name()
+	defer func() {
+		_ = temp.Close()
+		_ = os.Remove(tempName)
+	}()
+	if err := op.DBExportZip(ctx, temp, false, cfg.IncludeStats); err != nil {
 		return fmt.Errorf("failed to export database: %w", err)
 	}
-
-	data, err := json.Marshal(dump)
+	stat, err := temp.Stat()
 	if err != nil {
-		return fmt.Errorf("failed to marshal backup: %w", err)
+		return fmt.Errorf("failed to stat temporary backup: %w", err)
+	}
+	if stat.Size() > maxSize {
+		return fmt.Errorf("backup exceeds upload size limit")
+	}
+	if _, err := temp.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to rewind temporary backup: %w", err)
 	}
 
 	c, err := NewClient(cfg)
@@ -46,17 +71,28 @@ func RunBackup(ctx context.Context) error {
 	}
 	_ = c.MkdirAll(cfg.BackupPath, 0755)
 
-	filename := backupPrefix + time.Now().Format("20060102150405") + backupSuffix
+	filename := backupFilename()
 	remotePath := path.Join(cfg.BackupPath, filename)
 
-	if err := c.Write(remotePath, data, 0644); err != nil {
+	if err := c.WriteStreamWithLength(remotePath, temp, stat.Size(), 0644); err != nil {
 		return fmt.Errorf("failed to upload backup: %w", err)
 	}
 
-	log.Infof("webdav backup uploaded: %s (%d bytes)", filename, len(data))
+	log.Infof("webdav backup uploaded: %s (%d bytes)", filename, stat.Size())
 
 	enforceRetention(c, cfg.BackupPath, cfg.RetentionCount)
 	return nil
+}
+
+func backupFilename() string {
+	var suffix [4]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return backupPrefix + time.Now().UTC().Format("20060102150405.000000000") + backupZipSuffix
+	}
+	return backupPrefix +
+		time.Now().UTC().Format("20060102150405.000000000") +
+		"-" + hex.EncodeToString(suffix[:]) +
+		backupZipSuffix
 }
 
 func ListBackups(ctx context.Context) ([]BackupInfo, error) {
@@ -108,17 +144,50 @@ func RestoreFromBackup(ctx context.Context, filename string) (*model.DBImportRes
 	}
 	remotePath := path.Join(cfg.BackupPath, filename)
 
-	data, err := c.Read(remotePath)
+	stream, err := c.ReadStream(remotePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download backup: %w", err)
 	}
+	defer stream.Close()
 
-	var dump model.DBDump
-	if err := json.Unmarshal(data, &dump); err != nil {
-		return nil, fmt.Errorf("failed to parse backup: %w", err)
+	temp, err := os.CreateTemp("", "octopus-webdav-restore-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary restore file: %w", err)
+	}
+	tempName := temp.Name()
+	defer func() {
+		_ = temp.Close()
+		_ = os.Remove(tempName)
+	}()
+	written, err := io.Copy(temp, io.LimitReader(stream, maxWebDAVBackupFileSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to download backup: %w", err)
+	}
+	if written > maxWebDAVBackupFileSize {
+		return nil, fmt.Errorf("backup exceeds restore size limit")
+	}
+	if _, err := temp.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to rewind restore file: %w", err)
 	}
 
-	result, err := op.DBImportIncremental(ctx, &dump)
+	var result *model.DBImportResult
+	if strings.HasSuffix(filename, backupZipSuffix) {
+		result, err = op.DBImportZip(ctx, temp, written)
+	} else {
+		var dump model.DBDump
+		decoder := json.NewDecoder(temp)
+		if err := decoder.Decode(&dump); err != nil {
+			return nil, fmt.Errorf("failed to parse backup: %w", err)
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			if err == nil {
+				return nil, fmt.Errorf("failed to parse backup: trailing JSON value")
+			}
+			return nil, fmt.Errorf("failed to parse backup: %w", err)
+		}
+		result, err = op.DBImportIncremental(ctx, &dump)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to import backup: %w", err)
 	}
@@ -162,5 +231,6 @@ func isBackupFile(name string) bool {
 	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
 		return false
 	}
-	return strings.HasPrefix(name, backupPrefix) && strings.HasSuffix(name, backupSuffix)
+	return strings.HasPrefix(name, backupPrefix) &&
+		(strings.HasSuffix(name, backupJSONSuffix) || strings.HasSuffix(name, backupZipSuffix))
 }

@@ -19,7 +19,7 @@ func MarkAccountProjectionStale(ctx context.Context, accountID int, reason strin
 	if err := ensureStaleAccountGroups(ctx, accountID, message, now); err != nil {
 		return err
 	}
-	return db.GetDB().WithContext(ctx).Model(&model.SiteUserGroup{}).
+	if err := db.GetDB().WithContext(ctx).Model(&model.SiteUserGroup{}).
 		Where("site_account_id = ? AND projection_suspended = ?", accountID, false).
 		Updates(map[string]any{
 			"model_sync_status":        model.SiteGroupModelSyncStatusStale,
@@ -27,7 +27,10 @@ func MarkAccountProjectionStale(ctx context.Context, accountID int, reason strin
 			"model_sync_authoritative": false,
 			"last_model_sync_at":       &now,
 			"model_sync_failure_count": gorm.Expr("COALESCE(model_sync_failure_count, 0) + 1"),
-		}).Error
+		}).Error; err != nil {
+		return err
+	}
+	return op.CatalogRouteCandidatesMarkStaleByAccount(ctx, accountID)
 }
 
 func ensureStaleAccountGroups(ctx context.Context, accountID int, message string, now time.Time) error {

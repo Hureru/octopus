@@ -6,6 +6,7 @@ import (
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/server/router"
+	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/webdav"
 	"github.com/gin-gonic/gin"
 )
@@ -77,6 +78,10 @@ func restoreWebDAVBackup(c *gin.Context) {
 
 	result, err := webdav.RestoreFromBackup(c.Request.Context(), req.Filename)
 	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := task.ReloadSettingIntervals(); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

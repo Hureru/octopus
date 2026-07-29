@@ -15,12 +15,25 @@ var settingCache = cache.New[model.SettingKey, string](16)
 func SettingList(ctx context.Context) ([]model.Setting, error) {
 	settings := make([]model.Setting, 0, settingCache.Len())
 	for key, value := range settingCache.GetAll() {
-		settings = append(settings, model.Setting{
+		setting, ok := SettingForClient(model.Setting{
 			Key:   key,
 			Value: value,
 		})
+		if ok {
+			settings = append(settings, setting)
+		}
 	}
 	return settings, nil
+}
+
+func SettingForClient(setting model.Setting) (model.Setting, bool) {
+	switch setting.Key {
+	case model.SettingKeyJWTSecret:
+		return model.Setting{}, false
+	case model.SettingKeyWebDAVPassword:
+		setting.Value = ""
+	}
+	return setting, true
 }
 
 func SettingGetString(key model.SettingKey) (string, error) {

@@ -274,25 +274,48 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 				base.ProviderExtensions = &model.ProviderExtensions{OpenAI: &model.OpenAIExtension{RawResponseItems: rawOutput}}
 			}
 			finishReason, respErr := normalizeResponsesFinishReason(streamEvent.Response.Status, streamEvent.Response.Error)
+			usage := convertResponsesUsage(streamEvent.Response.Usage)
 			if respErr != nil {
-				events = append(events, model.StreamEvent{Kind: model.StreamEventKindError, ID: base.ID, Model: base.Model, Error: respErr})
+				events = append(events, model.StreamEvent{
+					Kind:           model.StreamEventKindError,
+					ID:             base.ID,
+					Model:          base.Model,
+					Error:          respErr,
+					Usage:          usage,
+					TerminalEvent:  "response.failed",
+					TerminalStatus: "failed",
+				})
 				return events, nil
 			}
 			if finishReason != nil && *finishReason == "stop" && o.responseCarriesFunctionCall(streamEvent.Response) {
 				finishReason = lo.ToPtr("tool_calls")
 			}
-			stopEvent := model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(lo.FromPtr(finishReason)), ProviderExtensions: base.ProviderExtensions}
+			stopEvent := model.StreamEvent{
+				Kind:               model.StreamEventKindMessageStop,
+				ID:                 base.ID,
+				Model:              base.Model,
+				Index:              base.Index,
+				StopReason:         model.ParseFinishReason(lo.FromPtr(finishReason)),
+				Usage:              usage,
+				TerminalEvent:      "response.completed",
+				TerminalStatus:     "completed",
+				ProviderExtensions: base.ProviderExtensions,
+			}
 			events = append(events, stopEvent)
-			if streamEvent.Response.Usage != nil {
-				usage := convertResponsesUsage(streamEvent.Response.Usage)
+			if usage != nil {
 				usageEvent := model.StreamEvent{Kind: model.StreamEventKindUsageDelta, ID: base.ID, Model: base.Model, Usage: usage, ProviderExtensions: base.ProviderExtensions}
 				events = append(events, usageEvent)
 			}
 		}
 
-	case "response.failed", "response.incomplete", "error":
+	case "response.failed", "response.incomplete", "response.cancelled", "response.canceled", "error":
 		var reason *string
 		var respErr *model.ResponseError
+		terminalEvent := streamEvent.Type
+		terminalStatus := strings.TrimPrefix(streamEvent.Type, "response.")
+		if streamEvent.Type == "error" {
+			terminalStatus = "failed"
+		}
 		switch streamEvent.Type {
 		case "response.incomplete":
 			reason = lo.ToPtr("length")
@@ -314,10 +337,43 @@ func (o *ResponseOutbound) TransformStreamEvent(ctx context.Context, eventData [
 				},
 			}
 		}
-		if respErr != nil {
-			events = append(events, model.StreamEvent{Kind: model.StreamEventKindError, ID: base.ID, Model: base.Model, Error: respErr})
+		var usage *model.Usage
+		if streamEvent.Response != nil {
+			usage = convertResponsesUsage(streamEvent.Response.Usage)
+			if streamEvent.Response.Status != nil && *streamEvent.Response.Status != "" {
+				terminalStatus = *streamEvent.Response.Status
+			}
 		}
-		events = append(events, model.StreamEvent{Kind: model.StreamEventKindMessageStop, ID: base.ID, Model: base.Model, Index: base.Index, StopReason: model.ParseFinishReason(lo.FromPtr(reason))})
+		if respErr != nil {
+			events = append(events, model.StreamEvent{
+				Kind:           model.StreamEventKindError,
+				ID:             base.ID,
+				Model:          base.Model,
+				Error:          respErr,
+				Usage:          usage,
+				TerminalEvent:  terminalEvent,
+				TerminalStatus: terminalStatus,
+			})
+		}
+		events = append(events, model.StreamEvent{
+			Kind:           model.StreamEventKindMessageStop,
+			ID:             base.ID,
+			Model:          base.Model,
+			Index:          base.Index,
+			StopReason:     model.ParseFinishReason(lo.FromPtr(reason)),
+			Error:          respErr,
+			Usage:          usage,
+			TerminalEvent:  terminalEvent,
+			TerminalStatus: terminalStatus,
+		})
+		if usage != nil {
+			events = append(events, model.StreamEvent{
+				Kind:  model.StreamEventKindUsageDelta,
+				ID:    base.ID,
+				Model: base.Model,
+				Usage: usage,
+			})
+		}
 
 	default:
 		return nil, nil

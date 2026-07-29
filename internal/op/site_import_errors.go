@@ -9,6 +9,7 @@ import (
 const (
 	CodeSiteImportInvalidJSON           = "site.import.invalid_json"
 	CodeSiteImportEmptyPayload          = "site.import.empty_payload"
+	CodeSiteImportPayloadTooLarge       = "site.import.payload_too_large"
 	CodeSiteImportUnrecognizedAllAPIHub = "site.import.unrecognized_all_api_hub"
 	CodeSiteImportUnrecognizedMetapi    = "site.import.unrecognized_metapi"
 	CodeSiteImportNoImportableAllAPIHub = "site.import.no_importable_all_api_hub"

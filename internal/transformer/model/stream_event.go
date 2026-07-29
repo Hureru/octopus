@@ -31,13 +31,15 @@ type StreamEvent struct {
 	Index int    `json:"index,omitempty"`
 	Role  string `json:"role,omitempty"`
 
-	ContentBlock *StreamContentBlock `json:"content_block,omitempty"`
-	Delta        *StreamDelta        `json:"delta,omitempty"`
-	ToolCall     *ToolCall           `json:"tool_call,omitempty"`
-	Usage        *Usage              `json:"usage,omitempty"`
-	StopReason   FinishReason        `json:"stop_reason,omitempty"`
-	StopSequence *string             `json:"stop_sequence,omitempty"`
-	Error        *ResponseError      `json:"error,omitempty"`
+	ContentBlock   *StreamContentBlock `json:"content_block,omitempty"`
+	Delta          *StreamDelta        `json:"delta,omitempty"`
+	ToolCall       *ToolCall           `json:"tool_call,omitempty"`
+	Usage          *Usage              `json:"usage,omitempty"`
+	StopReason     FinishReason        `json:"stop_reason,omitempty"`
+	StopSequence   *string             `json:"stop_sequence,omitempty"`
+	Error          *ResponseError      `json:"error,omitempty"`
+	TerminalEvent  string              `json:"terminal_event,omitempty"`
+	TerminalStatus string              `json:"terminal_status,omitempty"`
 
 	ProviderExtensions *ProviderExtensions `json:"provider_extensions,omitempty"`
 }

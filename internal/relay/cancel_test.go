@@ -41,3 +41,26 @@ func TestIsClientCancellationIgnoresLocalRelayBudgetTimeout(t *testing.T) {
 		t.Fatalf("expected local relay budget timeout to not be treated as client cancellation")
 	}
 }
+
+func TestIsClientCancellationIgnoresOctopusWebSocketTimeouts(t *testing.T) {
+	tests := []error{
+		errUpstreamWSDialTimeout,
+		fmt.Errorf("dial failed: %w", errUpstreamWSDialTimeout),
+		errWSClientMaxAge,
+		fmt.Errorf("session ended: %w", errWSClientMaxAge),
+	}
+	for _, err := range tests {
+		if isClientCancellation(context.Background(), err) {
+			t.Fatalf("Octopus-owned timeout was treated as client cancellation: %v", err)
+		}
+	}
+
+	for _, cause := range []error{errUpstreamWSDialTimeout, errWSClientMaxAge} {
+		ctx, cancel := context.WithTimeoutCause(context.Background(), 0, cause)
+		<-ctx.Done()
+		if isClientCancellation(ctx, contextError(ctx)) {
+			t.Fatalf("context cause %v was treated as client cancellation", cause)
+		}
+		cancel()
+	}
+}

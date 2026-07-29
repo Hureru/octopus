@@ -18,6 +18,18 @@ type mockStreamWriter struct {
 	headers http.Header
 }
 
+type failingStreamWriter struct {
+	headers http.Header
+}
+
+func (f *failingStreamWriter) Write([]byte) (int, error) {
+	return 0, errors.New("downstream write failed")
+}
+func (f *failingStreamWriter) Flush()                  {}
+func (f *failingStreamWriter) Written() bool           { return false }
+func (f *failingStreamWriter) Header() http.Header     { return f.headers }
+func (f *failingStreamWriter) WriteHeader(int)         {}
+
 func newMockStreamWriter() *mockStreamWriter {
 	return &mockStreamWriter{
 		headers: make(http.Header),
@@ -356,6 +368,37 @@ data: {"type":"message_stop"}
 	err := <-errChan
 	if err != nil {
 		t.Errorf("expected nil error due to terminal event detection, got: %v", err)
+	}
+}
+
+func TestStreamProcessorKeepsTerminalEvidenceWhenWriteFails(t *testing.T) {
+	source := newMockStreamSource([][]byte{[]byte(
+		"data: {\"type\":\"response.completed\"}\n\n",
+	)})
+	writer := &failingStreamWriter{headers: make(http.Header)}
+	finished := false
+	processor := NewStreamProcessor(StreamConfig{
+		Source:          source,
+		Writer:          writer,
+		Context:         context.Background(),
+		BufferRawStream: true,
+		TerminalEvents:  map[string]struct{}{"response.completed": {}},
+		OnFinish: func(context.Context, []byte) error {
+			finished = true
+			return nil
+		},
+	})
+
+	if err := processor.Run(); err == nil {
+		t.Fatal("expected downstream write error")
+	}
+	result := processor.Result()
+	if result.TerminalEvent != "response.completed" ||
+		result.Termination != TerminationWriteError {
+		t.Fatalf("terminal evidence was lost: %+v", result)
+	}
+	if !finished {
+		t.Fatal("terminal write failure skipped metrics finalization")
 	}
 }
 

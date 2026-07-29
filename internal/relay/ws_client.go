@@ -26,6 +26,7 @@ const (
 
 type wsRelayResult struct {
 	Success           bool
+	Outcome           dbmodel.RequestOutcome
 	ResponseID        string
 	ResetConversation bool
 	Written           bool
@@ -47,7 +48,7 @@ func HandleWSResponse(c *gin.Context) {
 
 	conn.SetReadLimit(wsClientReadLimit)
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), wsClientMaxAge)
+	ctx, cancel := context.WithTimeoutCause(c.Request.Context(), wsClientMaxAge, errWSClientMaxAge)
 	defer cancel()
 
 	apiKeyID := c.GetInt("api_key_id")
@@ -267,7 +268,7 @@ func processWSResponseCreate(
 	}
 
 	result = finalizeWSRelay(ctx, conn, req, result)
-	if result.Success {
+	if result.Success && result.Outcome == dbmodel.RequestOutcomeSuccess {
 		if conversationState == nil {
 			conversationState = &wsConversationState{DownstreamSessionID: downstreamSessionID}
 		}
@@ -417,9 +418,23 @@ func newWSRelayRequest(
 	preferredSticky *balancer.SessionEntry,
 	rawBody []byte,
 ) (*relayRequest, *dbmodel.Group, error) {
-	group, err := op.GroupGetEnabledMap(requestModel, ctx)
+	routingModel := requestModel
+	if canonical, ok := op.CatalogResolveIdentity(requestModel); ok {
+		if !canonical.Enabled {
+			return nil, nil, fmt.Errorf("model disabled")
+		}
+		routingModel = canonical.Name
+	}
+	group, err := op.GroupGetEnabledMap(routingModel, ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("model not found")
+	}
+	requirements := op.ProtocolRequirementsFromRequest(executionRequest)
+	requirements.InboundProtocol = dbmodel.ProtocolOpenAIResponses
+	requirements.Features = append(requirements.Features, dbmodel.ProtocolFeatureWebSocket)
+	group, preview, canonical, err := op.CatalogPlanGroup(ctx, requestModel, requirements, group)
+	if err != nil {
+		return nil, nil, fmt.Errorf("route planning failed: %w", err)
 	}
 
 	iter := balancer.NewIteratorWithPreference(group, apiKeyID, requestModel, preferredSticky)
@@ -427,18 +442,31 @@ func newWSRelayRequest(
 		return nil, nil, fmt.Errorf("no available channel")
 	}
 
+	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest)
+	metrics.SetProtocolDecision(
+		dbmodel.ProtocolOpenAIResponses,
+		dbmodel.ProtocolUnknown,
+		"",
+		dbmodel.ProtocolPolicyAuto,
+		false,
+		nil,
+	)
+	if canonical != nil {
+		metrics.SetRouting(*canonical, 0, dbmodel.ProtocolOpenAIResponses, dbmodel.ProtocolUnknown, "")
+	}
 	return &relayRequest{
-		c:               nil,
-		ctx:             ctx,
-		inAdapter:       inAdapter,
-		internalRequest: executionRequest,
-		metrics:         NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest),
-		apiKeyID:        apiKeyID,
-		requestModel:    requestModel,
-		groupID:         group.ID,
-		groupSessionTTL: group.SessionKeepTime,
-		iter:            iter,
-		streamWriter:    NewWSStreamWriter(ctx, conn),
+		c:                 nil,
+		ctx:               ctx,
+		inAdapter:         inAdapter,
+		internalRequest:   executionRequest,
+		metrics:           metrics,
+		apiKeyID:          apiKeyID,
+		requestModel:      requestModel,
+		groupID:           group.ID,
+		groupSessionTTL:   group.SessionKeepTime,
+		iter:              iter,
+		protocolDecisions: routeDecisionMap(preview),
+		streamWriter:      NewWSStreamWriter(ctx, conn),
 	}, &group, nil
 }
 
@@ -518,6 +546,33 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		}
 
 		req.internalRequest.Model = item.ModelName
+		decision := req.protocolDecisions[relayRouteDecisionKey(channel.ID, item.ModelName)]
+		outboundProtocol := decision.OutboundProtocol
+		if outboundProtocol == "" {
+			outboundProtocol = op.ProtocolForOutboundType(channel.Type)
+		}
+		protocolMode := decision.ProtocolMode
+		if protocolMode == "" {
+			protocolMode = dbmodel.ProtocolExecutionModeTransform
+		}
+		protocolPolicy := decision.ProtocolPolicy.Normalize(dbmodel.ProtocolPolicyAuto)
+		req.metrics.ClearEffectivePrice()
+		req.metrics.RouteCandidateID = decision.RouteCandidateID
+		if effectivePrice, priceErr := op.EffectivePriceForCandidate(
+			relayCtx,
+			decision.RouteCandidateID,
+			item.ModelName,
+		); priceErr == nil {
+			req.metrics.SetEffectivePrice(effectivePrice)
+		}
+		req.metrics.SetProtocolDecision(
+			dbmodel.ProtocolOpenAIResponses,
+			outboundProtocol,
+			protocolMode,
+			protocolPolicy,
+			decision.AllowLossy,
+			decision.Warnings,
+		)
 
 		selectOpts := dbmodel.ChannelKeySelectOptions{
 			ExcludeKeyIDs:  make(map[int]struct{}),
@@ -571,6 +626,10 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 				channel:              channel,
 				usedKey:              usedKey,
 				firstTokenTimeOutSec: group.FirstTokenTimeOut,
+				protocolMode:         protocolMode,
+				protocolPolicy:       protocolPolicy,
+				protocolAllowLossy:   decision.AllowLossy,
+				protocolWarnings:     append([]string(nil), decision.Warnings...),
 			}
 
 			result = ra.attempt()
@@ -579,7 +638,8 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			}
 		}
 
-		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
+		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation &&
+			result.Attribution == dbmodel.AttemptAttributionUpstream {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
 			if replayExact && result.StatusCode == http.StatusServiceUnavailable && isNoAvailableAccountError(relayErrorMessage(result.Err)) {
 				failureKind = balancer.FailureHard
@@ -592,7 +652,11 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			if req.metrics.InternalResponse != nil {
 				respID = req.metrics.InternalResponse.ID
 			}
-			return wsRelayResult{Success: true, ResponseID: respID}
+			return wsRelayResult{
+				Success:    true,
+				Outcome:    result.Outcome,
+				ResponseID: respID,
+			}
 		}
 		if result.ResetConversation {
 			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
@@ -601,7 +665,12 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			return wsRelayResult{ResetConversation: true, Err: result.Err}
 		}
 		if result.Canceled || result.Written {
-			return wsRelayResult{Written: result.Written, Canceled: result.Canceled, Err: result.Err}
+			return wsRelayResult{
+				Written:  result.Written,
+				Canceled: result.Canceled,
+				Outcome:  result.Outcome,
+				Err:      result.Err,
+			}
 		}
 		lastErr = result.Err
 		lastResult = result
@@ -610,16 +679,26 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 	if publicErr, ok := classifyWSPublicError(lastErr, lastResult.StatusCode); ok {
 		return wsRelayResult{ResetConversation: publicErr.ResetConversation, Err: lastErr, PublicError: &publicErr}
 	}
-	return wsRelayResult{Err: lastErr}
+	return wsRelayResult{Err: lastErr, Outcome: lastResult.Outcome}
 }
 
 func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, result wsRelayResult) wsRelayResult {
-	if result.Success {
-		req.metrics.SaveWithChannelStats(ctx, true, nil, req.iter.Attempts(), false)
+	outcome := result.Outcome
+	if outcome == "" {
+		if result.Canceled {
+			outcome = dbmodel.RequestOutcomeClientCanceled
+		} else if result.Success {
+			outcome = dbmodel.RequestOutcomeSuccess
+		} else {
+			outcome = dbmodel.RequestOutcomeFailed
+		}
+	}
+	if result.Success || outcome == dbmodel.RequestOutcomeIndeterminate {
+		req.metrics.SaveOutcomeWithChannelStats(ctx, outcome, nil, req.iter.Attempts(), false)
 		return result
 	}
 
-	req.metrics.SaveWithChannelStats(ctx, false, result.Err, req.iter.Attempts(), false)
+	req.metrics.SaveOutcomeWithChannelStats(ctx, outcome, result.Err, req.iter.Attempts(), false)
 	if result.Canceled || result.Written {
 		return result
 	}

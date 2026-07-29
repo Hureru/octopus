@@ -8,6 +8,8 @@ import (
 var (
 	errLocalRelayBudgetExceeded = errors.New("local relay budget exceeded")
 	errFirstTokenTimeout        = errors.New("first token timeout")
+	errUpstreamWSDialTimeout    = errors.New("upstream websocket dial timeout")
+	errWSClientMaxAge           = errors.New("websocket client max age reached")
 )
 
 func contextError(ctx context.Context) error {
@@ -42,7 +44,9 @@ func isFirstTokenTimeout(ctx context.Context, err error) bool {
 
 func isClientCancellation(ctx context.Context, err error) bool {
 	if isLocalRelayBudgetExceeded(ctx, err) || isLocalRelayBudgetExceeded(ctx, contextError(ctx)) ||
-		isFirstTokenTimeout(ctx, err) || isFirstTokenTimeout(ctx, contextError(ctx)) {
+		isFirstTokenTimeout(ctx, err) || isFirstTokenTimeout(ctx, contextError(ctx)) ||
+		errors.Is(err, errUpstreamWSDialTimeout) || errors.Is(contextError(ctx), errUpstreamWSDialTimeout) ||
+		errors.Is(err, errWSClientMaxAge) || errors.Is(contextError(ctx), errWSClientMaxAge) {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

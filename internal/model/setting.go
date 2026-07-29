@@ -49,6 +49,11 @@ const (
 	SettingKeyWebDAVIncludeStats               SettingKey = "webdav_include_stats"                  // WebDAV 备份是否包含统计数据
 )
 
+const (
+	maxIntervalHours = 24 * 365 * 10
+	maxRetentionDays = 365 * 100
+)
+
 type Setting struct {
 	Key   SettingKey `json:"key" gorm:"primaryKey"`
 	Value string     `json:"value" gorm:"not null"`
@@ -100,13 +105,14 @@ func DefaultSettings() []Setting {
 func (s *Setting) Validate() error {
 	switch s.Key {
 	case SettingKeyModelInfoUpdateInterval, SettingKeySyncLLMInterval, SettingKeySiteSyncInterval,
-		SettingKeySiteCheckinInterval, SettingKeyRelayLogKeepPeriod,
-		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown:
-		_, err := strconv.Atoi(s.Value)
-		if err != nil {
-			return fmt.Errorf("setting value must be an integer")
-		}
-		return nil
+		SettingKeySiteCheckinInterval:
+		return validateIntRange(s.Value, 0, maxIntervalHours)
+	case SettingKeyStatsSaveInterval:
+		return validateIntRange(s.Value, 1, 24*60)
+	case SettingKeyRelayLogKeepPeriod:
+		return validateIntRange(s.Value, 1, maxRetentionDays)
+	case SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown:
+		return validateIntMin(s.Value, 0)
 	case SettingKeyOutlierWindowCapacity:
 		// 评估样本上限受环形缓冲物理容量约束（≤20，见 outlierwindow.physicalCap）。
 		return validateIntRange(s.Value, 1, 20)
@@ -118,16 +124,9 @@ func (s *Setting) Validate() error {
 		SettingKeyOutlierReapMinutes, SettingKeyOutlierCFRecoverMinutes,
 		SettingKeyWebDAVRetentionCount:
 		// 时间窗/样本/连击/间隔等：0 或负值无意义，下限为 1。
-		return validateIntMin(s.Value, 1)
+		return validateIntRange(s.Value, 1, maxRetentionDays)
 	case SettingKeySSEHeartbeatInterval, SettingKeySSEPreStreamHeartbeatDelay, SettingKeyWebDAVBackupInterval:
-		value, err := strconv.Atoi(s.Value)
-		if err != nil {
-			return fmt.Errorf("setting value must be an integer")
-		}
-		if value < 0 {
-			return fmt.Errorf("setting value must be non-negative")
-		}
-		return nil
+		return validateIntRange(s.Value, 0, maxIntervalHours)
 	case SettingKeyRelayLogKeepEnabled, SettingKeyResponsesWSEnabled, SettingKeyGroupHealthEnabled, SettingKeyStatsSiteModelBackfilled, SettingKeyOutlierRetireEnabled, SettingKeyWebDAVIncludeStats:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("setting value must be true or false")

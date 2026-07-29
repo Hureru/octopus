@@ -220,6 +220,9 @@ func (i *ResponseInbound) processStreamEvents(ctx context.Context, events []mode
 				out = append(out, i.closeCurrentContentPart()...)
 				out = append(out, i.closeCurrentOutputItem()...)
 			}
+			if terminal := i.finishExplicitTerminal(event); len(terminal) > 0 {
+				out = append(out, terminal)
+			}
 
 		case model.StreamEventKindUsageDelta:
 			if event.Usage != nil && i.hasFinished && !i.responseCompleted {
@@ -255,6 +258,10 @@ func (i *ResponseInbound) processStreamEvents(ctx context.Context, events []mode
 			if event.Error == nil {
 				continue
 			}
+			if terminal := i.finishExplicitTerminal(event); len(terminal) > 0 {
+				out = append(out, terminal)
+				continue
+			}
 			i.responseCompleted = true
 			response := &ResponsesResponse{
 				Object:    "response",
@@ -282,6 +289,52 @@ func (i *ResponseInbound) processStreamEvents(ctx context.Context, events []mode
 		}
 	}
 	return result, nil
+}
+
+func (i *ResponseInbound) finishExplicitTerminal(event model.StreamEvent) []byte {
+	if i.responseCompleted || event.TerminalEvent == "" {
+		return nil
+	}
+	i.responseCompleted = true
+	if event.Usage != nil {
+		i.usage = event.Usage
+	}
+	status := strings.TrimSpace(event.TerminalStatus)
+	if status == "" {
+		status = strings.TrimPrefix(event.TerminalEvent, "response.")
+	}
+	if status == "" || status == "error" {
+		status = "failed"
+	}
+	output := i.finalOutputItems()
+	if event.ProviderExtensions != nil &&
+		event.ProviderExtensions.OpenAI != nil &&
+		len(event.ProviderExtensions.OpenAI.RawResponseItems) > 0 {
+		var items []ResponsesItem
+		if err := json.Unmarshal(event.ProviderExtensions.OpenAI.RawResponseItems, &items); err == nil {
+			output = items
+		}
+	}
+	response := &ResponsesResponse{
+		Object:     "response",
+		ID:         i.responseID,
+		Model:      i.model,
+		CreatedAt:  i.createdAt,
+		Status:     &status,
+		Truncation: i.truncation,
+		Output:     output,
+		Usage:      convertUsageToResponses(i.usage),
+	}
+	if event.Error != nil {
+		response.Error = &ResponsesError{
+			Code:    500,
+			Message: event.Error.Detail.Message,
+		}
+	}
+	return i.enqueueEvent(&ResponsesStreamEvent{
+		Type:     event.TerminalEvent,
+		Response: response,
+	})
 }
 
 func (i *ResponseInbound) enqueueEvent(ev *ResponsesStreamEvent) []byte {

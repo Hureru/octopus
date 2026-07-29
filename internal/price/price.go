@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bestruirui/octopus/internal/client"
+	"github.com/bestruirui/octopus/internal/globalprice"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -68,14 +69,14 @@ func UpdateLLMPrice(ctx context.Context) error {
 	if err := json.Unmarshal(body, &rawPrice); err != nil {
 		return fmt.Errorf("failed to parse LLM info: %w", err)
 	}
-	llmPriceLock.Lock()
+	prices := make(map[string]model.LLMPrice)
 	for _, provider := range Provider {
 		for _, model := range rawPrice[provider].Models {
 			model.ID = strings.ToLower(model.ID)
-			llmPrice[model.ID] = model.Cost
+			prices[model.ID] = model.Cost
 		}
 	}
-	llmPriceLock.Unlock()
+	globalprice.Replace(prices)
 	lastUpdateTime = time.Now()
 	return nil
 }
@@ -90,9 +91,7 @@ func GetLLMPrice(modelName string) *model.LLMPrice {
 	if err == nil {
 		return &price
 	}
-	llmPriceLock.RLock()
-	defer llmPriceLock.RUnlock()
-	price, ok := llmPrice[modelName]
+	price, ok := globalprice.Get(modelName)
 	if !ok {
 		return nil
 	}

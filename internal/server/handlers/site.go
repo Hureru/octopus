@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -19,6 +20,11 @@ import (
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	maxSiteImportUploadBytes       = 16 << 20
+	maxSiteImportMultipartOverhead = 1 << 20
 )
 
 func refreshAccountRandomCheckinScheduleBestEffort(ctx context.Context, accountID int) {
@@ -114,20 +120,63 @@ func importMetAPI(c *gin.Context) {
 }
 
 func readImportPayload(c *gin.Context) ([]byte, error) {
+	return readImportPayloadWithLimit(c, maxSiteImportUploadBytes)
+}
+
+func readImportPayloadWithLimit(c *gin.Context, limit int64) ([]byte, error) {
 	contentType := c.GetHeader("Content-Type")
 	if strings.Contains(contentType, "multipart/form-data") {
+		c.Request.Body = http.MaxBytesReader(
+			c.Writer,
+			c.Request.Body,
+			limit+maxSiteImportMultipartOverhead,
+		)
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
+			if siteImportRequestTooLarge(err) {
+				return nil, siteImportPayloadTooLargeError()
+			}
 			return nil, apperror.Wrap(op.CodeSiteImportEmptyPayload, "site import empty payload", err).WithStatus(http.StatusBadRequest)
+		}
+		if fileHeader.Size > limit {
+			return nil, siteImportPayloadTooLargeError()
 		}
 		file, err := fileHeader.Open()
 		if err != nil {
 			return nil, apperror.Wrap(op.CodeSiteImportEmptyPayload, "site import empty payload", err).WithStatus(http.StatusBadRequest)
 		}
 		defer file.Close()
-		return io.ReadAll(file)
+		return readLimitedSiteImport(file, limit)
 	}
-	return io.ReadAll(c.Request.Body)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+	return readLimitedSiteImport(c.Request.Body, limit)
+}
+
+func readLimitedSiteImport(reader io.Reader, limit int64) ([]byte, error) {
+	payload, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		if siteImportRequestTooLarge(err) {
+			return nil, siteImportPayloadTooLargeError()
+		}
+		return nil, err
+	}
+	if int64(len(payload)) > limit {
+		return nil, siteImportPayloadTooLargeError()
+	}
+	return payload, nil
+}
+
+func siteImportRequestTooLarge(err error) bool {
+	var maxBytesError *http.MaxBytesError
+	return errors.As(err, &maxBytesError) ||
+		strings.Contains(strings.ToLower(err.Error()), "request body too large")
+}
+
+func siteImportPayloadTooLargeError() error {
+	return apperror.New(
+		op.CodeSiteImportPayloadTooLarge,
+		"site import payload exceeds upload limit",
+	).WithStatus(http.StatusRequestEntityTooLarge)
 }
 
 func createSite(c *gin.Context) {
