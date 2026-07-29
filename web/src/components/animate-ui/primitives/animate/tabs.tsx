@@ -16,6 +16,9 @@ type TabsContextType = {
   activeValue: string;
   handleValueChange: (value: string) => void;
   registerTrigger: (value: string, node: HTMLElement | null) => void;
+  triggerId: (value: string) => string;
+  contentId: (value: string) => string;
+  focusTrigger: (value: string) => void;
 };
 
 const [TabsProvider, useTabs] =
@@ -49,6 +52,7 @@ function Tabs({
   const [activeValue, setActiveValue] = React.useState<string | undefined>(
     defaultValue,
   );
+  const tabsId = React.useId();
   const triggersRef = React.useRef(new Map<string, HTMLElement>());
   const initialSet = React.useRef(false);
   const isControlled = value !== undefined;
@@ -93,12 +97,31 @@ function Tabs({
     [isControlled, onValueChange],
   );
 
+  const safeValue = React.useCallback(
+    (val: string) => encodeURIComponent(val).replace(/%/g, '-'),
+    [],
+  );
+  const triggerId = React.useCallback(
+    (val: string) => `${tabsId}-tab-${safeValue(val)}`,
+    [safeValue, tabsId],
+  );
+  const contentId = React.useCallback(
+    (val: string) => `${tabsId}-panel-${safeValue(val)}`,
+    [safeValue, tabsId],
+  );
+  const focusTrigger = React.useCallback((val: string) => {
+    triggersRef.current.get(val)?.focus();
+  }, []);
+
   return (
     <TabsProvider
       value={{
         activeValue: (value ?? activeValue) as string,
         handleValueChange,
         registerTrigger,
+        triggerId,
+        contentId,
+        focusTrigger,
       }}
     >
       <div data-slot="tabs" {...props}>
@@ -147,6 +170,7 @@ function TabsHighlightItem(props: TabsHighlightItemProps) {
 type TabsTriggerProps = WithAsChild<
   {
     value: string;
+    panelId?: string;
     children: React.ReactNode;
   } & HTMLMotionProps<'button'>
 >;
@@ -154,10 +178,19 @@ type TabsTriggerProps = WithAsChild<
 function TabsTrigger({
   ref,
   value,
+  panelId,
   asChild = false,
+  onKeyDown,
   ...props
 }: TabsTriggerProps) {
-  const { activeValue, handleValueChange, registerTrigger } = useTabs();
+  const {
+    activeValue,
+    handleValueChange,
+    registerTrigger,
+    triggerId,
+    contentId,
+    focusTrigger,
+  } = useTabs();
 
   const localRef = React.useRef<HTMLButtonElement | null>(null);
   React.useImperativeHandle(ref, () => localRef.current as HTMLButtonElement);
@@ -168,13 +201,53 @@ function TabsTrigger({
   }, [value, registerTrigger]);
 
   const Component = asChild ? Slot : motion.button;
+  const active = activeValue === value;
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    onKeyDown?.(event);
+    if (event.defaultPrevented) return;
+    const values = Array.from(
+      (localRef.current?.closest('[role="tablist"]')?.querySelectorAll('[role="tab"]') ?? [])
+    ).map((node) => node.getAttribute('data-tab-value') ?? '');
+    const index = values.indexOf(value);
+    if (index < 0 || values.length < 2) return;
+    let nextIndex = index;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (index + 1) % values.length;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (index - 1 + values.length) % values.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = values.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const next = values[nextIndex];
+    handleValueChange(next);
+    requestAnimationFrame(() => focusTrigger(next));
+  };
 
   return (
     <Component
       ref={localRef}
       data-slot="tabs-trigger"
+      data-tab-value={value}
       role="tab"
+      id={triggerId(value)}
+      aria-controls={panelId ?? contentId(value)}
+      aria-selected={active}
+      tabIndex={active ? 0 : -1}
       onClick={() => handleValueChange(value)}
+      onKeyDown={handleKeyDown}
       data-state={activeValue === value ? 'active' : 'inactive'}
       {...props}
     />
@@ -315,7 +388,7 @@ function TabsContent({
   asChild = false,
   ...props
 }: TabsContentProps) {
-  const { activeValue } = useTabs();
+  const { activeValue, triggerId, contentId } = useTabs();
   const isActive = activeValue === value;
 
   const Component = asChild ? Slot : motion.div;
@@ -324,6 +397,11 @@ function TabsContent({
     <Component
       role="tabpanel"
       data-slot="tabs-content"
+      id={contentId(value)}
+      aria-labelledby={triggerId(value)}
+      aria-hidden={!isActive}
+      hidden={!isActive}
+      tabIndex={isActive ? 0 : -1}
       inert={!isActive}
       style={{ overflow: 'hidden', ...style }}
       initial={{ filter: 'blur(0px)' }}

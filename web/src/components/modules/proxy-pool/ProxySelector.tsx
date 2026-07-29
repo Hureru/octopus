@@ -37,7 +37,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
         <div className={className}>
             <div className="grid gap-2 md:grid-cols-8">
                 <div className={allowInherit ? 'space-y-2 md:col-span-3' : 'space-y-2 md:col-span-2'}>
-                    <label className="text-sm font-medium text-card-foreground">{t('mode.label')}</label>
+                    <label htmlFor="proxy-selector-mode" className="text-sm font-medium text-card-foreground">{t('mode.label')}</label>
                     <Select
                         value={mode}
                         disabled={disabled}
@@ -49,7 +49,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
                             });
                         }}
                     >
-                        <SelectTrigger className="w-full rounded-xl">
+                        <SelectTrigger id="proxy-selector-mode" className="w-full rounded-xl" aria-label={t('mode.label')}>
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl">
@@ -64,7 +64,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
 
                 {mode === 'pool' ? (
                     <div className={allowInherit ? 'space-y-2 md:col-span-5' : 'space-y-2 md:col-span-6'}>
-                        <label className="text-sm font-medium text-card-foreground">{t('name')}</label>
+                        <label htmlFor="proxy-selector-config" className="text-sm font-medium text-card-foreground">{t('name')}</label>
                         <div className="flex items-center gap-2">
                             {enabledProxies.length > 0 ? (
                                 <Select
@@ -72,7 +72,7 @@ export function ProxySelector({ value, onChange, allowInherit = false, disabled 
                                     disabled={disabled || isLoading}
                                     onValueChange={(proxyId) => onChange({ proxy_mode: 'pool', proxy_config_id: Number(proxyId) })}
                                 >
-                                    <SelectTrigger className="min-w-0 flex-1 rounded-xl">
+                                    <SelectTrigger id="proxy-selector-config" className="min-w-0 flex-1 rounded-xl" aria-label={t('name')}>
                                         <SelectValue placeholder={t('selectConfig')} />
                                     </SelectTrigger>
                                     <SelectContent className="rounded-xl">

@@ -1,13 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CloudUpload, Download, Eye, EyeOff, FolderSync, Key, Link, RefreshCw, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from '@/components/common/Toast';
 import {
+    type DBImportResult,
     SettingKey,
     useTestWebDAV,
     useTriggerWebDAVBackup,
@@ -46,6 +57,9 @@ export function SettingWebDAVBackup() {
     const backupList = useWebDAVBackupList(isConfigured);
 
     const [restoringFile, setRestoringFile] = useState<string | null>(null);
+    const [restoreCandidate, setRestoreCandidate] = useState<string | null>(null);
+    const [restoreResult, setRestoreResult] = useState<DBImportResult | null>(null);
+    const restoreTriggerRef = useRef<HTMLButtonElement | null>(null);
 
     const backups = useMemo(() => {
         if (backupList.isPending || backupList.isError) return null;
@@ -70,15 +84,25 @@ export function SettingWebDAVBackup() {
         }
     };
 
-    const handleRestore = async (filename: string) => {
-        if (!confirm(t('restoreConfirm'))) return;
+    const restoreRows = useMemo(() => {
+        if (!restoreResult) return [];
+        return Object.entries(restoreResult.rows_affected)
+            .filter(([, count]) => count > 0)
+            .sort(([left], [right]) => left.localeCompare(right));
+    }, [restoreResult]);
+
+    const handleRestore = async () => {
+        const filename = restoreCandidate;
+        if (!filename) return;
         setRestoringFile(filename);
         try {
-            await restoreBackup.mutateAsync(filename);
+            const result = await restoreBackup.mutateAsync(filename);
+            setRestoreResult(result);
+            setRestoreCandidate(null);
             toast.success(t('restoreSuccess'));
-            window.location.reload();
         } catch (e) {
             toast.error(t('restoreFailed'), { description: e instanceof Error ? e.message : undefined });
+        } finally {
             setRestoringFile(null);
         }
     };
@@ -86,8 +110,9 @@ export function SettingWebDAVBackup() {
     return (
         <SettingCard icon={CloudUpload} title={t('title')}>
             {/* WebDAV Configuration */}
-            <SettingRow icon={Link} label={t('url.label')}>
+            <SettingRow icon={Link} label={t('url.label')} htmlFor="webdav-url">
                 <Input
+                    id="webdav-url"
                     value={url.value}
                     onChange={(e) => url.setValue(e.target.value)}
                     onBlur={url.save}
@@ -96,8 +121,9 @@ export function SettingWebDAVBackup() {
                 />
             </SettingRow>
 
-            <SettingRow icon={User} label={t('username.label')}>
+            <SettingRow icon={User} label={t('username.label')} htmlFor="webdav-username">
                 <Input
+                    id="webdav-username"
                     value={username.value}
                     onChange={(e) => username.setValue(e.target.value)}
                     onBlur={username.save}
@@ -106,9 +132,10 @@ export function SettingWebDAVBackup() {
                 />
             </SettingRow>
 
-            <SettingRow icon={Key} label={t('password.label')}>
+            <SettingRow icon={Key} label={t('password.label')} htmlFor="webdav-password">
                 <div className="relative w-64">
                     <Input
+                        id="webdav-password"
                         type={showPassword ? 'text' : 'password'}
                         value={password.value}
                         onChange={(e) => password.setValue(e.target.value)}
@@ -118,6 +145,9 @@ export function SettingWebDAVBackup() {
                     />
                     <button
                         type="button"
+                        aria-label={showPassword ? t('password.hide') : t('password.show')}
+                        aria-pressed={showPassword}
+                        title={showPassword ? t('password.hide') : t('password.show')}
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
@@ -126,8 +156,9 @@ export function SettingWebDAVBackup() {
                 </div>
             </SettingRow>
 
-            <SettingRow icon={FolderSync} label={t('backupPath.label')}>
+            <SettingRow icon={FolderSync} label={t('backupPath.label')} htmlFor="webdav-backup-path">
                 <Input
+                    id="webdav-backup-path"
                     value={backupPath.value}
                     onChange={(e) => backupPath.setValue(e.target.value)}
                     onBlur={backupPath.save}
@@ -136,22 +167,25 @@ export function SettingWebDAVBackup() {
                 />
             </SettingRow>
 
-            <SettingSection title={t('interval.label')} />
-            <div className="space-y-3">
-                <Input
-                    type="number"
-                    value={interval.value}
-                    onChange={(e) => interval.setValue(e.target.value)}
-                    onBlur={interval.save}
-                    placeholder={t('interval.placeholder')}
-                    className="w-48 rounded-xl"
-                    min={0}
-                />
-                <p className="text-xs text-muted-foreground">{t('interval.description')}</p>
-            </div>
+			<SettingRow label={t('interval.label')} htmlFor="webdav-backup-interval">
+				<div className="space-y-2">
+					<Input
+						id="webdav-backup-interval"
+						type="number"
+						value={interval.value}
+						onChange={(e) => interval.setValue(e.target.value)}
+						onBlur={interval.save}
+						placeholder={t('interval.placeholder')}
+						className="w-48 rounded-xl"
+						min={0}
+					/>
+					<p className="text-xs text-muted-foreground">{t('interval.description')}</p>
+				</div>
+			</SettingRow>
 
-            <SettingRow label={t('retentionCount.label')}>
+            <SettingRow label={t('retentionCount.label')} htmlFor="webdav-retention-count">
                 <Input
+                    id="webdav-retention-count"
                     type="number"
                     value={retentionCount.value}
                     onChange={(e) => retentionCount.setValue(e.target.value)}
@@ -162,8 +196,12 @@ export function SettingWebDAVBackup() {
                 />
             </SettingRow>
 
-            <SettingRow label={t('includeStats')}>
-                <Switch checked={includeStats.enabled} onCheckedChange={includeStats.toggle} />
+            <SettingRow label={t('includeStats')} htmlFor="webdav-include-stats">
+                <Switch
+                    id="webdav-include-stats"
+                    checked={includeStats.enabled}
+                    onCheckedChange={includeStats.toggle}
+                />
             </SettingRow>
 
             {/* Actions */}
@@ -210,7 +248,15 @@ export function SettingWebDAVBackup() {
                         {backupList.isPending ? (
                             <p className="text-sm text-muted-foreground">{t('loading')}</p>
                         ) : backupList.isError ? (
-                            <p className="text-sm text-red-500">{t('loadError')}</p>
+                            <div className="flex items-center justify-between gap-3 text-sm text-red-500">
+                                <span>
+                                    {t('loadError')}: {backupList.error instanceof Error ? backupList.error.message : t('unknownError')}
+                                </span>
+                                <Button variant="outline" size="sm" onClick={() => backupList.refetch()}>
+                                    <RefreshCw className="size-4" />
+                                    {t('retry')}
+                                </Button>
+                            </div>
                         ) : backups && backups.length === 0 ? (
                             <p className="text-sm text-muted-foreground">{t('noBackups')}</p>
                         ) : backups ? (
@@ -230,7 +276,11 @@ export function SettingWebDAVBackup() {
                                             variant="outline"
                                             size="sm"
                                             className="shrink-0 rounded-xl"
-                                            onClick={() => handleRestore(backup.name)}
+                                            onClick={(event) => {
+                                                restoreTriggerRef.current = event.currentTarget;
+                                                setRestoreResult(null);
+                                                setRestoreCandidate(backup.name);
+                                            }}
                                             disabled={restoringFile !== null}
                                         >
                                             <Download className="size-3.5" />
@@ -240,9 +290,74 @@ export function SettingWebDAVBackup() {
                                 ))}
                             </div>
                         ) : null}
+
+                        {restoreResult ? (
+                            <div className="space-y-3 border-t border-border pt-4" role="status">
+                                <div className="flex items-center justify-between gap-3">
+                                    <h3 className="text-sm font-semibold">{t('restoreResult')}</h3>
+                                    <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                                        {t('reload')}
+                                    </Button>
+                                </div>
+                                {restoreRows.length > 0 ? (
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3">
+                                        {restoreRows.map(([table, count]) => (
+                                            <div key={table} className="flex justify-between gap-2">
+                                                <span className="truncate">{table}</span>
+                                                <span className="tabular-nums">{count}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-muted-foreground">{t('restoreNoChanges')}</p>
+                                )}
+                                {restoreResult.warnings?.map((warning) => (
+                                    <p key={`${warning.code}:${warning.resource_type}:${warning.resource_name}`} className="text-xs text-amber-700 dark:text-amber-300">
+                                        {warning.resource_name}: {warning.message}
+                                    </p>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
                 </>
             )}
+
+            <AlertDialog
+                open={restoreCandidate !== null}
+                onOpenChange={(open) => {
+                    if (!open && !restoreBackup.isPending) setRestoreCandidate(null);
+                }}
+            >
+                <AlertDialogContent
+                    onCloseAutoFocus={(event) => {
+                        const target = restoreTriggerRef.current;
+                        restoreTriggerRef.current = null;
+                        if (!target?.isConnected) return;
+                        event.preventDefault();
+                        target.focus();
+                    }}
+                >
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('restore')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t('restoreConfirm')}
+                            {restoreCandidate ? ` ${restoreCandidate}` : ''}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={restoreBackup.isPending}>{t('cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={restoreBackup.isPending}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                void handleRestore();
+                            }}
+                        >
+                            {restoreBackup.isPending ? t('restoring') : t('restore')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </SettingCard>
     );
 }

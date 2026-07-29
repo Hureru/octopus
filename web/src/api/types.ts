@@ -14,7 +14,7 @@ export interface ApiResponse<T = unknown> {
 /**
  * API 错误响应
  */
-export interface ApiError {
+export interface ApiError extends Error {
     code: number;
     message: string;
     errorCode?: string;

@@ -128,17 +128,23 @@ export function SettingCard({ icon: Icon, title, tooltip, children }: {
     );
 }
 
-export function SettingRow({ icon: Icon, label, tooltip, children }: {
+export function SettingRow({ icon: Icon, label, tooltip, htmlFor, children }: {
     icon?: LucideIcon;
     label: string;
     tooltip?: React.ReactNode;
+    htmlFor?: string;
     children: React.ReactNode;
 }) {
-    return (
-        <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-                {Icon && <Icon className="h-5 w-5 text-muted-foreground" />}
-                <span className="text-sm font-medium">{label}</span>
+	const labelNode = htmlFor ? (
+		<label htmlFor={htmlFor} className="text-sm font-medium">{label}</label>
+	) : (
+		<span className="text-sm font-medium">{label}</span>
+	);
+	return (
+		<div className="flex items-center justify-between gap-4">
+			<div className="flex items-center gap-3">
+				{Icon && <Icon className="h-5 w-5 text-muted-foreground" />}
+				{labelNode}
                 {tooltip && <SettingHelpTip>{tooltip}</SettingHelpTip>}
             </div>
             {children}

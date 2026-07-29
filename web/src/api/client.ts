@@ -65,13 +65,13 @@ async function handleResponse<T>(response: Response): Promise<T> {
         const errorParams = (data && typeof data === 'object' && 'params' in data && isApiErrorParams(data.params))
             ? data.params
             : undefined;
-        const error: ApiError = {
+        const message = translateApiErrorCode(errorCode, rawMessage, errorParams);
+        const error = Object.assign(new Error(message), {
             code: response.status,
             errorCode,
             rawMessage,
             params: errorParams,
-            message: translateApiErrorCode(errorCode, rawMessage, errorParams),
-        };
+        }) as ApiError;
 
         handleError(error);
         throw error;

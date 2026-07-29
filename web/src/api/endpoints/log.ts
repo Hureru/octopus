@@ -426,7 +426,7 @@ export function useLogs(options: UseLogsOptions = {}) {
     return {
         logs,
         isConnected: streamEnabled && isConnected,
-        error: streamEnabled ? error : null,
+        error: logsQuery.error ?? (streamEnabled ? error : null),
         hasMore: !!logsQuery.hasNextPage,
         isLoading: logsQuery.isLoading,
         isLoadingMore: logsQuery.isFetchingNextPage,
