@@ -10,20 +10,29 @@ type DBDump struct {
 	IncludeLogs  bool      `json:"include_logs"`
 	IncludeStats bool      `json:"include_stats"`
 
-	Channels            []Channel            `json:"channels,omitempty"`
-	ChannelKeys         []ChannelKey         `json:"channel_keys,omitempty"`
-	ProxyConfigurations []ProxyConfiguration `json:"proxy_configurations,omitempty"`
-	Sites               []Site               `json:"sites,omitempty"`
-	SiteAccounts        []SiteAccount        `json:"site_accounts,omitempty"`
-	SiteTokens          []SiteToken          `json:"site_tokens,omitempty"`
-	SiteUserGroups      []SiteUserGroup      `json:"site_user_groups,omitempty"`
-	SiteModels          []SiteModel          `json:"site_models,omitempty"`
-	SiteChannelBindings []SiteChannelBinding `json:"site_channel_bindings,omitempty"`
-	Groups              []Group              `json:"groups,omitempty"`
-	GroupItems          []GroupItem          `json:"group_items,omitempty"`
-	LLMInfos            []LLMInfo            `json:"llm_infos,omitempty"`
-	APIKeys             []APIKey             `json:"api_keys,omitempty"`
-	Settings            []Setting            `json:"settings,omitempty"`
+	Channels             []Channel               `json:"channels,omitempty"`
+	ChannelKeys          []ChannelKey            `json:"channel_keys,omitempty"`
+	ProxyConfigurations  []ProxyConfiguration    `json:"proxy_configurations,omitempty"`
+	Sites                []Site                  `json:"sites,omitempty"`
+	SiteAccounts         []SiteAccount           `json:"site_accounts,omitempty"`
+	SiteTokens           []SiteToken             `json:"site_tokens,omitempty"`
+	SiteUserGroups       []SiteUserGroup         `json:"site_user_groups,omitempty"`
+	SiteModels           []SiteModel             `json:"site_models,omitempty"`
+	SiteChannelBindings  []SiteChannelBinding    `json:"site_channel_bindings,omitempty"`
+	Groups               []Group                 `json:"groups,omitempty"`
+	GroupItems           []GroupItem             `json:"group_items,omitempty"`
+	LLMInfos             []LLMInfo               `json:"llm_infos,omitempty"`
+	APIKeys              []APIKey                `json:"api_keys,omitempty"`
+	Settings             []Setting               `json:"settings,omitempty"`
+	CanonicalModels      []CanonicalModel        `json:"canonical_models,omitempty"`
+	ModelAliases         []ModelAlias            `json:"model_aliases,omitempty"`
+	RouteCandidates      []RouteCandidate        `json:"route_candidates,omitempty"`
+	HeaderPolicies       []HeaderPolicy          `json:"header_policies,omitempty"`
+	UserAgentProfiles    []UserAgentProfile      `json:"user_agent_profiles,omitempty"`
+	SiteModelPriceQuotes []SiteModelPriceQuote   `json:"site_model_price_quotes,omitempty"`
+	CurrencyRates        []CurrencyRate          `json:"currency_rates,omitempty"`
+	ClashControllers     []ClashControllerBackup `json:"clash_controllers,omitempty"`
+	SiteProxyPreferences []SiteProxyPreference   `json:"site_proxy_preferences,omitempty"`
 
 	StatsTotal           []StatsTotal           `json:"stats_total,omitempty"`
 	StatsDaily           []StatsDaily           `json:"stats_daily,omitempty"`
@@ -32,8 +41,27 @@ type DBDump struct {
 	StatsChannel         []StatsChannel         `json:"stats_channel,omitempty"`
 	StatsAPIKey          []StatsAPIKey          `json:"stats_api_key,omitempty"`
 	StatsSiteModelHourly []StatsSiteModelHourly `json:"stats_site_model_hourly,omitempty"`
+	UsageRequestFacts    []UsageRequestFact     `json:"usage_request_facts,omitempty"`
+	UsageAttemptFacts    []UsageAttemptFact     `json:"usage_attempt_facts,omitempty"`
+	UsageAggregates      []UsageAggregate       `json:"usage_aggregates,omitempty"`
 
-	RelayLogs []RelayLog `json:"relay_logs,omitempty"`
+	RelayLogs             []RelayLog             `json:"relay_logs,omitempty"`
+	RelayLogRepairAudits  []RelayLogRepairAudit  `json:"relay_log_repair_audits,omitempty"`
+	SiteOperationAttempts []SiteOperationAttempt `json:"site_operation_attempts,omitempty"`
+}
+
+// ClashControllerBackup includes the encrypted controller secret without
+// exposing it through the normal ClashController API representation.
+type ClashControllerBackup struct {
+	ID              int       `json:"id"`
+	Name            string    `json:"name"`
+	APIURL          string    `json:"api_url"`
+	ProxyURL        string    `json:"proxy_url"`
+	GroupName       string    `json:"group_name"`
+	SecretEncrypted string    `json:"secret_encrypted,omitempty"`
+	Enabled         bool      `json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type DBImportResult struct {

@@ -3,8 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -22,6 +25,8 @@ import (
 )
 
 var projectedAutoGroupQueued atomic.Bool
+
+const maxDBImportUploadBytes = 128 << 20
 
 func init() {
 	router.NewGroupRouter("/api/v1/setting").
@@ -160,6 +165,8 @@ func exportDB(c *gin.Context) {
 
 func importDB(c *gin.Context) {
 	var dump model.DBDump
+	var result *model.DBImportResult
+	var importErr error
 
 	contentType := c.GetHeader("Content-Type")
 	if strings.Contains(contentType, "multipart/form-data") {
@@ -174,31 +181,69 @@ func importDB(c *gin.Context) {
 			return
 		}
 		defer f.Close()
-		body, err := io.ReadAll(f)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
+		if fh.Size > maxDBImportUploadBytes {
+			resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
 			return
 		}
-		if err := decodeDBDump(body, &dump); err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
+		if isZipBackup(
+			fh.Filename,
+			fh.Header.Get("Content-Type"),
+			f,
+		) {
+			result, importErr = op.DBImportZip(c.Request.Context(), f, fh.Size)
+		} else {
+			body, err := readLimitedBackup(f, maxDBImportUploadBytes)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			importErr = decodeDBDump(body, &dump)
 		}
 	} else {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := decodeDBDump(body, &dump); err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
+		if strings.Contains(contentType, "application/zip") {
+			temp, err := os.CreateTemp("", "octopus-import-*.zip")
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			tempName := temp.Name()
+			defer func() {
+				_ = temp.Close()
+				_ = os.Remove(tempName)
+			}()
+			written, err := io.Copy(
+				temp,
+				io.LimitReader(c.Request.Body, maxDBImportUploadBytes+1),
+			)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			if written > maxDBImportUploadBytes {
+				resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
+				return
+			}
+			result, importErr = op.DBImportZip(c.Request.Context(), temp, written)
+		} else {
+			body, err := readLimitedBackup(c.Request.Body, maxDBImportUploadBytes)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			importErr = decodeDBDump(body, &dump)
 		}
 	}
 
-	result, err := op.DBImportIncremental(c.Request.Context(), &dump)
-	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+	if importErr != nil {
+		resp.Error(c, http.StatusBadRequest, importErr.Error())
 		return
+	}
+	if result == nil {
+		result, importErr = op.DBImportIncremental(c.Request.Context(), &dump)
+		if importErr != nil {
+			resp.Error(c, http.StatusBadRequest, importErr.Error())
+			return
+		}
 	}
 
 	if err := op.InitCache(); err != nil {
@@ -206,6 +251,28 @@ func importDB(c *gin.Context) {
 	}
 
 	resp.Success(c, result)
+}
+
+func readLimitedBackup(reader io.Reader, limit int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("backup file exceeds upload limit")
+	}
+	return body, nil
+}
+
+func isZipBackup(filename, contentType string, reader io.ReaderAt) bool {
+	if strings.EqualFold(filepath.Ext(filename), ".zip") ||
+		strings.Contains(strings.ToLower(contentType), "application/zip") {
+		return true
+	}
+	var signature [4]byte
+	n, err := reader.ReadAt(signature[:], 0)
+	return err == nil && n == len(signature) &&
+		string(signature[:]) == "PK\x03\x04"
 }
 
 func decodeDBDump(body []byte, dump *model.DBDump) error {
