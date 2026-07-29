@@ -174,6 +174,7 @@ function TabsTrigger({
       ref={localRef}
       data-slot="tabs-trigger"
       role="tab"
+      aria-selected={activeValue === value}
       onClick={() => handleValueChange(value)}
       data-state={activeValue === value ? 'active' : 'inactive'}
       {...props}

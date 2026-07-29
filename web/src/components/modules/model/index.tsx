@@ -1,38 +1,62 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useModelList } from '@/api/endpoints/model';
-import { ModelItem } from './Item';
-import { useSearchStore, useToolbarViewOptionsStore } from '@/components/modules/toolbar';
-import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
+import { useState } from 'react';
+import { Boxes, DollarSign, ShieldCheck } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { cn } from '@/lib/utils';
+import { ModelCatalog } from './Catalog';
+import { HeaderPolicies } from './HeaderPolicies';
+import { LegacyPrices } from './LegacyPrices';
+
+type ModelView = 'catalog' | 'headers' | 'global-prices';
+
+const VIEWS = [
+    { id: 'catalog', icon: Boxes },
+    { id: 'headers', icon: ShieldCheck },
+    { id: 'global-prices', icon: DollarSign },
+] as const;
 
 export function Model() {
-    const { data: models } = useModelList();
-    const pageKey = 'model' as const;
-    const searchTerm = useSearchStore((s) => s.getSearchTerm(pageKey));
-    const layout = useToolbarViewOptionsStore((s) => s.getLayout(pageKey));
-    const sortOrder = useToolbarViewOptionsStore((s) => s.getSortOrder(pageKey));
-
-    const sortedModels = useMemo(() => {
-        if (!models) return [];
-        return [...models].sort((a, b) =>
-            sortOrder === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
-        );
-    }, [models, sortOrder]);
-
-    const visibleModels = useMemo(() => {
-        const term = searchTerm.toLowerCase().trim();
-        return !term ? sortedModels : sortedModels.filter((m) => m.name.toLowerCase().includes(term));
-    }, [sortedModels, searchTerm]);
+    const t = useTranslations('model.workspace');
+    const [view, setView] = useState<ModelView>('catalog');
 
     return (
-        <VirtualizedGrid
-            items={visibleModels}
-            layout={layout}
-            columns={{ default: 1, md: 2, lg: 3 }}
-            estimateItemHeight={112}
-            getItemKey={(model) => `model-${model.name}`}
-            renderItem={(model) => <ModelItem model={model} layout={layout} />}
-        />
+        <div className="flex h-full min-h-0 flex-col gap-3">
+            <div
+                role="tablist"
+                aria-label={t('ariaLabel')}
+                className="flex shrink-0 gap-1 overflow-x-auto rounded-lg border bg-card p-1"
+            >
+                {VIEWS.map((item) => {
+                    const active = view === item.id;
+                    return (
+                        <button
+                            key={item.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            onClick={() => setView(item.id)}
+                            className={cn(
+                                'inline-flex min-h-10 min-w-fit flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors',
+                                active
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                            )}
+                        >
+                            <item.icon className="size-4" />
+                            {t(item.id)}
+                        </button>
+                    );
+                })}
+            </div>
+            <div
+                role="tabpanel"
+                className="min-h-0 flex-1 overflow-hidden pb-24 md:pb-0"
+            >
+                {view === 'catalog' ? <ModelCatalog /> : null}
+                {view === 'headers' ? <HeaderPolicies /> : null}
+                {view === 'global-prices' ? <LegacyPrices /> : null}
+            </div>
+        </div>
     );
 }

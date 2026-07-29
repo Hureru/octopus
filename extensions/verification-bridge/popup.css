@@ -1,0 +1,236 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  letter-spacing: 0;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --text: #18212f;
+  --muted: #657184;
+  --border: #d7dce4;
+  --accent: #176b51;
+  --accent-hover: #10533e;
+  --danger: #b42318;
+  --danger-hover: #8f1c13;
+  --focus: #d97706;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15191f;
+    --surface: #20262f;
+    --text: #f4f6f8;
+    --muted: #aeb7c4;
+    --border: #3c4654;
+    --accent: #45a987;
+    --accent-hover: #5cba9b;
+    --danger: #f97066;
+    --danger-hover: #ff8a80;
+    --focus: #f5a524;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  min-height: 420px;
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+}
+
+main {
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #ffffff;
+  background: #176b51;
+  border-radius: 6px;
+  font-weight: 750;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+header p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+section {
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+section + section {
+  margin-top: 12px;
+}
+
+h2 {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+label {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+input[type="url"],
+input[type="password"],
+input[type="text"] {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+button.primary {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button.danger {
+  color: #ffffff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.button-row,
+.button-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.button-row {
+  grid-template-columns: 1fr 1fr;
+}
+
+.button-grid {
+  grid-template-columns: 1fr;
+}
+
+dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+dl div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.status {
+  min-height: 20px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.status.success {
+  color: var(--accent);
+}

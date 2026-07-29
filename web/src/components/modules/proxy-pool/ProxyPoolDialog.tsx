@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ChevronDown, ExternalLink, FlaskConical, Network, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, FlaskConical, KeyRound, Network, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
     useCreateProxyConfiguration,
@@ -13,8 +13,9 @@ import {
     type ProxyConfiguration,
     type ProxyConfigurationReference,
 } from '@/api/endpoints/proxy-pool';
+import { useClashControllerList } from '@/api/endpoints/site-recovery';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -22,11 +23,16 @@ import { toast } from '@/components/common/Toast';
 import { cn } from '@/lib/utils';
 import { useJumpStore } from '@/stores/jump';
 import { useProxyPoolDialogStore } from './dialog-store';
+import { Tabs, TabsList, TabsTrigger } from '@/components/animate-ui/components/animate/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ClashControllerPanel } from './ClashControllerPanel';
+import { VerificationPairingPanel } from './VerificationPairingPanel';
 
 type FormState = {
     id?: number;
     name: string;
     url: string;
+    clash_controller_id: number | null;
     enabled: boolean;
     remark: string;
 };
@@ -42,11 +48,14 @@ type ReferenceTreeNode = {
 const emptyForm: FormState = {
     name: '',
     url: '',
+    clash_controller_id: null,
     enabled: true,
     remark: '',
 };
 
 const DEFAULT_TEST_URL = 'https://api.openai.com/v1/models';
+const NO_CLASH_CONTROLLER = '__none__';
+type ProxyPoolView = 'proxies' | 'clash' | 'verification';
 
 function maskProxyURL(value: string) {
     try {
@@ -72,6 +81,7 @@ function createFormFromProxy(proxy: ProxyConfiguration): FormState {
         id: proxy.id,
         name: proxy.name,
         url: proxy.url,
+        clash_controller_id: proxy.clash_controller_id ?? null,
         enabled: proxy.enabled,
         remark: proxy.remark ?? '',
     };
@@ -175,11 +185,13 @@ export function ProxyPoolDialog() {
     const clearFocus = useProxyPoolDialogStore((state) => state.clearFocus);
     const requestJump = useJumpStore((state) => state.requestJump);
     const { data: proxies = [], isLoading, error } = useProxyConfigurationList();
+    const { data: clashControllers = [] } = useClashControllerList(isOpen);
     const createProxy = useCreateProxyConfiguration();
     const updateProxy = useUpdateProxyConfiguration();
     const deleteProxy = useDeleteProxyConfiguration();
     const testProxy = useTestProxyConfiguration();
     const [form, setForm] = useState<FormState>(emptyForm);
+    const [activeView, setActiveView] = useState<ProxyPoolView>('proxies');
     const [query, setQuery] = useState('');
     const [testURL, setTestURL] = useState(DEFAULT_TEST_URL);
     const [testingKey, setTestingKey] = useState<string | null>(null);
@@ -265,6 +277,7 @@ export function ProxyPoolDialog() {
         const payload = {
             name: form.name.trim(),
             url: form.url.trim(),
+            clash_controller_id: form.clash_controller_id,
             enabled: form.enabled,
             remark: form.remark.trim(),
         };
@@ -328,19 +341,68 @@ export function ProxyPoolDialog() {
 
     useEffect(() => {
         if (!isOpen || !focusedProxyId) return;
-        const node = focusedProxyRefs.current.get(focusedProxyId);
-        if (!node) return;
-        const timer = window.setTimeout(() => {
+        const viewTimer = window.setTimeout(() => {
+            setActiveView('proxies');
+        }, 0);
+        const scrollTimer = window.setTimeout(() => {
+            const node = focusedProxyRefs.current.get(focusedProxyId);
+            if (!node) return;
             node.scrollIntoView({ behavior: 'smooth', block: 'center' });
             clearFocus();
         }, 80);
-        return () => window.clearTimeout(timer);
+        return () => {
+            window.clearTimeout(viewTimer);
+            window.clearTimeout(scrollTimer);
+        };
     }, [isOpen, focusedProxyId, filteredProxies.length, clearFocus]);
 
     return (
         <Dialog open={isOpen} onOpenChange={setOpen}>
-            <DialogContent className="max-h-[90vh] overflow-hidden rounded-3xl p-0 sm:max-w-5xl">
-                <div className="grid max-h-[90vh] min-h-[620px] grid-cols-1 overflow-hidden md:grid-cols-[1.1fr_0.9fr]">
+            <DialogContent
+                className="h-[min(90dvh,52rem)] overflow-hidden rounded-2xl p-0 sm:max-w-5xl"
+                showCloseButton={false}
+            >
+                <DialogTitle className="sr-only">{t('title')}</DialogTitle>
+                <DialogDescription className="sr-only">{t('description')}</DialogDescription>
+                <Tabs
+                    value={activeView}
+                    onValueChange={(value) => setActiveView(value as ProxyPoolView)}
+                    className="flex h-full min-h-0 gap-0"
+                >
+                    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-5 py-3 sm:px-6">
+                        <div className="min-w-0 flex-1 overflow-x-auto">
+                            <TabsList className="w-full min-w-0">
+                                <TabsTrigger value="proxies">
+                                    <Network className="hidden size-4 sm:block" />
+                                    {t('tabs.proxies')}
+                                </TabsTrigger>
+                                <TabsTrigger value="clash">
+                                    <ServerCog className="hidden size-4 sm:block" />
+                                    {t('tabs.clash')}
+                                </TabsTrigger>
+                                <TabsTrigger value="verification">
+                                    <KeyRound className="hidden size-4 sm:block" />
+                                    {t('tabs.verification')}
+                                </TabsTrigger>
+                            </TabsList>
+                        </div>
+                        <DialogClose asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="shrink-0 rounded-lg"
+                                title={t('close')}
+                                aria-label={t('close')}
+                            >
+                                <X className="size-4" />
+                            </Button>
+                        </DialogClose>
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-hidden">
+                    {activeView === 'proxies' ? (
+                <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden md:grid-cols-[1.1fr_0.9fr] md:grid-rows-1">
                     <section className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
                         <DialogHeader className="shrink-0 p-6 pb-3">
                             <DialogTitle className="flex items-center gap-2 text-2xl">
@@ -390,6 +452,19 @@ export function ProxyPoolDialog() {
                                             <div className="mt-1 truncate font-mono text-xs text-muted-foreground" title={maskProxyURL(proxy.url)}>
                                                 {maskProxyURL(proxy.url)}
                                             </div>
+                                            {proxy.clash_controller_id ? (
+                                                <div className="mt-1 text-xs text-muted-foreground">
+                                                    {t('clashLinked', {
+                                                        name:
+                                                            clashControllers.find(
+                                                                (item) =>
+                                                                    item.id ===
+                                                                    proxy.clash_controller_id,
+                                                            )?.name ??
+                                                            `#${proxy.clash_controller_id}`,
+                                                    })}
+                                                </div>
+                                            ) : null}
                                             {proxy.remark ? <p className="mt-2 text-xs text-muted-foreground">{proxy.remark}</p> : null}
                                         </div>
                                         <div className="flex shrink-0 items-center gap-1">
@@ -431,6 +506,54 @@ export function ProxyPoolDialog() {
                                 <Input value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} placeholder="socks5://127.0.0.1:1080" className="rounded-xl" required />
                             </div>
                             <div className="space-y-2">
+                                <label className="text-sm font-medium">{t('clashLinkLabel')}</label>
+                                <Select
+                                    value={
+                                        form.clash_controller_id
+                                            ? String(form.clash_controller_id)
+                                            : NO_CLASH_CONTROLLER
+                                    }
+                                    onValueChange={(value) => {
+                                        if (value === NO_CLASH_CONTROLLER) {
+                                            setForm({
+                                                ...form,
+                                                clash_controller_id: null,
+                                            });
+                                            return;
+                                        }
+                                        const controller = clashControllers.find(
+                                            (item) => item.id === Number(value),
+                                        );
+                                        setForm({
+                                            ...form,
+                                            clash_controller_id: Number(value),
+                                            url: controller?.proxy_url ?? form.url,
+                                        });
+                                    }}
+                                >
+                                    <SelectTrigger className="w-full rounded-xl">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value={NO_CLASH_CONTROLLER}>
+                                            {t('clashLinkNone')}
+                                        </SelectItem>
+                                        {clashControllers.map((controller) => (
+                                            <SelectItem
+                                                key={controller.id}
+                                                value={String(controller.id)}
+                                                disabled={!controller.enabled}
+                                            >
+                                                {controller.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground">
+                                    {t('clashLinkHint')}
+                                </p>
+                            </div>
+                            <div className="space-y-2">
                                 <label className="text-sm font-medium">{t('remark')}</label>
                                 <Input value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} className="rounded-xl" />
                             </div>
@@ -454,6 +577,15 @@ export function ProxyPoolDialog() {
                         </form>
                     </section>
                 </div>
+                    ) : activeView === 'clash' ? (
+                        <ClashControllerPanel enabled={isOpen && activeView === 'clash'} />
+                    ) : (
+                        <VerificationPairingPanel
+                            enabled={isOpen && activeView === 'verification'}
+                        />
+                    )}
+                    </div>
+                </Tabs>
             </DialogContent>
             <Dialog open={!!referencesProxy} onOpenChange={(open) => !open && setReferencesProxy(null)}>
                 <DialogContent className="max-h-[85vh] overflow-hidden rounded-3xl sm:max-w-2xl">

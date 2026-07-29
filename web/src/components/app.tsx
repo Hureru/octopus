@@ -236,7 +236,7 @@ export function AppContainer() {
                                 transition={{ duration: 0.3 }}
                                 className="flex flex-col sm:flex-row sm:items-baseline gap-2 sm:gap-6"
                             >
-                                <span className="text-3xl font-bold mt-1">{t(activeItem)}</span>
+                                <h1 className="text-3xl font-bold mt-1">{t(activeItem)}</h1>
                                 {activeItem === 'channel' && <ChannelTabSwitcher />}
                             </motion.div>
                         </AnimatePresence>
@@ -266,4 +266,3 @@ export function AppContainer() {
         </motion.div>
     );
 }
-

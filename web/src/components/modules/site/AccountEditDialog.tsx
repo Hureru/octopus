@@ -53,6 +53,7 @@ type SiteAccountFormState = {
     platform_user_id: string;
     proxy_mode: ProxyMode;
     proxy_config_id: number | null;
+    auto_proxy_recovery: boolean | null;
     enabled: boolean;
     auto_sync: boolean;
     auto_checkin: boolean;
@@ -142,6 +143,7 @@ function createEmptyAccountForm(site: SiteRecord): SiteAccountFormState {
         platform_user_id: '',
         proxy_mode: 'inherit',
         proxy_config_id: null,
+        auto_proxy_recovery: null,
         enabled: true,
         auto_sync: true,
         auto_checkin: true,
@@ -168,6 +170,7 @@ function createAccountForm(account: SiteAccount): SiteAccountFormState {
             : '',
         proxy_mode: account.proxy_mode ?? 'inherit',
         proxy_config_id: account.proxy_config_id ?? null,
+        auto_proxy_recovery: account.auto_proxy_recovery ?? null,
         enabled: account.enabled,
         auto_sync: account.auto_sync,
         auto_checkin: account.auto_checkin,
@@ -220,6 +223,7 @@ interface AccountEditDialogProps {
 export function AccountEditDialog({ open, onOpenChange, site, account }: AccountEditDialogProps) {
     const t = useTranslations();
     const tProxy = useTranslations('proxyPool');
+    const tRecovery = useTranslations('siteRecovery');
     const locale = useSettingStore((state) => state.locale);
     const createSiteAccount = useCreateSiteAccount();
     const updateSiteAccount = useUpdateSiteAccount();
@@ -349,6 +353,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 proxy_mode: accountForm.proxy_mode,
                 proxy_config_id:
                     accountForm.proxy_mode === 'pool' ? accountForm.proxy_config_id : null,
+                auto_proxy_recovery: accountForm.auto_proxy_recovery,
                 enabled: accountForm.enabled,
                 auto_sync: accountForm.auto_sync,
                 auto_checkin: accountForm.auto_checkin,
@@ -814,6 +819,52 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                 用于该账号的同步、签到和模型拉取；自动投影的渠道会跟随这里解析后的代理。
                             </span>
                         </div>
+
+                        <label className="grid gap-2 text-sm">
+                            <span className="font-medium">
+                                {tRecovery('form.accountPolicy')}
+                            </span>
+                            <Select
+                                value={
+                                    accountForm.auto_proxy_recovery === null
+                                        ? 'inherit'
+                                        : accountForm.auto_proxy_recovery
+                                          ? 'enabled'
+                                          : 'disabled'
+                                }
+                                onValueChange={(value) =>
+                                    setAccountForm((current) =>
+                                        current
+                                            ? {
+                                                  ...current,
+                                                  auto_proxy_recovery:
+                                                      value === 'inherit'
+                                                          ? null
+                                                          : value === 'enabled',
+                                              }
+                                            : current,
+                                    )
+                                }
+                            >
+                                <SelectTrigger className="w-full rounded-xl">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="rounded-xl">
+                                    <SelectItem className="rounded-xl" value="inherit">
+                                        {tRecovery('form.inheritSite')}
+                                    </SelectItem>
+                                    <SelectItem className="rounded-xl" value="enabled">
+                                        {tRecovery('form.enable')}
+                                    </SelectItem>
+                                    <SelectItem className="rounded-xl" value="disabled">
+                                        {tRecovery('form.disable')}
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <span className="text-xs text-muted-foreground">
+                                {tRecovery('form.accountPolicyHint')}
+                            </span>
+                        </label>
                     </div>
 
                     <footer className="mt-5 flex shrink-0 flex-col gap-3 px-1 pt-2 sm:flex-row">

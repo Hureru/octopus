@@ -1,20 +1,32 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useLogs, useLogSiteActionTargets, type LogKeywordMode, type LogKeywordScope } from '@/api/endpoints/log';
+import type { UsageAnalyticsFilters, UsageBreakdownItem } from '@/api/endpoints/log-analytics';
 import { LogCard, type LogSiteActionTargets } from './Item';
 import { Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import dayjs from 'dayjs';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
 import { useSearchStore } from '@/components/modules/toolbar';
 import { useToolbarViewOptionsStore } from '@/components/modules/toolbar/view-options-store';
 import { useLogUIStore } from './ui-store';
+import { useLogAnalyticsStore } from './analytics-store';
+import { UsageAnalytics } from './Analytics';
+import { LogControls } from './Controls';
 
 type LogFilters = {
     keyword: string;
     keywordMode: LogKeywordMode;
     keywordScope: LogKeywordScope;
     channelIds: number[];
+    siteIds: number[];
+    siteAccountIds: number[];
+    apiKeyIds: number[];
+    requestModels: string[];
+    actualModels: string[];
+    canonicalModels: string[];
     startTime?: number;
     endTime?: number;
 };
@@ -34,6 +46,12 @@ function filtersActive(filters: LogFilters) {
     return (
         !!filters.keyword.trim() ||
         filters.channelIds.length > 0 ||
+        filters.siteIds.length > 0 ||
+        filters.siteAccountIds.length > 0 ||
+        filters.apiKeyIds.length > 0 ||
+        filters.requestModels.length > 0 ||
+        filters.actualModels.length > 0 ||
+        filters.canonicalModels.length > 0 ||
         !!filters.startTime ||
         !!filters.endTime
     );
@@ -45,7 +63,7 @@ function filtersActive(filters: LogFilters) {
  * - SSE 实时推送新日志（无过滤时）
  * - 过滤模式使用 cursor 分页，滚动加载更多
  */
-export function Log() {
+function LogDetailList() {
     const t = useTranslations('log');
     const pageKey = 'log' as const;
     const searchTerm = useSearchStore((s) => s.getSearchTerm(pageKey));
@@ -56,14 +74,39 @@ export function Log() {
     const logChannelIds = useToolbarViewOptionsStore((s) => s.logChannelIds);
     const logKeywordMode = useToolbarViewOptionsStore((s) => s.logKeywordMode);
     const logKeywordScope = useToolbarViewOptionsStore((s) => s.logKeywordScope);
+    const siteIds = useLogAnalyticsStore((s) => s.siteIds);
+    const siteAccountIds = useLogAnalyticsStore((s) => s.siteAccountIds);
+    const apiKeyIds = useLogAnalyticsStore((s) => s.apiKeyIds);
+    const requestModels = useLogAnalyticsStore((s) => s.requestModels);
+    const actualModels = useLogAnalyticsStore((s) => s.actualModels);
+    const canonicalModels = useLogAnalyticsStore((s) => s.canonicalModels);
     const filters = useMemo<LogFilters>(() => ({
         keyword: searchTerm,
         keywordMode: logKeywordMode,
         keywordScope: logKeywordScope,
         channelIds: logChannelIds,
+        siteIds,
+        siteAccountIds,
+        apiKeyIds,
+        requestModels,
+        actualModels,
+        canonicalModels,
         startTime: logDateRange.start,
         endTime: logDateRange.end,
-    }), [logDateRange.end, logDateRange.start, logChannelIds, searchTerm, logKeywordMode, logKeywordScope]);
+    }), [
+        actualModels,
+        apiKeyIds,
+        canonicalModels,
+        logDateRange.end,
+        logDateRange.start,
+        logChannelIds,
+        logKeywordMode,
+        logKeywordScope,
+        requestModels,
+        searchTerm,
+        siteAccountIds,
+        siteIds,
+    ]);
     const debouncedFilters = useDebouncedValue(filters, 200);
     const filterMode = filtersActive(debouncedFilters);
     const logFilters = useMemo(() => ({
@@ -71,6 +114,12 @@ export function Log() {
         keyword_mode: debouncedFilters.keyword.trim() ? debouncedFilters.keywordMode : undefined,
         keyword_scope: debouncedFilters.keyword.trim() ? debouncedFilters.keywordScope : undefined,
         channel_ids: debouncedFilters.channelIds.length > 0 ? debouncedFilters.channelIds : undefined,
+        site_ids: debouncedFilters.siteIds.length > 0 ? debouncedFilters.siteIds : undefined,
+        site_account_ids: debouncedFilters.siteAccountIds.length > 0 ? debouncedFilters.siteAccountIds : undefined,
+        api_key_ids: debouncedFilters.apiKeyIds.length > 0 ? debouncedFilters.apiKeyIds : undefined,
+        request_models: debouncedFilters.requestModels.length > 0 ? debouncedFilters.requestModels : undefined,
+        actual_models: debouncedFilters.actualModels.length > 0 ? debouncedFilters.actualModels : undefined,
+        canonical_models: debouncedFilters.canonicalModels.length > 0 ? debouncedFilters.canonicalModels : undefined,
         start_time: debouncedFilters.startTime,
         end_time: debouncedFilters.endTime,
     }), [debouncedFilters]);
@@ -162,6 +211,123 @@ export function Log() {
                     reachEndOffset={2}
                 />
             </div>
+        </div>
+    );
+}
+
+export function Log() {
+    const queryClient = useQueryClient();
+    const view = useLogAnalyticsStore((state) => state.view);
+    const scope = useLogAnalyticsStore((state) => state.scope);
+    const dimension = useLogAnalyticsStore((state) => state.dimension);
+    const timezone = useLogAnalyticsStore((state) => state.timezone);
+    const siteIds = useLogAnalyticsStore((state) => state.siteIds);
+    const siteAccountIds = useLogAnalyticsStore((state) => state.siteAccountIds);
+    const apiKeyIds = useLogAnalyticsStore((state) => state.apiKeyIds);
+    const requestModels = useLogAnalyticsStore((state) => state.requestModels);
+    const actualModels = useLogAnalyticsStore((state) => state.actualModels);
+    const canonicalModels = useLogAnalyticsStore((state) => state.canonicalModels);
+    const setView = useLogAnalyticsStore((state) => state.setView);
+    const setSiteIds = useLogAnalyticsStore((state) => state.setSiteIds);
+    const setSiteAccountIds = useLogAnalyticsStore((state) => state.setSiteAccountIds);
+    const setAPIKeyIds = useLogAnalyticsStore((state) => state.setAPIKeyIds);
+    const setRequestModels = useLogAnalyticsStore((state) => state.setRequestModels);
+    const setActualModels = useLogAnalyticsStore((state) => state.setActualModels);
+    const setCanonicalModels = useLogAnalyticsStore((state) => state.setCanonicalModels);
+    const logDateRange = useToolbarViewOptionsStore((state) => state.logDateRange);
+    const logChannelIds = useToolbarViewOptionsStore((state) => state.logChannelIds);
+    const setLogDateRange = useToolbarViewOptionsStore((state) => state.setLogDateRange);
+    const setLogChannelIds = useToolbarViewOptionsStore((state) => state.setLogChannelIds);
+    const refreshRequestId = useLogUIStore((state) => state.refreshRequestId);
+    const setRefreshing = useLogUIStore((state) => state.setRefreshing);
+    const lastAnalyticsRefreshRef = useRef(refreshRequestId);
+
+    useEffect(() => {
+        if (logDateRange.start || logDateRange.end) return;
+        const now = dayjs().tz(timezone);
+        setLogDateRange({ start: now.startOf('day').unix(), end: now.unix() });
+    }, [logDateRange.end, logDateRange.start, setLogDateRange, timezone]);
+
+    useEffect(() => {
+        if (view !== 'analytics' || refreshRequestId === lastAnalyticsRefreshRef.current) return;
+        lastAnalyticsRefreshRef.current = refreshRequestId;
+        setRefreshing(true);
+        void queryClient.invalidateQueries({ queryKey: ['logs', 'analytics'] }).finally(() => {
+            setTimeout(() => setRefreshing(false), 350);
+        });
+    }, [queryClient, refreshRequestId, setRefreshing, view]);
+
+    const analyticsFilters = useMemo<UsageAnalyticsFilters>(() => ({
+        start_time: logDateRange.start,
+        end_time: logDateRange.end,
+        timezone,
+        metric_scope: scope,
+        site_ids: siteIds.length > 0 ? siteIds : undefined,
+        site_account_ids: siteAccountIds.length > 0 ? siteAccountIds : undefined,
+        channel_ids: logChannelIds.length > 0 ? logChannelIds : undefined,
+        api_key_ids: apiKeyIds.length > 0 ? apiKeyIds : undefined,
+        request_models: requestModels.length > 0 ? requestModels : undefined,
+        actual_models: actualModels.length > 0 ? actualModels : undefined,
+        canonical_models: canonicalModels.length > 0 ? canonicalModels : undefined,
+    }), [
+        actualModels,
+        apiKeyIds,
+        canonicalModels,
+        logChannelIds,
+        logDateRange.end,
+        logDateRange.start,
+        requestModels,
+        scope,
+        siteAccountIds,
+        siteIds,
+        timezone,
+    ]);
+
+    const handleDrilldown = useCallback((item: UsageBreakdownItem) => {
+        switch (dimension) {
+            case 'site':
+                setSiteIds(item.id > 0 ? [item.id] : []);
+                break;
+            case 'site_account':
+                setSiteAccountIds(item.id > 0 ? [item.id] : []);
+                break;
+            case 'channel':
+                setLogChannelIds(item.id > 0 ? [item.id] : []);
+                break;
+            case 'api_key':
+                setAPIKeyIds(item.id > 0 ? [item.id] : []);
+                break;
+            case 'request_model':
+                setRequestModels([item.name]);
+                break;
+            case 'actual_model':
+                setActualModels([item.name]);
+                break;
+            case 'canonical_model':
+                setCanonicalModels([item.name]);
+                break;
+        }
+        setView('detail');
+    }, [
+        dimension,
+        setAPIKeyIds,
+        setActualModels,
+        setCanonicalModels,
+        setLogChannelIds,
+        setRequestModels,
+        setSiteAccountIds,
+        setSiteIds,
+        setView,
+    ]);
+
+    return (
+        <div className="flex h-full min-h-0 flex-col gap-3">
+            <LogControls />
+            {view === 'analytics' ? (
+                <UsageAnalytics filters={analyticsFilters} dimension={dimension} onDrilldown={handleDrilldown} />
+            ) : (
+                <LogDetailList />
+            )}
         </div>
     );
 }

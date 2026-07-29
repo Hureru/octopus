@@ -70,6 +70,7 @@ import { CheckinPanel } from "./CheckinPanel";
 import { SiteEditDialog } from "./SiteEditDialog";
 import { BatchEditDialog } from "./BatchEditDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
+import { RecoveryDialog } from "./RecoveryDialog";
 import {
   accountHasCheckinEnabled,
   accountMatchesCheckinFilters,
@@ -100,6 +101,7 @@ import {
   Power,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Square,
   Archive,
   ArchiveRestore,
@@ -567,6 +569,7 @@ function estimateVisibleSiteCardHeight(item: VisibleSite, expanded: boolean) {
 export function Site() {
   const t = useTranslations();
   const tProxy = useTranslations('proxyPool');
+  const tRecovery = useTranslations('siteRecovery');
   const locale = useSettingStore((state) => state.locale);
   const { data: sites, isLoading, error } = useSiteList();
   const updateSite = useUpdateSite();
@@ -608,6 +611,10 @@ export function Site() {
   const [editingAccount, setEditingAccount] = useState<SiteAccount | null>(
     null,
   );
+  const [recoveryContext, setRecoveryContext] = useState<{
+    site: SiteRecord;
+    account: SiteAccount;
+  } | null>(null);
 
   // Batch selection
   const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
@@ -968,6 +975,16 @@ export function Site() {
     if (!open) {
       setAccountSite(null);
       setEditingAccount(null);
+    }
+  }
+
+  function openRecoveryDialog(site: SiteRecord, account: SiteAccount) {
+    setRecoveryContext({ site, account });
+  }
+
+  function closeRecoveryDialog(open: boolean) {
+    if (!open) {
+      setRecoveryContext(null);
     }
   }
 
@@ -1825,6 +1842,16 @@ export function Site() {
                                           </button>
                                           <button
                                             type="button"
+                                            className={MENU_BUTTON_CLASS}
+                                            onClick={() =>
+                                              openRecoveryDialog(site, account)
+                                            }
+                                          >
+                                            <ShieldCheck className="size-4" />
+                                            <span>{tRecovery('menu')}</span>
+                                          </button>
+                                          <button
+                                            type="button"
                                             className={cn(
                                               MENU_BUTTON_CLASS,
                                               "text-destructive",
@@ -2140,6 +2167,18 @@ export function Site() {
         onOpenChange={closeAccountDialog}
         site={accountSite}
         account={editingAccount}
+      />
+
+      <RecoveryDialog
+        key={
+          recoveryContext
+            ? `site-recovery-${recoveryContext.account.id}`
+            : "site-recovery"
+        }
+        open={recoveryContext !== null}
+        onOpenChange={closeRecoveryDialog}
+        site={recoveryContext?.site ?? null}
+        account={recoveryContext?.account ?? null}
       />
 
       <Dialog

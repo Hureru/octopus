@@ -92,6 +92,13 @@ export type SiteAccount = {
   platform_user_id?: number | null;
   proxy_mode: ProxyMode;
   proxy_config_id?: number | null;
+  auto_proxy_recovery?: boolean | null;
+  preferred_proxy_config_id?: number | null;
+  preferred_clash_node?: string;
+  verification_user_agent?: string;
+  verification_proxy_config_id?: number | null;
+  verification_clash_node?: string;
+  verification_expires_at?: string | null;
   enabled: boolean;
   auto_sync: boolean;
   auto_checkin: boolean;
@@ -122,6 +129,9 @@ export type Site = {
   enabled: boolean;
   proxy_mode: Exclude<ProxyMode, "inherit">;
   proxy_config_id?: number | null;
+  auto_proxy_recovery: boolean;
+  preferred_proxy_config_id?: number | null;
+  preferred_clash_node?: string;
   external_checkin_url?: string | null;
   is_pinned: boolean;
   sort_order: number;
@@ -238,6 +248,9 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
     default_route_type: site.default_route_type ?? undefined,
     proxy_mode: site.proxy_mode ?? "direct",
     proxy_config_id: site.proxy_config_id ?? null,
+    auto_proxy_recovery: site.auto_proxy_recovery ?? false,
+    preferred_proxy_config_id: site.preferred_proxy_config_id ?? null,
+    preferred_clash_node: site.preferred_clash_node ?? "",
     external_checkin_url: site.external_checkin_url ?? null,
     is_pinned: site.is_pinned ?? false,
     sort_order: typeof site.sort_order === "number" ? site.sort_order : 0,
@@ -261,6 +274,14 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
       platform_user_id: account.platform_user_id ?? null,
       proxy_mode: account.proxy_mode ?? "inherit",
       proxy_config_id: account.proxy_config_id ?? null,
+      auto_proxy_recovery: account.auto_proxy_recovery ?? null,
+      preferred_proxy_config_id: account.preferred_proxy_config_id ?? null,
+      preferred_clash_node: account.preferred_clash_node ?? "",
+      verification_user_agent: account.verification_user_agent ?? "",
+      verification_proxy_config_id:
+        account.verification_proxy_config_id ?? null,
+      verification_clash_node: account.verification_clash_node ?? "",
+      verification_expires_at: account.verification_expires_at ?? null,
       random_checkin: account.random_checkin ?? false,
       checkin_interval_hours:
         typeof account.checkin_interval_hours === "number" &&
@@ -290,7 +311,7 @@ function invalidateSiteQueries(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.invalidateQueries({ queryKey: ["sites", "archived"] });
   queryClient.invalidateQueries({ queryKey: ["site-channel", "list"] });
   queryClient.invalidateQueries({ queryKey: ["channels", "list"] });
-  queryClient.invalidateQueries({ queryKey: ["models", "channel"] });
+  queryClient.invalidateQueries({ queryKey: ["models"] });
   queryClient.invalidateQueries({ queryKey: ["proxy-pool"] });
 }
 

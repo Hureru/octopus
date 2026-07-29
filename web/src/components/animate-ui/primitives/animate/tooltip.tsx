@@ -340,6 +340,8 @@ function TooltipOverlay() {
                   }}
                   transition={transition}
                   {...rendered.data.contentProps}
+                  id={rendered.data.id}
+                  role="tooltip"
                   style={{
                     position: 'relative',
                     ...(rendered.data.contentProps?.style || {}),
@@ -552,6 +554,7 @@ function TooltipTrigger({
       data-align={align}
       data-state={currentTooltip?.id === id ? 'open' : 'closed'}
       {...props}
+      aria-describedby={currentTooltip?.id === id ? id : undefined}
     />
   );
 }

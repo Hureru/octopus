@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Hash, HeartPulse, ShieldCheck, Timer, TimerOff, type LucideIcon } from 'lucide-react';
+import { CalendarClock, Hash, HeartPulse, ShieldCheck, Timer, TimerOff, type LucideIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { SettingKey } from '@/api/endpoints/setting';
@@ -78,6 +78,15 @@ export function SettingReliability() {
                 label={t('circuitBreaker.maxCooldown.label')}
                 placeholder={t('circuitBreaker.maxCooldown.placeholder')}
                 icon={TimerOff}
+            />
+
+            <SettingSection title={t('usageRetention.title')} tooltip={t('usageRetention.description')} />
+            <NumberFieldRow
+                settingKey={SettingKey.UsageHourlyRetentionDays}
+                label={t('usageRetention.label')}
+                placeholder={t('usageRetention.placeholder')}
+                icon={CalendarClock}
+                min={1}
             />
 
             {/* 被动离群退役 */}

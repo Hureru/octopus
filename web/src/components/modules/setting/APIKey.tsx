@@ -13,6 +13,8 @@ import {
     MorphingDialog,
     MorphingDialogContainer,
     MorphingDialogContent,
+    MorphingDialogDescription,
+    MorphingDialogTitle,
     MorphingDialogTrigger,
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
@@ -567,8 +569,9 @@ function APIKeyKeyItem({
                     type="button"
                     layoutId={statsLayoutId}
                     onClick={onViewStats}
+                    aria-label={t('apiKey.actions.stats', { name: apiKey.name })}
                     className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
-                    title="Stats"
+                    title={t('apiKey.actions.stats', { name: apiKey.name })}
                 >
                     <Info className="size-4" />
                 </motion.button>
@@ -576,8 +579,9 @@ function APIKeyKeyItem({
                     type="button"
                     layoutId={editLayoutId}
                     onClick={onEdit}
+                    aria-label={t('apiKey.actions.edit', { name: apiKey.name })}
                     className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
-                    title="Edit"
+                    title={t('apiKey.actions.edit', { name: apiKey.name })}
                 >
                     <Pencil className="size-4" />
                 </motion.button>
@@ -586,8 +590,9 @@ function APIKeyKeyItem({
                         type="button"
                         layoutId={exportLayoutId}
                         onClick={onExport}
+                        aria-label={t('apiKey.actions.export', { name: apiKey.name })}
                         className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
-                        title="Export"
+                        title={t('apiKey.actions.export', { name: apiKey.name })}
                     >
                         <Share2 className="size-4" />
                     </motion.button>
@@ -601,8 +606,10 @@ function APIKeyKeyItem({
 
                 {!confirmDelete && (
                     <motion.button
+                        type="button"
                         layoutId={deleteLayoutId}
                         onClick={() => setConfirmDelete(true)}
+                        aria-label={t('apiKey.actions.delete', { name: apiKey.name })}
                         className="flex size-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground"
                     >
                         <Trash2 className="size-4" />
@@ -618,12 +625,15 @@ function APIKeyKeyItem({
                         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                     >
                         <button
+                            type="button"
                             onClick={() => setConfirmDelete(false)}
+                            aria-label={t('apiKey.actions.cancelDelete', { name: apiKey.name })}
                             className="flex size-8 items-center justify-center rounded-lg bg-destructive-foreground/20 text-destructive-foreground transition-all hover:bg-destructive-foreground/30 active:scale-95"
                         >
                             <X className="size-4" />
                         </button>
                         <button
+                            type="button"
                             onClick={onDelete}
                             disabled={isDeleting}
                             className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-lg bg-destructive-foreground text-destructive text-sm font-medium transition-all hover:bg-destructive-foreground/90 active:scale-[0.98] disabled:opacity-50"
@@ -849,26 +859,35 @@ function APIKeyPanelBase({
 
 function APIKeyDialogPanel() {
     const { setIsOpen } = useMorphingDialog();
+    const t = useTranslations('setting');
     return (
-        <APIKeyPanelBase
-            idPrefix="apikey-dialog"
-            containerClassName="rounded-3xl border border-border bg-card p-6 space-y-5 relative w-screen max-w-full md:max-w-xl"
-            listClassName="space-y-2 h-[calc(100vh-10rem)] overflow-y-auto"
-            renderHeaderExtra={() => (
-                <button
-                    type="button"
-                    onClick={() => setIsOpen(false)}
-                    className="h-9 w-9 flex items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted"
-                    title="Close"
-                >
-                    <X className="size-4" />
-                </button>
-            )}
-        />
+        <>
+            <MorphingDialogTitle className="sr-only">{t('apiKey.title')}</MorphingDialogTitle>
+            <MorphingDialogDescription className="sr-only">
+                {t('apiKey.dialogDescription')}
+            </MorphingDialogDescription>
+            <APIKeyPanelBase
+                idPrefix="apikey-dialog"
+                containerClassName="rounded-3xl border border-border bg-card p-6 space-y-5 relative w-screen max-w-full md:max-w-xl"
+                listClassName="space-y-2 h-[calc(100dvh-10rem)] overflow-y-auto"
+                renderHeaderExtra={() => (
+                    <button
+                        type="button"
+                        onClick={() => setIsOpen(false)}
+                        aria-label={t('apiKey.close')}
+                        className="h-9 w-9 flex items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted"
+                        title={t('apiKey.close')}
+                    >
+                        <X className="size-4" />
+                    </button>
+                )}
+            />
+        </>
     );
 }
 
 export function SettingAPIKey() {
+    const t = useTranslations('setting');
     return (
         <APIKeyPanelBase
             idPrefix="apikey"
@@ -876,7 +895,11 @@ export function SettingAPIKey() {
             listClassName="space-y-2 h-36 overflow-y-auto"
             renderHeaderExtra={() => (
                 <MorphingDialog>
-                    <MorphingDialogTrigger className="h-9 w-9 flex items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted">
+                    <MorphingDialogTrigger
+                        aria-label={t('apiKey.expand')}
+                        title={t('apiKey.expand')}
+                        className="h-9 w-9 flex items-center justify-center rounded-lg bg-muted/60 text-muted-foreground transition-colors hover:bg-muted"
+                    >
                         <Maximize2 className="size-4" />
                     </MorphingDialogTrigger>
                     <MorphingDialogContainer>

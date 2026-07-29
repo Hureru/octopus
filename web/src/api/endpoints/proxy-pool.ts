@@ -9,6 +9,7 @@ export type ProxyConfiguration = {
     id: number;
     name: string;
     url: string;
+    clash_controller_id?: number | null;
     enabled: boolean;
     remark: string;
     reference_count: number;
@@ -82,7 +83,7 @@ export function useUpdateProxyConfiguration() {
     const queryClient = useQueryClient();
     const t = useTranslations('proxyPool');
     return useMutation({
-        mutationFn: async (data: Partial<Pick<ProxyConfiguration, 'name' | 'url' | 'enabled' | 'remark'>> & { id: number }) =>
+        mutationFn: async (data: Partial<Pick<ProxyConfiguration, 'name' | 'url' | 'clash_controller_id' | 'enabled' | 'remark'>> & { id: number }) =>
             apiClient.post<ProxyConfiguration>('/api/v1/proxy-pool/update', data),
         onSuccess: () => invalidateProxyPool(queryClient),
         onError: (error) => logger.error(t('updateFailed'), error),

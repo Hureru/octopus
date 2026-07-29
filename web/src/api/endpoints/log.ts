@@ -7,7 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /**
  * 尝试状态
  */
-export type AttemptStatus = 'success' | 'failed' | 'circuit_break' | 'skipped';
+export type AttemptStatus = 'success' | 'failed' | 'client_canceled' | 'circuit_break' | 'skipped';
+export type RequestOutcome = 'success' | 'failed' | 'client_canceled' | 'indeterminate';
 
 export type RelayLogWSMode = 'fresh' | 'continuation' | 'replay';
 
@@ -25,6 +26,10 @@ export interface ChannelAttempt {
     model_name: string;
     attempt_num: number;    // 第几次尝试
     status: AttemptStatus;
+    status_code?: number;
+    outcome?: RequestOutcome;
+    attribution?: 'upstream' | 'client' | 'relay' | 'policy' | '';
+    completion_evidence?: string;
     duration: number;       // 耗时(毫秒)
     sticky?: boolean;
     msg?: string;
@@ -56,10 +61,20 @@ export interface RelayLog {
     id: number;
     time: number;                // 时间戳
     request_model_name: string;  // 请求模型名称
+    request_api_key_id?: number;
     request_api_key_name?: string; // 请求使用的 API Key 名称
     channel: number;             // 实际使用的渠道ID
     channel_name: string;        // 渠道名称
     actual_model_name: string;   // 实际使用模型名称
+    canonical_model_name?: string;
+    route_candidate_id?: number;
+    inbound_protocol?: string;
+    outbound_protocol?: string;
+    protocol_mode?: string;
+    protocol_policy?: string;
+    protocol_allow_lossy?: boolean;
+    protocol_warnings?: string[];
+    protocol_failure_stage?: string;
     input_tokens: number;        // 输入Token
     transport_input_tokens?: number | null; // 实际发送到上游请求体的 Token 估算
     bill_input_tokens?: number | null; // 按常规输入价格计费的 Token
@@ -69,9 +84,32 @@ export interface RelayLog {
     ftut: number;                // 首字时间(毫秒)
     use_time: number;            // 总用时(毫秒)
     cost: number;                // 消耗费用
+    price_quote_id?: number;
+    price_source?: string;
+    price_unit?: string;
+    price_currency?: string;
+    price_input?: number;
+    price_output?: number;
+    price_cache_read?: number;
+    price_cache_write?: number;
+    price_per_request?: number;
+    price_group_multiplier?: number;
+    price_exchange_rate_usd?: number;
+    price_observed_at?: string | null;
+    price_stale?: boolean;
+    price_convertible?: boolean;
+    price_original_cost?: number;
+    price_match_reason?: string;
+    token_source?: 'reported' | 'estimated' | 'unknown';
     request_content: string;     // 请求内容
     response_content: string;    // 响应内容
     error: string;               // 错误信息
+    success?: boolean;
+    outcome?: RequestOutcome;
+    transport_termination?: string;
+    completion_evidence?: string;
+    terminal_event?: string;
+    header_policy_trace?: string;
     attempts?: ChannelAttempt[]; // 所有尝试记录
     total_attempts?: number;     // 总尝试次数
     used_ws?: boolean;           // 是否使用了上游WebSocket
@@ -80,7 +118,7 @@ export interface RelayLog {
     ws_recovery?: RelayLogWSRecovery | null; // 本次请求触发的恢复动作
 }
 
-export type LogStatusFilter = 'all' | 'success' | 'error';
+export type LogStatusFilter = 'all' | 'success' | 'failed' | 'error' | 'client_canceled' | 'indeterminate';
 
 /**
  * 日志列表查询参数
@@ -103,6 +141,12 @@ export interface LogListParams {
     start_time?: number;
     end_time?: number;
     channel_ids?: number[];
+    site_ids?: number[];
+    site_account_ids?: number[];
+    api_key_ids?: number[];
+    request_models?: string[];
+    actual_models?: string[];
+    canonical_models?: string[];
     status?: LogStatusFilter;
     keyword?: string;
     keyword_scope?: LogKeywordScope;
@@ -123,6 +167,12 @@ const logFiltersKey = (filters?: UseLogsOptions['filters']) => ({
     start_time: filters?.start_time ?? null,
     end_time: filters?.end_time ?? null,
     channel_ids: filters?.channel_ids?.filter((id) => id > 0).sort((a, b) => a - b) ?? [],
+    site_ids: filters?.site_ids?.filter((id) => id > 0).sort((a, b) => a - b) ?? [],
+    site_account_ids: filters?.site_account_ids?.filter((id) => id > 0).sort((a, b) => a - b) ?? [],
+    api_key_ids: filters?.api_key_ids?.filter((id) => id > 0).sort((a, b) => a - b) ?? [],
+    request_models: [...(filters?.request_models ?? [])].sort(),
+    actual_models: [...(filters?.actual_models ?? [])].sort(),
+    canonical_models: [...(filters?.canonical_models ?? [])].sort(),
     status: filters?.status && filters.status !== 'all' ? filters.status : 'all',
     keyword: filters?.keyword?.trim() ?? '',
     keyword_scope: filters?.keyword_scope ?? 'default',
@@ -134,6 +184,15 @@ function appendLogListParams(params: URLSearchParams, filters?: UseLogsOptions['
     if (filters?.end_time) params.set('end_time', String(filters.end_time));
     const channelIds = filters?.channel_ids?.filter((id) => id > 0) ?? [];
     if (channelIds.length > 0) params.set('channel_ids', channelIds.join(','));
+    const siteIds = filters?.site_ids?.filter((id) => id > 0) ?? [];
+    if (siteIds.length > 0) params.set('site_ids', siteIds.join(','));
+    const accountIds = filters?.site_account_ids?.filter((id) => id > 0) ?? [];
+    if (accountIds.length > 0) params.set('site_account_ids', accountIds.join(','));
+    const apiKeyIds = filters?.api_key_ids?.filter((id) => id > 0) ?? [];
+    if (apiKeyIds.length > 0) params.set('api_key_ids', apiKeyIds.join(','));
+    if (filters?.request_models?.length) params.set('request_models', filters.request_models.join(','));
+    if (filters?.actual_models?.length) params.set('actual_models', filters.actual_models.join(','));
+    if (filters?.canonical_models?.length) params.set('canonical_models', filters.canonical_models.join(','));
     if (filters?.status && filters.status !== 'all') params.set('status', filters.status);
     const keyword = filters?.keyword?.trim();
     if (keyword) params.set('keyword', keyword);

@@ -126,6 +126,58 @@ async function request<T>(
     return handleResponse<T>(response);
 }
 
+function parseDownloadFilename(contentDisposition: string | null): string | null {
+    if (!contentDisposition) return null;
+    const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    if (encoded) {
+        try {
+            return decodeURIComponent(encoded);
+        } catch {
+            // Fall through to the plain filename parameter.
+        }
+    }
+    return contentDisposition.match(/filename="([^"]+)"/i)?.[1] ?? null;
+}
+
+function safeDownloadFilename(value: string) {
+    return value.replace(/[\\/\u0000-\u001f\u007f]/g, '_');
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    try {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = safeDownloadFilename(filename);
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+}
+
+export async function downloadApiFile(path: string, fallbackFilename: string) {
+    const headers = new Headers();
+    const token = getAuthStore?.().token;
+    if (!token) throw new Error('Not authenticated');
+    headers.set('Authorization', `Bearer ${token}`);
+
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+        method: 'GET',
+        headers,
+    });
+    if (!response.ok) {
+        await handleResponse<never>(response);
+        throw new Error(response.statusText);
+    }
+
+    const filename =
+        parseDownloadFilename(response.headers.get('content-disposition')) || fallbackFilename;
+    triggerBlobDownload(await response.blob(), filename);
+    return { filename: safeDownloadFilename(filename) };
+}
+
 /**
  * API 客户端 - 基础 HTTP 方法
  */
@@ -160,4 +212,3 @@ export const apiClient = {
     patch: <T>(path: string, data?: unknown, params?: Record<string, string | number | boolean>): Promise<T> =>
         request<T>('PATCH', path, data ? JSON.stringify(data) : undefined, params),
 };
-

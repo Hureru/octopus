@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
     ArrowDownWideNarrow,
     ArrowDownZA,
@@ -129,8 +129,16 @@ export function Toolbar() {
     const [viewOptionsOpen, setViewOptionsOpen] = useState(false);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [autoGroupDialogOpen, setAutoGroupDialogOpen] = useState(false);
+    const searchButtonRef = useRef<HTMLButtonElement>(null);
 
     const searchExpanded = expandedSearchItem === toolbarItem;
+
+    const closeSearch = () => {
+        if (!toolbarItem) return;
+        setSearchTerm(toolbarItem, '');
+        setExpandedSearchItem(null);
+        window.requestAnimationFrame(() => searchButtonRef.current?.focus());
+    };
 
     const isLogToolbar = toolbarItem === 'log';
     const showLayoutOptions = toolbarItem === 'channel' || toolbarItem === 'model';
@@ -258,8 +266,12 @@ export function Toolbar() {
                 <div className="relative h-9 w-9">
                     {!searchExpanded ? (
                         <motion.button
+                            ref={searchButtonRef}
+                            type="button"
                             layoutId="search-box"
                             onClick={() => setExpandedSearchItem(toolbarItem)}
+                            aria-label={t('search.open')}
+                            title={t('search.open')}
                             className={buttonVariants({
                                 variant: 'ghost',
                                 size: 'icon',
@@ -284,14 +296,18 @@ export function Toolbar() {
                                 type="text"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(toolbarItem, e.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Escape') closeSearch();
+                                }}
+                                aria-label={t('search.input')}
                                 autoFocus
                                 className="w-20 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                             />
                             <button
-                                onClick={() => {
-                                    setSearchTerm(toolbarItem, '');
-                                    setExpandedSearchItem(null);
-                                }}
+                                type="button"
+                                onClick={closeSearch}
+                                aria-label={t('search.close')}
+                                title={t('search.close')}
                                 className="p-0.5 rounded shrink-0 text-muted-foreground hover:text-foreground transition-colors"
                             >
                                 <X className="size-3.5" />

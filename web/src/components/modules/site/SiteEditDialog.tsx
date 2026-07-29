@@ -51,6 +51,7 @@ type SiteFormState = {
     enabled: boolean;
     proxy_mode: Exclude<ProxyMode, 'inherit'>;
     proxy_config_id: number | null;
+    auto_proxy_recovery: boolean;
     external_checkin_url: string;
     is_pinned: boolean;
     sort_order: number;
@@ -96,6 +97,7 @@ function createEmptySiteForm(): SiteFormState {
         enabled: true,
         proxy_mode: 'direct',
         proxy_config_id: null,
+        auto_proxy_recovery: false,
         external_checkin_url: '',
         is_pinned: false,
         sort_order: 0,
@@ -115,6 +117,7 @@ function createSiteForm(site: SiteRecord): SiteFormState {
         enabled: site.enabled,
         proxy_mode: site.proxy_mode ?? 'direct',
         proxy_config_id: site.proxy_config_id ?? null,
+        auto_proxy_recovery: site.auto_proxy_recovery ?? false,
         external_checkin_url: site.external_checkin_url ?? '',
         is_pinned: site.is_pinned,
         sort_order: site.sort_order,
@@ -136,6 +139,7 @@ function normalizeSiteRecord(site: SiteRecord): SiteRecord {
         tags: site.tags ?? [],
         proxy_mode: site.proxy_mode ?? 'direct',
         proxy_config_id: site.proxy_config_id ?? null,
+        auto_proxy_recovery: site.auto_proxy_recovery ?? false,
         external_checkin_url: site.external_checkin_url ?? null,
         is_pinned: site.is_pinned ?? false,
         sort_order: typeof site.sort_order === 'number' ? site.sort_order : 0,
@@ -194,6 +198,7 @@ interface SiteEditDialogProps {
 export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }: SiteEditDialogProps) {
     const t = useTranslations();
     const tProxy = useTranslations('proxyPool');
+    const tRecovery = useTranslations('siteRecovery');
     const locale = useSettingStore((state) => state.locale);
     const createSite = useCreateSite();
     const updateSite = useUpdateSite();
@@ -284,6 +289,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 proxy_mode: siteForm.proxy_mode,
                 proxy_config_id:
                     siteForm.proxy_mode === 'pool' ? siteForm.proxy_config_id : null,
+                auto_proxy_recovery: siteForm.auto_proxy_recovery,
                 external_checkin_url: siteForm.external_checkin_url.trim() || null,
                 is_pinned: siteForm.is_pinned,
                 sort_order: siteForm.sort_order,
@@ -500,6 +506,27 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                 proxy_config_id: next.proxy_config_id ?? null,
                             }))}
                         />
+
+                        <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium">
+                                    {tRecovery('form.sitePolicy')}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    {tRecovery('form.sitePolicyHint')}
+                                </div>
+                            </div>
+                            <Switch
+                                checked={siteForm.auto_proxy_recovery}
+                                onCheckedChange={(checked) =>
+                                    setSiteForm((current) => ({
+                                        ...current,
+                                        auto_proxy_recovery: checked,
+                                    }))
+                                }
+                                aria-label={tRecovery('form.sitePolicy')}
+                            />
+                        </div>
 
                         <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
                             <div>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Octopus Verification Bridge</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true">O</div>
+        <div>
+          <h1>Verification Bridge</h1>
+          <p>Octopus administrator pairing</p>
+        </div>
+      </header>
+
+      <section aria-labelledby="connection-title">
+        <h2 id="connection-title">Connection</h2>
+        <label>
+          Octopus URL
+          <input id="base-url" type="url" placeholder="http://127.0.0.1:8080" autocomplete="url">
+        </label>
+        <label>
+          Pairing token
+          <input id="pairing-token" type="password" autocomplete="off">
+        </label>
+        <label class="check-row">
+          <input id="show-token" type="checkbox">
+          Show token
+        </label>
+        <div class="button-row">
+          <button id="save" type="button">Save</button>
+          <button id="claim" class="primary" type="button">Claim task</button>
+        </div>
+      </section>
+
+      <section id="task-section" aria-labelledby="task-title" hidden>
+        <h2 id="task-title">Active task</h2>
+        <dl>
+          <div>
+            <dt>Target</dt>
+            <dd id="task-host"></dd>
+          </div>
+          <div>
+            <dt>Operation</dt>
+            <dd id="task-operation"></dd>
+          </div>
+          <div>
+            <dt>Expires</dt>
+            <dd id="task-expires"></dd>
+          </div>
+        </dl>
+        <div class="button-grid">
+          <button id="open" class="primary" type="button">Open verification</button>
+          <button id="submit" type="button">Submit session</button>
+          <button id="release" class="danger" type="button">Release task</button>
+        </div>
+      </section>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

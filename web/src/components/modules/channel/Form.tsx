@@ -1,4 +1,11 @@
-import { ChannelType, type AutoGroupType, type Channel, type ChannelWSMode, useFetchModel } from '@/api/endpoints/channel';
+import {
+    ChannelType,
+    type AutoGroupType,
+    type Channel,
+    type ChannelProtocolPolicy,
+    type ChannelWSMode,
+    useFetchModel,
+} from '@/api/endpoints/channel';
 import { ProxySelector } from '@/components/modules/proxy-pool/ProxySelector';
 import {
     Select,
@@ -32,6 +39,8 @@ export interface ChannelFormData {
     base_urls: Channel['base_urls'];
     custom_header: Channel['custom_header'];
     ws_mode: ChannelWSMode;
+    protocol_policy: ChannelProtocolPolicy;
+    allow_lossy: boolean;
     proxy_mode: Channel['proxy_mode'];
     proxy_config_id: number | null;
     param_override: string;
@@ -477,6 +486,46 @@ export function ChannelForm({
                     </AccordionTrigger>
                     <AccordionContent className="pt-4 px-4 pb-4 space-y-4 border-t">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <label htmlFor={`${idPrefix}-protocol-policy`} className="text-sm font-medium text-card-foreground">
+                                    {t('protocolPolicy')}
+                                </label>
+                                <Select
+                                    value={formData.protocol_policy}
+                                    onValueChange={(value) =>
+                                        onFormDataChange({
+                                            ...formData,
+                                            protocol_policy: value as ChannelProtocolPolicy,
+                                        })
+                                    }
+                                >
+                                    <SelectTrigger
+                                        id={`${idPrefix}-protocol-policy`}
+                                        className="w-full rounded-xl border border-border px-4 py-2 text-foreground"
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="rounded-xl">
+                                        <SelectItem className="rounded-xl" value="auto">{t('protocolPolicyAuto')}</SelectItem>
+                                        <SelectItem className="rounded-xl" value="passthrough-only">{t('protocolPolicyPassthrough')}</SelectItem>
+                                        <SelectItem className="rounded-xl" value="transform-allowed">{t('protocolPolicyTransform')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="flex min-h-16 items-center justify-between gap-4 rounded-xl border border-border px-4 py-3">
+                                <label htmlFor={`${idPrefix}-allow-lossy`} className="text-sm font-medium text-card-foreground">
+                                    {t('allowLossy')}
+                                </label>
+                                <Switch
+                                    id={`${idPrefix}-allow-lossy`}
+                                    checked={formData.allow_lossy}
+                                    onCheckedChange={(checked) =>
+                                        onFormDataChange({ ...formData, allow_lossy: checked })
+                                    }
+                                />
+                            </div>
+
                             {formData.type === ChannelType.OpenAIResponse ? (
                                 <div className="space-y-2">
                                     <label htmlFor={`${idPrefix}-ws-mode`} className="text-sm font-medium text-card-foreground">

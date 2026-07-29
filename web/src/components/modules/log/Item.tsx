@@ -1,14 +1,54 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Link } from 'lucide-react';
+import {
+    AlertCircle,
+    ArrowDown,
+    ArrowDownToLine,
+    ArrowRight,
+    ArrowUpFromLine,
+    CheckCircle2,
+    ChevronDown,
+    ChevronUp,
+    CircleHelp,
+    CircleOff,
+    Clock,
+    Coins,
+    DollarSign,
+    FileCheck2,
+    Flag,
+    Gauge,
+    KeyRound,
+    Link,
+    Loader2,
+    MessageSquare,
+    Pin,
+    RotateCw,
+    Route,
+    Send,
+    ShieldCheck,
+    Unplug,
+    Zap,
+    type LucideIcon,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 import { useTheme } from 'next-themes';
-import { getLogDetail, type RelayLog, type RelayLogWSMode, type RelayLogWSExecMode, type RelayLogWSRecovery, type ChannelAttempt, type AttemptStatus, type LogSiteActionTarget as ApiLogSiteActionTarget, type LogSiteActionTargets as ApiLogSiteActionTargets } from '@/api/endpoints/log';
+import {
+    getLogDetail,
+    type AttemptStatus,
+    type ChannelAttempt,
+    type LogSiteActionTarget as ApiLogSiteActionTarget,
+    type LogSiteActionTargets as ApiLogSiteActionTargets,
+    type RelayLog,
+    type RelayLogWSExecMode,
+    type RelayLogWSMode,
+    type RelayLogWSRecovery,
+    type RequestOutcome,
+} from '@/api/endpoints/log';
 import { getModelIcon } from '@/lib/model-icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -237,6 +277,63 @@ function getWSRecoveryBadgeMeta(recovery: RelayLogWSRecovery | null | undefined,
     }
 }
 
+function resolveRequestOutcome(log: RelayLog): RequestOutcome {
+    if (log.outcome) return log.outcome;
+    if (log.success === true) return 'success';
+    if (log.success === false || log.error) return 'failed';
+    return 'indeterminate';
+}
+
+function getRequestOutcomeMeta(outcome: RequestOutcome, t: ReturnType<typeof useTranslations<'log.card'>>) {
+    switch (outcome) {
+        case 'success':
+            return {
+                label: t('success'),
+                icon: CheckCircle2,
+                badgeClassName: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+                cardBorderClassName: 'border-border',
+                panelClassName: 'border-border/50 bg-secondary/30',
+                panelHoverClassName: 'hover:bg-muted/50',
+                panelTextClassName: 'text-secondary-foreground',
+                evidenceTextClassName: 'text-muted-foreground',
+            };
+        case 'client_canceled':
+            return {
+                label: t('clientCanceled'),
+                icon: CircleOff,
+                badgeClassName: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                cardBorderClassName: 'border-amber-500/40',
+                panelClassName: 'border-amber-500/25 bg-amber-500/5',
+                panelHoverClassName: 'hover:bg-amber-500/10',
+                panelTextClassName: 'text-amber-700 dark:text-amber-300',
+                evidenceTextClassName: 'text-amber-700 dark:text-amber-300',
+            };
+        case 'indeterminate':
+            return {
+                label: t('indeterminate'),
+                icon: CircleHelp,
+                badgeClassName: 'bg-slate-500/10 text-slate-700 dark:text-slate-300',
+                cardBorderClassName: 'border-slate-500/40',
+                panelClassName: 'border-slate-500/25 bg-slate-500/5',
+                panelHoverClassName: 'hover:bg-slate-500/10',
+                panelTextClassName: 'text-slate-700 dark:text-slate-300',
+                evidenceTextClassName: 'text-slate-700 dark:text-slate-300',
+            };
+        case 'failed':
+        default:
+            return {
+                label: t('failed'),
+                icon: AlertCircle,
+                badgeClassName: 'bg-destructive/15 text-destructive',
+                cardBorderClassName: 'border-destructive/40',
+                panelClassName: 'border-destructive/20 bg-destructive/5',
+                panelHoverClassName: 'hover:bg-destructive/10',
+                panelTextClassName: 'text-destructive',
+                evidenceTextClassName: 'text-destructive',
+            };
+    }
+}
+
 function getAttemptStatusMeta(status: AttemptStatus, t: ReturnType<typeof useTranslations<'log.card'>>) {
     switch (status) {
         case 'success':
@@ -245,6 +342,13 @@ function getAttemptStatusMeta(status: AttemptStatus, t: ReturnType<typeof useTra
                 badgeClassName: 'bg-primary/15 text-primary',
                 containerClassName: 'bg-primary/5 border-primary/20 hover:bg-primary/10',
                 messageClassName: 'text-primary/90 border-primary/30',
+            };
+        case 'client_canceled':
+            return {
+                label: t('clientCanceled'),
+                badgeClassName: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+                containerClassName: 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10',
+                messageClassName: 'text-amber-700 dark:text-amber-300 border-amber-500/30',
             };
         case 'skipped':
             return {
@@ -269,6 +373,114 @@ function getAttemptStatusMeta(status: AttemptStatus, t: ReturnType<typeof useTra
                 messageClassName: 'text-destructive/90 border-destructive/30',
             };
     }
+}
+
+interface MetadataBadgeProps {
+    icon: LucideIcon;
+    label: string;
+    value: string;
+    compact?: boolean;
+}
+
+function MetadataBadge({ icon: Icon, label, value, compact }: MetadataBadgeProps) {
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Badge variant="outline" className="h-6 min-w-0 gap-1 px-1.5 text-[10px] font-medium">
+                    <Icon className="size-3 shrink-0" />
+                    <span className={cn('truncate', compact ? 'max-w-24' : 'max-w-56')}>{value}</span>
+                </Badge>
+            </TooltipTrigger>
+            <TooltipContent>{label}: {value}</TooltipContent>
+        </Tooltip>
+    );
+}
+
+function LogMetadataBadges({ log, compact = false }: { log: RelayLog; compact?: boolean }) {
+    const t = useTranslations('log.card');
+    const outcome = resolveRequestOutcome(log);
+    const outcomeMeta = getRequestOutcomeMeta(outcome, t);
+    const OutcomeIcon = outcomeMeta.icon;
+    const protocolPath = log.inbound_protocol && log.outbound_protocol
+        ? log.inbound_protocol === log.outbound_protocol
+            ? log.inbound_protocol
+            : `${log.inbound_protocol} -> ${log.outbound_protocol}`
+        : log.inbound_protocol || log.outbound_protocol || '';
+    const metadata: Array<{ icon: LucideIcon; label: string; value: string }> = [];
+
+    if (protocolPath) {
+        metadata.push({ icon: Route, label: t('protocolPath'), value: protocolPath });
+    }
+    if (log.protocol_mode) {
+        metadata.push({ icon: Link, label: t('protocolMode'), value: log.protocol_mode });
+    }
+    if (!compact && log.protocol_policy) {
+        const value = log.protocol_allow_lossy
+            ? `${log.protocol_policy} · ${t('lossyAllowed')}`
+            : log.protocol_policy;
+        metadata.push({ icon: ShieldCheck, label: t('protocolPolicy'), value });
+    }
+    if (!compact && log.protocol_failure_stage) {
+        metadata.push({
+            icon: AlertCircle,
+            label: t('protocolFailureStage'),
+            value: log.protocol_failure_stage,
+        });
+    }
+    if (!compact && log.protocol_warnings?.length) {
+        metadata.push({
+            icon: AlertCircle,
+            label: t('protocolWarnings'),
+            value: log.protocol_warnings.join('; '),
+        });
+    }
+    if (!compact && log.transport_termination) {
+        metadata.push({ icon: Unplug, label: t('transportTermination'), value: log.transport_termination });
+    }
+    if (!compact && log.completion_evidence) {
+        metadata.push({ icon: FileCheck2, label: t('completionEvidence'), value: log.completion_evidence });
+    }
+    if (!compact && log.terminal_event) {
+        metadata.push({ icon: Flag, label: t('terminalEvent'), value: log.terminal_event });
+    }
+    if (!compact && log.token_source) {
+        metadata.push({ icon: Gauge, label: t('tokenSource'), value: log.token_source });
+    }
+    if (!compact && log.price_source) {
+        const qualifiers = [
+            log.price_currency,
+            log.price_unit,
+            log.price_stale ? t('priceStale') : '',
+            log.price_convertible === false ? t('priceUnconvertible') : '',
+        ].filter(Boolean);
+        const value = qualifiers.length
+            ? `${log.price_source} (${qualifiers.join(' · ')})`
+            : log.price_source;
+        metadata.push({ icon: Coins, label: t('priceSource'), value });
+    }
+
+    return (
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Badge className={cn('h-6 gap-1 border-0 px-1.5 text-[10px]', outcomeMeta.badgeClassName)}>
+                        <OutcomeIcon className="size-3 shrink-0" />
+                        {outcomeMeta.label}
+                    </Badge>
+                </TooltipTrigger>
+                <TooltipContent>{t('outcome')}: {outcomeMeta.label}</TooltipContent>
+            </Tooltip>
+            {metadata.map((item) => (
+                <MetadataBadge
+                    key={`${item.label}-${item.value}`}
+                    icon={item.icon}
+                    label={item.label}
+                    value={item.value}
+                    compact={compact}
+                />
+            ))}
+        </div>
+    );
 }
 
 interface RetryBadgeWithTooltipProps {
@@ -523,6 +735,8 @@ function AttemptDisableButton({
 
 export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogSiteActionTargets | null }) {
     const t = useTranslations('log.card');
+    const outcome = resolveRequestOutcome(log);
+    const outcomeMeta = getRequestOutcomeMeta(outcome, t);
     const displayActualModelName = useMemo(
         () => log.actual_model_name?.trim() || log.request_model_name?.trim() || '',
         [log.actual_model_name, log.request_model_name],
@@ -548,8 +762,14 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     const attemptTargets = siteTargets?.attempt_targets ?? [];
     const legacyErrorTarget = siteTargets?.legacy_error_target ?? null;
     const showDiagnosticPanel = hasError || hasAttempts;
-    const diagnosticTitle = hasAttempts ? t('retryDetails') : t('errorInfo');
-    const diagnosticIcon = hasAttempts ? RotateCw : AlertCircle;
+    const diagnosticTitle = hasAttempts
+        ? t('retryDetails')
+        : outcome === 'client_canceled'
+            ? t('cancellationInfo')
+            : outcome === 'success'
+                ? t('transportEvidence')
+                : t('errorInfo');
+    const diagnosticIcon = hasAttempts ? RotateCw : outcomeMeta.icon;
     const DiagnosticIcon = diagnosticIcon;
     const displayLog = detailLog ?? log;
 
@@ -639,7 +859,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                     }}
                     className={cn(
                         'rounded-3xl border bg-card w-full text-left',
-                        hasError ? 'border-destructive/40' : 'border-border',
+                        outcomeMeta.cardBorderClassName,
                     )}
                 >
                     <div className={cn('p-4 grid grid-cols-[auto_1fr] gap-4', hasError ? 'items-start' : 'items-center')}>
@@ -673,7 +893,10 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                         <Pin className="size-3.5 shrink-0 text-amber-500" />
                                     ) : null}
                                 </div>
-                                <WSModeBadge log={log} />
+                                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                                    <LogMetadataBadges log={log} compact />
+                                    <WSModeBadge log={log} />
+                                </div>
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
                                 <div className="flex items-center gap-1.5">
@@ -719,8 +942,10 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 </div>
                             </div>
                             {hasError ? (
-                                <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 overflow-hidden">
-                                    <p className="text-xs text-destructive line-clamp-2">{sanitizeErrorMessage(log.error)}</p>
+                                <div className={cn('overflow-hidden rounded-xl border p-2.5', outcomeMeta.panelClassName)}>
+                                    <p className={cn('line-clamp-2 text-xs', outcomeMeta.evidenceTextClassName)}>
+                                        {sanitizeErrorMessage(log.error)}
+                                    </p>
                                 </div>
                             ) : null}
                         </div>
@@ -755,8 +980,14 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     <Pin className="size-3.5 shrink-0 text-amber-500" />
                                 ) : null}
                             </div>
-                            <WSModeBadge log={log} />
+                            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                                <LogMetadataBadges log={displayLog} compact />
+                                <WSModeBadge log={displayLog} />
+                            </div>
                         </MorphingDialogTitle>
+                        <div className="-mt-1 mb-3 flex min-w-0 flex-wrap items-center gap-1 pr-14">
+                            <LogMetadataBadges log={displayLog} />
+                        </div>
 
                         <MorphingDialogDescription className="flex-1 min-h-0">
                             <div className="flex flex-col min-h-0 h-full gap-4">
@@ -764,20 +995,18 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     <div
                                         className={cn(
                                             'flex-initial min-h-0 flex flex-col rounded-2xl border overflow-hidden max-h-[40%]',
-                                            hasError
-                                                ? 'bg-destructive/5 border-destructive/20'
-                                                : 'bg-secondary/30 border-border/50',
+                                            outcomeMeta.panelClassName,
                                         )}
                                     >
                                         <div
                                             className={cn(
                                                 'flex items-center gap-2 px-3 py-2.5 shrink-0 cursor-pointer select-none hover:bg-muted/50 transition-colors',
-                                                hasError && 'hover:bg-destructive/10',
+                                                outcomeMeta.panelHoverClassName,
                                             )}
                                             onClick={() => setIsDiagnosticExpanded(!isDiagnosticExpanded)}
                                         >
-                                            <DiagnosticIcon className={cn('size-4', hasError ? 'text-destructive' : 'text-muted-foreground')} />
-                                            <span className={cn('text-sm font-medium', hasError ? 'text-destructive' : 'text-secondary-foreground')}>
+                                            <DiagnosticIcon className={cn('size-4', outcomeMeta.panelTextClassName)} />
+                                            <span className={cn('text-sm font-medium', outcomeMeta.panelTextClassName)}>
                                                 {diagnosticTitle}
                                             </span>
                                             <div className="ml-auto flex items-center gap-2">
@@ -786,9 +1015,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                         variant="outline"
                                                         className={cn(
                                                             'text-xs border-0',
-                                                            hasError
-                                                                ? 'bg-destructive/10 text-destructive'
-                                                                : 'bg-secondary text-secondary-foreground',
+                                                            outcomeMeta.badgeClassName,
                                                         )}
                                                     >
                                                         {log.total_attempts || log.attempts!.length} {t('attempts')}
@@ -817,12 +1044,18 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                                 <div className="absolute right-0 top-0">
                                                                     <CopyIconButton
                                                                         text={log.error ?? ''}
-                                                                        className="p-1 rounded-md text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                                                        className={cn(
+                                                                            'rounded-md p-1 transition-colors hover:bg-muted/60',
+                                                                            outcomeMeta.evidenceTextClassName,
+                                                                        )}
                                                                         copyIconClassName="size-4"
                                                                         checkIconClassName="size-4"
                                                                     />
                                                                 </div>
-                                                                <p className="text-sm text-destructive whitespace-pre-wrap wrap-break-word pr-8 leading-relaxed">
+                                                                <p className={cn(
+                                                                    'pr-8 text-sm leading-relaxed whitespace-pre-wrap wrap-break-word',
+                                                                    outcomeMeta.evidenceTextClassName,
+                                                                )}>
                                                                     {sanitizeErrorMessage(log.error)}
                                                                 </p>
                                                                 {!hasAttempts && legacyErrorTarget ? (

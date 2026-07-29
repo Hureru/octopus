@@ -59,6 +59,7 @@ function MemberItem({
 }) {
     const { Avatar: ModelAvatar } = getModelIcon(member.name);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const t = useTranslations('group');
     const isDisabled = member.enabled === false;
     const isSiteChannel = member.site_id != null;
     const sourceLabel = [member.channel_name, isSiteChannel ? null : member.endpoint_type?.trim()]
@@ -103,6 +104,7 @@ function MemberItem({
                     )}
                     // eslint-disable-next-line react-hooks/refs
                     {...dnd.dragHandleProps}
+                    aria-label={t('member.reorder', { name: member.name })}
                 >
                     <GripVertical className="size-3.5 text-muted-foreground" />
                 </div>
@@ -142,6 +144,7 @@ function MemberItem({
                         layoutId={`delete-btn-member-${layoutScope ?? 'default'}-${member.id}`}
                         type="button"
                         onClick={() => showConfirmDelete ? setConfirmDelete(true) : onRemove(member.id)}
+                        aria-label={t('member.remove', { name: member.name })}
                         className="p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors"
                         initial={false}
                         animate={{ opacity: 1, x: 0 }}
@@ -162,6 +165,7 @@ function MemberItem({
                             <button
                                 type="button"
                                 onClick={() => setConfirmDelete(false)}
+                                aria-label={t('member.cancelRemove', { name: member.name })}
                                 className="flex h-6 w-6 items-center justify-center rounded-md bg-destructive-foreground/20 text-destructive-foreground transition-all hover:bg-destructive-foreground/30 active:scale-95"
                             >
                                 <X className="h-3 w-3" />
@@ -169,6 +173,7 @@ function MemberItem({
                             <button
                                 type="button"
                                 onClick={() => onRemove(member.id)}
+                                aria-label={t('member.confirmRemove', { name: member.name })}
                                 className="flex-1 h-6 flex items-center justify-center gap-1.5 rounded-md bg-destructive-foreground text-destructive text-xs font-semibold transition-all hover:bg-destructive-foreground/90 active:scale-[0.98]"
                             >
                                 <Trash2 className="h-3 w-3" />

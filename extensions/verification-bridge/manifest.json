@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Octopus Verification Bridge",
+  "version": "0.1.0",
+  "description": "Completes paired Octopus site verification tasks in an administrator browser.",
+  "permissions": [
+    "cookies",
+    "storage",
+    "windows"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "Octopus Verification Bridge",
+    "default_popup": "popup.html"
+  }
+}

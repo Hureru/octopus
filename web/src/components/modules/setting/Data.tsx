@@ -25,7 +25,7 @@ export function SettingData() {
     const importDB = useImportDB();
 
     const [includeStats, setIncludeStats] = useState(true);
-    // 常规导出固定 JSON（可导入恢复）；含日志导出为 ZIP 流式归档，单独成按钮
+    // 常规导出固定 JSON；含日志导出为 ZIP 流式归档
     const [exportingKind, setExportingKind] = useState<'json' | 'logs' | null>(null);
 
     const [file, setFile] = useState<File | null>(null);
@@ -52,7 +52,12 @@ export function SettingData() {
             return;
         }
         // accept 属性只约束选择器默认过滤，仍可手动选任意文件，导入前再校验一次
-        if (file.type !== 'application/json' && !file.name.toLowerCase().endsWith('.json')) {
+        const lowerName = file.name.toLowerCase();
+        const supported = file.type === 'application/json'
+            || file.type === 'application/zip'
+            || lowerName.endsWith('.json')
+            || lowerName.endsWith('.zip');
+        if (!supported) {
             toast.error(t('backup.import.invalidFileType'));
             if (fileInputRef.current) fileInputRef.current.value = '';
             setFile(null);
@@ -143,7 +148,7 @@ export function SettingData() {
                     {exportingKind === 'json' ? t('backup.export.exporting') : t('backup.export.button')}
                 </Button>
 
-                {/* 含日志归档：数据量大，ZIP 流式写入，仅供留存，无法导入恢复 */}
+                {/* 含日志归档：数据量大，使用 ZIP 流式写入 */}
                 <Button
                     type="button"
                     variant="outline"
@@ -166,7 +171,7 @@ export function SettingData() {
                 <Input
                     ref={fileInputRef}
                     type="file"
-                    accept="application/json,.json"
+                    accept="application/json,application/zip,.json,.zip"
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                     className="rounded-xl"
                 />

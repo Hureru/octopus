@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { NextIntlClientProvider } from 'next-intl';
 import { useSettingStore, type Locale } from '@/stores/setting';
 
@@ -23,6 +23,10 @@ const bcp47: Record<Locale, string> = {
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
     const { locale } = useSettingStore();
+
+    useEffect(() => {
+        document.documentElement.lang = bcp47[locale];
+    }, [locale]);
 
     return (
         <NextIntlClientProvider

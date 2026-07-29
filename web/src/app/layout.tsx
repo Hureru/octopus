@@ -5,7 +5,13 @@ import { LocaleProvider } from "@/provider/locale";
 import QueryProvider from "@/provider/query";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import { TooltipProvider } from "@/components/animate-ui/components/animate/tooltip";
+import type { Viewport } from "next";
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 
 export default function RootLayout({
@@ -14,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html suppressHydrationWarning>
+    <html lang="zh-Hans" suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#eae9e3" />
         <meta name="application-name" content="Octopus" />

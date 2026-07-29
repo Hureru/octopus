@@ -43,6 +43,8 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         base_urls: channel.base_urls?.length ? channel.base_urls : [{ url: '', delay: 0 }],
         custom_header: channel.custom_header ?? [],
         ws_mode: channel.ws_mode ?? 'inherit',
+        protocol_policy: channel.protocol_policy ?? 'auto',
+        allow_lossy: channel.allow_lossy ?? false,
         proxy_mode: channel.proxy_mode ?? 'direct',
         proxy_config_id: channel.proxy_config_id ?? null,
         param_override: channel.param_override ?? '',
@@ -100,6 +102,8 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         if (formData.auto_sync !== channel.auto_sync) req.auto_sync = formData.auto_sync;
         if (formData.auto_group !== channel.auto_group) req.auto_group = formData.auto_group;
         if ((formData.ws_mode ?? 'inherit') !== (channel.ws_mode ?? 'inherit')) req.ws_mode = formData.ws_mode;
+        if (formData.protocol_policy !== channel.protocol_policy) req.protocol_policy = formData.protocol_policy;
+        if (formData.allow_lossy !== channel.allow_lossy) req.allow_lossy = formData.allow_lossy;
 
         if (!headersEqual(formData.custom_header, channel.custom_header)) {
             req.custom_header = (formData.custom_header ?? [])
@@ -215,7 +219,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                 <Tabs value={currentView}>
                     <TabsContents>
                         <TabsContent value="viewing" >
-                            <div className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5">
+                            <div className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5" tabIndex={0}>
                                 {channel.managed ? (
                                     <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
                                         <div>
@@ -245,6 +249,27 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                                         ) : null}
                                     </section>
                                 ) : null}
+                                <section className="space-y-3">
+                                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        {t('sections.protocol')}
+                                    </h3>
+                                    <dl className="grid gap-3 sm:grid-cols-3">
+                                        <div className="rounded-lg border px-3 py-2">
+                                            <dt className="text-xs text-muted-foreground">{t('protocol.policy')}</dt>
+                                            <dd className="mt-1 text-sm font-medium">{channel.protocol_policy}</dd>
+                                        </div>
+                                        <div className="rounded-lg border px-3 py-2">
+                                            <dt className="text-xs text-muted-foreground">{t('protocol.allowLossy')}</dt>
+                                            <dd className="mt-1 text-sm font-medium">
+                                                {channel.allow_lossy ? t('protocol.yes') : t('protocol.no')}
+                                            </dd>
+                                        </div>
+                                        <div className="rounded-lg border px-3 py-2">
+                                            <dt className="text-xs text-muted-foreground">{t('protocol.wsMode')}</dt>
+                                            <dd className="mt-1 text-sm font-medium">{channel.ws_mode}</dd>
+                                        </div>
+                                    </dl>
+                                </section>
                                 <dl className="grid gap-3 grid-cols-1 sm:grid-cols-3">
                                     <div className="rounded-2xl border bg-linear-to-br from-chart-1/10 to-chart-1/5 p-3 sm:p-4">
                                         <dt className="flex items-center gap-2 mb-2 text-xs font-medium text-muted-foreground">
@@ -282,10 +307,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
 
                                 {/* 请求详情 */}
                                 <section className="space-y-3">
-                                    <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <h3 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <TrendingUp className="size-3.5" />
                                         {t('sections.requests')}
-                                    </h4>
+                                    </h3>
                                     <dl className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                                         <div className="rounded-2xl border bg-card p-3 sm:p-4 transition-colors hover:bg-accent/5">
                                             <dt className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
@@ -313,10 +338,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
 
                                 {/* Token 使用 */}
                                 <section className="space-y-3">
-                                    <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <h3 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <FileText className="size-3.5" />
                                         {t('sections.tokens')}
-                                    </h4>
+                                    </h3>
                                     <dl className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                                         <div className="rounded-2xl border bg-card p-3 sm:p-4 transition-colors hover:bg-accent/5">
                                             <dt className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
@@ -344,10 +369,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
 
                                 {/* 成本详情 */}
                                 <section className="space-y-3">
-                                    <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <h3 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <DollarSign className="size-3.5" />
                                         {t('sections.costs')}
-                                    </h4>
+                                    </h3>
                                     <dl className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                                         <div className="rounded-2xl border bg-card p-3 sm:p-4 transition-colors hover:bg-accent/5">
                                             <dt className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
@@ -375,10 +400,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
 
                                 {/* Base URLs */}
                                 <section className="space-y-3">
-                                    <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <h3 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <Globe className="size-3.5" />
                                         {t('sections.baseUrls')}
-                                    </h4>
+                                    </h3>
                                     <div className="rounded-2xl border bg-card overflow-hidden">
                                         {channel.base_urls?.map((url, i) => (
                                             <div key={i} className="flex items-center justify-between p-3 sm:p-4 border-b last:border-0 hover:bg-accent/5 transition-colors">
@@ -408,10 +433,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
 
                                 {/* Keys */}
                                 <section className="space-y-3">
-                                    <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    <h3 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <Key className="size-3.5" />
                                         {t('sections.keys')}
-                                    </h4>
+                                    </h3>
                                     <div className="rounded-2xl border bg-card overflow-hidden">
                                         {channel.keys?.map((key) => (
                                             <div key={key.id} className="flex items-center gap-3 p-3 sm:p-4 border-b last:border-0 hover:bg-accent/5 transition-colors">

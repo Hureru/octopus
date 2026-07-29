@@ -314,7 +314,10 @@ export function GroupCard({ group }: { group: Group }) {
                     <PresetPopover group={group} />
 
                     <MorphingDialog>
-                        <MorphingDialogTrigger className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground">
+                        <MorphingDialogTrigger
+                            aria-label={`${t('detail.actions.edit')}: ${group.name}`}
+                            className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground"
+                        >
                             <Tooltip side="top" sideOffset={10} align="center">
                                 <TooltipTrigger asChild>
                                     <Pencil className="size-4" />

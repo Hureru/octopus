@@ -69,13 +69,27 @@ function MorphingDialogProvider({
   const isOpen = isControlled ? (controlledOpen as boolean) : uncontrolledOpen;
   const uniqueId = useId();
   const triggerRef = useRef<HTMLDivElement>(null!);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(isOpen);
+
+  const rememberReturnFocus = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && activeElement !== document.body) {
+      returnFocusRef.current = activeElement;
+    }
+  }, []);
 
   const setIsOpen = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
     (value) => {
       // 非受控：直接交给 setUncontrolledOpen，由 React 基于最新 state 计算，
       // 避免 useCallback 闭包捕获到陈旧的 uncontrolledOpen
       if (!isControlled) {
-        setUncontrolledOpen(value);
+        setUncontrolledOpen((current) => {
+          const next = typeof value === 'function' ? value(current) : value;
+          if (next && !current) rememberReturnFocus();
+          return next;
+        });
         return;
       }
       // 受控：基于 controlledOpen 计算下一个值并通知外部
@@ -84,10 +98,28 @@ function MorphingDialogProvider({
         typeof value === 'function'
           ? (value as (prev: boolean) => boolean)(current)
           : value;
+      if (next && !current) rememberReturnFocus();
       if (next !== current) onOpenChange?.(next);
     },
-    [isControlled, controlledOpen, onOpenChange]
+    [isControlled, controlledOpen, onOpenChange, rememberReturnFocus]
   );
+
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!wasOpen || isOpen) return;
+
+    const target = returnFocusRef.current;
+    returnFocusRef.current = null;
+    const rafId = window.requestAnimationFrame(() => {
+      if (target?.isConnected) {
+        target.focus();
+        return;
+      }
+      triggerRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [isOpen]);
 
   const contextValue = useMemo(
     () => ({
@@ -127,6 +159,7 @@ export type MorphingDialogTriggerProps = {
   style?: React.CSSProperties;
   triggerRef?: React.RefObject<HTMLDivElement>;
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  title?: string;
   'aria-label'?: string;
 };
 
@@ -136,6 +169,7 @@ function MorphingDialogTrigger({
   style,
   triggerRef: triggerRefProp,
   onClick,
+  title,
   'aria-label': ariaLabel,
 }: MorphingDialogTriggerProps) {
   const { setIsOpen, isOpen, uniqueId, triggerRef } = useMorphingDialog();
@@ -169,6 +203,7 @@ function MorphingDialogTrigger({
         ref={triggerRefProp ?? triggerRef}
         className={cn('relative', className)}
         style={{ ...style, visibility: 'hidden', pointerEvents: 'none' }}
+        title={title}
         aria-hidden
       >
         {children}
@@ -187,7 +222,8 @@ function MorphingDialogTrigger({
       aria-haspopup='dialog'
       aria-expanded={isOpen}
       aria-controls={`motion-ui-morphing-dialog-content-${uniqueId}`}
-      aria-label={ariaLabel ?? `Open dialog ${uniqueId}`}
+      aria-label={ariaLabel}
+      title={title}
       role='button'
       tabIndex={0}
     >
@@ -207,7 +243,7 @@ function MorphingDialogContent({
   className,
   style,
 }: MorphingDialogContentProps) {
-  const { setIsOpen, isOpen, uniqueId, triggerRef } = useMorphingDialog();
+  const { setIsOpen, isOpen, uniqueId } = useMorphingDialog();
   const containerRef = useRef<HTMLDivElement>(null!);
   const firstFocusableElementRef = useRef<HTMLElement | null>(null);
   const lastFocusableElementRef = useRef<HTMLElement | null>(null);
@@ -268,12 +304,10 @@ function MorphingDialogContent({
       });
       return () => {
         window.cancelAnimationFrame(rafId);
+        document.body.classList.remove('overflow-hidden');
       };
-    } else {
-      document.body.classList.remove('overflow-hidden');
-      triggerRef.current?.focus();
     }
-  }, [isOpen, triggerRef]);
+  }, [isOpen]);
 
   useClickOutside(
     containerRef,
@@ -299,6 +333,7 @@ function MorphingDialogContent({
       layoutId={`dialog-${uniqueId}`}
       className={cn('overflow-hidden', className)}
       style={style}
+      id={`motion-ui-morphing-dialog-content-${uniqueId}`}
       role='dialog'
       aria-modal='true'
       aria-labelledby={`motion-ui-morphing-dialog-title-${uniqueId}`}
@@ -366,6 +401,7 @@ function MorphingDialogTitle({
 
   return (
     <motion.div
+      id={`motion-ui-morphing-dialog-title-${uniqueId}`}
       layoutId={`dialog-title-container-${uniqueId}`}
       className={className}
       style={style}
@@ -432,7 +468,7 @@ function MorphingDialogDescription({
       initial='initial'
       animate='animate'
       exit='exit'
-      id={`dialog-description-${uniqueId}`}
+      id={`motion-ui-morphing-dialog-description-${uniqueId}`}
     >
       {children}
     </motion.div>
