@@ -24,6 +24,7 @@ var relayLogPerfIndexes = []struct {
 }{
 	{name: "idx_relay_logs_time_id", sql: "CREATE INDEX idx_relay_logs_time_id ON relay_logs(time, id)"},
 	{name: "idx_relay_logs_success_time_id", sql: "CREATE INDEX idx_relay_logs_success_time_id ON relay_logs(success, time, id)"},
+	{name: "idx_relay_logs_outcome_time_id", sql: "CREATE INDEX idx_relay_logs_outcome_time_id ON relay_logs(outcome, time, id)"},
 	{name: "idx_relay_logs_channel_time_id", sql: "CREATE INDEX idx_relay_logs_channel_time_id ON relay_logs(channel_id, time, id)"},
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 func siteHTTPClient(ctx context.Context, siteRecord *model.Site, accounts ...*model.SiteAccount) (*http.Client, error) {
@@ -72,9 +73,37 @@ func requestJSON(ctx context.Context, siteRecord *model.Site, method string, req
 		return nil, err
 	}
 	applyDefaultSiteRequestHeaders(req, body != nil)
-	for _, item := range siteRecord.CustomHeader {
-		if strings.TrimSpace(item.HeaderKey) != "" {
-			req.Header.Set(strings.TrimSpace(item.HeaderKey), item.HeaderValue)
+	accountID := 0
+	if len(accounts) > 0 && accounts[0] != nil {
+		accountID = accounts[0].ID
+	}
+	if policy, policyErr := op.ResolveSiteHeaderPolicy(ctx, siteRecord.ID, accountID); policyErr == nil {
+		op.ApplyHeaderPolicy(req.Header, nil, siteRecord.CustomHeader, policy)
+	} else {
+		log.Warnf(
+			"resolve site header policy failed (site=%d account=%d): %v",
+			siteRecord.ID,
+			accountID,
+			policyErr,
+		)
+		op.ApplyHeaderPolicy(
+			req.Header,
+			nil,
+			siteRecord.CustomHeader,
+			op.HeaderPolicyFailureFallback(),
+		)
+	}
+	if len(accounts) > 0 && accounts[0] != nil {
+		_, proxyConfigID := resolveSiteAccountProxy(siteRecord, accounts[0])
+		clashNode := accounts[0].PreferredClashNode
+		if clashNode == "" {
+			clashNode = siteRecord.PreferredClashNode
+		}
+		if cookie, userAgent, ok := op.VerificationHeadersForAccount(accounts[0], proxyConfigID, clashNode); ok {
+			req.Header.Set("Cookie", cookie)
+			if userAgent != "" {
+				req.Header.Set("User-Agent", userAgent)
+			}
 		}
 	}
 	for key, value := range headers {

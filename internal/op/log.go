@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -28,6 +28,7 @@ const (
 )
 
 var relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+var relayLogUsagePending = make(map[int64]usagePendingRecord)
 var relayLogPendingBytes int64
 var relayLogPendingLock sync.Mutex
 
@@ -36,8 +37,6 @@ var relayLogRecentLock sync.Mutex
 
 var relayLogFlushLock sync.Mutex
 var relayLogFlushSignal = make(chan struct{}, 1)
-var relayLogDroppedTotal atomic.Uint64
-var relayLogLastDropWarn atomic.Int64
 
 var relayLogSubscribers = make(map[chan model.RelayLog]struct{})
 var relayLogSubscribersLock sync.RWMutex
@@ -116,9 +115,15 @@ func RelayLogWriterRun(ctx context.Context) {
 			if err := relayLogDrainPending(ctx, relayLogWriterMaxBatches); err != nil {
 				log.Warnw("relay_log.flush_failed", "batch_size", relayLogBatchSize, "queue_length", RelayLogPendingLen(), "error", err.Error())
 			}
+			if err := usageFactsDrainPending(ctx, relayLogWriterMaxBatches); err != nil {
+				log.Warnw("usage_fact.flush_failed", "batch_size", usageFactBatchSize, "queue_length", UsageFactsPendingLen(), "error", err.Error())
+			}
 		case <-ticker.C:
 			if err := relayLogDrainPending(ctx, relayLogWriterMaxBatches); err != nil {
 				log.Warnw("relay_log.flush_failed", "batch_size", relayLogBatchSize, "queue_length", RelayLogPendingLen(), "error", err.Error())
+			}
+			if err := usageFactsDrainPending(ctx, relayLogWriterMaxBatches); err != nil {
+				log.Warnw("usage_fact.flush_failed", "batch_size", usageFactBatchSize, "queue_length", UsageFactsPendingLen(), "error", err.Error())
 			}
 		}
 	}
@@ -141,21 +146,36 @@ func appendRelayLogRecent(relayLog model.RelayLog) {
 	relayLogRecentLock.Unlock()
 }
 
-func enqueueRelayLogPending(relayLog model.RelayLog) bool {
+func enqueueRelayLogPending(
+	ctx context.Context,
+	relayLog model.RelayLog,
+	usage usagePendingRecord,
+) error {
 	estimatedBytes := relayLogApproxBytes(relayLog)
-	relayLogPendingLock.Lock()
-	defer relayLogPendingLock.Unlock()
-	if len(relayLogPending) >= relayLogQueueSize || relayLogPendingBytes+estimatedBytes > relayLogQueueBytes {
-		dropped := relayLogDroppedTotal.Add(1)
-		warnRelayLogDropped(dropped)
-		return false
+	for {
+		relayLogPendingLock.Lock()
+		hasCountCapacity := len(relayLogPending) < relayLogQueueSize
+		hasByteCapacity := relayLogPendingBytes+estimatedBytes <= relayLogQueueBytes ||
+			len(relayLogPending) == 0
+		if hasCountCapacity && hasByteCapacity {
+			relayLogPending = append(relayLogPending, relayLog)
+			relayLogUsagePending[relayLog.ID] = usage
+			relayLogPendingBytes += estimatedBytes
+			shouldFlush := len(relayLogPending) >= relayLogBatchSize
+			relayLogPendingLock.Unlock()
+			if shouldFlush {
+				signalRelayLogFlush()
+			}
+			return nil
+		}
+		relayLogPendingLock.Unlock()
+
+		// A full queue applies backpressure instead of losing the relay/usage
+		// pair. Both records are committed by relayLogFlushPendingBatch.
+		if err := relayLogFlushPendingBatch(ctx, relayLogBatchSize); err != nil {
+			return err
+		}
 	}
-	relayLogPending = append(relayLogPending, relayLog)
-	relayLogPendingBytes += estimatedBytes
-	if len(relayLogPending) >= relayLogBatchSize {
-		signalRelayLogFlush()
-	}
-	return true
 }
 
 func relayLogApproxBytes(relayLog model.RelayLog) int64 {
@@ -168,17 +188,6 @@ func relayLogApproxBytes(relayLog model.RelayLog) int64 {
 	return int64(size)
 }
 
-func warnRelayLogDropped(dropped uint64) {
-	now := time.Now().Unix()
-	last := relayLogLastDropWarn.Load()
-	if now-last < 60 {
-		return
-	}
-	if relayLogLastDropWarn.CompareAndSwap(last, now) {
-		log.Warnw("relay_log.queue_full", "dropped_total", dropped, "queue_size", relayLogQueueSize, "queue_bytes", relayLogQueueBytes)
-	}
-}
-
 func RelayLogPendingLen() int {
 	relayLogPendingLock.Lock()
 	defer relayLogPendingLock.Unlock()
@@ -186,7 +195,7 @@ func RelayLogPendingLen() int {
 }
 
 func RelayLogDroppedTotal() uint64 {
-	return relayLogDroppedTotal.Load()
+	return 0
 }
 
 func relayLogDrainPending(ctx context.Context, maxBatches int) error {
@@ -229,13 +238,26 @@ func relayLogFlushPendingBatch(ctx context.Context, batchSize int) error {
 	}
 	batch := make([]model.RelayLog, batchSize)
 	copy(batch, relayLogPending[:batchSize])
+	usageBatch := make([]usagePendingRecord, 0, batchSize)
+	for i := range batch {
+		record, ok := relayLogUsagePending[batch[i].ID]
+		if !ok {
+			relayLogPendingLock.Unlock()
+			return fmt.Errorf("missing usage facts for pending relay log %d", batch[i].ID)
+		}
+		usageBatch = append(usageBatch, record)
+	}
 	batchBytes := relayLogBatchApproxBytes(batch)
 	relayLogPendingLock.Unlock()
 
 	start := time.Now()
-	result := db.GetDB().WithContext(ctx).CreateInBatches(&batch, relayLogBatchSize)
-	if result.Error != nil {
-		return result.Error
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.CreateInBatches(&batch, relayLogBatchSize).Error; err != nil {
+			return err
+		}
+		return persistUsageRecords(tx, usageBatch)
+	}); err != nil {
+		return err
 	}
 	duration := time.Since(start)
 	log.Debugw("relay_log.flush", "batch_size", len(batch), "duration", duration.String(), "queue_length", RelayLogPendingLen())
@@ -244,10 +266,14 @@ func relayLogFlushPendingBatch(ctx context.Context, batchSize int) error {
 	if len(relayLogPending) >= batchSize && relayLogPending[0].ID == batch[0].ID && relayLogPending[batchSize-1].ID == batch[batchSize-1].ID {
 		relayLogPending = relayLogPending[batchSize:]
 		relayLogPendingBytes -= batchBytes
+		for i := range batch {
+			delete(relayLogUsagePending, batch[i].ID)
+		}
 	} else {
 		flushed := make(map[int64]struct{}, len(batch))
 		for _, item := range batch {
 			flushed[item.ID] = struct{}{}
+			delete(relayLogUsagePending, item.ID)
 		}
 		kept := relayLogPending[:0]
 		keptBytes := int64(0)
@@ -265,6 +291,7 @@ func relayLogFlushPendingBatch(ctx context.Context, batchSize int) error {
 	}
 	if len(relayLogPending) == 0 {
 		relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+		relayLogUsagePending = make(map[int64]usagePendingRecord)
 		relayLogPendingBytes = 0
 	}
 	relayLogPendingLock.Unlock()
@@ -281,19 +308,17 @@ func relayLogBatchApproxBytes(batch []model.RelayLog) int64 {
 }
 
 func RelayLogFlushPending(ctx context.Context) error {
-	for {
+	for RelayLogPendingLen() > 0 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		if RelayLogPendingLen() == 0 {
-			return nil
-		}
 		if err := relayLogFlushPendingBatch(ctx, relayLogBatchSize); err != nil {
 			return err
 		}
 	}
+	return UsageFactsFlushPending(ctx)
 }
 
 func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
@@ -301,16 +326,39 @@ func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
 	if err != nil {
 		return err
 	}
-	relayLog.ID = snowflake.GenerateID()
+	if relayLog.Outcome == "" {
+		if relayLog.Success {
+			relayLog.Outcome = model.RequestOutcomeSuccess
+		} else {
+			relayLog.Outcome = model.RequestOutcomeFailed
+		}
+	}
+	relayLog.Success = relayLog.Outcome == model.RequestOutcomeSuccess
+	if relayLog.TransportTermination == "" {
+		relayLog.TransportTermination = model.TransportTerminationUnknown
+	}
+	if relayLog.ID == 0 {
+		relayLog.ID = snowflake.GenerateID()
+	}
+	persistCtx := relayLogPersistenceContext(ctx)
+	usage, err := usageFactsSnapshot(persistCtx, relayLog)
+	if err != nil {
+		return err
+	}
 	notifySubscribers(relayLog)
 	appendRelayLogRecent(relayLog)
 
 	if !enabled {
-		return nil
+		return enqueueUsageFacts(persistCtx, usage)
 	}
-	enqueueRelayLogPending(relayLog)
-	_ = ctx // kept for API compatibility; DB writes are handled by the background writer.
-	return nil
+	return enqueueRelayLogPending(persistCtx, relayLog, usage)
+}
+
+func relayLogPersistenceContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func RelayLogSaveDBTask(ctx context.Context) error {
@@ -406,9 +454,12 @@ func relayLogCleanup(ctx context.Context) error {
 type RelayLogStatusFilter string
 
 const (
-	RelayLogStatusAll     RelayLogStatusFilter = ""
-	RelayLogStatusSuccess RelayLogStatusFilter = "success"
-	RelayLogStatusError   RelayLogStatusFilter = "error"
+	RelayLogStatusAll            RelayLogStatusFilter = ""
+	RelayLogStatusSuccess        RelayLogStatusFilter = "success"
+	RelayLogStatusFailed         RelayLogStatusFilter = "failed"
+	RelayLogStatusError          RelayLogStatusFilter = "error" // legacy alias
+	RelayLogStatusClientCanceled RelayLogStatusFilter = "client_canceled"
+	RelayLogStatusIndeterminate  RelayLogStatusFilter = "indeterminate"
 )
 
 type RelayLogKeywordScope string
@@ -433,20 +484,26 @@ const (
 )
 
 type RelayLogListFilter struct {
-	StartTime      *int
-	EndTime        *int
-	ChannelIDs     []int
-	Status         RelayLogStatusFilter
-	Keyword        string
-	KeywordScope   RelayLogKeywordScope
-	KeywordMode    RelayLogKeywordMode
-	Page           int
-	PageSize       int
-	IncludeContent bool
-	WithTotal      bool
-	Limit          int
-	BeforeTime     *int64
-	BeforeID       *int64
+	StartTime       *int
+	EndTime         *int
+	ChannelIDs      []int
+	SiteIDs         []int
+	SiteAccountIDs  []int
+	APIKeyIDs       []int
+	RequestModels   []string
+	ActualModels    []string
+	CanonicalModels []string
+	Status          RelayLogStatusFilter
+	Keyword         string
+	KeywordScope    RelayLogKeywordScope
+	KeywordMode     RelayLogKeywordMode
+	Page            int
+	PageSize        int
+	IncludeContent  bool
+	WithTotal       bool
+	Limit           int
+	BeforeTime      *int64
+	BeforeID        *int64
 	// Pagination forces cursor or page mode. Empty defers to cursor when
 	// limit/cursor fields are set, otherwise page mode.
 	Pagination string
@@ -529,6 +586,10 @@ func RelayLogListWithFilter(ctx context.Context, filter RelayLogListFilter) (Rel
 		filter.PageSize = 20
 	}
 	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.ChannelIDs, err = resolveRelayLogChannelIDs(ctx, filter)
+	if err != nil {
+		return RelayLogListResult{}, err
+	}
 
 	// Resolve effective keyword mode and apply guardrails for slow contains
 	// search before any DB work.
@@ -689,10 +750,20 @@ func selectRelayLogListFields(query *gorm.DB, includeContent bool) *gorm.DB {
 		"id",
 		"time",
 		"request_model_name",
+		"request_api_key_id",
 		"request_api_key_name",
 		"channel_id",
 		"channel_name",
 		"actual_model_name",
+		"canonical_model_name",
+		"route_candidate_id",
+		"inbound_protocol",
+		"outbound_protocol",
+		"protocol_mode",
+		"protocol_policy",
+		"protocol_allow_lossy",
+		"protocol_warnings",
+		"protocol_failure_stage",
 		"input_tokens",
 		"transport_input_tokens",
 		"bill_input_tokens",
@@ -702,8 +773,16 @@ func selectRelayLogListFields(query *gorm.DB, includeContent bool) *gorm.DB {
 		"ftut",
 		"use_time",
 		"cost",
+		"price_source",
+		"price_currency",
+		"token_source",
 		"error",
 		"success",
+		"outcome",
+		"transport_termination",
+		"completion_evidence",
+		"terminal_event",
+		"header_policy_trace",
 		"attempts",
 		"total_attempts",
 		"used_ws",
@@ -830,11 +909,45 @@ func relayLogMatchesFilter(relayLog model.RelayLog, filter RelayLogListFilter, c
 	if len(channelSet) > 0 && !logMatchesChannels(relayLog, channelSet) {
 		return false
 	}
-	if filter.Status == RelayLogStatusSuccess && !relayLog.Success {
+	if len(filter.APIKeyIDs) > 0 && !containsInt(filter.APIKeyIDs, relayLog.RequestAPIKeyID) {
 		return false
 	}
-	if filter.Status == RelayLogStatusError && relayLog.Success {
+	if len(filter.RequestModels) > 0 && !containsString(filter.RequestModels, relayLog.RequestModelName) {
 		return false
+	}
+	if len(filter.ActualModels) > 0 && !containsString(filter.ActualModels, relayLog.ActualModelName) {
+		return false
+	}
+	if len(filter.CanonicalModels) > 0 && !containsString(filter.CanonicalModels, relayLog.CanonicalModelName) {
+		return false
+	}
+	if filter.Status != RelayLogStatusAll {
+		outcome := relayLog.Outcome
+		if outcome == "" {
+			if relayLog.Success {
+				outcome = model.RequestOutcomeSuccess
+			} else {
+				outcome = model.RequestOutcomeFailed
+			}
+		}
+		switch filter.Status {
+		case RelayLogStatusSuccess:
+			if outcome != model.RequestOutcomeSuccess {
+				return false
+			}
+		case RelayLogStatusFailed, RelayLogStatusError:
+			if outcome != model.RequestOutcomeFailed {
+				return false
+			}
+		case RelayLogStatusClientCanceled:
+			if outcome != model.RequestOutcomeClientCanceled {
+				return false
+			}
+		case RelayLogStatusIndeterminate:
+			if outcome != model.RequestOutcomeIndeterminate {
+				return false
+			}
+		}
 	}
 	if keyword != "" && !logMatchesKeyword(relayLog, keyword, filter.KeywordScope, filter.KeywordMode) {
 		return false
@@ -852,10 +965,27 @@ func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB 
 	if len(filter.ChannelIDs) > 0 {
 		query = query.Where("channel_id IN ?", filter.ChannelIDs)
 	}
-	if filter.Status == RelayLogStatusSuccess {
-		query = query.Where("success = ?", true)
-	} else if filter.Status == RelayLogStatusError {
-		query = query.Where("success = ?", false)
+	if len(filter.APIKeyIDs) > 0 {
+		query = query.Where("request_api_key_id IN ?", filter.APIKeyIDs)
+	}
+	if len(filter.RequestModels) > 0 {
+		query = query.Where("request_model_name IN ?", filter.RequestModels)
+	}
+	if len(filter.ActualModels) > 0 {
+		query = query.Where("actual_model_name IN ?", filter.ActualModels)
+	}
+	if len(filter.CanonicalModels) > 0 {
+		query = query.Where("canonical_model_name IN ?", filter.CanonicalModels)
+	}
+	switch filter.Status {
+	case RelayLogStatusSuccess:
+		query = query.Where("outcome = ?", model.RequestOutcomeSuccess)
+	case RelayLogStatusFailed, RelayLogStatusError:
+		query = query.Where("outcome = ?", model.RequestOutcomeFailed)
+	case RelayLogStatusClientCanceled:
+		query = query.Where("outcome = ?", model.RequestOutcomeClientCanceled)
+	case RelayLogStatusIndeterminate:
+		query = query.Where("outcome = ?", model.RequestOutcomeIndeterminate)
 	}
 	keyword := strings.ToLower(strings.TrimSpace(filter.Keyword))
 	if keyword == "" {
@@ -891,6 +1021,62 @@ func applyRelayLogDBFilters(query *gorm.DB, filter RelayLogListFilter) *gorm.DB 
 		)
 	}
 	return query
+}
+
+func resolveRelayLogChannelIDs(ctx context.Context, filter RelayLogListFilter) ([]int, error) {
+	hasSiteFilter := len(filter.SiteIDs) > 0 || len(filter.SiteAccountIDs) > 0
+	if !hasSiteFilter {
+		return filter.ChannelIDs, nil
+	}
+	query := db.GetDB().WithContext(ctx).Model(&model.SiteChannelBinding{})
+	if len(filter.SiteIDs) > 0 {
+		query = query.Where("site_id IN ?", filter.SiteIDs)
+	}
+	if len(filter.SiteAccountIDs) > 0 {
+		query = query.Where("site_account_id IN ?", filter.SiteAccountIDs)
+	}
+	var siteChannelIDs []int
+	if err := query.Distinct("channel_id").Pluck("channel_id", &siteChannelIDs).Error; err != nil {
+		return nil, err
+	}
+	if len(filter.ChannelIDs) == 0 {
+		if len(siteChannelIDs) == 0 {
+			return []int{-1}, nil
+		}
+		return siteChannelIDs, nil
+	}
+	allowed := make(map[int]struct{}, len(siteChannelIDs))
+	for _, id := range siteChannelIDs {
+		allowed[id] = struct{}{}
+	}
+	result := make([]int, 0, len(filter.ChannelIDs))
+	for _, id := range filter.ChannelIDs {
+		if _, ok := allowed[id]; ok {
+			result = append(result, id)
+		}
+	}
+	if len(result) == 0 {
+		return []int{-1}, nil
+	}
+	return result, nil
+}
+
+func containsInt(values []int, target int) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (and the escape char itself) so
@@ -1018,7 +1204,20 @@ func RelayLogClear(ctx context.Context) error {
 	defer relayLogFlushLock.Unlock()
 
 	relayLogPendingLock.Lock()
+	pendingUsage := make([]usagePendingRecord, 0, len(relayLogPending))
+	for i := range relayLogPending {
+		if record, ok := relayLogUsagePending[relayLogPending[i].ID]; ok {
+			pendingUsage = append(pendingUsage, record)
+		}
+	}
+	if err := db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return persistUsageRecords(tx, pendingUsage)
+	}); err != nil {
+		relayLogPendingLock.Unlock()
+		return err
+	}
 	relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+	relayLogUsagePending = make(map[int64]usagePendingRecord)
 	relayLogPendingBytes = 0
 	relayLogPendingLock.Unlock()
 

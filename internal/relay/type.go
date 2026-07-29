@@ -13,6 +13,7 @@ import (
 	"github.com/bestruirui/octopus/internal/conf"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/relay/stream"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/gin-gonic/gin"
 )
@@ -84,16 +85,17 @@ type UpstreamReader interface {
 }
 
 type relayRequest struct {
-	c               *gin.Context
-	ctx             context.Context // used when c is nil (WebSocket mode)
-	inAdapter       model.Inbound
-	internalRequest *model.InternalLLMRequest
-	metrics         *RelayMetrics
-	apiKeyID        int
-	requestModel    string
-	groupID         int
-	groupSessionTTL int
-	iter            *balancer.Iterator
+	c                 *gin.Context
+	ctx               context.Context // used when c is nil (WebSocket mode)
+	inAdapter         model.Inbound
+	internalRequest   *model.InternalLLMRequest
+	metrics           *RelayMetrics
+	apiKeyID          int
+	requestModel      string
+	groupID           int
+	groupSessionTTL   int
+	iter              *balancer.Iterator
+	protocolDecisions map[string]dbmodel.RouteDecisionReason
 
 	// rawBody 保存客户端原始请求 body，用于同格式（如 Anthropic→Anthropic）直通转发时
 	// 绕过内部模型来回转换，以保证 beta 字段、内容块顺序、thinking 签名等完全透传。
@@ -127,16 +129,28 @@ type relayAttempt struct {
 	firstTokenTimeOutSec int
 	firstTokenBudget     *firstTokenBudget
 	retryAfter           time.Duration // forward() 提取后暂存
+	streamResult         stream.Result
+	protocolMode         dbmodel.ProtocolExecutionMode
+	protocolPolicy       dbmodel.ProtocolPolicy
+	protocolAllowLossy   bool
+	protocolWarnings     []string
+	protocolFailureStage dbmodel.ProtocolFailureStage
 }
 
 // attemptResult 封装单次尝试的结果
 type attemptResult struct {
-	Success           bool          // 是否成功
-	Written           bool          // 流式响应是否已开始写入（不可重试）
-	Canceled          bool          // 是否由下游请求取消或超时触发
-	ResetConversation bool          // 是否需要立即重置连续会话并停止后续 failover
-	FirstTokenTimeout bool          // 是否由首字超时触发，用于直接切换渠道
-	Err               error         // 失败时的错误
-	StatusCode        int           // 上游 HTTP 状态码（0 = 连接错误）
-	RetryAfter        time.Duration // 解析的 Retry-After 值
+	Success              bool          // 是否成功
+	Written              bool          // 流式响应是否已开始写入（不可重试）
+	Canceled             bool          // 是否由下游请求取消或超时触发
+	ResetConversation    bool          // 是否需要立即重置连续会话并停止后续 failover
+	FirstTokenTimeout    bool          // 是否由首字超时触发，用于直接切换渠道
+	Err                  error         // 失败时的错误
+	StatusCode           int           // 上游 HTTP 状态码（0 = 连接错误）
+	RetryAfter           time.Duration // 解析的 Retry-After 值
+	Outcome              dbmodel.RequestOutcome
+	TransportTermination dbmodel.TransportTermination
+	CompletionEvidence   dbmodel.CompletionEvidence
+	TerminalEvent        string
+	Attribution          dbmodel.AttemptAttribution
+	ProtocolFailureStage dbmodel.ProtocolFailureStage
 }

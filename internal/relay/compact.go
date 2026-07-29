@@ -72,22 +72,63 @@ func HandleResponsesCompact(c *gin.Context) {
 	}
 
 	requestModel := compactReq.Model
+	routingModel := requestModel
+	var canonicalModel *dbmodel.CanonicalModel
+	if canonical, ok := op.CatalogResolveRequest(requestModel); ok {
+		routingModel = canonical.Name
+		canonicalModel = &canonical
+	}
 	apiKeyID := c.GetInt("api_key_id")
 
-	group, err := op.GroupGetEnabledMap(requestModel, c.Request.Context())
+	group, err := op.GroupGetEnabledMap(routingModel, c.Request.Context())
 	if err != nil {
 		resp.ErrorWithCode(c, http.StatusNotFound, CodeRelayModelNotFound, "model not found")
 		return
 	}
+	features := []dbmodel.ProtocolFeature{dbmodel.ProtocolFeatureResponsesState}
+	if compactReq.PreviousResponseID != nil {
+		features = append(features, dbmodel.ProtocolFeatureContinuation)
+	}
+	group, preview, plannedCanonical, err := op.CatalogPlanGroup(
+		c.Request.Context(),
+		requestModel,
+		dbmodel.ProtocolRouteRequirements{
+			InboundProtocol: dbmodel.ProtocolOpenAIResponses,
+			Features:        features,
+		},
+		group,
+	)
+	if err != nil {
+		resp.ErrorWithCode(c, http.StatusInternalServerError, CodeRelayNoAvailableChannel, "route planning failed")
+		return
+	}
+	if plannedCanonical != nil {
+		canonicalModel = plannedCanonical
+	}
+	protocolDecisions := routeDecisionMap(preview)
 
 	iter := balancer.NewIterator(group, apiKeyID, requestModel)
+	recordProtocolPlanningSkips(c.Request.Context(), iter, preview)
 	if iter.Len() == 0 {
 		resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no available channel")
 		return
 	}
 
-	metricsReq := &transformerModel.InternalLLMRequest{Model: requestModel, RawRequest: body}
+	metricsReq := &transformerModel.InternalLLMRequest{
+		Model:        requestModel,
+		RawRequest:   body,
+		RawAPIFormat: transformerModel.APIFormatOpenAIResponse,
+	}
 	metrics := NewRelayMetrics(apiKeyID, requestModel, body, metricsReq)
+	if canonicalModel != nil {
+		metrics.SetRouting(
+			*canonicalModel,
+			0,
+			dbmodel.ProtocolOpenAIResponses,
+			dbmodel.ProtocolOpenAIResponses,
+			string(dbmodel.ProtocolExecutionModePassthrough),
+		)
+	}
 
 	var lastErr error
 	var lastStatusCode int
@@ -124,6 +165,48 @@ func HandleResponsesCompact(c *gin.Context) {
 		if !supportsResponsesCompact(channel.Type) {
 			iter.Skip(channel.ID, 0, channel.Name, "channel type not compatible with responses compact")
 			continue
+		}
+		decision := protocolDecisions[relayRouteDecisionKey(channel.ID, item.ModelName)]
+		candidateID := decision.RouteCandidateID
+		if candidateID == 0 && canonicalModel != nil {
+			if candidate, candidateErr := op.CatalogCandidateFor(
+				c.Request.Context(),
+				canonicalModel.ID,
+				channel.ID,
+				item.ModelName,
+			); candidateErr == nil {
+				candidateID = candidate.ID
+			}
+		}
+		metrics.ClearEffectivePrice()
+		if canonicalModel != nil {
+			metrics.SetRouting(
+				*canonicalModel,
+				candidateID,
+				dbmodel.ProtocolOpenAIResponses,
+				dbmodel.ProtocolOpenAIResponses,
+				string(dbmodel.ProtocolExecutionModePassthrough),
+			)
+		} else {
+			metrics.RouteCandidateID = candidateID
+		}
+		if effectivePrice, priceErr := op.EffectivePriceForCandidate(
+			c.Request.Context(),
+			candidateID,
+			item.ModelName,
+		); priceErr == nil {
+			metrics.SetEffectivePrice(effectivePrice)
+		}
+		metrics.SetProtocolDecision(
+			dbmodel.ProtocolOpenAIResponses,
+			dbmodel.ProtocolOpenAIResponses,
+			dbmodel.ProtocolExecutionModePassthrough,
+			decision.ProtocolPolicy.Normalize(dbmodel.ProtocolPolicyAuto),
+			decision.AllowLossy,
+			decision.Warnings,
+		)
+		if len(decision.Warnings) > 0 {
+			c.Header("X-Octopus-Warning", strings.Join(decision.Warnings, "; "))
 		}
 
 		selectOpts := dbmodel.ChannelKeySelectOptions{
@@ -165,7 +248,20 @@ func HandleResponsesCompact(c *gin.Context) {
 				}
 			}
 
-			statusCode, retryAfter, attemptErr = forwardResponsesCompact(c, metrics, iter, channel, usedKey, body)
+			attemptBody, bodyErr := compactRequestBodyForModel(body, item.ModelName)
+			if bodyErr != nil {
+				attemptErr = bodyErr
+				break
+			}
+			statusCode, retryAfter, attemptErr = forwardResponsesCompact(
+				c,
+				metrics,
+				iter,
+				channel,
+				usedKey,
+				attemptBody,
+				item.ModelName,
+			)
 			if attemptErr == nil {
 				success = true
 				break
@@ -225,15 +321,24 @@ func supportsResponsesCompact(channelType outbound.OutboundType) bool {
 	}
 }
 
-func forwardResponsesCompact(c *gin.Context, metrics *RelayMetrics, iter *balancer.Iterator, channel *dbmodel.Channel, usedKey dbmodel.ChannelKey, requestBody []byte) (int, time.Duration, error) {
+func forwardResponsesCompact(
+	c *gin.Context,
+	metrics *RelayMetrics,
+	iter *balancer.Iterator,
+	channel *dbmodel.Channel,
+	usedKey dbmodel.ChannelKey,
+	requestBody []byte,
+	actualModel string,
+) (int, time.Duration, error) {
 	span := iter.StartAttempt(channel.ID, usedKey.ID, channel.Name)
+	span.SetRouteCandidateID(metrics.RouteCandidateID)
 	request, err := buildResponsesCompactRequest(c.Request.Context(), channel, usedKey.ChannelKey, requestBody)
 	if err != nil {
 		span.End(dbmodel.AttemptFailed, 0, err.Error())
 		return 0, 0, fmt.Errorf("failed to create compact request: %w", err)
 	}
 	metrics.SetTransportRequestPayload(requestBody, metrics.RequestModel)
-	copyProxyHeaders(c.Request.Header, channel, request.Header)
+	copyProxyHeaders(c.Request.Context(), c.Request.Header, channel, request.Header)
 
 	response, err := sendCompactRequest(channel, request)
 	if err != nil {
@@ -264,11 +369,25 @@ func forwardResponsesCompact(c *gin.Context, metrics *RelayMetrics, iter *balanc
 
 	var compactResp responsesCompactResponse
 	if err := json.Unmarshal(body, &compactResp); err == nil {
-		metrics.SetInternalResponse(compactResponseToInternalResponse(&compactResp), metrics.RequestModel)
+		metrics.SetInternalResponse(compactResponseToInternalResponse(&compactResp), actualModel)
 	}
 
+	span.SetUsage(metrics.AttemptUsageSnapshot())
 	span.End(dbmodel.AttemptSuccess, response.StatusCode, "")
 	return response.StatusCode, 0, nil
+}
+
+func compactRequestBodyForModel(requestBody []byte, modelName string) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to decode compact request: %w", err)
+	}
+	modelJSON, err := json.Marshal(strings.TrimSpace(modelName))
+	if err != nil {
+		return nil, err
+	}
+	payload["model"] = modelJSON
+	return json.Marshal(payload)
 }
 
 func buildResponsesCompactRequest(ctx context.Context, channel *dbmodel.Channel, key string, requestBody []byte) (*http.Request, error) {
@@ -288,22 +407,14 @@ func buildResponsesCompactRequest(ctx context.Context, channel *dbmodel.Channel,
 	return req, nil
 }
 
-func copyProxyHeaders(src http.Header, channel *dbmodel.Channel, dst http.Header) {
-	for key, values := range src {
-		lowerKey := strings.ToLower(key)
-		if hopByHopHeaders[lowerKey] || lowerKey == "content-type" {
-			continue
-		}
-		for _, value := range values {
-			dst.Add(key, value)
-		}
+func copyProxyHeaders(ctx context.Context, src http.Header, channel *dbmodel.Channel, dst http.Header) {
+	policy, err := op.ResolveHeaderPolicy(ctx, channel.ID, 0, 0)
+	if err != nil {
+		log.Warnf("resolve compact header policy failed (channel=%d): %v", channel.ID, err)
+		policy = op.HeaderPolicyFailureFallback()
 	}
-	for _, header := range channel.CustomHeader {
-		if strings.EqualFold(header.HeaderKey, "Content-Type") {
-			continue
-		}
-		dst.Set(header.HeaderKey, header.HeaderValue)
-	}
+	op.ApplyHeaderPolicy(dst, src, channel.CustomHeader, policy)
+	dst.Set("Content-Type", "application/json")
 	// 防止 Go 默认 User-Agent 泄露到上游
 	if dst.Get("User-Agent") == "" {
 		dst.Set("User-Agent", "")

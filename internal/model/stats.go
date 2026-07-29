@@ -1,13 +1,15 @@
 package model
 
 type StatsMetrics struct {
-	InputToken     int64   `json:"input_token" gorm:"bigint"`
-	OutputToken    int64   `json:"output_token" gorm:"bigint"`
-	InputCost      float64 `json:"input_cost" gorm:"type:real"`
-	OutputCost     float64 `json:"output_cost" gorm:"type:real"`
-	WaitTime       int64   `json:"wait_time" gorm:"bigint"`
-	RequestSuccess int64   `json:"request_success" gorm:"bigint"`
-	RequestFailed  int64   `json:"request_failed" gorm:"bigint"`
+	InputToken           int64   `json:"input_token" gorm:"bigint"`
+	OutputToken          int64   `json:"output_token" gorm:"bigint"`
+	InputCost            float64 `json:"input_cost" gorm:"type:real"`
+	OutputCost           float64 `json:"output_cost" gorm:"type:real"`
+	WaitTime             int64   `json:"wait_time" gorm:"bigint"`
+	RequestSuccess       int64   `json:"request_success" gorm:"bigint"`
+	RequestFailed        int64   `json:"request_failed" gorm:"bigint"`
+	RequestCanceled      int64   `json:"request_canceled" gorm:"bigint"`
+	RequestIndeterminate int64   `json:"request_indeterminate" gorm:"bigint"`
 }
 
 type StatsTotal struct {
@@ -64,4 +66,6 @@ func (s *StatsMetrics) Add(delta StatsMetrics) {
 	s.WaitTime += delta.WaitTime
 	s.RequestSuccess += delta.RequestSuccess
 	s.RequestFailed += delta.RequestFailed
+	s.RequestCanceled += delta.RequestCanceled
+	s.RequestIndeterminate += delta.RequestIndeterminate
 }

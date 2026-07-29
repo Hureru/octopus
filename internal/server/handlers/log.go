@@ -28,6 +28,14 @@ func init() {
 				Handle(getLogSiteActionTargets),
 		).
 		AddRoute(
+			router.NewRoute("/repair/preview", http.MethodPost).
+				Handle(previewRelayLogRepair),
+		).
+		AddRoute(
+			router.NewRoute("/repair/execute", http.MethodPost).
+				Handle(executeRelayLogRepair),
+		).
+		AddRoute(
 			router.NewRoute("/:id", http.MethodGet).
 				Handle(getLog),
 		).
@@ -45,6 +53,41 @@ func init() {
 			router.NewRoute("/stream", http.MethodGet).
 				Handle(streamLog),
 		)
+}
+
+func previewRelayLogRepair(c *gin.Context) {
+	var filter op.RelayLogRepairFilter
+	if err := c.ShouldBindJSON(&filter); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	result, err := op.RelayLogRepairPreviewRun(c.Request.Context(), filter)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, result)
+}
+
+func executeRelayLogRepair(c *gin.Context) {
+	var request struct {
+		op.RelayLogRepairFilter
+		Confirm bool `json:"confirm"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	if !request.Confirm {
+		resp.Error(c, http.StatusBadRequest, "confirm must be true")
+		return
+	}
+	result, err := op.RelayLogRepairExecute(c.Request.Context(), request.RelayLogRepairFilter)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, result)
 }
 
 func listLog(c *gin.Context) {
@@ -112,7 +155,12 @@ func listLog(c *gin.Context) {
 		endTime = &et
 	}
 
-	if status != op.RelayLogStatusAll && status != op.RelayLogStatusSuccess && status != op.RelayLogStatusError {
+	if status != op.RelayLogStatusAll &&
+		status != op.RelayLogStatusSuccess &&
+		status != op.RelayLogStatusFailed &&
+		status != op.RelayLogStatusError &&
+		status != op.RelayLogStatusClientCanceled &&
+		status != op.RelayLogStatusIndeterminate {
 		resp.Error(c, http.StatusBadRequest, "invalid status")
 		return
 	}
@@ -148,23 +196,44 @@ func listLog(c *gin.Context) {
 			channelIDs = append(channelIDs, id)
 		}
 	}
+	siteIDs, err := parseUsageIntList(c.Query("site_ids"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	siteAccountIDs, err := parseUsageIntList(c.Query("site_account_ids"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	apiKeyIDs, err := parseUsageIntList(c.Query("api_key_ids"))
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	result, err := op.RelayLogListWithFilter(c.Request.Context(), op.RelayLogListFilter{
-		StartTime:      startTime,
-		EndTime:        endTime,
-		ChannelIDs:     channelIDs,
-		Status:         status,
-		Keyword:        keyword,
-		KeywordScope:   keywordScope,
-		KeywordMode:    keywordMode,
-		Page:           page,
-		PageSize:       pageSize,
-		IncludeContent: includeContent,
-		WithTotal:      withTotal,
-		Limit:          limit,
-		BeforeTime:     beforeTime,
-		BeforeID:       beforeID,
-		Pagination:     pagination,
+		StartTime:       startTime,
+		EndTime:         endTime,
+		ChannelIDs:      channelIDs,
+		SiteIDs:         siteIDs,
+		SiteAccountIDs:  siteAccountIDs,
+		APIKeyIDs:       apiKeyIDs,
+		RequestModels:   parseUsageStringList(c.Query("request_models")),
+		ActualModels:    parseUsageStringList(c.Query("actual_models")),
+		CanonicalModels: parseUsageStringList(c.Query("canonical_models")),
+		Status:          status,
+		Keyword:         keyword,
+		KeywordScope:    keywordScope,
+		KeywordMode:     keywordMode,
+		Page:            page,
+		PageSize:        pageSize,
+		IncludeContent:  includeContent,
+		WithTotal:       withTotal,
+		Limit:           limit,
+		BeforeTime:      beforeTime,
+		BeforeID:        beforeID,
+		Pagination:      pagination,
 	})
 	if err != nil {
 		var fe *op.RelayLogFilterError

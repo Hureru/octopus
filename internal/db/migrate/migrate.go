@@ -37,19 +37,11 @@ func RegisterAfterAutoMigration(m Migration) {
 }
 
 func BeforeAutoMigrate(db *gorm.DB) error {
-	if err := runMigrationsWithRecord(db, beforeAutoMigrations); err != nil {
-		return err
-	}
-	beforeAutoMigrations = nil
-	return nil
+	return runMigrationsWithRecord(db, beforeAutoMigrations)
 }
 
 func AfterAutoMigrate(db *gorm.DB) error {
-	if err := runMigrationsWithRecord(db, afterAutoMigrations); err != nil {
-		return err
-	}
-	afterAutoMigrations = nil
-	return nil
+	return runMigrationsWithRecord(db, afterAutoMigrations)
 }
 
 func runMigrationsWithRecord(db *gorm.DB, migrations []Migration) error {

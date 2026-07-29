@@ -417,9 +417,20 @@ func newWSRelayRequest(
 	preferredSticky *balancer.SessionEntry,
 	rawBody []byte,
 ) (*relayRequest, *dbmodel.Group, error) {
-	group, err := op.GroupGetEnabledMap(requestModel, ctx)
+	routingModel := requestModel
+	if canonical, ok := op.CatalogResolveRequest(requestModel); ok {
+		routingModel = canonical.Name
+	}
+	group, err := op.GroupGetEnabledMap(routingModel, ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("model not found")
+	}
+	requirements := op.ProtocolRequirementsFromRequest(executionRequest)
+	requirements.InboundProtocol = dbmodel.ProtocolOpenAIResponses
+	requirements.Features = append(requirements.Features, dbmodel.ProtocolFeatureWebSocket)
+	group, preview, canonical, err := op.CatalogPlanGroup(ctx, requestModel, requirements, group)
+	if err != nil {
+		return nil, nil, fmt.Errorf("route planning failed: %w", err)
 	}
 
 	iter := balancer.NewIteratorWithPreference(group, apiKeyID, requestModel, preferredSticky)
@@ -427,18 +438,31 @@ func newWSRelayRequest(
 		return nil, nil, fmt.Errorf("no available channel")
 	}
 
+	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest)
+	metrics.SetProtocolDecision(
+		dbmodel.ProtocolOpenAIResponses,
+		dbmodel.ProtocolUnknown,
+		"",
+		dbmodel.ProtocolPolicyAuto,
+		false,
+		nil,
+	)
+	if canonical != nil {
+		metrics.SetRouting(*canonical, 0, dbmodel.ProtocolOpenAIResponses, dbmodel.ProtocolUnknown, "")
+	}
 	return &relayRequest{
-		c:               nil,
-		ctx:             ctx,
-		inAdapter:       inAdapter,
-		internalRequest: executionRequest,
-		metrics:         NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest),
-		apiKeyID:        apiKeyID,
-		requestModel:    requestModel,
-		groupID:         group.ID,
-		groupSessionTTL: group.SessionKeepTime,
-		iter:            iter,
-		streamWriter:    NewWSStreamWriter(ctx, conn),
+		c:                 nil,
+		ctx:               ctx,
+		inAdapter:         inAdapter,
+		internalRequest:   executionRequest,
+		metrics:           metrics,
+		apiKeyID:          apiKeyID,
+		requestModel:      requestModel,
+		groupID:           group.ID,
+		groupSessionTTL:   group.SessionKeepTime,
+		iter:              iter,
+		protocolDecisions: routeDecisionMap(preview),
+		streamWriter:      NewWSStreamWriter(ctx, conn),
 	}, &group, nil
 }
 
@@ -518,6 +542,33 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		}
 
 		req.internalRequest.Model = item.ModelName
+		decision := req.protocolDecisions[relayRouteDecisionKey(channel.ID, item.ModelName)]
+		outboundProtocol := decision.OutboundProtocol
+		if outboundProtocol == "" {
+			outboundProtocol = op.ProtocolForOutboundType(channel.Type)
+		}
+		protocolMode := decision.ProtocolMode
+		if protocolMode == "" {
+			protocolMode = dbmodel.ProtocolExecutionModeTransform
+		}
+		protocolPolicy := decision.ProtocolPolicy.Normalize(dbmodel.ProtocolPolicyAuto)
+		req.metrics.ClearEffectivePrice()
+		req.metrics.RouteCandidateID = decision.RouteCandidateID
+		if effectivePrice, priceErr := op.EffectivePriceForCandidate(
+			relayCtx,
+			decision.RouteCandidateID,
+			item.ModelName,
+		); priceErr == nil {
+			req.metrics.SetEffectivePrice(effectivePrice)
+		}
+		req.metrics.SetProtocolDecision(
+			dbmodel.ProtocolOpenAIResponses,
+			outboundProtocol,
+			protocolMode,
+			protocolPolicy,
+			decision.AllowLossy,
+			decision.Warnings,
+		)
 
 		selectOpts := dbmodel.ChannelKeySelectOptions{
 			ExcludeKeyIDs:  make(map[int]struct{}),
@@ -571,6 +622,10 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 				channel:              channel,
 				usedKey:              usedKey,
 				firstTokenTimeOutSec: group.FirstTokenTimeOut,
+				protocolMode:         protocolMode,
+				protocolPolicy:       protocolPolicy,
+				protocolAllowLossy:   decision.AllowLossy,
+				protocolWarnings:     append([]string(nil), decision.Warnings...),
 			}
 
 			result = ra.attempt()
@@ -579,7 +634,8 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			}
 		}
 
-		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
+		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation &&
+			result.Attribution == dbmodel.AttemptAttributionUpstream {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
 			if replayExact && result.StatusCode == http.StatusServiceUnavailable && isNoAvailableAccountError(relayErrorMessage(result.Err)) {
 				failureKind = balancer.FailureHard

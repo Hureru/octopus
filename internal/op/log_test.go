@@ -10,8 +10,10 @@ import (
 )
 
 func resetRelayLogStateForTest() {
+	usageFactsResetForTest()
 	relayLogPendingLock.Lock()
 	relayLogPending = make([]model.RelayLog, 0, relayLogBatchSize)
+	relayLogUsagePending = make(map[int64]usagePendingRecord)
 	relayLogPendingBytes = 0
 	relayLogPendingLock.Unlock()
 
@@ -19,8 +21,6 @@ func resetRelayLogStateForTest() {
 	relayLogRecent = make([]model.RelayLog, 0, relayLogRecentMaxSize)
 	relayLogRecentLock.Unlock()
 
-	relayLogDroppedTotal.Store(0)
-	relayLogLastDropWarn.Store(0)
 	for {
 		select {
 		case <-relayLogFlushSignal:
@@ -220,5 +220,56 @@ func TestRelayLogFlushPendingPersistsQueuedLogs(t *testing.T) {
 	}
 	if dbCount != 3 {
 		t.Fatalf("expected 3 persisted logs, got %d", dbCount)
+	}
+}
+
+func TestRelayLogAndUsageFactsCommitAtomically(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	if err := settingRefreshCache(ctx); err != nil {
+		t.Fatalf("settingRefreshCache failed: %v", err)
+	}
+	resetRelayLogStateForTest()
+
+	if err := RelayLogAdd(ctx, model.RelayLog{
+		ID:               9901,
+		Time:             time.Now().Unix(),
+		RequestModelName: "atomic-model",
+		Outcome:          model.RequestOutcomeSuccess,
+		Success:          true,
+	}); err != nil {
+		t.Fatalf("RelayLogAdd failed: %v", err)
+	}
+	if err := dbpkg.GetDB().Exec(`
+		CREATE TRIGGER fail_usage_fact_insert
+		BEFORE INSERT ON usage_request_facts
+		BEGIN
+			SELECT RAISE(ABORT, 'forced usage failure');
+		END
+	`).Error; err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	if err := RelayLogFlushPending(ctx); err == nil {
+		t.Fatal("expected atomic flush to fail")
+	}
+
+	var logCount, factCount int64
+	if err := dbpkg.GetDB().Model(&model.RelayLog{}).Where("id = ?", 9901).Count(&logCount).Error; err != nil {
+		t.Fatalf("count relay logs: %v", err)
+	}
+	if err := dbpkg.GetDB().Model(&model.UsageRequestFact{}).Where("relay_log_id = ?", 9901).Count(&factCount).Error; err != nil {
+		t.Fatalf("count usage facts: %v", err)
+	}
+	if logCount != 0 || factCount != 0 {
+		t.Fatalf("partial commit detected: logs=%d facts=%d", logCount, factCount)
+	}
+	if RelayLogPendingLen() != 1 {
+		t.Fatalf("failed batch was removed from queue")
+	}
+
+	if err := dbpkg.GetDB().Exec("DROP TRIGGER fail_usage_fact_insert").Error; err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	if err := RelayLogFlushPending(ctx); err != nil {
+		t.Fatalf("retry atomic flush: %v", err)
 	}
 }

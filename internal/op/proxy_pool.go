@@ -50,6 +50,11 @@ func ProxyConfigurationCreate(item *model.ProxyConfiguration, ctx context.Contex
 	if err := item.Validate(); err != nil {
 		return err
 	}
+	if item.ClashControllerID != nil {
+		if _, err := ClashControllerGet(ctx, *item.ClashControllerID); err != nil {
+			return err
+		}
+	}
 	if err := db.GetDB().WithContext(ctx).Create(item).Error; err != nil {
 		return err
 	}
@@ -76,6 +81,10 @@ func ProxyConfigurationUpdate(req *model.ProxyConfigurationUpdateRequest, ctx co
 		merged.URL = *req.URL
 		selectFields = append(selectFields, "url")
 	}
+	if req.ClashControllerIDSet {
+		merged.ClashControllerID = req.ClashControllerID
+		selectFields = append(selectFields, "clash_controller_id")
+	}
 	if req.Enabled != nil {
 		merged.Enabled = *req.Enabled
 		selectFields = append(selectFields, "enabled")
@@ -94,6 +103,14 @@ func ProxyConfigurationUpdate(req *model.ProxyConfigurationUpdateRequest, ctx co
 	}
 	if req.URL != nil {
 		updates.URL = merged.URL
+	}
+	if req.ClashControllerIDSet {
+		if merged.ClashControllerID != nil {
+			if _, err := ClashControllerGet(ctx, *merged.ClashControllerID); err != nil {
+				return nil, err
+			}
+		}
+		updates.ClashControllerID = merged.ClashControllerID
 	}
 	if req.Enabled != nil {
 		updates.Enabled = merged.Enabled

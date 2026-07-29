@@ -20,7 +20,7 @@ type sqlCaptureLogger struct {
 	statements []string
 }
 
-func (l *sqlCaptureLogger) LogMode(logger.LogLevel) logger.Interface { return l }
+func (l *sqlCaptureLogger) LogMode(logger.LogLevel) logger.Interface      { return l }
 func (l *sqlCaptureLogger) Info(context.Context, string, ...interface{})  {}
 func (l *sqlCaptureLogger) Warn(context.Context, string, ...interface{})  {}
 func (l *sqlCaptureLogger) Error(context.Context, string, ...interface{}) {}
@@ -91,16 +91,41 @@ func TestEnsureRelayLogColumnsSQLite_AddsMissingWithoutRecreate(t *testing.T) {
 		t.Fatalf("ensureRelayLogColumnsSQLite failed: %v", err)
 	}
 
-	// success 列被加上。
-	var name string
-	if err := gormDB.Raw(
-		"SELECT name FROM pragma_table_info('relay_logs') WHERE name = ? LIMIT 1",
+	// Current outcome, routing, pricing, and repair fields are all added through
+	// the same safe ADD COLUMN path.
+	for _, column := range []string{
 		"success",
-	).Scan(&name).Error; err != nil {
-		t.Fatalf("read columns: %v", err)
-	}
-	if name != "success" {
-		t.Fatalf("success column not added by ensureRelayLogColumnsSQLite")
+		"outcome",
+		"transport_termination",
+		"completion_evidence",
+		"canonical_model_name",
+		"route_candidate_id",
+		"protocol_policy",
+		"protocol_allow_lossy",
+		"protocol_warnings",
+		"protocol_failure_stage",
+		"price_quote_id",
+		"price_source",
+		"price_unit",
+		"price_per_request",
+		"price_group_multiplier",
+		"price_observed_at",
+		"price_stale",
+		"price_convertible",
+		"price_original_cost",
+		"price_match_reason",
+		"repair_batch_id",
+	} {
+		var name string
+		if err := gormDB.Raw(
+			"SELECT name FROM pragma_table_info('relay_logs') WHERE name = ? LIMIT 1",
+			column,
+		).Scan(&name).Error; err != nil {
+			t.Fatalf("read column %s: %v", column, err)
+		}
+		if name != column {
+			t.Fatalf("%s column not added by ensureRelayLogColumnsSQLite", column)
+		}
 	}
 
 	// 没发出过 recreateTable 特征 SQL。

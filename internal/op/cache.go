@@ -32,6 +32,9 @@ func InitCache() error {
 	if err := statsRefreshCache(ctx); err != nil {
 		return fmt.Errorf("stats refresh cache error: %v", err)
 	}
+	if _, err := CatalogSync(ctx); err != nil {
+		return fmt.Errorf("model catalog sync error: %v", err)
+	}
 	return nil
 }
 

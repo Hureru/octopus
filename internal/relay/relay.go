@@ -64,24 +64,73 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	if err != nil {
 		return
 	}
+	requestModel := internalRequest.Model
+	routingModel := requestModel
+	var canonicalModel *dbmodel.CanonicalModel
+	if canonical, ok := op.CatalogResolveRequest(requestModel); ok {
+		routingModel = canonical.Name
+		canonicalModel = &canonical
+	}
 	supportedModels := c.GetString("supported_models")
 	if supportedModels != "" {
 		supportedModelsArray := strings.Split(supportedModels, ",")
-		if !slices.Contains(supportedModelsArray, internalRequest.Model) {
+		if !slices.Contains(supportedModelsArray, requestModel) && !slices.Contains(supportedModelsArray, routingModel) {
 			resp.ErrorWithCode(c, http.StatusBadRequest, CodeRelayModelNotSupported, "model not supported")
 			return
 		}
 	}
 
-	requestModel := internalRequest.Model
 	apiKeyID := c.GetInt("api_key_id")
+	inboundProtocol := inboundProtocolName(inboundType)
+	protocolRequirements := op.ProtocolRequirementsFromRequest(internalRequest)
+	if protocolRequirements.InboundProtocol == dbmodel.ProtocolUnknown {
+		protocolRequirements.InboundProtocol = inboundProtocol
+	}
 
 	// 获取通道分组
-	group, err := op.GroupGetEnabledMap(requestModel, c.Request.Context())
+	group, err := op.GroupGetEnabledMap(routingModel, c.Request.Context())
 	if err != nil {
 		resp.ErrorWithCode(c, http.StatusNotFound, CodeRelayModelNotFound, "model not found")
 		return
 	}
+	group, routePreview, plannedCanonical, err := op.CatalogPlanGroup(
+		c.Request.Context(),
+		requestModel,
+		protocolRequirements,
+		group,
+	)
+	if err != nil {
+		resp.ErrorWithCode(c, http.StatusInternalServerError, CodeRelayNoAvailableChannel, "route planning failed")
+		return
+	}
+	if plannedCanonical != nil {
+		canonicalModel = plannedCanonical
+	}
+	responsesPassthroughRequired := internalRequest.HasOpenAIResponsesPassthrough()
+	if len(group.Items) == 0 {
+		routeErr := fmt.Errorf("no protocol-compatible channel")
+		metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, internalRequest)
+		if canonicalModel != nil {
+			metrics.SetRouting(*canonicalModel, 0, inboundProtocol, dbmodel.ProtocolUnknown, "")
+		}
+		metrics.SetProtocolDecision(
+			inboundProtocol,
+			dbmodel.ProtocolUnknown,
+			"",
+			dbmodel.ProtocolPolicyAuto,
+			false,
+			nil,
+		)
+		metrics.SetProtocolFailureStage(dbmodel.ProtocolFailureStageRoutePlanning)
+		metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeFailed, routeErr, nil, false)
+		if responsesPassthroughRequired {
+			resp.ErrorWithCode(c, http.StatusBadRequest, CodeRelayNoAvailableChannel, "当前请求包含 OpenAI Responses 原生工具，仅支持 OpenAI Responses 通道直通")
+		} else {
+			resp.ErrorWithCode(c, http.StatusServiceUnavailable, CodeRelayNoAvailableChannel, "no protocol-compatible channel")
+		}
+		return
+	}
+	protocolDecisions := routeDecisionMap(routePreview)
 
 	// === HTTP Replay 机制 ===
 	// 当 HTTP 请求携带 previous_response_id 时，尝试从本地加载上一次成功的 replay 状态，
@@ -136,27 +185,29 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 	// 初始化 Metrics
 	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, internalRequest)
+	if canonicalModel != nil {
+		metrics.SetRouting(*canonicalModel, 0, inboundProtocol, dbmodel.ProtocolUnknown, "")
+	}
+	metrics.SetProtocolDecision(inboundProtocol, dbmodel.ProtocolUnknown, "", dbmodel.ProtocolPolicyAuto, false, nil)
 	// 如果触发了 HTTP replay，记录 ws_mode=replay 和 ws_recovery=replay
 	if responsesReplayState != nil {
 		metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 		metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
 	}
-	responsesPassthroughRequired := internalRequest.HasOpenAIResponsesPassthrough()
-	responsesPassthroughCapableFound := false
-
 	// 请求级上下文
 	req := &relayRequest{
-		c:               c,
-		inAdapter:       inAdapter,
-		internalRequest: internalRequest,
-		metrics:         metrics,
-		apiKeyID:        apiKeyID,
-		requestModel:    requestModel,
-		groupID:         group.ID,
-		groupSessionTTL: group.SessionKeepTime,
-		iter:            iter,
-		rawBody:         rawBody,
-		heartbeat:       hb,
+		c:                 c,
+		inAdapter:         inAdapter,
+		internalRequest:   internalRequest,
+		metrics:           metrics,
+		apiKeyID:          apiKeyID,
+		requestModel:      requestModel,
+		groupID:           group.ID,
+		groupSessionTTL:   group.SessionKeepTime,
+		iter:              iter,
+		protocolDecisions: protocolDecisions,
+		rawBody:           rawBody,
+		heartbeat:         hb,
 	}
 
 	var lastErr error
@@ -175,7 +226,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		select {
 		case <-c.Request.Context().Done():
 			log.Debugf("request context canceled, stopping retry")
-			metrics.SaveWithChannelStats(c.Request.Context(), false, context.Canceled, iter.Attempts(), false)
+			metrics.TransportTermination = dbmodel.TransportTerminationClientCanceled
+			metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeClientCanceled, context.Canceled, iter.Attempts(), false)
 			return
 		default:
 		}
@@ -194,15 +246,6 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
 			continue
 		}
-		if responsesPassthroughRequired {
-			if channel.Type == outbound.OutboundTypeOpenAIResponse {
-				responsesPassthroughCapableFound = true
-			} else {
-				iter.Skip(channel.ID, 0, channel.Name, "openai responses passthrough required")
-				continue
-			}
-		}
-
 		// 出站适配器
 		outAdapter := outbound.Get(channel.Type)
 		if outAdapter == nil {
@@ -222,6 +265,50 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 		// 设置实际模型
 		internalRequest.Model = item.ModelName
+
+		decision := protocolDecisions[relayRouteDecisionKey(channel.ID, item.ModelName)]
+		candidateID := decision.RouteCandidateID
+		metrics.ClearEffectivePrice()
+		if canonicalModel != nil {
+			if candidateID == 0 {
+				if candidate, candidateErr := op.CatalogCandidateFor(
+					c.Request.Context(),
+					canonicalModel.ID,
+					channel.ID,
+					item.ModelName,
+				); candidateErr == nil {
+					candidateID = candidate.ID
+				}
+			}
+			metrics.SetRouting(*canonicalModel, candidateID, inboundProtocol, decision.OutboundProtocol, string(decision.ProtocolMode))
+			if effectivePrice, priceErr := op.EffectivePriceForCandidate(c.Request.Context(), candidateID, item.ModelName); priceErr == nil {
+				metrics.SetEffectivePrice(effectivePrice)
+			}
+		}
+		outboundProtocol := decision.OutboundProtocol
+		if outboundProtocol == "" {
+			outboundProtocol = op.ProtocolForOutboundType(channel.Type)
+		}
+		protocolMode := decision.ProtocolMode
+		if protocolMode == "" {
+			protocolMode = dbmodel.ProtocolExecutionModeTransform
+			if passthrough, ok := outAdapter.(model.PassthroughCapable); ok &&
+				passthrough.CanPassthrough(internalRequest.RawAPIFormat) {
+				protocolMode = dbmodel.ProtocolExecutionModePassthrough
+			}
+		}
+		protocolPolicy := decision.ProtocolPolicy.Normalize(dbmodel.ProtocolPolicyAuto)
+		metrics.SetProtocolDecision(
+			inboundProtocol,
+			outboundProtocol,
+			protocolMode,
+			protocolPolicy,
+			decision.AllowLossy,
+			decision.Warnings,
+		)
+		if len(decision.Warnings) > 0 {
+			c.Header("X-Octopus-Warning", strings.Join(decision.Warnings, "; "))
+		}
 
 		log.Debugf("request model %s, mode: %d, forwarding to channel: %s model: %s (attempt %d/%d, sticky=%t)",
 			requestModel, group.Mode, channel.Name, item.ModelName,
@@ -261,7 +348,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				select {
 				case <-c.Request.Context().Done():
 					log.Debugf("request context canceled during retry backoff")
-					metrics.SaveWithChannelStats(c.Request.Context(), false, context.Canceled, iter.Attempts(), false)
+					metrics.TransportTermination = dbmodel.TransportTerminationClientCanceled
+					metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeClientCanceled, context.Canceled, iter.Attempts(), false)
 					return
 				case <-time.After(delay):
 				}
@@ -277,6 +365,10 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				channel:              channel,
 				usedKey:              usedKey,
 				firstTokenTimeOutSec: group.FirstTokenTimeOut,
+				protocolMode:         protocolMode,
+				protocolPolicy:       protocolPolicy,
+				protocolAllowLossy:   decision.AllowLossy,
+				protocolWarnings:     append([]string(nil), decision.Warnings...),
 			}
 
 			result = ra.attempt()
@@ -286,7 +378,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		}
 
 		// 同通道重试耗尽后记录熔断器失败
-		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
+		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation &&
+			result.Attribution == dbmodel.AttemptAttributionUpstream {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
 			balancer.RecordFailure(channel.ID, usedKey.ID, internalRequest.Model, failureKind)
 			outlierwindow.Report(channel.ID, false, result.StatusCode, time.Now())
@@ -296,13 +389,16 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		}
 
 		if result.Success {
-			outlierwindow.Report(channel.ID, true, result.StatusCode, time.Now())
+			if result.Outcome == dbmodel.RequestOutcomeSuccess {
+				outlierwindow.Report(channel.ID, true, result.StatusCode, time.Now())
+			}
 
 			// === HTTP Replay 状态保存 ===
 			// 成功后，如果是 OpenAI Responses HTTP 请求，保存 replay 状态供后续续接
 			// 注意：exact replay 请求成功后也需要保存新状态，否则只能续接一轮
 			// 优先使用 metrics.InternalResponse（streaming 安全），避免二次 GetInternalResponse 消耗聚合器
-			if inboundType == inbound.InboundTypeOpenAIResponse &&
+			if result.Outcome == dbmodel.RequestOutcomeSuccess &&
+				inboundType == inbound.InboundTypeOpenAIResponse &&
 				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 				internalResponse := metrics.InternalResponse
 				if internalResponse == nil {
@@ -339,15 +435,21 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				}
 			}
 
-			metrics.SaveWithChannelStats(c.Request.Context(), true, nil, iter.Attempts(), false)
+			metrics.SaveOutcomeWithChannelStats(
+				c.Request.Context(),
+				result.Outcome,
+				nil,
+				iter.Attempts(),
+				false,
+			)
 			return
 		}
 		if result.Canceled {
-			metrics.SaveWithChannelStats(c.Request.Context(), false, result.Err, iter.Attempts(), false)
+			metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeClientCanceled, result.Err, iter.Attempts(), false)
 			return
 		}
 		if result.ResetConversation {
-			metrics.SaveWithChannelStats(c.Request.Context(), false, result.Err, iter.Attempts(), false)
+			metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeFailed, result.Err, iter.Attempts(), false)
 			if publicErr, ok := classifyWSPublicError(result.Err, result.StatusCode); ok {
 				hb.FlushOrError(c, publicErr.Status, publicErr.Message)
 			} else {
@@ -356,7 +458,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			return
 		}
 		if result.Written {
-			metrics.SaveWithChannelStats(c.Request.Context(), false, result.Err, iter.Attempts(), false)
+			metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeFailed, result.Err, iter.Attempts(), false)
 			return
 		}
 		lastErr = result.Err
@@ -364,13 +466,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	}
 
 	// 所有候选通道均失败
-	if responsesPassthroughRequired && !responsesPassthroughCapableFound {
-		err := fmt.Errorf("openai responses native tools require an openai responses channel")
-		metrics.SaveWithChannelStats(c.Request.Context(), false, err, iter.Attempts(), false)
-		hb.FlushOrError(c, http.StatusBadRequest, "当前请求包含 OpenAI Responses 原生工具，仅支持 OpenAI Responses 通道直通")
-		return
-	}
-	metrics.SaveWithChannelStats(c.Request.Context(), false, lastErr, iter.Attempts(), false)
+	metrics.SaveOutcomeWithChannelStats(c.Request.Context(), dbmodel.RequestOutcomeFailed, lastErr, iter.Attempts(), false)
 
 	// 透传 429/503 状态码和 Retry-After 头，让客户端 SDK 的重试机制接管
 	if isPassthroughStatus(lastResult.StatusCode) {
@@ -397,9 +493,11 @@ func circuitFailureKind(retryEnabled bool, statusCode int) balancer.FailureKind 
 // attempt 统一管理一次通道尝试的完整生命周期
 func (ra *relayAttempt) attempt() attemptResult {
 	span := ra.iter.StartAttempt(ra.channel.ID, ra.usedKey.ID, ra.channel.Name)
+	span.SetRouteCandidateID(ra.metrics.RouteCandidateID)
 
 	// 转发请求
 	statusCode, fwdErr := ra.forward()
+	termination, evidence, terminalEvent := ra.captureCompletion(statusCode, fwdErr)
 
 	// 更新 channel key 状态
 	ra.usedKey.StatusCode = statusCode
@@ -409,23 +507,40 @@ func (ra *relayAttempt) attempt() attemptResult {
 		// ====== 成功 ======
 		// Passthrough handlers collect response at stream end via PassthroughConfig.CollectMetrics
 		ra.collectResponse()
+		span.SetUsage(ra.metrics.AttemptUsageSnapshot())
 		ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
 		op.ChannelKeyUpdate(ra.usedKey)
+		outcome := requestOutcomeForTerminalEvent(terminalEvent)
 
-		span.End(dbmodel.AttemptSuccess, statusCode, "")
+		span.EndDetailed(
+			dbmodel.AttemptSuccess,
+			statusCode,
+			"",
+			outcome,
+			dbmodel.AttemptAttributionNone,
+			evidence,
+		)
 
 		// Channel 维度统计
-		op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
-			WaitTime:       span.Duration().Milliseconds(),
-			RequestSuccess: 1,
-		})
+		channelStats := dbmodel.StatsMetrics{WaitTime: span.Duration().Milliseconds()}
+		if outcome == dbmodel.RequestOutcomeSuccess {
+			channelStats.RequestSuccess = 1
+			// 熔断器：只有完整成功才恢复健康。
+			balancer.RecordSuccess(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
+			// 会话保持：只绑定完整成功的会话。
+			balancer.SetSticky(ra.apiKeyID, ra.requestModel, ra.channel.ID, ra.usedKey.ID)
+		}
+		op.StatsChannelUpdate(ra.channel.ID, channelStats)
 
-		// 熔断器：记录成功
-		balancer.RecordSuccess(ra.channel.ID, ra.usedKey.ID, ra.internalRequest.Model)
-		// 会话保持：更新粘性记录
-		balancer.SetSticky(ra.apiKeyID, ra.requestModel, ra.channel.ID, ra.usedKey.ID)
-
-		return attemptResult{Success: true}
+		return attemptResult{
+			Success:              true,
+			Outcome:              outcome,
+			Attribution:          dbmodel.AttemptAttributionNone,
+			TransportTermination: termination,
+			CompletionEvidence:   evidence,
+			TerminalEvent:        terminalEvent,
+			StatusCode:           statusCode,
+		}
 	}
 
 	// ====== 失败 ======
@@ -434,42 +549,130 @@ func (ra *relayAttempt) attempt() attemptResult {
 		if written {
 			ra.collectResponse()
 		}
+		span.SetUsage(ra.metrics.AttemptUsageSnapshot())
 		op.ChannelKeyUpdate(ra.usedKey)
-		span.End(dbmodel.AttemptFailed, statusCode, fwdErr.Error())
+		span.EndDetailed(
+			dbmodel.AttemptCanceled,
+			statusCode,
+			fwdErr.Error(),
+			dbmodel.RequestOutcomeClientCanceled,
+			dbmodel.AttemptAttributionClient,
+			evidence,
+		)
 		return attemptResult{
-			Success:    false,
-			Written:    written,
-			Canceled:   true,
-			Err:        fwdErr,
-			StatusCode: statusCode,
+			Success:              false,
+			Written:              written,
+			Canceled:             true,
+			Err:                  fwdErr,
+			StatusCode:           statusCode,
+			Outcome:              dbmodel.RequestOutcomeClientCanceled,
+			Attribution:          dbmodel.AttemptAttributionClient,
+			TransportTermination: termination,
+			CompletionEvidence:   evidence,
+			TerminalEvent:        terminalEvent,
 		}
 	}
 
 	op.ChannelKeyUpdate(ra.usedKey)
-	span.End(dbmodel.AttemptFailed, statusCode, fwdErr.Error())
-
-	// Channel 维度统计
-	op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
-		WaitTime:      span.Duration().Milliseconds(),
-		RequestFailed: 1,
-	})
-
-	// 注意：熔断器记录已移至 Handler() 的同通道重试循环外，
-	// 避免重试期间过早触发熔断
-
+	attribution := dbmodel.AttemptAttributionUpstream
+	if ra.protocolFailureStage != "" {
+		attribution = dbmodel.AttemptAttributionRelay
+		ra.metrics.SetProtocolFailureStage(ra.protocolFailureStage)
+	}
 	written := ra.streamPayloadWritten.Load()
 	if written {
 		ra.collectResponse()
 	}
+	span.SetUsage(ra.metrics.AttemptUsageSnapshot())
+	span.EndDetailed(
+		dbmodel.AttemptFailed,
+		statusCode,
+		fwdErr.Error(),
+		dbmodel.RequestOutcomeFailed,
+		attribution,
+		evidence,
+	)
+
+	// Channel 维度统计
+	if attribution == dbmodel.AttemptAttributionUpstream {
+		op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
+			WaitTime:      span.Duration().Milliseconds(),
+			RequestFailed: 1,
+		})
+	}
+
+	// 注意：熔断器记录已移至 Handler() 的同通道重试循环外，
+	// 避免重试期间过早触发熔断
+
 	firstTokenTimeout := isFirstTokenTimeout(nil, fwdErr)
 	return attemptResult{
-		Success:           false,
-		Written:           written,
-		ResetConversation: statusCode == http.StatusConflict && needsConversationRestart(relayErrorMessage(fwdErr)),
-		FirstTokenTimeout: firstTokenTimeout,
-		Err:               fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
-		StatusCode:        statusCode,
-		RetryAfter:        ra.retryAfter,
+		Success:              false,
+		Written:              written,
+		ResetConversation:    statusCode == http.StatusConflict && needsConversationRestart(relayErrorMessage(fwdErr)),
+		FirstTokenTimeout:    firstTokenTimeout,
+		Err:                  fmt.Errorf("channel %s failed: %v", ra.channel.Name, fwdErr),
+		StatusCode:           statusCode,
+		RetryAfter:           ra.retryAfter,
+		Outcome:              dbmodel.RequestOutcomeFailed,
+		Attribution:          attribution,
+		TransportTermination: termination,
+		CompletionEvidence:   evidence,
+		TerminalEvent:        terminalEvent,
+		ProtocolFailureStage: ra.protocolFailureStage,
+	}
+}
+
+func (ra *relayAttempt) captureCompletion(statusCode int, err error) (
+	dbmodel.TransportTermination,
+	dbmodel.CompletionEvidence,
+	string,
+) {
+	result := ra.streamResult
+	termination := mapStreamTermination(result.Termination)
+	evidence := dbmodel.CompletionEvidenceNone
+	if result.TerminalEvent != "" {
+		evidence = dbmodel.CompletionEvidenceProtocolTerminal
+	} else if result.Termination == stream.TerminationUpstreamEOF && result.PayloadWritten {
+		evidence = dbmodel.CompletionEvidenceUpstreamEOF
+	} else if err == nil && statusCode >= 200 && statusCode < 300 {
+		termination = dbmodel.TransportTerminationHTTPCompleted
+		evidence = dbmodel.CompletionEvidenceHTTP2xx
+	} else if termination == "" || termination == dbmodel.TransportTerminationUnknown {
+		if isClientCancellation(ra.requestContext(), err) {
+			termination = dbmodel.TransportTerminationClientCanceled
+		} else {
+			termination = dbmodel.TransportTerminationUpstreamError
+		}
+	}
+
+	if ra.metrics != nil {
+		ra.metrics.TransportTermination = termination
+		ra.metrics.CompletionEvidence = evidence
+		ra.metrics.TerminalEvent = result.TerminalEvent
+	}
+	return termination, evidence, result.TerminalEvent
+}
+
+func mapStreamTermination(value stream.Termination) dbmodel.TransportTermination {
+	switch value {
+	case stream.TerminationUpstreamEOF:
+		return dbmodel.TransportTerminationUpstreamEOF
+	case stream.TerminationProtocolTerminal:
+		return dbmodel.TransportTerminationProtocolTerminal
+	case stream.TerminationClientCanceled:
+		return dbmodel.TransportTerminationClientCanceled
+	case stream.TerminationClientDisconnectedAfterFinish:
+		return dbmodel.TransportTerminationClientDisconnectedAfterFinish
+	case stream.TerminationFirstTokenTimeout:
+		return dbmodel.TransportTerminationFirstTokenTimeout
+	case stream.TerminationReadError:
+		return dbmodel.TransportTerminationReadError
+	case stream.TerminationWriteError:
+		return dbmodel.TransportTerminationWriteError
+	case stream.TerminationTransformError:
+		return dbmodel.TransportTerminationTransformError
+	default:
+		return dbmodel.TransportTerminationUnknown
 	}
 }
 
@@ -563,6 +766,7 @@ func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
 	responsesReq := openaiOutbound.ConvertToResponsesRequest(ra.internalRequest)
 	reqBody, err := json.Marshal(responsesReq)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageRequestTransform)
 		wsUpstreamPool.Put(pc)
 		return -1, nil // fall through to HTTP
 	}
@@ -752,18 +956,20 @@ func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *ws
 // forwardViaHTTP forwards the request using traditional HTTP.
 func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
 	// Check for passthrough capability using interface
-	if pt, ok := ra.outAdapter.(model.PassthroughCapable); ok &&
-		len(ra.rawBody) > 0 &&
-		pt.CanPassthrough(ra.internalRequest.RawAPIFormat) {
-		// Additional checks for OpenAI Responses edge cases
-		if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
-			if ra.c == nil || ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
-				// Fall through to standard path
+	if ra.protocolMode != dbmodel.ProtocolExecutionModeTransform {
+		if pt, ok := ra.outAdapter.(model.PassthroughCapable); ok &&
+			len(ra.rawBody) > 0 &&
+			pt.CanPassthrough(ra.internalRequest.RawAPIFormat) {
+			// Additional checks for OpenAI Responses edge cases
+			if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+				if ra.c == nil || ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
+					// Fall through to standard path
+				} else {
+					return ra.forwardViaHTTPPassthrough(ctx, pt)
+				}
 			} else {
 				return ra.forwardViaHTTPPassthrough(ctx, pt)
 			}
-		} else {
-			return ra.forwardViaHTTPPassthrough(ctx, pt)
 		}
 	}
 
@@ -782,6 +988,7 @@ func (ra *relayAttempt) forwardViaHTTPPassthrough(ctx context.Context, pt model.
 		ra.internalRequest.Query,
 	)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageRequestTransform)
 		log.Warnf("failed to create passthrough request: %v", err)
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -865,6 +1072,7 @@ func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error)
 		ra.usedKey.ChannelKey,
 	)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageRequestTransform)
 		log.Warnf("failed to create request: %v", err)
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -960,36 +1168,28 @@ func (ra *relayAttempt) applyParamOverride(outboundRequest *http.Request) error 
 
 // copyHeaders 复制请求头，过滤 hop-by-hop 头
 func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
+	clientHeaders := make(http.Header)
 	if ra.c != nil {
-		for key, values := range ra.c.Request.Header {
-			lowerKey := strings.ToLower(key)
-			if hopByHopHeaders[lowerKey] {
-				continue
-			}
-			// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉
-			// 透传路径预置的 prompt-caching / extended-cache-ttl 基线。
-			if lowerKey == "anthropic-beta" {
-				existing := outboundRequest.Header.Get(key)
-				for _, value := range values {
-					existing = mergeBetaHeader(existing, value)
-				}
-				if existing != "" {
-					outboundRequest.Header.Set(key, existing)
-				}
-				continue
-			}
-			for _, value := range values {
-				outboundRequest.Header.Set(key, value)
-			}
+		clientHeaders = ra.c.Request.Header
+	}
+	policy, err := op.ResolveHeaderPolicy(
+		ra.requestContext(),
+		ra.channel.ID,
+		ra.metrics.CanonicalModelID,
+		ra.metrics.RouteCandidateID,
+	)
+	if err != nil {
+		log.Warnf("resolve header policy failed (channel=%d): %v", ra.channel.ID, err)
+		policy = op.HeaderPolicyFailureFallback()
+	}
+	op.ApplyHeaderPolicy(outboundRequest.Header, clientHeaders, ra.channel.CustomHeader, policy)
+	if ra.metrics != nil && len(policy.Trace) > 0 {
+		if payload, marshalErr := json.Marshal(policy.Trace); marshalErr == nil {
+			ra.metrics.HeaderPolicyTrace = string(payload)
 		}
 	}
 	if outboundRequest.Header.Get("User-Agent") == "" {
 		outboundRequest.Header.Set("User-Agent", "")
-	}
-	if len(ra.channel.CustomHeader) > 0 {
-		for _, header := range ra.channel.CustomHeader {
-			outboundRequest.Header.Set(header.HeaderKey, header.HeaderValue)
-		}
 	}
 }
 
@@ -1080,6 +1280,7 @@ func (ra *relayAttempt) handleStreamResponseV2(ctx context.Context, response *ht
 		Context:           ctx,
 		FirstTokenTimeout: firstTokenTimeout,
 		HeartbeatInterval: streamHeartbeatInterval(),
+		TerminalEvents:    clientSuccessTerminalEvents(ra.internalRequest.RawAPIFormat),
 		OnFirstToken: func() {
 			ra.metrics.SetFirstTokenTime(time.Now())
 			ra.stopFirstTokenTimer()
@@ -1088,6 +1289,7 @@ func (ra *relayAttempt) handleStreamResponseV2(ctx context.Context, response *ht
 
 	// Run processor
 	err := processor.Run()
+	ra.streamResult = processor.Result()
 
 	// Track payload written for metrics collection
 	if processor.PayloadWritten() {
@@ -1142,7 +1344,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 		FirstTokenTimeout: firstTokenTimeout,
 		HeartbeatInterval: streamHeartbeatInterval(),
 		BufferRawStream:   true,
-		TerminalEvents:    cfg.TerminalEvents,
+		TerminalEvents:    clientSuccessTerminalEvents(ra.internalRequest.RawAPIFormat),
 		OnFirstToken: func() {
 			ra.metrics.SetFirstTokenTime(time.Now())
 			ra.stopFirstTokenTimer()
@@ -1169,6 +1371,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 
 	// Run processor
 	err := processor.Run()
+	ra.streamResult = processor.Result()
 
 	// Track payload written for metrics collection
 	if processor.PayloadWritten() {
@@ -1268,6 +1471,7 @@ func (ra *relayAttempt) decodeOutboundStreamEvents(ctx context.Context, data []b
 	}
 	events, err := outEventAdapter.TransformStreamEvent(ctx, data)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageOutboundStreamTransform)
 		return nil, true, err
 	}
 	return events, true, nil
@@ -1283,6 +1487,7 @@ func (ra *relayAttempt) encodeInboundStreamEvents(ctx context.Context, events []
 	}
 	inStream, err := inEventAdapter.TransformStreamEvents(ctx, events)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageInboundStreamTransform)
 		log.Warnf("failed to transform inbound stream events: %v", err)
 		return nil, err
 	}
@@ -1290,12 +1495,17 @@ func (ra *relayAttempt) encodeInboundStreamEvents(ctx context.Context, events []
 }
 
 func (ra *relayAttempt) decodeOutboundStreamResponse(ctx context.Context, data []byte) (*model.InternalLLMResponse, error) {
-	return ra.outAdapter.TransformStream(ctx, data)
+	response, err := ra.outAdapter.TransformStream(ctx, data)
+	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageOutboundStreamTransform)
+	}
+	return response, err
 }
 
 func (ra *relayAttempt) encodeInboundStreamResponse(ctx context.Context, internalStream *model.InternalLLMResponse) ([]byte, error) {
 	inStream, err := ra.inAdapter.TransformStream(ctx, internalStream)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageInboundStreamTransform)
 		log.Warnf("failed to transform stream: %v", err)
 		return nil, err
 	}
@@ -1306,18 +1516,30 @@ func (ra *relayAttempt) encodeInboundStreamResponse(ctx context.Context, interna
 func (ra *relayAttempt) handleResponse(ctx context.Context, response *http.Response) error {
 	internalResponse, err := ra.outAdapter.TransformResponse(ctx, response)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageOutboundResponseTransform)
 		log.Warnf("failed to transform response: %v", err)
 		return fmt.Errorf("failed to transform outbound response: %w", err)
 	}
 
 	inResponse, err := ra.inAdapter.TransformResponse(ctx, internalResponse)
 	if err != nil {
+		ra.markProtocolFailure(dbmodel.ProtocolFailureStageInboundResponseTransform)
 		log.Warnf("failed to transform response: %v", err)
 		return fmt.Errorf("failed to transform inbound response: %w", err)
 	}
 
 	ra.c.Data(http.StatusOK, "application/json", inResponse)
 	return nil
+}
+
+func (ra *relayAttempt) markProtocolFailure(stage dbmodel.ProtocolFailureStage) {
+	if ra == nil || stage == "" {
+		return
+	}
+	ra.protocolFailureStage = stage
+	if ra.metrics != nil {
+		ra.metrics.SetProtocolFailureStage(stage)
+	}
 }
 
 // collectResponse 收集响应信息
@@ -1390,6 +1612,89 @@ var (
 		"error":        {},
 	}
 )
+
+func clientSuccessTerminalEvents(format model.APIFormat) map[string]struct{} {
+	switch format {
+	case model.APIFormatOpenAIResponse:
+		return map[string]struct{}{
+			"response.completed":  {},
+			"response.incomplete": {},
+		}
+	case model.APIFormatAnthropicMessage:
+		return map[string]struct{}{"message_stop": {}}
+	case model.APIFormatOpenAIChatCompletion:
+		return map[string]struct{}{"[DONE]": {}}
+	default:
+		return nil
+	}
+}
+
+func requestOutcomeForTerminalEvent(event string) dbmodel.RequestOutcome {
+	switch strings.TrimSpace(event) {
+	case "response.incomplete":
+		return dbmodel.RequestOutcomeIndeterminate
+	default:
+		return dbmodel.RequestOutcomeSuccess
+	}
+}
+
+func inboundProtocolName(value inbound.InboundType) dbmodel.ProtocolName {
+	switch value {
+	case inbound.InboundTypeOpenAIResponse:
+		return dbmodel.ProtocolOpenAIResponses
+	case inbound.InboundTypeAnthropic:
+		return dbmodel.ProtocolAnthropic
+	case inbound.InboundTypeOpenAIEmbedding:
+		return dbmodel.ProtocolOpenAIEmbedding
+	default:
+		return dbmodel.ProtocolOpenAIChat
+	}
+}
+
+func routeDecisionMap(preview dbmodel.RoutePreview) map[string]dbmodel.RouteDecisionReason {
+	decisions := make(map[string]dbmodel.RouteDecisionReason, len(preview.Decisions))
+	for _, decision := range preview.Decisions {
+		if !decision.Included {
+			continue
+		}
+		decisions[relayRouteDecisionKey(decision.ChannelID, decision.UpstreamModel)] = decision
+	}
+	return decisions
+}
+
+func recordProtocolPlanningSkips(
+	ctx context.Context,
+	iter *balancer.Iterator,
+	preview dbmodel.RoutePreview,
+) {
+	if iter == nil {
+		return
+	}
+	for _, decision := range preview.Decisions {
+		if decision.Included {
+			continue
+		}
+		channelName := fmt.Sprintf("channel_%d", decision.ChannelID)
+		if channel, err := op.ChannelGet(decision.ChannelID, ctx); err == nil {
+			channelName = channel.Name
+		}
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "excluded by protocol planning"
+		}
+		iter.RecordPlanningSkip(
+			decision.ChannelID,
+			channelName,
+			decision.UpstreamModel,
+			decision.RouteCandidateID,
+			reason,
+		)
+	}
+}
+
+func relayRouteDecisionKey(channelID int, modelName string) string {
+	return fmt.Sprintf("%d\x00%s", channelID, modelName)
+}
 
 // streamReachedTerminalEvent 报告缓存的原始 SSE 流是否已包含协议终态事件。
 // 客户端 SDK 收到终态事件后会立即断连而不等上游 EOF，断连取消会沿出站请求

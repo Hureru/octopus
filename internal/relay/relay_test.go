@@ -257,6 +257,19 @@ func TestHandleStreamResponsePassthroughOpenAIResponsesClientCancelAfterTerminal
 	}
 }
 
+func TestOpenAIResponsesIncompleteIsTerminalButNotSuccessful(t *testing.T) {
+	events := clientSuccessTerminalEvents(transformerModel.APIFormatOpenAIResponse)
+	if _, ok := events["response.incomplete"]; !ok {
+		t.Fatal("response.incomplete must remain terminal for disconnect handling")
+	}
+	if outcome := requestOutcomeForTerminalEvent("response.incomplete"); outcome != model.RequestOutcomeIndeterminate {
+		t.Fatalf("response.incomplete outcome = %s, want indeterminate", outcome)
+	}
+	if outcome := requestOutcomeForTerminalEvent("response.completed"); outcome != model.RequestOutcomeSuccess {
+		t.Fatalf("response.completed outcome = %s, want success", outcome)
+	}
+}
+
 // 回归：客户端在终态事件前断连（真正的中途取消），仍应按断连处理返回取消错误，
 // 而不是 "failed to read stream event"，也不应误判为成功。
 func TestHandleStreamResponsePassthroughOpenAIResponsesClientCancelMidStream(t *testing.T) {
@@ -356,6 +369,65 @@ func TestHandleStreamResponsePassthroughAnthropicClientCancelAfterTerminal(t *te
 	}
 	if req.metrics.Stats.InputToken != 3 || req.metrics.Stats.OutputToken != 5 {
 		t.Fatalf("expected usage input=3 output=5 collected into metrics, got input=%d output=%d", req.metrics.Stats.InputToken, req.metrics.Stats.OutputToken)
+	}
+}
+
+// 回归：Responses 客户端经 Chat Completions 上游转换时，客户端在收到
+// response.completed 后立即断连。转换后的客户端协议已经完成，后续读取被取消
+// 不应覆盖成功结果。
+func TestHandleStreamResponseV2OpenAIChatToResponsesClientCancelAfterTerminal(t *testing.T) {
+	rawSSE := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"grok-4","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"grok-4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &notifyStreamWriter{header: http.Header{}}
+	writer.onWrite = func(p []byte) {
+		if bytes.Contains(p, []byte(`"type":"response.completed"`)) {
+			cancel()
+		}
+	}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	internalReq := &transformerModel.InternalLLMRequest{
+		Model:        "grok-4",
+		Stream:       boolPtr(true),
+		RawAPIFormat: transformerModel.APIFormatOpenAIResponse,
+	}
+	req := &relayRequest{
+		c:               c,
+		inAdapter:       inbound.Get(inbound.InboundTypeOpenAIResponse),
+		internalRequest: internalReq,
+		metrics:         NewRelayMetrics(1, internalReq.Model, nil, internalReq),
+		apiKeyID:        1,
+		requestModel:    internalReq.Model,
+		streamWriter:    writer,
+	}
+	ra := &relayAttempt{
+		relayRequest: req,
+		outAdapter:   outbound.Get(outbound.OutboundTypeOpenAIChat),
+		channel:      &model.Channel{Type: outbound.OutboundTypeOpenAIChat},
+	}
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(rawSSE)},
+	}
+
+	if err := ra.handleStreamResponseV2(ctx, response); err != nil {
+		t.Fatalf("expected transformed stream with client terminal event to finish successfully, got: %v", err)
+	}
+	if got := writer.buf.String(); !strings.Contains(got, `"type":"response.completed"`) {
+		t.Fatalf("expected transformed Responses terminal event, got %q", got)
 	}
 }
 
@@ -1691,6 +1763,10 @@ func TestHandleResponsesCompactProxiesSuccessfulResponse(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		if !strings.Contains(string(body), `"previous_response_id":"resp_123"`) {
 			http.Error(w, `{"error":"missing previous_response_id"}`, http.StatusBadRequest)
+			return
+		}
+		if !strings.Contains(string(body), `"model":"compact-model"`) {
+			http.Error(w, fmt.Sprintf(`{"error":"unexpected model body %s"}`, string(body)), http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

@@ -162,6 +162,18 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		}
 		selectFields = append(selectFields, "proxy_config_id")
 	}
+	if req.AutoProxyRecovery != nil {
+		merged.AutoProxyRecovery = *req.AutoProxyRecovery
+		selectFields = append(selectFields, "auto_proxy_recovery")
+	}
+	if req.PreferredProxyConfigIDSet {
+		merged.PreferredProxyConfigID = req.PreferredProxyConfigID
+		selectFields = append(selectFields, "preferred_proxy_config_id")
+	}
+	if req.PreferredClashNode != nil {
+		merged.PreferredClashNode = strings.TrimSpace(*req.PreferredClashNode)
+		selectFields = append(selectFields, "preferred_clash_node")
+	}
 	if req.ExternalCheckinSet {
 		merged.ExternalCheckinURL = req.ExternalCheckinURL
 		selectFields = append(selectFields, "external_checkin_url")
@@ -217,6 +229,15 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	}
 	if req.ProxyConfigIDSet || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
 		updates.ProxyConfigID = merged.ProxyConfigID
+	}
+	if req.AutoProxyRecovery != nil {
+		updates.AutoProxyRecovery = merged.AutoProxyRecovery
+	}
+	if req.PreferredProxyConfigIDSet {
+		updates.PreferredProxyConfigID = merged.PreferredProxyConfigID
+	}
+	if req.PreferredClashNode != nil {
+		updates.PreferredClashNode = merged.PreferredClashNode
 	}
 	if req.ExternalCheckinSet {
 		updates.ExternalCheckinURL = merged.ExternalCheckinURL
@@ -600,6 +621,18 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 		}
 		selectFields = append(selectFields, "proxy_config_id")
 	}
+	if req.AutoProxyRecoverySet {
+		merged.AutoProxyRecovery = req.AutoProxyRecovery
+		selectFields = append(selectFields, "auto_proxy_recovery")
+	}
+	if req.PreferredProxyConfigIDSet {
+		merged.PreferredProxyConfigID = req.PreferredProxyConfigID
+		selectFields = append(selectFields, "preferred_proxy_config_id")
+	}
+	if req.PreferredClashNode != nil {
+		merged.PreferredClashNode = strings.TrimSpace(*req.PreferredClashNode)
+		selectFields = append(selectFields, "preferred_clash_node")
+	}
 	if req.Enabled != nil {
 		merged.Enabled = *req.Enabled
 		selectFields = append(selectFields, "enabled")
@@ -667,6 +700,15 @@ func SiteAccountUpdate(req *model.SiteAccountUpdateRequest, ctx context.Context)
 	}
 	if req.ProxyConfigIDSet || (req.ProxyMode != nil && *req.ProxyMode != model.ProxyUsageModePool) {
 		updates.ProxyConfigID = merged.ProxyConfigID
+	}
+	if req.AutoProxyRecoverySet {
+		updates.AutoProxyRecovery = merged.AutoProxyRecovery
+	}
+	if req.PreferredProxyConfigIDSet {
+		updates.PreferredProxyConfigID = merged.PreferredProxyConfigID
+	}
+	if req.PreferredClashNode != nil {
+		updates.PreferredClashNode = merged.PreferredClashNode
 	}
 	if req.Enabled != nil {
 		updates.Enabled = merged.Enabled

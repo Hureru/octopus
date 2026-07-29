@@ -128,6 +128,64 @@ func (o *ChatOutbound) TransformRequest(ctx context.Context, request *model.Inte
 	return req, nil
 }
 
+// TransformRequestRaw preserves same-protocol Chat Completions fields while
+// rewriting only the selected upstream model and relay-owned transport fields.
+func (o *ChatOutbound) TransformRequestRaw(
+	ctx context.Context,
+	rawBody []byte,
+	modelName, baseUrl, key string,
+	query url.Values,
+) (*http.Request, error) {
+	if len(rawBody) == 0 {
+		return nil, fmt.Errorf("raw body is empty")
+	}
+	if strings.TrimSpace(modelName) != "" {
+		rewrittenBody, err := rewriteRawChatRequestModel(rawBody, modelName)
+		if err != nil {
+			return nil, err
+		}
+		rawBody = rewrittenBody
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(rawBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.ContentLength = int64(len(rawBody))
+	bodyBytes := rawBody
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	parsedURL, err := url.Parse(strings.TrimSuffix(baseUrl, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base url: %w", err)
+	}
+	parsedURL.Path = parsedURL.Path + "/chat/completions"
+	if query != nil {
+		parsedURL.RawQuery = query.Encode()
+	}
+	req.URL = parsedURL
+	req.Method = http.MethodPost
+	return req, nil
+}
+
+func rewriteRawChatRequestModel(rawBody []byte, modelName string) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		return nil, fmt.Errorf("failed to decode raw chat request: %w", err)
+	}
+	payload["model"] = strings.TrimSpace(modelName)
+	rewrittenBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode raw chat request: %w", err)
+	}
+	return rewrittenBody, nil
+}
+
 // applyOpenAIOrgProjectHeaders forwards the optional OpenAI-Organization and
 // OpenAI-Project headers from TransformerMetadata. Both headers are scoped
 // to multi-org / multi-project deployments where a single API key can hit
@@ -301,4 +359,15 @@ func (o *ChatOutbound) TransformStreamEvent(ctx context.Context, eventData []byt
 		return nil, err
 	}
 	return model.StreamEventsFromInternalResponse(stream), nil
+}
+
+func (o *ChatOutbound) CanPassthrough(inboundFormat model.APIFormat) bool {
+	return inboundFormat == model.APIFormatOpenAIChatCompletion
+}
+
+func (o *ChatOutbound) PassthroughConfig() model.PassthroughConfig {
+	return model.PassthroughConfig{
+		TerminalEvents: map[string]struct{}{"[DONE]": {}},
+		CollectMetrics: true,
+	}
 }

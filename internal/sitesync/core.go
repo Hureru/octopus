@@ -36,7 +36,7 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 		return nil, sanitizeSiteError(err)
 	}
 
-	snapshot, syncErr := syncAccountState(ctx, siteRecord, account)
+	snapshot, syncErr := syncAccountStateWithRecovery(ctx, siteRecord, account)
 	if snapshot == nil && syncErr != nil {
 		message := sanitizeSiteStatusMessage(syncErr)
 		updateErr := updateAccountSyncState(ctx, account.ID, model.SiteExecutionStatusFailed, message, "")
@@ -47,6 +47,11 @@ func SyncAccount(ctx context.Context, accountID int) (*model.SiteSyncResult, err
 			log.Warnf("failed to mark site account projection stale (account=%d): %v", account.ID, staleErr)
 		}
 		return nil, sanitizeSiteError(syncErr)
+	}
+	if snapshot != nil {
+		if priceErr := refreshSitePricingQuotes(ctx, siteRecord, account, snapshot.accessToken); priceErr != nil {
+			log.Debugf("site pricing refresh skipped (account=%d): %v", account.ID, sanitizeSiteError(priceErr))
+		}
 	}
 
 	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
@@ -89,7 +94,7 @@ func CheckinAccount(ctx context.Context, accountID int) (*model.SiteCheckinResul
 		return nil, sanitizeSiteError(err)
 	}
 
-	result, resolvedAccessToken, err := checkinAccountState(ctx, siteRecord, account)
+	result, resolvedAccessToken, err := checkinAccountStateWithRecovery(ctx, siteRecord, account)
 	if err != nil {
 		status := model.SiteExecutionStatusFailed
 		lowered := strings.ToLower(err.Error())

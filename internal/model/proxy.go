@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -17,22 +18,40 @@ const (
 )
 
 type ProxyConfiguration struct {
-	ID             int       `json:"id" gorm:"primaryKey"`
-	Name           string    `json:"name" gorm:"unique;not null"`
-	URL            string    `json:"url" gorm:"unique;not null"`
-	Enabled        bool      `json:"enabled" gorm:"default:true"`
-	Remark         string    `json:"remark"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ReferenceCount int       `json:"reference_count" gorm:"-"`
+	ID                int       `json:"id" gorm:"primaryKey"`
+	Name              string    `json:"name" gorm:"unique;not null"`
+	URL               string    `json:"url" gorm:"unique;not null"`
+	ClashControllerID *int      `json:"clash_controller_id,omitempty" gorm:"index"`
+	Enabled           bool      `json:"enabled" gorm:"default:true"`
+	Remark            string    `json:"remark"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	ReferenceCount    int       `json:"reference_count" gorm:"-"`
 }
 
 type ProxyConfigurationUpdateRequest struct {
-	ID      int     `json:"id" binding:"required"`
-	Name    *string `json:"name,omitempty"`
-	URL     *string `json:"url,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
-	Remark  *string `json:"remark,omitempty"`
+	ID                   int     `json:"id" binding:"required"`
+	Name                 *string `json:"name,omitempty"`
+	URL                  *string `json:"url,omitempty"`
+	ClashControllerID    *int    `json:"clash_controller_id,omitempty"`
+	ClashControllerIDSet bool    `json:"-"`
+	Enabled              *bool   `json:"enabled,omitempty"`
+	Remark               *string `json:"remark,omitempty"`
+}
+
+func (r *ProxyConfigurationUpdateRequest) UnmarshalJSON(data []byte) error {
+	type alias ProxyConfigurationUpdateRequest
+	var value alias
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*r = ProxyConfigurationUpdateRequest(value)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	_, r.ClashControllerIDSet = raw["clash_controller_id"]
+	return nil
 }
 
 type ProxyTestRequest struct {

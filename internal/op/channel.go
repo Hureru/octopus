@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -266,6 +267,14 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "ws_mode")
 		updates.WSMode = req.WSMode.Normalize()
 	}
+	if req.ProtocolPolicy != nil {
+		selectFields = append(selectFields, "protocol_policy")
+		updates.ProtocolPolicy = req.ProtocolPolicy.Normalize(model.ProtocolPolicyAuto)
+	}
+	if req.AllowLossy != nil {
+		selectFields = append(selectFields, "allow_lossy")
+		updates.AllowLossy = *req.AllowLossy
+	}
 	if req.ParamOverride != nil {
 		selectFields = append(selectFields, "param_override")
 		updates.ParamOverride = req.ParamOverride
@@ -443,6 +452,20 @@ func channelDel(id int, ctx context.Context, bypassManagedCheck bool) error {
 	if err := tx.Where("channel_id = ?", id).Delete(&model.StatsChannel{}).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to delete channel stats: %w", err)
+	}
+
+	// Route candidates remain as audit/history records after their backing
+	// channel is deleted, but must never stay routable.
+	archivedAt := time.Now()
+	if err := tx.Model(&model.RouteCandidate{}).
+		Where("channel_id = ?", id).
+		Updates(map[string]any{
+			"status":            model.RouteCandidateArchived,
+			"unavailable_since": gorm.Expr("COALESCE(unavailable_since, ?)", archivedAt),
+			"archived_at":       archivedAt,
+		}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to archive route candidates: %w", err)
 	}
 
 	// 删除渠道

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/url"
 	"testing"
 
 	"github.com/bestruirui/octopus/internal/transformer/model"
@@ -267,5 +268,38 @@ func TestTransformRequestAttachesOrgAndProjectHeaders(t *testing.T) {
 	}
 	if got := httpReq.Header.Get("OpenAI-Organization"); got != "" {
 		t.Errorf("expected OpenAI-Organization omitted for blank value, got %q", got)
+	}
+}
+
+func TestChatTransformRequestRawPreservesUnknownFieldsAndRewritesModel(t *testing.T) {
+	outbound := &ChatOutbound{}
+	request, err := outbound.TransformRequestRaw(
+		context.Background(),
+		[]byte(`{"model":"client-model","messages":[{"role":"user","content":"hello"}],"custom_extension":{"keep":true}}`),
+		"upstream-model",
+		"https://api.example.com/v1",
+		"sk-test",
+		url.Values{"beta": []string{"1"}},
+	)
+	if err != nil {
+		t.Fatalf("TransformRequestRaw failed: %v", err)
+	}
+	body, err := io.ReadAll(request.Body)
+	if err != nil {
+		t.Fatalf("read raw request body: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal raw request body: %v", err)
+	}
+	if payload["model"] != "upstream-model" {
+		t.Fatalf("model was not rewritten: %#v", payload["model"])
+	}
+	extension, ok := payload["custom_extension"].(map[string]any)
+	if !ok || extension["keep"] != true {
+		t.Fatalf("unknown same-protocol field was not preserved: %#v", payload["custom_extension"])
+	}
+	if request.URL.Path != "/v1/chat/completions" || request.URL.Query().Get("beta") != "1" {
+		t.Fatalf("unexpected passthrough URL: %s", request.URL.String())
 	}
 }

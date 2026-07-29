@@ -29,12 +29,30 @@ type RelayMetrics struct {
 	InternalResponse *transformerModel.InternalLLMResponse
 
 	// 统计指标
-	ActualModel string
-	Stats       model.StatsMetrics
-	UsedWS      bool
-	WSMode      *model.RelayLogWSMode
-	WSExecMode  *model.RelayLogWSExecMode
-	WSRecovery  *model.RelayLogWSRecovery
+	ActualModel          string
+	Stats                model.StatsMetrics
+	UsedWS               bool
+	WSMode               *model.RelayLogWSMode
+	WSExecMode           *model.RelayLogWSExecMode
+	WSRecovery           *model.RelayLogWSRecovery
+	Outcome              model.RequestOutcome
+	TransportTermination model.TransportTermination
+	CompletionEvidence   model.CompletionEvidence
+	TerminalEvent        string
+	CanonicalModelName   string
+	CanonicalModelID     int
+	RouteCandidateID     int
+	InboundProtocol      model.ProtocolName
+	OutboundProtocol     model.ProtocolName
+	ProtocolMode         string
+	ProtocolPolicy       model.ProtocolPolicy
+	ProtocolAllowLossy   bool
+	ProtocolWarnings     []string
+	ProtocolFailureStage model.ProtocolFailureStage
+	HeaderPolicyTrace    string
+	EffectivePrice       *model.EffectivePrice
+	PriceOriginalCost    float64
+	TokenSource          model.UsageValueSource
 
 	TransportInputTokens *int
 	BillInputTokens      *int
@@ -85,9 +103,117 @@ func (m *RelayMetrics) SetWSRecovery(recovery model.RelayLogWSRecovery) {
 	m.WSRecovery = wsRecoveryPtr(recovery)
 }
 
+func (m *RelayMetrics) SetRouting(
+	canonical model.CanonicalModel,
+	candidateID int,
+	inboundProtocol model.ProtocolName,
+	outboundProtocol model.ProtocolName,
+	protocolMode string,
+) {
+	m.CanonicalModelName = canonical.Name
+	m.CanonicalModelID = canonical.ID
+	m.RouteCandidateID = candidateID
+	m.InboundProtocol = inboundProtocol
+	m.OutboundProtocol = outboundProtocol
+	m.ProtocolMode = protocolMode
+}
+
+func (m *RelayMetrics) SetProtocolDecision(
+	inboundProtocol model.ProtocolName,
+	outboundProtocol model.ProtocolName,
+	mode model.ProtocolExecutionMode,
+	policy model.ProtocolPolicy,
+	allowLossy bool,
+	warnings []string,
+) {
+	m.InboundProtocol = inboundProtocol
+	m.OutboundProtocol = outboundProtocol
+	m.ProtocolMode = string(mode)
+	m.ProtocolPolicy = policy
+	m.ProtocolAllowLossy = allowLossy
+	m.ProtocolWarnings = append(m.ProtocolWarnings[:0], warnings...)
+}
+
+func (m *RelayMetrics) SetProtocolFailureStage(stage model.ProtocolFailureStage) {
+	if stage != "" {
+		m.ProtocolFailureStage = stage
+	}
+}
+
+func (m *RelayMetrics) SetEffectivePrice(value model.EffectivePrice) {
+	m.EffectivePrice = &value
+}
+
+func (m *RelayMetrics) ClearEffectivePrice() {
+	m.EffectivePrice = nil
+	m.PriceOriginalCost = 0
+}
+
+func (m *RelayMetrics) AttemptUsageSnapshot() *model.AttemptUsageSnapshot {
+	if m == nil {
+		return nil
+	}
+	inputTokens := m.Stats.InputToken
+	if m.BillInputTokens != nil {
+		inputTokens = max(0, intPointerValue(m.BillInputTokens)) +
+			max(0, intPointerValue(m.CacheReadTokens)) +
+			max(0, intPointerValue(m.CacheWriteTokens))
+	}
+	costUSD := m.Stats.InputCost + m.Stats.OutputCost
+	if inputTokens == 0 && m.Stats.OutputToken == 0 && costUSD == 0 &&
+		m.TokenSource != model.UsageValueSourceReported &&
+		m.TokenSource != model.UsageValueSourceEstimated {
+		return nil
+	}
+	tokenSource := m.TokenSource
+	if tokenSource == "" {
+		tokenSource = model.UsageValueSourceUnknown
+	}
+	snapshot := &model.AttemptUsageSnapshot{
+		InputTokens:       inputTokens,
+		OutputTokens:      m.Stats.OutputToken,
+		CacheReadTokens:   intPointerValue(m.CacheReadTokens),
+		CacheWriteTokens:  intPointerValue(m.CacheWriteTokens),
+		CostUSD:           costUSD,
+		TokenSource:       tokenSource,
+		PriceOriginalCost: m.PriceOriginalCost,
+	}
+	if !m.FirstTokenTime.IsZero() {
+		snapshot.FTUTKnown = true
+		snapshot.FTUTMS = m.FirstTokenTime.Sub(m.StartTime).Milliseconds()
+	}
+	if m.EffectivePrice != nil {
+		snapshot.PriceQuoteID = m.EffectivePrice.QuoteID
+		snapshot.PriceSource = m.EffectivePrice.Source
+		snapshot.PriceUnit = m.EffectivePrice.Unit
+		snapshot.PriceCurrency = m.EffectivePrice.Currency
+		snapshot.PriceInput = m.EffectivePrice.Input
+		snapshot.PriceOutput = m.EffectivePrice.Output
+		snapshot.PriceCacheRead = m.EffectivePrice.CacheRead
+		snapshot.PriceCacheWrite = m.EffectivePrice.CacheWrite
+		snapshot.PricePerRequest = m.EffectivePrice.PerRequest
+		snapshot.PriceMultiplier = m.EffectivePrice.GroupMultiplier
+		snapshot.PriceRateToUSD = m.EffectivePrice.ExchangeRateToUSD
+		snapshot.PriceObservedAt = m.EffectivePrice.ObservedAt
+		snapshot.PriceStale = m.EffectivePrice.Stale
+		snapshot.PriceConvertible = m.EffectivePrice.Convertible
+		snapshot.PriceMatchReason = m.EffectivePrice.MatchReason
+	}
+	return snapshot
+}
+
 func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMResponse, actualModel string) {
 	m.InternalResponse = resp
 	m.ActualModel = actualModel
+	m.Stats.InputToken = 0
+	m.Stats.OutputToken = 0
+	m.Stats.InputCost = 0
+	m.Stats.OutputCost = 0
+	m.BillInputTokens = nil
+	m.CacheReadTokens = nil
+	m.CacheWriteTokens = nil
+	m.PriceOriginalCost = 0
+	m.TokenSource = model.UsageValueSourceUnknown
 
 	if resp == nil {
 		return
@@ -105,13 +231,7 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 		m.Stats.InputToken = usage.PromptTokens
 		m.Stats.OutputToken = usage.CompletionTokens
 		inputReported = usage.EffectiveInputTokens() > 0
-
-		if modelPrice := resolveModelPrice(actualModel); modelPrice != nil {
-			m.Stats.InputCost = (float64(cacheReadTokens)*modelPrice.CacheRead +
-				float64(cacheWriteTokens)*modelPrice.CacheWrite +
-				float64(nonCachedInput)*modelPrice.Input) * 1e-6
-			m.Stats.OutputCost = float64(usage.CompletionTokens) * modelPrice.Output * 1e-6
-		}
+		m.TokenSource = model.UsageValueSourceReported
 	}
 
 	// 降级：上游未上报 input（usage 缺失，或 usage 中输入侧全为 0）时，用请求侧
@@ -121,10 +241,80 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 		estimated := int64(*m.TransportInputTokens)
 		m.Stats.InputToken = estimated
 		m.BillInputTokens = intPtr(int(estimated))
-		if modelPrice := resolveModelPrice(actualModel); modelPrice != nil {
-			m.Stats.InputCost = float64(estimated) * modelPrice.Input * 1e-6
-		}
+		m.TokenSource = model.UsageValueSourceEstimated
 	}
+	m.calculateCosts(actualModel)
+}
+
+func (m *RelayMetrics) calculateCosts(actualModel string) {
+	effective := m.effectivePriceForCost(actualModel)
+	if effective == nil || effective.Source == model.PriceQuoteSourceUnknown {
+		return
+	}
+	nonCachedInput := intPointerValue(m.BillInputTokens)
+	cacheRead := intPointerValue(m.CacheReadTokens)
+	cacheWrite := intPointerValue(m.CacheWriteTokens)
+	inputRaw, outputRaw, inputUSD, outputUSD := effectivePriceCosts(
+		effective,
+		nonCachedInput,
+		cacheRead,
+		cacheWrite,
+		m.Stats.OutputToken,
+	)
+	m.PriceOriginalCost = inputRaw + outputRaw
+	m.Stats.InputCost = inputUSD
+	m.Stats.OutputCost = outputUSD
+}
+
+func (m *RelayMetrics) effectivePriceForCost(actualModel string) *model.EffectivePrice {
+	if m.EffectivePrice != nil && m.EffectivePrice.Source != model.PriceQuoteSourceUnknown {
+		return m.EffectivePrice
+	}
+	modelPrice := resolveModelPrice(actualModel)
+	if modelPrice == nil {
+		return m.EffectivePrice
+	}
+	candidateID := m.RouteCandidateID
+	m.EffectivePrice = &model.EffectivePrice{
+		RouteCandidateID:  candidateID,
+		Source:            model.PriceQuoteSourceGlobal,
+		Unit:              model.PriceUnitPerMillionTokens,
+		Currency:          "USD",
+		Input:             modelPrice.Input,
+		Output:            modelPrice.Output,
+		CacheRead:         modelPrice.CacheRead,
+		CacheWrite:        modelPrice.CacheWrite,
+		GroupMultiplier:   1,
+		ExchangeRateToUSD: 1,
+		Convertible:       true,
+		MatchReason:       "global model fallback",
+	}
+	return m.EffectivePrice
+}
+
+func effectivePriceCosts(
+	effective *model.EffectivePrice,
+	nonCachedInput int64,
+	cacheRead int64,
+	cacheWrite int64,
+	outputTokens int64,
+) (inputRaw, outputRaw, inputUSD, outputUSD float64) {
+	if effective == nil || effective.Source == model.PriceQuoteSourceUnknown {
+		return 0, 0, 0, 0
+	}
+	if effective.Unit == model.PriceUnitPerRequest {
+		inputRaw = effective.PerRequest
+	} else {
+		inputRaw = (float64(cacheRead)*effective.CacheRead +
+			float64(cacheWrite)*effective.CacheWrite +
+			float64(nonCachedInput)*effective.Input) * 1e-6
+		outputRaw = float64(outputTokens) * effective.Output * 1e-6
+	}
+	if effective.Convertible && effective.ExchangeRateToUSD > 0 {
+		inputUSD = inputRaw * effective.ExchangeRateToUSD
+		outputUSD = outputRaw * effective.ExchangeRateToUSD
+	}
+	return inputRaw, outputRaw, inputUSD, outputUSD
 }
 
 func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
@@ -132,6 +322,26 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 }
 
 func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt, updateChannelStats bool) {
+	outcome := model.RequestOutcomeFailed
+	if success {
+		outcome = model.RequestOutcomeSuccess
+	} else if isClientCancellation(ctx, err) {
+		outcome = model.RequestOutcomeClientCanceled
+	}
+	m.SaveOutcomeWithChannelStats(ctx, outcome, err, attempts, updateChannelStats)
+}
+
+func (m *RelayMetrics) SaveOutcomeWithChannelStats(
+	ctx context.Context,
+	outcome model.RequestOutcome,
+	err error,
+	attempts []model.ChannelAttempt,
+	updateChannelStats bool,
+) {
+	if outcome == "" {
+		outcome = model.RequestOutcomeIndeterminate
+	}
+	m.Outcome = outcome
 	duration := time.Since(m.StartTime)
 
 	globalStats := model.StatsMetrics{
@@ -141,10 +351,15 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 		InputCost:   m.Stats.InputCost,
 		OutputCost:  m.Stats.OutputCost,
 	}
-	if success {
+	switch outcome {
+	case model.RequestOutcomeSuccess:
 		globalStats.RequestSuccess = 1
-	} else {
+	case model.RequestOutcomeFailed:
 		globalStats.RequestFailed = 1
+	case model.RequestOutcomeClientCanceled:
+		globalStats.RequestCanceled = 1
+	default:
+		globalStats.RequestIndeterminate = 1
 	}
 
 	channelID, channelName := finalChannel(attempts)
@@ -152,15 +367,18 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 	op.StatsHourlyUpdate(globalStats)
 	op.StatsDailyUpdate(context.Background(), globalStats)
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
+	channelStats := globalStats
+	channelStats.RequestCanceled = 0
+	channelStats.RequestIndeterminate = 0
 	if updateChannelStats {
-		op.StatsChannelUpdate(channelID, globalStats)
+		op.StatsChannelUpdate(channelID, channelStats)
 	} else {
-		updateFinalChannelUsageStats(channelID, globalStats)
+		updateFinalChannelUsageStats(channelID, channelStats)
 	}
 	op.StatsSiteModelHourlyRecordAttempts(attempts, m.ActualModel)
 
 	// 上游未上报 usage（或输入侧全为 0）时打告警，便于定位是哪个通道缺失 usage。
-	if success && (m.InternalResponse == nil || m.InternalResponse.Usage == nil ||
+	if outcome == model.RequestOutcomeSuccess && (m.InternalResponse == nil || m.InternalResponse.Usage == nil ||
 		m.InternalResponse.Usage.EffectiveInputTokens() == 0) {
 		fallbackInput := 0
 		if m.TransportInputTokens != nil {
@@ -175,13 +393,15 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 		)
 	}
 
-	if conf.AppConfig.Log.Relay.Summary || !success {
+	if conf.AppConfig.Log.Relay.Summary || outcome != model.RequestOutcomeSuccess {
 		fields := []interface{}{
 			"model", m.RequestModel,
 			"actual_model", m.ActualModel,
 			"channel_id", channelID,
 			"channel", channelName,
-			"success", success,
+			"outcome", outcome,
+			"protocol_mode", m.ProtocolMode,
+			"protocol_failure_stage", m.ProtocolFailureStage,
 			"duration_ms", duration.Milliseconds(),
 			"input_token", m.Stats.InputToken,
 			"output_token", m.Stats.OutputToken,
@@ -191,14 +411,16 @@ func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, e
 			"attempts", len(attempts),
 			"ws", m.UsedWS,
 		}
-		if success {
+		if outcome == model.RequestOutcomeSuccess {
+			log.Infow("relay.complete", fields...)
+		} else if outcome == model.RequestOutcomeClientCanceled {
 			log.Infow("relay.complete", fields...)
 		} else {
 			log.Warnw("relay.complete", fields...)
 		}
 	}
 
-	m.saveLog(ctx, success, err, duration, attempts, channelID, channelName)
+	m.saveLog(ctx, outcome, err, duration, attempts, channelID, channelName)
 }
 
 func finalChannel(attempts []model.ChannelAttempt) (int, string) {
@@ -213,26 +435,64 @@ func finalChannel(attempts []model.ChannelAttempt) (int, string) {
 			lastID = a.ChannelID
 			lastName = a.ChannelName
 		}
+		if a.Status == model.AttemptCanceled && lastID == 0 {
+			lastID = a.ChannelID
+			lastName = a.ChannelName
+		}
 	}
 	return lastID, lastName
 }
 
-func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
+func (m *RelayMetrics) saveLog(ctx context.Context, outcome model.RequestOutcome, err error, duration time.Duration, attempts []model.ChannelAttempt, channelID int, channelName string) {
 	actualModel := m.ActualModel
 	if actualModel == "" {
 		actualModel = m.RequestModel
 	}
 
 	relayLog := model.RelayLog{
-		Time:             m.StartTime.Unix(),
-		RequestModelName: m.RequestModel,
-		ChannelName:      channelName,
-		ChannelId:        channelID,
-		ActualModelName:  actualModel,
-		UseTime:          int(duration.Milliseconds()),
-		Attempts:         attempts,
-		TotalAttempts:    len(attempts),
-		UsedWS:           m.UsedWS,
+		Time:                 m.StartTime.Unix(),
+		RequestModelName:     m.RequestModel,
+		RequestAPIKeyID:      m.APIKeyID,
+		ChannelName:          channelName,
+		ChannelId:            channelID,
+		ActualModelName:      actualModel,
+		CanonicalModelName:   m.CanonicalModelName,
+		RouteCandidateID:     m.RouteCandidateID,
+		InboundProtocol:      m.InboundProtocol,
+		OutboundProtocol:     m.OutboundProtocol,
+		ProtocolMode:         m.ProtocolMode,
+		ProtocolPolicy:       m.ProtocolPolicy,
+		ProtocolAllowLossy:   m.ProtocolAllowLossy,
+		ProtocolWarnings:     append([]string(nil), m.ProtocolWarnings...),
+		ProtocolFailureStage: m.ProtocolFailureStage,
+		UseTime:              int(duration.Milliseconds()),
+		Attempts:             attempts,
+		TotalAttempts:        len(attempts),
+		UsedWS:               m.UsedWS,
+		Outcome:              outcome,
+		TransportTermination: m.TransportTermination,
+		CompletionEvidence:   m.CompletionEvidence,
+		TerminalEvent:        m.TerminalEvent,
+		HeaderPolicyTrace:    m.HeaderPolicyTrace,
+		TokenSource:          m.TokenSource,
+	}
+	if m.EffectivePrice != nil {
+		relayLog.PriceQuoteID = m.EffectivePrice.QuoteID
+		relayLog.PriceSource = m.EffectivePrice.Source
+		relayLog.PriceUnit = m.EffectivePrice.Unit
+		relayLog.PriceCurrency = m.EffectivePrice.Currency
+		relayLog.PriceInput = m.EffectivePrice.Input
+		relayLog.PriceOutput = m.EffectivePrice.Output
+		relayLog.PriceCacheRead = m.EffectivePrice.CacheRead
+		relayLog.PriceCacheWrite = m.EffectivePrice.CacheWrite
+		relayLog.PricePerRequest = m.EffectivePrice.PerRequest
+		relayLog.PriceGroupMultiplier = m.EffectivePrice.GroupMultiplier
+		relayLog.PriceExchangeRateUSD = m.EffectivePrice.ExchangeRateToUSD
+		relayLog.PriceObservedAt = m.EffectivePrice.ObservedAt
+		relayLog.PriceStale = m.EffectivePrice.Stale
+		relayLog.PriceConvertible = m.EffectivePrice.Convertible
+		relayLog.PriceOriginalCost = m.PriceOriginalCost
+		relayLog.PriceMatchReason = m.EffectivePrice.MatchReason
 	}
 
 	if apiKey, getErr := op.APIKeyGet(m.APIKeyID, ctx); getErr == nil {
@@ -278,7 +538,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, dur
 	if err != nil {
 		relayLog.Error = err.Error()
 	}
-	relayLog.Success = success
+	relayLog.Success = outcome == model.RequestOutcomeSuccess
 
 	if logErr := op.RelayLogAdd(ctx, relayLog); logErr != nil {
 		log.Warnf("failed to save relay log: %v", logErr)
@@ -303,6 +563,13 @@ func updateFinalChannelUsageStats(channelID int, metrics model.StatsMetrics) {
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func intPointerValue(value *int) int64 {
+	if value == nil {
+		return 0
+	}
+	return int64(*value)
 }
 
 // resolveModelPrice returns the global price configured for the actual model.

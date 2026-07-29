@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -45,13 +46,235 @@ func init() {
 		AddRoute(
 			router.NewRoute("/last-update-time", http.MethodGet).
 				Handle(getLastUpdateTime),
+		).
+		AddRoute(
+			router.NewRoute("/catalog", http.MethodGet).
+				Handle(listModelCatalog),
+		).
+		AddRoute(
+			router.NewRoute("/prices", http.MethodGet).
+				Handle(listSiteModelPrices),
+		).
+		AddRoute(
+			router.NewRoute("/currency-rates", http.MethodGet).
+				Handle(listCurrencyRates),
+		).
+		AddRoute(
+			router.NewRoute("/effective-price", http.MethodGet).
+				Handle(previewEffectivePrice),
 		)
+	router.NewGroupRouter("/api/v1/model").
+		Use(middleware.Auth()).
+		Use(middleware.RequireJSON()).
+		AddRoute(router.NewRoute("/catalog/sync", http.MethodPost).Handle(syncModelCatalog)).
+		AddRoute(router.NewRoute("/catalog/alias", http.MethodPost).Handle(upsertModelAlias)).
+		AddRoute(router.NewRoute("/catalog/canonical", http.MethodPost).Handle(updateCanonicalModel)).
+		AddRoute(router.NewRoute("/catalog/candidate", http.MethodPost).Handle(updateRouteCandidate)).
+		AddRoute(router.NewRoute("/catalog/preview", http.MethodPost).Handle(previewModelRoute)).
+		AddRoute(router.NewRoute("/protocol/capabilities", http.MethodGet).Handle(listProtocolCapabilities)).
+		AddRoute(router.NewRoute("/price-quote", http.MethodPost).Handle(upsertSiteModelPrice)).
+		AddRoute(router.NewRoute("/currency-rate", http.MethodPost).Handle(upsertCurrencyRate))
+	router.NewGroupRouter("/api/v1/model").
+		Use(middleware.Auth()).
+		AddRoute(router.NewRoute("/catalog/alias/:id", http.MethodDelete).Handle(deleteModelAlias)).
+		AddRoute(router.NewRoute("/price-quote/:id", http.MethodDelete).Handle(deleteSiteModelPrice))
 	router.NewGroupRouter("/v1").
 		Use(middleware.APIKeyAuth()).
 		AddRoute(
 			router.NewRoute("/models", http.MethodGet).
 				Handle(getModelList),
 		)
+}
+
+func listSiteModelPrices(c *gin.Context) {
+	canonicalID, _ := strconv.Atoi(c.Query("canonical_model_id"))
+	candidateID, _ := strconv.Atoi(c.Query("route_candidate_id"))
+	items, err := op.SiteModelPriceQuoteList(c.Request.Context(), canonicalID, candidateID)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, items)
+}
+
+func upsertSiteModelPrice(c *gin.Context) {
+	var request model.SiteModelPriceQuote
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	item, err := op.SiteModelPriceManualUpsert(c.Request.Context(), request)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, item)
+}
+
+func deleteSiteModelPrice(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		resp.InvalidParam(c)
+		return
+	}
+	if err := op.SiteModelPriceManualDelete(c.Request.Context(), id); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
+func previewEffectivePrice(c *gin.Context) {
+	candidateID, _ := strconv.Atoi(c.Query("route_candidate_id"))
+	fallbackModel := strings.TrimSpace(c.Query("model"))
+	if candidateID <= 0 && fallbackModel == "" {
+		resp.InvalidParam(c)
+		return
+	}
+	item, err := op.EffectivePriceForCandidate(c.Request.Context(), candidateID, fallbackModel)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, item)
+}
+
+func listCurrencyRates(c *gin.Context) {
+	items, err := op.CurrencyRateList(c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, items)
+}
+
+func upsertCurrencyRate(c *gin.Context) {
+	var request model.CurrencyRate
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	item, err := op.CurrencyRateUpsert(c.Request.Context(), request)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, item)
+}
+
+func listModelCatalog(c *gin.Context) {
+	items, err := op.CatalogList(c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, items)
+}
+
+func syncModelCatalog(c *gin.Context) {
+	result, err := op.CatalogSync(c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, result)
+}
+
+func upsertModelAlias(c *gin.Context) {
+	var request struct {
+		CanonicalModelID int    `json:"canonical_model_id" binding:"required"`
+		Alias            string `json:"alias" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	item, err := op.CatalogAliasUpsert(c.Request.Context(), request.CanonicalModelID, request.Alias)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, item)
+}
+
+func deleteModelAlias(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		resp.InvalidParam(c)
+		return
+	}
+	if err := op.CatalogAliasDelete(c.Request.Context(), id); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
+func updateCanonicalModel(c *gin.Context) {
+	var request model.CanonicalModel
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	item, err := op.CatalogCanonicalUpdate(c.Request.Context(), request)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, item)
+}
+
+func updateRouteCandidate(c *gin.Context) {
+	var request model.RouteCandidate
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	item, err := op.CatalogRouteCandidateUpdate(c.Request.Context(), request)
+	if err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp.Success(c, item)
+}
+
+func previewModelRoute(c *gin.Context) {
+	var request struct {
+		Model           string                  `json:"model" binding:"required"`
+		InboundProtocol model.ProtocolName      `json:"inbound_protocol" binding:"required"`
+		Features        []model.ProtocolFeature `json:"features,omitempty"`
+		WebSocket       bool                    `json:"websocket,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		resp.InvalidJSON(c)
+		return
+	}
+	canonical, ok := op.CatalogResolveRequest(request.Model)
+	groupName := request.Model
+	if ok {
+		groupName = canonical.Name
+	}
+	group, err := op.GroupGetEnabledMap(groupName, c.Request.Context())
+	if err != nil {
+		resp.Error(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if request.WebSocket {
+		request.Features = append(request.Features, model.ProtocolFeatureWebSocket)
+	}
+	_, preview, _, err := op.CatalogPlanGroup(c.Request.Context(), request.Model, model.ProtocolRouteRequirements{
+		InboundProtocol: request.InboundProtocol,
+		Features:        request.Features,
+	}, group)
+	if err != nil {
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp.Success(c, preview)
+}
+
+func listProtocolCapabilities(c *gin.Context) {
+	resp.Success(c, op.ProtocolCapabilityMatrix())
 }
 
 func getModelList(c *gin.Context) {

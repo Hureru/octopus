@@ -65,6 +65,31 @@ type StreamConfig struct {
 	TerminalEvents  map[string]struct{} // Protocol terminal events for early completion
 }
 
+// Termination describes how the transport loop ended. It is deliberately
+// separate from the request outcome: a client disconnect can happen after the
+// protocol has already emitted its terminal event.
+type Termination string
+
+const (
+	TerminationUnknown                       Termination = "unknown"
+	TerminationUpstreamEOF                   Termination = "upstream_eof"
+	TerminationProtocolTerminal              Termination = "protocol_terminal"
+	TerminationClientCanceled                Termination = "client_canceled"
+	TerminationClientDisconnectedAfterFinish Termination = "client_disconnected_after_finish"
+	TerminationFirstTokenTimeout             Termination = "first_token_timeout"
+	TerminationReadError                     Termination = "read_error"
+	TerminationWriteError                    Termination = "write_error"
+	TerminationTransformError                Termination = "transform_error"
+)
+
+// Result is the structured completion evidence produced by StreamProcessor.
+// Callers should use this instead of deriving business success from err alone.
+type Result struct {
+	PayloadWritten bool        `json:"payload_written"`
+	TerminalEvent  string      `json:"terminal_event,omitempty"`
+	Termination    Termination `json:"termination"`
+}
+
 // StreamProcessor unifies all stream handling logic.
 type StreamProcessor struct {
 	config StreamConfig
@@ -73,13 +98,16 @@ type StreamProcessor struct {
 	rawBuffer      bytes.Buffer
 	payloadWritten bool
 	firstToken     bool
+	terminalEvent  string
+	termination    Termination
 }
 
 // NewStreamProcessor creates a processor from config.
 func NewStreamProcessor(config StreamConfig) *StreamProcessor {
 	return &StreamProcessor{
-		config:     config,
-		firstToken: true,
+		config:      config,
+		firstToken:  true,
+		termination: TerminationUnknown,
 	}
 }
 
@@ -146,6 +174,7 @@ func (p *StreamProcessor) Run() error {
 			return p.handleDisconnect()
 
 		case <-firstTokenC:
+			p.termination = TerminationFirstTokenTimeout
 			return p.handleFirstTokenTimeout()
 
 		case <-heartbeatC:
@@ -155,14 +184,25 @@ func (p *StreamProcessor) Run() error {
 
 		case r, ok := <-results:
 			if !ok {
-				// Channel closed, stream ended
+				// The reader can exit through readCtx.Done without publishing its
+				// final context error. Do not reinterpret that close as upstream EOF.
+				if p.config.Context.Err() != nil {
+					return p.handleDisconnect()
+				}
+				p.termination = p.successfulTermination()
 				return p.finalize()
 			}
 
 			if r.err != nil {
 				if r.err == io.EOF {
+					p.termination = p.successfulTermination()
 					return p.finalize()
 				}
+				if p.config.Context.Err() != nil &&
+					(errors.Is(r.err, context.Canceled) || errors.Is(r.err, context.DeadlineExceeded)) {
+					return p.handleDisconnect()
+				}
+				p.termination = TerminationReadError
 				return fmt.Errorf("stream read error: %w", r.err)
 			}
 
@@ -209,6 +249,7 @@ func (p *StreamProcessor) processEvent(data []byte) error {
 	if p.config.Transform != nil {
 		output, err = p.config.Transform(p.config.Context, data)
 		if err != nil {
+			p.termination = TerminationTransformError
 			return fmt.Errorf("transform error: %w", err)
 		}
 		if len(output) == 0 {
@@ -219,10 +260,14 @@ func (p *StreamProcessor) processEvent(data []byte) error {
 	}
 
 	if _, err := p.config.Writer.Write(output); err != nil {
+		p.termination = TerminationWriteError
 		return fmt.Errorf("write error: %w", err)
 	}
 
 	p.payloadWritten = true
+	if p.terminalEvent == "" {
+		p.terminalEvent = terminalEventFromSSE(output, p.config.TerminalEvents)
+	}
 	p.config.Writer.Flush()
 	return nil
 }
@@ -238,15 +283,20 @@ func (p *StreamProcessor) writeHeartbeat() error {
 
 // handleDisconnect handles context cancellation or timeout.
 func (p *StreamProcessor) handleDisconnect() error {
-	// Check for terminal events in buffered stream
-	if p.config.BufferRawStream && len(p.config.TerminalEvents) > 0 {
-		if p.streamReachedTerminal() {
-			log.Debugf("client disconnected but stream reached terminal event, treating as success")
-			return p.finalize()
-		}
+	// Check both transformed output (recorded during processEvent) and buffered
+	// source bytes. The former is essential for Chat/Anthropic -> Responses
+	// conversions where only the client-facing stream contains response.completed.
+	if p.terminalEvent == "" && p.config.BufferRawStream && len(p.config.TerminalEvents) > 0 {
+		p.terminalEvent = p.streamTerminalEvent()
+	}
+	if p.terminalEvent != "" {
+		p.termination = TerminationClientDisconnectedAfterFinish
+		log.Debugf("client disconnected after terminal event %s, treating as success", p.terminalEvent)
+		return p.finalizeWithContext(context.Background())
 	}
 
 	err := p.config.Context.Err()
+	p.termination = TerminationClientCanceled
 	log.Debugf("client disconnected, stopping stream: written=%t first_token_seen=%t err=%v",
 		p.payloadWritten, !p.firstToken, err)
 
@@ -268,6 +318,10 @@ func (p *StreamProcessor) handleFirstTokenTimeout() error {
 
 // finalize completes the stream and calls OnFinish callback.
 func (p *StreamProcessor) finalize() error {
+	return p.finalizeWithContext(p.config.Context)
+}
+
+func (p *StreamProcessor) finalizeWithContext(ctx context.Context) error {
 	if !p.payloadWritten {
 		return ErrEmptyUpstreamStream
 	}
@@ -276,7 +330,7 @@ func (p *StreamProcessor) finalize() error {
 
 	if p.config.OnFinish != nil {
 		rawStream := p.rawBuffer.Bytes()
-		if err := p.config.OnFinish(p.config.Context, rawStream); err != nil {
+		if err := p.config.OnFinish(ctx, rawStream); err != nil {
 			return err
 		}
 	}
@@ -289,14 +343,36 @@ func (p *StreamProcessor) PayloadWritten() bool {
 	return p.payloadWritten
 }
 
-// streamReachedTerminal checks if buffered stream contains a terminal event.
-func (p *StreamProcessor) streamReachedTerminal() bool {
-	if p.rawBuffer.Len() == 0 {
-		return false
+// Result returns the completion evidence accumulated by the processor.
+func (p *StreamProcessor) Result() Result {
+	return Result{
+		PayloadWritten: p.payloadWritten,
+		TerminalEvent:  p.terminalEvent,
+		Termination:    p.termination,
 	}
+}
 
+func (p *StreamProcessor) successfulTermination() Termination {
+	if p.terminalEvent != "" {
+		return TerminationProtocolTerminal
+	}
+	return TerminationUpstreamEOF
+}
+
+// streamTerminalEvent checks if buffered stream contains a terminal event.
+func (p *StreamProcessor) streamTerminalEvent() string {
+	if p.rawBuffer.Len() == 0 {
+		return ""
+	}
+	return terminalEventFromSSE(p.rawBuffer.Bytes(), p.config.TerminalEvents)
+}
+
+func terminalEventFromSSE(payload []byte, terminalEvents map[string]struct{}) string {
+	if len(payload) == 0 || len(terminalEvents) == 0 {
+		return ""
+	}
 	readCfg := &sse.ReadConfig{MaxEventSize: 32 * 1024 * 1024}
-	for ev, err := range sse.Read(bytes.NewReader(p.rawBuffer.Bytes()), readCfg) {
+	for ev, err := range sse.Read(bytes.NewReader(payload), readCfg) {
 		if err != nil {
 			break
 		}
@@ -304,18 +380,21 @@ func (p *StreamProcessor) streamReachedTerminal() bool {
 		// Extract event type
 		typ := strings.TrimSpace(ev.Type)
 		if typ == "" {
-			data := ev.Data
+			data := strings.TrimSpace(ev.Data)
+			if data == "[DONE]" {
+				typ = "[DONE]"
+			}
 			if len(data) > 0 && data[0] == '{' {
 				typ = extractJSONType(data)
 			}
 		}
 
-		if _, ok := p.config.TerminalEvents[typ]; ok {
-			return true
+		if _, ok := terminalEvents[typ]; ok {
+			return typ
 		}
 	}
 
-	return false
+	return ""
 }
 
 // extractJSONType extracts "type" field from JSON without full unmarshaling.

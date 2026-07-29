@@ -149,6 +149,45 @@ func TestSiteCreateAndAccountCreatePersistExplicitFalseValues(t *testing.T) {
 	}
 }
 
+func TestSiteAccountUpdateClearsAutoProxyRecoveryOverride(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	_, account := createSiteOpTestSiteAccount(
+		t,
+		ctx,
+		"recovery-policy-site",
+		"recovery-policy-account",
+	)
+
+	enabled := true
+	if _, err := SiteAccountUpdate(&model.SiteAccountUpdateRequest{
+		ID:                   account.ID,
+		AutoProxyRecovery:    &enabled,
+		AutoProxyRecoverySet: true,
+	}, ctx); err != nil {
+		t.Fatalf("enable account recovery override: %v", err)
+	}
+
+	var request model.SiteAccountUpdateRequest
+	payload := fmt.Sprintf(`{"id":%d,"auto_proxy_recovery":null}`, account.ID)
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		t.Fatalf("unmarshal nullable recovery update: %v", err)
+	}
+	if !request.AutoProxyRecoverySet || request.AutoProxyRecovery != nil {
+		t.Fatalf("nullable recovery update lost presence: %+v", request)
+	}
+	if _, err := SiteAccountUpdate(&request, ctx); err != nil {
+		t.Fatalf("clear account recovery override: %v", err)
+	}
+
+	reloaded, err := SiteAccountGet(account.ID, ctx)
+	if err != nil {
+		t.Fatalf("reload account: %v", err)
+	}
+	if reloaded.AutoProxyRecovery != nil {
+		t.Fatalf("expected account recovery to inherit site after clear, got %v", *reloaded.AutoProxyRecovery)
+	}
+}
+
 func TestSiteUpdateCanClearNullableFields(t *testing.T) {
 	ctx := setupSiteOpTestDB(t)
 

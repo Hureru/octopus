@@ -14,6 +14,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/helper"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/coder/websocket"
 )
@@ -449,26 +450,21 @@ func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Chann
 
 func buildUpstreamWSHeaders(clientHeaders http.Header, channel *dbmodel.Channel, key string) http.Header {
 	headers := http.Header{}
-	for name, values := range clientHeaders {
-		if !shouldProxyUpstreamWSHeader(name) {
-			continue
+	policy := op.HeaderPolicyFailureFallback()
+	if channel != nil {
+		if resolved, err := op.ResolveHeaderPolicy(context.Background(), channel.ID, 0, 0); err == nil {
+			policy = resolved
+		} else {
+			log.Warnf("resolve WebSocket header policy failed (channel=%d): %v", channel.ID, err)
 		}
-		for _, value := range values {
-			headers.Add(name, value)
-		}
+		op.ApplyHeaderPolicy(headers, clientHeaders, channel.CustomHeader, policy)
+	} else {
+		op.ApplyHeaderPolicy(headers, clientHeaders, nil, policy)
 	}
 	if values, ok := headers["User-Agent"]; !ok || len(values) == 0 {
 		headers.Set("User-Agent", "")
 	} else {
 		headers["User-Agent"] = values[:1]
-	}
-	if channel != nil {
-		for _, header := range channel.CustomHeader {
-			if strings.TrimSpace(header.HeaderKey) == "" {
-				continue
-			}
-			headers.Set(header.HeaderKey, header.HeaderValue)
-		}
 	}
 	headers.Set("Authorization", "Bearer "+key)
 	headers.Set("OpenAI-Beta", "responses_websockets=2026-02-06")

@@ -1,8 +1,10 @@
 package relay
 
 import (
+	"math"
 	"testing"
 
+	"github.com/bestruirui/octopus/internal/model"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
@@ -61,5 +63,73 @@ func TestSetInternalResponseNoFallbackWhenCacheOnly(t *testing.T) {
 
 	if m.Stats.InputToken != 0 {
 		t.Fatalf("input token: got %d want 0 (cache-only is reported input)", m.Stats.InputToken)
+	}
+}
+
+func TestRelayMetricsKeepsUnconvertibleSiteCreditOutOfUSDCost(t *testing.T) {
+	m := &RelayMetrics{}
+	m.SetEffectivePrice(model.EffectivePrice{
+		QuoteID:           12,
+		Source:            model.PriceQuoteSourceSiteExact,
+		Unit:              model.PriceUnitSiteCredit,
+		Currency:          "SITE_CREDIT",
+		Input:             4,
+		Output:            8,
+		GroupMultiplier:   2,
+		Convertible:       false,
+		ExchangeRateToUSD: 0,
+	})
+	m.SetInternalResponse(&transformerModel.InternalLLMResponse{
+		Usage: &transformerModel.Usage{
+			PromptTokens:     1_000_000,
+			CompletionTokens: 500_000,
+		},
+	}, "credit-model")
+
+	if math.Abs(m.PriceOriginalCost-8) > 1e-9 {
+		t.Fatalf("original site-credit cost = %f, want 8", m.PriceOriginalCost)
+	}
+	if m.Stats.InputCost != 0 || m.Stats.OutputCost != 0 {
+		t.Fatalf("unconvertible credits leaked into USD cost: %+v", m.Stats)
+	}
+}
+
+func TestRelayMetricsCalculatesPerRequestPriceOnce(t *testing.T) {
+	m := &RelayMetrics{}
+	m.SetEffectivePrice(model.EffectivePrice{
+		QuoteID:           13,
+		Source:            model.PriceQuoteSourceSiteExact,
+		Unit:              model.PriceUnitPerRequest,
+		Currency:          "CNY",
+		PerRequest:        5,
+		GroupMultiplier:   1,
+		Convertible:       true,
+		ExchangeRateToUSD: 0.2,
+	})
+	m.SetInternalResponse(&transformerModel.InternalLLMResponse{
+		Usage: &transformerModel.Usage{
+			PromptTokens:     2_000_000,
+			CompletionTokens: 3_000_000,
+		},
+	}, "request-model")
+
+	if m.PriceOriginalCost != 5 {
+		t.Fatalf("per-request original cost = %f, want 5", m.PriceOriginalCost)
+	}
+	if math.Abs(m.Stats.InputCost-1) > 1e-9 || m.Stats.OutputCost != 0 {
+		t.Fatalf("per-request converted cost mismatch: %+v", m.Stats)
+	}
+}
+
+func TestFinalChannelRetainsClientCanceledAttempt(t *testing.T) {
+	channelID, channelName := finalChannel([]model.ChannelAttempt{
+		{
+			ChannelID:   17,
+			ChannelName: "images-channel",
+			Status:      model.AttemptCanceled,
+		},
+	})
+	if channelID != 17 || channelName != "images-channel" {
+		t.Fatalf("finalChannel canceled attempt = (%d, %q)", channelID, channelName)
 	}
 }

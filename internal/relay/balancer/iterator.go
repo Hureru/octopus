@@ -125,6 +125,25 @@ func (it *Iterator) Skip(channelID, channelKeyID int, channelName, msg string) {
 	})
 }
 
+func (it *Iterator) RecordPlanningSkip(
+	channelID int,
+	channelName string,
+	modelName string,
+	routeCandidateID int,
+	msg string,
+) {
+	it.count++
+	it.attempts = append(it.attempts, model.ChannelAttempt{
+		ChannelID:        channelID,
+		ChannelName:      channelName,
+		ModelName:        modelName,
+		RouteCandidateID: routeCandidateID,
+		AttemptNum:       it.count,
+		Status:           model.AttemptSkipped,
+		Msg:              msg,
+	})
+}
+
 // SkipCircuitBreak 检查熔断状态，若已熔断自动记录（含剩余冷却时间）并返回 true
 func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName string) bool {
 	modelName := it.candidates[it.index].ModelName
@@ -180,13 +199,52 @@ type AttemptSpan struct {
 	ended     bool
 }
 
+func (s *AttemptSpan) SetRouteCandidateID(candidateID int) {
+	if s == nil || s.ended {
+		return
+	}
+	s.attempt.RouteCandidateID = candidateID
+}
+
+func (s *AttemptSpan) SetUsage(usage *model.AttemptUsageSnapshot) {
+	if s == nil || s.ended || usage == nil {
+		return
+	}
+	snapshot := *usage
+	s.attempt.Usage = &snapshot
+}
+
 // End 结束尝试：设置状态，自动计算耗时，追加到 Iterator
 func (s *AttemptSpan) End(status model.AttemptStatus, statusCode int, msg string) {
+	outcome := model.RequestOutcomeFailed
+	attribution := model.AttemptAttributionUpstream
+	if status == model.AttemptSuccess {
+		outcome = model.RequestOutcomeSuccess
+		attribution = model.AttemptAttributionNone
+	} else if status == model.AttemptCanceled {
+		outcome = model.RequestOutcomeClientCanceled
+		attribution = model.AttemptAttributionClient
+	}
+	s.EndDetailed(status, statusCode, msg, outcome, attribution, model.CompletionEvidenceNone)
+}
+
+func (s *AttemptSpan) EndDetailed(
+	status model.AttemptStatus,
+	statusCode int,
+	msg string,
+	outcome model.RequestOutcome,
+	attribution model.AttemptAttribution,
+	evidence model.CompletionEvidence,
+) {
 	if s.ended {
 		return
 	}
 	s.ended = true
 	s.attempt.Status = status
+	s.attempt.StatusCode = statusCode
+	s.attempt.Outcome = outcome
+	s.attempt.Attribution = attribution
+	s.attempt.CompletionEvidence = evidence
 	s.attempt.Duration = int(time.Since(s.startTime).Milliseconds())
 	s.attempt.Msg = msg
 	s.iter.attempts = append(s.iter.attempts, s.attempt)

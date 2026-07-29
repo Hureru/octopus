@@ -52,10 +52,11 @@ func listProxyConfigurationReferences(c *gin.Context) {
 
 func createProxyConfiguration(c *gin.Context) {
 	type proxyConfigurationCreateRequest struct {
-		Name    string `json:"name" binding:"required"`
-		URL     string `json:"url" binding:"required"`
-		Enabled *bool  `json:"enabled,omitempty"`
-		Remark  string `json:"remark,omitempty"`
+		Name              string `json:"name" binding:"required"`
+		URL               string `json:"url" binding:"required"`
+		ClashControllerID *int   `json:"clash_controller_id,omitempty"`
+		Enabled           *bool  `json:"enabled,omitempty"`
+		Remark            string `json:"remark,omitempty"`
 	}
 
 	var req proxyConfigurationCreateRequest
@@ -68,10 +69,11 @@ func createProxyConfiguration(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 	item := model.ProxyConfiguration{
-		Name:    req.Name,
-		URL:     req.URL,
-		Enabled: enabled,
-		Remark:  req.Remark,
+		Name:              req.Name,
+		URL:               req.URL,
+		ClashControllerID: req.ClashControllerID,
+		Enabled:           enabled,
+		Remark:            req.Remark,
 	}
 	if err := op.ProxyConfigurationCreate(&item, c.Request.Context()); err != nil {
 		resp.Error(c, http.StatusBadRequest, err.Error())
