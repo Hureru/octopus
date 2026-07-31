@@ -40,6 +40,18 @@ func isFirstTokenTimeout(ctx context.Context, err error) bool {
 	return errors.Is(context.Cause(ctx), errFirstTokenTimeout)
 }
 
+func shouldRecordWSHealthFailure(ctx context.Context, err error) bool {
+	if errors.Is(err, errUpstreamWSDialTimeout) {
+		return true
+	}
+	if errors.Is(err, errLocalRelayBudgetExceeded) ||
+		errors.Is(err, errFirstTokenTimeout) ||
+		errors.Is(err, errWSClientMaxAge) {
+		return false
+	}
+	return ctx == nil || ctx.Err() == nil
+}
+
 func isClientCancellation(ctx context.Context, err error) bool {
 	if isLocalRelayBudgetExceeded(ctx, err) || isLocalRelayBudgetExceeded(ctx, contextError(ctx)) ||
 		isFirstTokenTimeout(ctx, err) || isFirstTokenTimeout(ctx, contextError(ctx)) {

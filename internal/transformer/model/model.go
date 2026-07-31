@@ -454,7 +454,7 @@ func parseRawJSONArray(raw json.RawMessage) ([]json.RawMessage, bool) {
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, false
 	}
-	if items == nil || len(items) == 0 {
+	if len(items) == 0 {
 		return nil, false
 	}
 	return items, true

@@ -3,6 +3,7 @@ package op
 import (
 	"archive/zip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,9 +28,36 @@ const (
 	dbExportLogBatchSize = 1000
 )
 
-func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DBDump, error) {
-	conn := db.GetDB().WithContext(ctx)
+func withDBExportSnapshot(ctx context.Context, work func(*gorm.DB) error) error {
+	conn := db.GetDB()
+	if conn == nil {
+		return fmt.Errorf("database is not initialized")
+	}
+	conn = conn.WithContext(ctx)
+	switch conn.Dialector.Name() {
+	case "mysql", "postgres":
+		return conn.Transaction(work, &sql.TxOptions{
+			Isolation: sql.LevelRepeatableRead,
+			ReadOnly:  true,
+		})
+	case "sqlite":
+		return conn.Transaction(work)
+	default:
+		return fmt.Errorf("unsupported export database dialect %q", conn.Dialector.Name())
+	}
+}
 
+func DBExportAll(ctx context.Context, includeLogs, includeStats bool) (*model.DBDump, error) {
+	var dump *model.DBDump
+	err := withDBExportSnapshot(ctx, func(conn *gorm.DB) error {
+		var err error
+		dump, err = dbExportAllWithConn(ctx, conn, includeLogs, includeStats)
+		return err
+	})
+	return dump, err
+}
+
+func dbExportAllWithConn(ctx context.Context, conn *gorm.DB, includeLogs, includeStats bool) (*model.DBDump, error) {
 	d := &model.DBDump{
 		Version:      dbDumpVersion,
 		ExportedAt:   time.Now().UTC(),
@@ -774,8 +802,12 @@ func DBExportZip(ctx context.Context, w io.Writer, includeLogs, includeStats boo
 		}
 	}()
 
-	conn := db.GetDB().WithContext(ctx)
+	return withDBExportSnapshot(ctx, func(conn *gorm.DB) error {
+		return dbExportZipWithConn(ctx, zw, conn, includeLogs, includeStats)
+	})
+}
 
+func dbExportZipWithConn(ctx context.Context, zw *zip.Writer, conn *gorm.DB, includeLogs, includeStats bool) error {
 	manifest := map[string]any{
 		"version":       dbDumpVersion,
 		"exported_at":   time.Now().UTC().Format(time.RFC3339),

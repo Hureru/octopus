@@ -2,7 +2,9 @@ package relay
 
 import (
 	"math/rand/v2"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,20 +21,35 @@ func isPassthroughStatus(code int) bool {
 	return code == 429 || code == 503
 }
 
-// parseRetryAfter 解析 Retry-After 响应头（仅支持秒数格式），上限 60s
+const maxRetryAfter = 60 * time.Second
+
+// parseRetryAfter parses both legal Retry-After forms and caps the wait at 60s.
 func parseRetryAfter(header string) time.Duration {
+	return parseRetryAfterAt(header, time.Now())
+}
+
+func parseRetryAfterAt(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
 	if header == "" {
 		return 0
 	}
 	secs, err := strconv.Atoi(header)
-	if err != nil || secs <= 0 {
+	if err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return min(time.Duration(secs)*time.Second, maxRetryAfter)
+	}
+
+	retryAt, err := http.ParseTime(header)
+	if err != nil {
 		return 0
 	}
-	d := time.Duration(secs) * time.Second
-	if d > 60*time.Second {
-		d = 60 * time.Second
+	delay := retryAt.Sub(now)
+	if delay <= 0 {
+		return 0
 	}
-	return d
+	return min(delay, maxRetryAfter)
 }
 
 // computeBackoff 计算退避时间

@@ -64,6 +64,7 @@ func storeWSConversationState(apiKeyID int, requestModel string, state *wsConver
 	}
 	cloned.RequestModel = requestModel
 
+	pruneExpiredWSConversationStates(time.Now())
 	wsConversationStore.Store(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID), &wsConversationStateEntry{
 		state:     cloned,
 		expiresAt: time.Now().Add(ttl),
@@ -77,6 +78,36 @@ func deleteWSConversationState(apiKeyID int, requestModel, downstreamSessionID s
 		return
 	}
 	wsConversationStore.Delete(wsConversationStateKey(apiKeyID, requestModel, downstreamSessionID))
+}
+
+func deleteWSConversationStatesForSession(apiKeyID int, downstreamSessionID string) {
+	downstreamSessionID = strings.TrimSpace(downstreamSessionID)
+	if downstreamSessionID == "" {
+		return
+	}
+	wsConversationStore.Range(func(key, value any) bool {
+		entry, ok := value.(*wsConversationStateEntry)
+		if !ok || entry == nil || entry.state == nil {
+			wsConversationStore.Delete(key)
+			return true
+		}
+		if entry.state.DownstreamSessionID == downstreamSessionID &&
+			strings.HasPrefix(fmt.Sprint(key), fmt.Sprintf("%d:", apiKeyID)) {
+			wsConversationStore.Delete(key)
+		}
+		return true
+	})
+}
+
+func pruneExpiredWSConversationStates(now time.Time) {
+	wsConversationStore.Range(func(key, value any) bool {
+		entry, ok := value.(*wsConversationStateEntry)
+		if !ok || entry == nil || entry.state == nil ||
+			(!entry.expiresAt.IsZero() && !now.Before(entry.expiresAt)) {
+			wsConversationStore.Delete(key)
+		}
+		return true
+	})
 }
 
 func resolveWSConversationState(apiKeyID int, requestModel string, localState *wsConversationState, allowStoredRestore bool, downstreamSessionID string) *wsConversationState {

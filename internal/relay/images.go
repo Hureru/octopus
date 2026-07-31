@@ -552,9 +552,11 @@ func imagesAttempt(
 
 	var bodyReader io.Reader
 	var contentType string
+	var multipartPipeReader *io.PipeReader
 
 	if isMultipart {
 		pr, pw := io.Pipe()
+		multipartPipeReader = pr
 		mw := multipart.NewWriter(pw)
 		contentType = mw.FormDataContentType()
 		bodyReader = pr
@@ -593,12 +595,16 @@ func imagesAttempt(
 		contentType = "application/json"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bodyReader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, parsedURL.String(), bodyReader)
 	if err != nil {
+		if multipartPipeReader != nil {
+			_ = multipartPipeReader.CloseWithError(err)
+		}
 		return 0, false, nil, "", fmt.Errorf("failed to create request: %w", err)
 	}
-	req.URL = parsedURL
-	req.Method = http.MethodPost
+	if req.Body != nil {
+		defer req.Body.Close()
+	}
 
 	// Header 透传：复制下游 header，过滤 hop-by-hop 与鉴权相关
 	copyHeadersToUpstream(req, c, channel, channelKey, contentType, stream)
@@ -772,21 +778,37 @@ func proxySSE(ctx context.Context, c *gin.Context, respUp *http.Response, firstT
 		eof  bool
 	}
 
+	readCtx, cancelRead := context.WithCancel(ctx)
+	defer func() {
+		cancelRead()
+		_ = respUp.Body.Close()
+	}()
+
 	results := make(chan lineResult, 1)
 	go func() {
 		defer close(results)
 		br := bufio.NewReaderSize(respUp.Body, 64*1024)
+		send := func(result lineResult) bool {
+			select {
+			case results <- result:
+				return true
+			case <-readCtx.Done():
+				return false
+			}
+		}
 		for {
 			line, err := readLineLimited(br, maxSSEEventSize)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					results <- lineResult{eof: true}
+					send(lineResult{eof: true})
 					return
 				}
-				results <- lineResult{err: err}
+				send(lineResult{err: err})
 				return
 			}
-			results <- lineResult{line: line}
+			if !send(lineResult{line: line}) {
+				return
+			}
 		}
 	}()
 

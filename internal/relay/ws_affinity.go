@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
@@ -17,6 +19,8 @@ import (
 const (
 	wsAffinityCacheShards = 16
 	wsAffinityMaxTTL      = time.Hour
+	wsAffinityHotMaxItems = 8192
+	wsAffinitySweepEvery  = time.Minute
 )
 
 type wsAffinityScope struct {
@@ -40,7 +44,9 @@ type wsAffinityStore interface {
 }
 
 type dbWSAffinityStore struct {
-	hot cache.Cache[string, wsAffinityEntry]
+	hot          cache.Cache[string, wsAffinityEntry]
+	hotSweepMu   sync.Mutex
+	nextHotSweep time.Time
 }
 
 func newDBWSAffinityStore() wsAffinityStore {
@@ -70,6 +76,7 @@ func (s *dbWSAffinityStore) Get(ctx context.Context, scope wsAffinityScope) (*ws
 			}
 			s.hot.Del(key)
 		}
+		s.maintainHotCache(now)
 	}
 
 	dbConn := db.GetDB()
@@ -97,6 +104,7 @@ func (s *dbWSAffinityStore) Get(ctx context.Context, scope wsAffinityScope) (*ws
 	}
 	if s != nil && s.hot != nil {
 		s.hot.Set(key, entry)
+		s.maintainHotCache(time.Now())
 	}
 	return &entry, true
 }
@@ -162,6 +170,47 @@ func (s *dbWSAffinityStore) Delete(ctx context.Context, scope wsAffinityScope) e
 	return dbConn.WithContext(ctx).
 		Where("api_key_id = ? AND group_id = ? AND request_model = ? AND response_id_hash = ?", scope.APIKeyID, scope.GroupID, strings.TrimSpace(scope.RequestModel), hash).
 		Delete(&model.WSResponseAffinity{}).Error
+}
+
+func (s *dbWSAffinityStore) maintainHotCache(now time.Time) {
+	if s == nil || s.hot == nil {
+		return
+	}
+	s.hotSweepMu.Lock()
+	defer s.hotSweepMu.Unlock()
+
+	if now.Before(s.nextHotSweep) && s.hot.Len() <= wsAffinityHotMaxItems {
+		return
+	}
+
+	all := s.hot.GetAll()
+	for key, entry := range all {
+		if !entry.ExpiresAt.IsZero() && !now.Before(entry.ExpiresAt) {
+			s.hot.Del(key)
+			delete(all, key)
+		}
+	}
+	if len(all) > wsAffinityHotMaxItems {
+		type hotItem struct {
+			key       string
+			expiresAt time.Time
+		}
+		items := make([]hotItem, 0, len(all))
+		for key, entry := range all {
+			expiresAt := entry.ExpiresAt
+			if expiresAt.IsZero() {
+				expiresAt = time.Unix(1<<62, 0)
+			}
+			items = append(items, hotItem{key: key, expiresAt: expiresAt})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].expiresAt.Before(items[j].expiresAt)
+		})
+		for i := 0; i < len(items)-wsAffinityHotMaxItems; i++ {
+			s.hot.Del(items[i].key)
+		}
+	}
+	s.nextHotSweep = now.Add(wsAffinitySweepEvery)
 }
 
 func normalizeWSAffinityScope(scope wsAffinityScope) (cacheKey string, responseHash string, ok bool) {

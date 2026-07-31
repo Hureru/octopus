@@ -24,6 +24,7 @@ import {
     type GroupHealthProbeMode,
     type GroupHealthStatus,
 } from '@/api/endpoints/group-health';
+import { toast } from '@/components/common/Toast';
 
 function formatDateTime(value?: string | null) {
     if (!value) return 'Never';
@@ -161,6 +162,7 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
     const { data: views = [] } = useGroupHealthList();
     const runGroupHealth = useRunGroupHealth();
     const [open, setOpen] = useState(false);
+    const showRunError = (error: Error) => toast.error(t('runFailed'), { description: error.message });
 
     const view = useMemo(
         () => views.find((item) => item.group_id === groupId),
@@ -213,7 +215,7 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
                         variant="outline"
                         className="h-7 rounded-lg px-2 text-xs"
                         disabled={isRunPendingForGroup || isRunning}
-                        onClick={() => runGroupHealth.mutate({ groupId })}
+                        onClick={() => runGroupHealth.mutate({ groupId }, { onError: showRunError })}
                     >
                         {isRunning || isStandardRunPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
                         {t('run')}
@@ -224,7 +226,7 @@ export function GroupHealthBadge({ groupId }: { groupId?: number }) {
                         variant="outline"
                         className="h-7 rounded-lg px-2 text-xs"
                         disabled={isRunPendingForGroup || isRunning}
-                        onClick={() => runGroupHealth.mutate({ groupId, probeMode: 'full' })}
+                        onClick={() => runGroupHealth.mutate({ groupId, probeMode: 'full' }, { onError: showRunError })}
                     >
                         {isFullRunPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
                         {t('runFull')}

@@ -56,6 +56,7 @@ func HandleWSResponse(c *gin.Context) {
 	log.Debugf("ws client connected (apikey=%d)", apiKeyID)
 
 	downstreamSessionID := fmt.Sprintf("ws_%d", time.Now().UnixNano())
+	defer deleteWSConversationStatesForSession(apiKeyID, downstreamSessionID)
 	var conversationState *wsConversationState
 
 	// Message loop

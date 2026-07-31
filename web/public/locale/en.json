@@ -41,7 +41,10 @@
         "neverExpire": "Never",
         "daysLeft": "days left",
         "expired": "Expired",
-        "supportedModels": "Supported Models"
+        "supportedModels": "Supported Models",
+        "copied": "{label} copied",
+        "toggleTheme": "Switch theme",
+        "toggleLanguage": "Switch language"
     },
     "navbar": {
         "navigation": "Main navigation",
@@ -108,7 +111,11 @@
         }
     },
     "common": {
+        "close": "Close",
+        "loading": "Loading...",
+        "routeNotFound": "Route not found: {route}",
         "copy": {
+            "action": "Copy",
             "success": "Copied",
             "failed": "Copy failed",
             "noContent": "Nothing to copy"
@@ -161,7 +168,8 @@
             "runAllFull": "Full Probe All",
             "viewDetails": "View details",
             "detailTitle": "Group health details",
-            "detailDescription": "Inspect the latest health snapshot for each group and run standard or full probes from the home dashboard."
+            "detailDescription": "Inspect the latest health snapshot for each group and run standard or full probes from the home dashboard.",
+            "runFailed": "Failed to start group health check"
         }
     },
     "setting": {
@@ -676,7 +684,8 @@
             },
             "empty": "No health snapshot yet.",
             "errorDetails": "Error details",
-            "noHttpStatus": "No HTTP status"
+            "noHttpStatus": "No HTTP status",
+            "runFailed": "Failed to start group health check"
         },
         "empty": "No groups yet, click the button above to create one",
         "autoGroup": {
@@ -986,7 +995,9 @@
     "list": {
       "noMore": "No more logs",
       "loadFailed": "Failed to load logs: {message}",
-      "retry": "Retry"
+      "retry": "Retry",
+      "streamDisconnected": "Live log connection disconnected",
+      "streamTokenFailed": "Failed to get live log stream token"
         },
         "card": {
             "error": "Error",
@@ -1604,6 +1615,146 @@
             "revokeConfirmDescription": "\"{name}\" will no longer claim verification tasks. Its claimed tasks will be released.",
             "cancel": "Cancel",
             "operationFailed": "Operation failed"
+        }
+    },
+    "siteManagement": {
+        "common": {
+            "close": "Close",
+            "cancel": "Cancel",
+            "saving": "Saving...",
+            "saveChanges": "Save changes",
+            "add": "Add",
+            "remove": "Remove",
+            "operationFailed": "Operation failed",
+            "headerKey": "Header Key",
+            "headerValue": "Header Value"
+        },
+        "tags": {
+            "placeholder": "Enter a tag and press Enter",
+            "maxLength": "A tag cannot exceed {count} characters",
+            "maxCount": "You can add at most {count} tags",
+            "remove": "Remove tag {tag}"
+        },
+        "siteForm": {
+            "nameRequired": "Enter a site name",
+            "urlRequired": "Enter a site URL",
+            "detectedPlatform": "Detected platform: {platform}",
+            "platformApi": "Direct API",
+            "detectFailed": "The platform could not be detected. Select it manually.",
+            "platformRequired": "Select a platform",
+            "headerRequired": "Both the custom header key and value are required",
+            "routeRequired": "Both the protocol override type and URL are required",
+            "duplicateRoute": "Only one path override can be configured per protocol",
+            "updated": "Site updated",
+            "created": "Site created",
+            "editTitle": "Edit site",
+            "createTitle": "Add site",
+            "siteName": "Site name",
+            "siteNamePlaceholder": "For example: Primary OneAPI",
+            "platform": "Platform",
+            "autoDetect": "Auto-detect",
+            "siteUrl": "Site URL",
+            "defaultProtocol": "Default protocol",
+            "defaultProtocolHint": "Controls the model-list request format and the default endpoint format for models without an explicit route type",
+            "manualCheckinUrl": "Manual check-in URL",
+            "manualCheckinPlaceholder": "Optional: https://example.com/signin",
+            "manualCheckinHint": "After configuration, this page can be opened from the site overview for manual check-in.",
+            "tags": "Tags",
+            "tagsHint": "Optional: tag sites to make list filtering and grouping easier.",
+            "enabled": "Enable site",
+            "disabledHint": "Managed channels are no longer projected while disabled",
+            "advancedSettings": "Advanced settings",
+            "customHeaders": "Custom headers ({count})",
+            "protocolOverrides": "Protocol path overrides ({count})",
+            "protocolOverridesHint": "Override the request URL by protocol. For example, use https://example.com/anthropic/v1 for Anthropic. Leave blank to infer it from the site URL.",
+            "routeType": "Protocol type",
+            "createSite": "Create site"
+        },
+        "accountForm": {
+            "contextMissing": "The site context is unavailable.",
+            "nameRequired": "Enter an account name",
+            "usernamePasswordRequired": "Username and password are required",
+            "accessTokenRequired": "Enter an access token",
+            "apiKeyRequired": "Enter an API key",
+            "checkinIntervalRange": "The minimum check-in interval must be between 1 and 720 hours",
+            "randomWindowRange": "The random delay window must be between 0 and 1,440 minutes",
+            "platformUserIdRequired": "Enter the platform user ID",
+            "platformUserIdInvalid": "The platform user ID must be a positive integer",
+            "tokenExpiresPositive": "token_expires_at must be a positive integer timestamp",
+            "tokenExpiresParseable": "token_expires_at must be a timestamp or a parseable date",
+            "updated": "Site account updated",
+            "created": "Site account created",
+            "editTitle": "Edit site account",
+            "createTitle": "Add site account",
+            "accountName": "Account name",
+            "accountNamePlaceholder": "For example: Primary account",
+            "credentialType": "Credential type",
+            "credentialUsernamePassword": "Username / Password",
+            "credentialAccessToken": "Access token",
+            "credentialApiKey": "API key",
+            "username": "Username",
+            "usernamePlaceholder": "Enter the username",
+            "password": "Password",
+            "passwordPlaceholder": "Enter the password",
+            "accessToken": "Access token",
+            "accessTokenPlaceholder": "Enter the access token",
+            "refreshToken": "Refresh token",
+            "refreshTokenPlaceholder": "Optional: enter refresh_token",
+            "tokenExpiresAt": "token_expires_at",
+            "tokenExpiresPlaceholder": "Optional: timestamp or date string from DevTools",
+            "sub2apiHint": "For Sub2API, enter both <refreshToken>refresh_token</refreshToken> and <expiresAt>token_expires_at</expiresAt> from DevTools so the token can refresh before expiry or after a 401 response.",
+            "platformUserId": "Platform user ID",
+            "platformUserIdPlaceholder": "For example: 11494",
+            "platformUserIdHint": "New API needs the user ID to sync tokens, groups, and check-ins. Imports try to populate it automatically.",
+            "apiKey": "API key",
+            "apiKeyPlaceholder": "Enter the API key",
+            "enabled": "Enable account",
+            "autoSync": "Automatic sync",
+            "autoCheckin": "Automatic check-in",
+            "randomCheckin": "Randomized check-in",
+            "minCheckinInterval": "Minimum check-in interval (hours)",
+            "randomDelayWindow": "Random delay window (minutes)",
+            "proxyHint": "Used for this account's sync, check-in, and model fetches. Automatically projected channels follow the resolved proxy.",
+            "createAccount": "Create account"
+        },
+        "batchEdit": {
+            "selectSiteRequired": "Select at least one site",
+            "headerRequired": "Both the key and value are required when setting a header",
+            "changeRequired": "Enter at least one change",
+            "completed": "Completed: {successCount} succeeded, {failedCount} failed",
+            "failed": "Batch edit failed",
+            "title": "Batch edit",
+            "description": "Apply these changes to {count} sites. Unspecified settings remain unchanged.",
+            "addTags": "Add tags",
+            "removeTags": "Remove tags",
+            "headerList": "Headers ({count})",
+            "set": "Set",
+            "delete": "Delete",
+            "deleteKeyPlaceholder": "Delete this key (no value needed)",
+            "headerHint": "Set adds or updates a key without case sensitivity. Delete removes the key. Other headers remain unchanged on each site.",
+            "applying": "Applying...",
+            "applySelected": "Apply to selected sites"
+        },
+        "checkin": {
+            "filters": {
+                "all": "All",
+                "success": "Succeeded",
+                "failed": "Failed",
+                "idle": "Not run",
+                "disabled": "Disabled"
+            },
+            "overview": "Overview",
+            "currentResult": "Current result",
+            "visibleCounts": "{siteCount} sites / {accountCount} accounts",
+            "currentBalance": "Current balance",
+            "totalUsed": "Total used",
+            "enabledAccounts": "Enabled accounts",
+            "todayFailures": "Today's failures",
+            "search": "Search: {term}",
+            "clearFilters": "Clear filters",
+            "openManualCheckin": "Open manual check-ins ({count})",
+            "removeTagFilter": "Stop filtering by \"{tag}\"",
+            "addTagFilter": "Filter by \"{tag}\""
         }
     },
     "siteRecovery": {

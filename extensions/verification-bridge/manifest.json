@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Octopus 验证桥",
+  "version": "0.1.0",
+  "description": "在管理员浏览器中完成已配对的 Octopus 站点验证任务。",
+  "permissions": [
+    "cookies",
+    "storage",
+    "windows"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "Octopus 验证桥",
+    "default_popup": "popup.html"
+  }
+}

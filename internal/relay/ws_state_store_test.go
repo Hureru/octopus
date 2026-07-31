@@ -15,10 +15,10 @@ func TestResolveWSConversationStateFallsBackToStoredState(t *testing.T) {
 
 	stored := &wsConversationState{
 		DownstreamSessionID: "ws_a",
-		RequestModel:   "gpt-5.4",
-		ChannelID:      11,
-		ChannelKeyID:   22,
-		LastResponseID: "resp_saved",
+		RequestModel:        "gpt-5.4",
+		ChannelID:           11,
+		ChannelKeyID:        22,
+		LastResponseID:      "resp_saved",
 	}
 	storeWSConversationState(7, "gpt-5.4", stored, time.Minute)
 
@@ -53,9 +53,9 @@ func TestResolveWSConversationStateDoesNotRestoreStoredStateForFreshConnection(t
 
 	storeWSConversationState(7, "gpt-5.4", &wsConversationState{
 		DownstreamSessionID: "ws_a",
-		RequestModel:   "gpt-5.4",
-		LastResponseID: "resp_saved",
-		Transcript:     []transformerModel.Message{{Role: "assistant"}},
+		RequestModel:        "gpt-5.4",
+		LastResponseID:      "resp_saved",
+		Transcript:          []transformerModel.Message{{Role: "assistant"}},
 	}, time.Minute)
 
 	resolved := resolveWSConversationState(7, "gpt-5.4", nil, false, "ws_b")
@@ -70,9 +70,9 @@ func TestResolveWSConversationStateRestoresStoredStateForContinuation(t *testing
 
 	storeWSConversationState(7, "gpt-5.4", &wsConversationState{
 		DownstreamSessionID: "ws_a",
-		RequestModel:   "gpt-5.4",
-		LastResponseID: "resp_saved",
-		Transcript:     []transformerModel.Message{{Role: "assistant"}},
+		RequestModel:        "gpt-5.4",
+		LastResponseID:      "resp_saved",
+		Transcript:          []transformerModel.Message{{Role: "assistant"}},
 	}, time.Minute)
 
 	local := &wsConversationState{RequestModel: "other-model"}
@@ -91,14 +91,61 @@ func TestShouldRestoreStoredWSConversationState(t *testing.T) {
 	}
 }
 
+func TestDeleteWSConversationStatesForSessionDeletesAllModels(t *testing.T) {
+	resetWSConversationStateStore()
+	t.Cleanup(resetWSConversationStateStore)
+
+	for _, modelName := range []string{"gpt-5.4", "gpt-5.6"} {
+		storeWSConversationState(7, modelName, &wsConversationState{
+			DownstreamSessionID: "ws_a",
+			RequestModel:        modelName,
+		}, time.Minute)
+	}
+	storeWSConversationState(7, "gpt-5.4", &wsConversationState{
+		DownstreamSessionID: "ws_b",
+		RequestModel:        "gpt-5.4",
+	}, time.Minute)
+
+	deleteWSConversationStatesForSession(7, "ws_a")
+
+	if resolved := loadWSConversationState(7, "gpt-5.4", "ws_a"); resolved != nil {
+		t.Fatalf("expected first model state to be deleted, got %#v", resolved)
+	}
+	if resolved := loadWSConversationState(7, "gpt-5.6", "ws_a"); resolved != nil {
+		t.Fatalf("expected second model state to be deleted, got %#v", resolved)
+	}
+	if resolved := loadWSConversationState(7, "gpt-5.4", "ws_b"); resolved == nil {
+		t.Fatal("expected another downstream session to remain")
+	}
+}
+
+func TestPruneExpiredWSConversationStatesRemovesColdEntries(t *testing.T) {
+	resetWSConversationStateStore()
+	t.Cleanup(resetWSConversationStateStore)
+
+	key := wsConversationStateKey(7, "gpt-5.4", "ws_expired")
+	wsConversationStore.Store(key, &wsConversationStateEntry{
+		state: &wsConversationState{
+			DownstreamSessionID: "ws_expired",
+			RequestModel:        "gpt-5.4",
+		},
+		expiresAt: time.Now().Add(-time.Second),
+	})
+
+	pruneExpiredWSConversationStates(time.Now())
+	if _, ok := wsConversationStore.Load(key); ok {
+		t.Fatal("expected expired cold state to be removed")
+	}
+}
+
 func TestResolveWSConversationStateIsSessionScoped(t *testing.T) {
 	resetWSConversationStateStore()
 	t.Cleanup(resetWSConversationStateStore)
 
 	storeWSConversationState(7, "gpt-5.4", &wsConversationState{
 		DownstreamSessionID: "ws_a",
-		RequestModel:       "gpt-5.4",
-		LastResponseID:     "resp_saved",
+		RequestModel:        "gpt-5.4",
+		LastResponseID:      "resp_saved",
 	}, time.Minute)
 
 	if resolved := resolveWSConversationState(7, "gpt-5.4", nil, true, "ws_b"); resolved != nil {

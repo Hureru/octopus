@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -22,12 +23,14 @@ export function TagInput({
     value,
     onChange,
     suggestions = [],
-    placeholder = '输入标签后回车',
+    placeholder,
     className,
 }: TagInputProps) {
+    const t = useTranslations('siteManagement.tags');
     const [draft, setDraft] = useState('');
     const [focused, setFocused] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
+    const resolvedPlaceholder = placeholder ?? t('placeholder');
 
     const matchedSuggestions = useMemo(() => {
         const keyword = draft.trim().toLowerCase();
@@ -42,7 +45,7 @@ export function TagInput({
         const tag = raw.trim();
         if (!tag) return;
         if (tag.length > TAG_MAX_LENGTH) {
-            toast.error(`单个标签不能超过 ${TAG_MAX_LENGTH} 个字符`);
+            toast.error(t('maxLength', { count: TAG_MAX_LENGTH }));
             return;
         }
         if (value.includes(tag)) {
@@ -50,7 +53,7 @@ export function TagInput({
             return;
         }
         if (value.length >= TAGS_MAX_COUNT) {
-            toast.error(`标签数量不能超过 ${TAGS_MAX_COUNT} 个`);
+            toast.error(t('maxCount', { count: TAGS_MAX_COUNT }));
             return;
         }
         onChange([...value, tag]);
@@ -88,7 +91,7 @@ export function TagInput({
                                 removeTag(tag);
                             }}
                             className="rounded-full p-0.5 transition-colors hover:bg-muted-foreground/20"
-                            aria-label={`移除标签 ${tag}`}
+                            aria-label={t('remove', { tag })}
                         >
                             <X className="size-3" />
                         </button>
@@ -104,7 +107,7 @@ export function TagInput({
                         setFocused(false);
                         addTag(draft);
                     }}
-                    placeholder={value.length === 0 ? placeholder : ''}
+                    placeholder={value.length === 0 ? resolvedPlaceholder : ''}
                     className="min-w-20 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
                 />
             </div>

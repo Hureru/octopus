@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useGroupHealthEnabled } from '@/api/endpoints/setting';
 import { useGroupHealthList, useRunAllGroupHealth } from '@/api/endpoints/group-health';
+import { toast } from '@/components/common/Toast';
 import { GroupHealthOverview } from './group-health-overview';
 
 export function GroupHealthSummaryStrip() {
@@ -15,6 +16,7 @@ export function GroupHealthSummaryStrip() {
     const { data: views = [] } = useGroupHealthList();
     const runAllGroupHealth = useRunAllGroupHealth();
     const [open, setOpen] = useState(false);
+    const showRunError = (error: Error) => toast.error(t('runFailed'), { description: error.message });
 
     const summary = useMemo(() => {
         const running = views.filter((view) => view.latest?.status === 'running').length;
@@ -70,7 +72,7 @@ export function GroupHealthSummaryStrip() {
                             size="sm"
                             variant="outline"
                             className="h-8 rounded-xl text-xs"
-                            onClick={() => runAllGroupHealth.mutate({})}
+                            onClick={() => runAllGroupHealth.mutate({}, { onError: showRunError })}
                             disabled={runAllGroupHealth.isPending}
                         >
                             {runAllGroupHealth.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
@@ -81,7 +83,7 @@ export function GroupHealthSummaryStrip() {
                             size="sm"
                             variant="outline"
                             className="h-8 rounded-xl text-xs"
-                            onClick={() => runAllGroupHealth.mutate({ probeMode: 'full' })}
+                            onClick={() => runAllGroupHealth.mutate({ probeMode: 'full' }, { onError: showRunError })}
                             disabled={runAllGroupHealth.isPending}
                         >
                             {runAllGroupHealth.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}

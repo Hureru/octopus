@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   AlertTriangle,
   CalendarCheck2,
@@ -21,12 +22,20 @@ import {
   type CheckinFilterStatus,
 } from "./checkin-status";
 
-const FILTERS: Array<{ key: CheckinFilterStatus; label: string }> = [
-  { key: "all", label: "全部" },
-  { key: "success", label: "成功" },
-  { key: "failed", label: "失败" },
-  { key: "idle", label: "未执行" },
-  { key: "disabled", label: "禁用" },
+const FILTERS: Array<{
+  key: CheckinFilterStatus;
+  labelKey:
+    | "filters.all"
+    | "filters.success"
+    | "filters.failed"
+    | "filters.idle"
+    | "filters.disabled";
+}> = [
+  { key: "all", labelKey: "filters.all" },
+  { key: "success", labelKey: "filters.success" },
+  { key: "failed", labelKey: "filters.failed" },
+  { key: "idle", labelKey: "filters.idle" },
+  { key: "disabled", labelKey: "filters.disabled" },
 ];
 
 function filterTone(status: CheckinFilterStatus, active: boolean) {
@@ -131,6 +140,7 @@ export function CheckinPanel({
   activeTags: string[];
   onTagFilterChange: (tag: string) => void;
 }) {
+  const t = useTranslations("siteManagement.checkin");
   const summaryNow = useMemo(() => {
     const [year = "", month = "", day = ""] = statusDayKey.split("-");
     const parsed = new Date(Number(year), Number(month), Number(day));
@@ -163,13 +173,16 @@ export function CheckinPanel({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2 text-base font-semibold">
             <CalendarCheck2 className="size-5 text-primary" />
-            <span>总览</span>
+            <span>{t("overview")}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>当前结果</span>
+            <span>{t("currentResult")}</span>
             <span className="font-medium text-foreground">
-              {visibleSiteCount} 站点 / {visibleAccountCount} 账号
+              {t("visibleCounts", {
+                siteCount: visibleSiteCount,
+                accountCount: visibleAccountCount,
+              })}
             </span>
           </div>
         </div>
@@ -177,22 +190,22 @@ export function CheckinPanel({
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <OverviewMetric
             icon={<Wallet className="size-4" />}
-            label="当前余额"
+            label={t("currentBalance")}
             value={formatCurrency(inventory.totalBalance)}
           />
           <OverviewMetric
             icon={<TrendingUp className="size-4" />}
-            label="累计消耗"
+            label={t("totalUsed")}
             value={formatCurrency(inventory.totalBalanceUsed)}
           />
           <OverviewMetric
             icon={<Layers3 className="size-4" />}
-            label="启用账号"
+            label={t("enabledAccounts")}
             value={`${inventory.enabledAccounts} / ${inventory.totalAccounts}`}
           />
           <OverviewMetric
             icon={<AlertTriangle className="size-4" />}
-            label="今日异常"
+            label={t("todayFailures")}
             value={`${summary.failed}`}
             tone={summary.failed > 0 ? "warning" : "default"}
           />
@@ -200,7 +213,9 @@ export function CheckinPanel({
 
         {hasActiveFilters && hasContextBadges ? (
           <div className="mt-4 flex flex-wrap gap-2">
-            {searchTerm ? <Badge variant="outline">搜索：{searchTerm}</Badge> : null}
+            {searchTerm ? (
+              <Badge variant="outline">{t("search", { term: searchTerm })}</Badge>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -226,7 +241,7 @@ export function CheckinPanel({
                   )}
                 >
                   <span>{count}</span>
-                  <span>{filter.label}</span>
+                  <span>{t(filter.labelKey)}</span>
                 </button>
               );
             })}
@@ -241,7 +256,7 @@ export function CheckinPanel({
                 onClick={onClearFilters}
               >
                 <FilterX className="size-4" />
-                清空筛选
+                {t("clearFilters")}
               </Button>
             ) : null}
             {manualCheckinUrls.length > 0 ? (
@@ -253,7 +268,7 @@ export function CheckinPanel({
                 onClick={openAllManualCheckin}
               >
                 <ExternalLink className="size-4" />
-                打开手动签到 ({manualCheckinUrls.length})
+                {t("openManualCheckin", { count: manualCheckinUrls.length })}
               </Button>
             ) : null}
           </div>
@@ -268,7 +283,11 @@ export function CheckinPanel({
                   key={tag}
                   type="button"
                   onClick={() => onTagFilterChange(tag)}
-                  title={active ? `取消按「${tag}」筛选` : `按「${tag}」筛选`}
+                  title={
+                    active
+                      ? t("removeTagFilter", { tag })
+                      : t("addTagFilter", { tag })
+                  }
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     active

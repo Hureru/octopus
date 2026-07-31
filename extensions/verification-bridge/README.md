@@ -1,19 +1,19 @@
-# Octopus Verification Bridge
+# Octopus 验证桥
 
-Manifest V3 browser extension for completing paired Site verification tasks.
+用于在管理员浏览器中完成已配对站点验证任务的 Manifest V3 扩展。
 
-## Load
+## 加载扩展
 
-1. Open the browser extension management page.
-2. Enable developer mode.
-3. Load this directory as an unpacked extension.
-4. Create an account-scoped pairing in Octopus and enter the returned pairing token in the extension popup. The token is shown once, remains valid until expiry/revocation, and can only claim tasks for that Site Account.
+1. 打开浏览器的扩展管理页面。
+2. 启用开发者模式。
+3. 选择“加载已解压的扩展程序”，并加载本目录。
+4. 在 Octopus 中为指定站点账号创建配对，然后在扩展弹窗中输入返回的配对令牌。令牌只显示一次，在过期或撤销前有效，并且只能领取该站点账号的任务。
 
-## Flow
+## 使用流程
 
-1. Save the Octopus URL and pairing token.
-2. Claim a pending verification task.
-3. Open the dedicated verification window and complete the Site challenge.
-4. Submit the target Site cookies to Octopus.
+1. 保存 Octopus 地址和配对令牌。
+2. 领取待处理的验证任务。
+3. 打开独立验证窗口并完成站点验证。
+4. 将目标站点的验证 Cookie 提交给 Octopus。
 
-The extension requests host access only for the configured Octopus instance and the current verification target. Target access is removed after submission or explicit release. Pairing tokens remain in extension-local storage and are never sent anywhere except the configured Octopus instance.
+扩展只会为已配置的 Octopus 实例和当前验证目标请求站点访问权限。提交或主动释放任务后，目标站点权限会被移除。配对令牌保存在扩展本地存储中，只会发送到已配置的 Octopus 实例。

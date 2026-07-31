@@ -136,7 +136,7 @@ func (r *wsUpstreamReader) Close() error {
 
 // CloseWithError closes the reader and removes the connection from pool.
 func (r *wsUpstreamReader) CloseWithError() {
-	if r.closed {
+	if r.pc == nil {
 		return
 	}
 	r.closed = true

@@ -3,8 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -22,6 +26,9 @@ import (
 )
 
 var projectedAutoGroupQueued atomic.Bool
+
+const maxDBImportUploadBytes = 128 << 20
+const maxDBImportMultipartOverhead = 1 << 20
 
 func init() {
 	router.NewGroupRouter("/api/v1/setting").
@@ -64,44 +71,25 @@ func setSetting(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if setting.Key == model.SettingKeyJWTSecret {
+		resp.Error(c, http.StatusBadRequest, "setting cannot be changed through this endpoint")
+		return
+	}
 	if err := op.SettingSetString(setting.Key, setting.Value); err != nil {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	switch setting.Key {
-	case model.SettingKeyModelInfoUpdateInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
+	case model.SettingKeyModelInfoUpdateInterval,
+		model.SettingKeySyncLLMInterval,
+		model.SettingKeySiteSyncInterval,
+		model.SettingKeySiteCheckinInterval,
+		model.SettingKeyStatsSaveInterval,
+		model.SettingKeyOutlierRetireInterval,
+		model.SettingKeyWebDAVBackupInterval:
+		if err := task.UpdateSettingInterval(setting.Key, setting.Value); err != nil {
+			resp.Error(c, http.StatusInternalServerError, err.Error())
 			return
-		}
-		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
-	case model.SettingKeySyncLLMInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
-	case model.SettingKeySiteSyncInterval, model.SettingKeySiteCheckinInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		task.Update(string(setting.Key), time.Duration(hours)*time.Hour)
-	case model.SettingKeyWebDAVBackupInterval:
-		hours, err := strconv.Atoi(setting.Value)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if hours > 0 {
-			interval := time.Duration(hours) * time.Hour
-			task.Register(string(setting.Key), interval, false, task.WebDAVBackupTask)
-			task.Update(string(setting.Key), interval)
-		} else {
-			task.Update(string(setting.Key), 0)
 		}
 	case model.SettingKeyProjectedChannelAutoGroupEnabled:
 		mode, _ := model.ParseAutoGroupSettingValue(setting.Value)
@@ -116,7 +104,11 @@ func setSetting(c *gin.Context) {
 			})
 		}
 	}
-	resp.Success(c, setting)
+	if responseSetting, ok := op.SettingForClient(setting); ok {
+		resp.Success(c, responseSetting)
+		return
+	}
+	resp.Success(c, nil)
 }
 
 func exportDB(c *gin.Context) {
@@ -125,6 +117,10 @@ func exportDB(c *gin.Context) {
 	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "json")))
 	if format != "json" && format != "zip" {
 		resp.Error(c, http.StatusBadRequest, "invalid format")
+		return
+	}
+	if err := validateDBExportOptions(format, includeLogs); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -158,13 +154,36 @@ func exportDB(c *gin.Context) {
 	c.JSON(http.StatusOK, dump)
 }
 
+func validateDBExportOptions(format string, includeLogs bool) error {
+	if format == "json" && includeLogs {
+		return fmt.Errorf("JSON exports cannot include logs; use ZIP format")
+	}
+	return nil
+}
+
 func importDB(c *gin.Context) {
 	var dump model.DBDump
+	var result *model.DBImportResult
+	var importErr error
 
 	contentType := c.GetHeader("Content-Type")
 	if strings.Contains(contentType, "multipart/form-data") {
+		if c.Request.ContentLength > maxDBImportUploadBytes+maxDBImportMultipartOverhead {
+			resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(
+			c.Writer,
+			c.Request.Body,
+			maxDBImportUploadBytes+maxDBImportMultipartOverhead,
+		)
 		fh, err := c.FormFile("file")
 		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
+				return
+			}
 			resp.Error(c, http.StatusBadRequest, "missing upload file field 'file'")
 			return
 		}
@@ -174,38 +193,107 @@ func importDB(c *gin.Context) {
 			return
 		}
 		defer f.Close()
-		body, err := io.ReadAll(f)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
+		if fh.Size > maxDBImportUploadBytes {
+			resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
 			return
 		}
-		if err := decodeDBDump(body, &dump); err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
+		if isZipBackup(
+			fh.Filename,
+			fh.Header.Get("Content-Type"),
+			f,
+		) {
+			result, importErr = op.DBImportZip(c.Request.Context(), f, fh.Size)
+		} else {
+			body, err := readLimitedBackup(f, maxDBImportUploadBytes)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			importErr = decodeDBDump(body, &dump)
 		}
 	} else {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := decodeDBDump(body, &dump); err != nil {
-			resp.Error(c, http.StatusBadRequest, err.Error())
-			return
+		if strings.Contains(contentType, "application/zip") {
+			temp, err := os.CreateTemp("", "octopus-import-*.zip")
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			tempName := temp.Name()
+			defer func() {
+				_ = temp.Close()
+				_ = os.Remove(tempName)
+			}()
+			written, err := io.Copy(
+				temp,
+				io.LimitReader(c.Request.Body, maxDBImportUploadBytes+1),
+			)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			if written > maxDBImportUploadBytes {
+				resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
+				return
+			}
+			result, importErr = op.DBImportZip(c.Request.Context(), temp, written)
+		} else {
+			body, err := readLimitedBackup(c.Request.Body, maxDBImportUploadBytes)
+			if err != nil {
+				resp.Error(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			importErr = decodeDBDump(body, &dump)
 		}
 	}
 
-	result, err := op.DBImportIncremental(c.Request.Context(), &dump)
-	if err != nil {
-		resp.Error(c, http.StatusBadRequest, err.Error())
+	if importErr != nil {
+		status := http.StatusBadRequest
+		if errors.Is(importErr, errBackupUploadTooLarge) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		resp.Error(c, status, importErr.Error())
 		return
+	}
+	if result == nil {
+		result, importErr = op.DBImportIncremental(c.Request.Context(), &dump)
+		if importErr != nil {
+			resp.Error(c, http.StatusBadRequest, importErr.Error())
+			return
+		}
 	}
 
 	if err := op.InitCache(); err != nil {
 		log.Warnf("cache refresh after import failed: %v", err)
 	}
+	if err := task.ReloadSettingIntervals(); err != nil {
+		log.Warnf("scheduler interval refresh after import failed: %v", err)
+	}
 
 	resp.Success(c, result)
+}
+
+func readLimitedBackup(reader io.Reader, limit int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, errBackupUploadTooLarge
+	}
+	return body, nil
+}
+
+var errBackupUploadTooLarge = errors.New("backup file exceeds upload limit")
+
+func isZipBackup(filename, contentType string, reader io.ReaderAt) bool {
+	if strings.EqualFold(filepath.Ext(filename), ".zip") ||
+		strings.Contains(strings.ToLower(contentType), "application/zip") {
+		return true
+	}
+	var signature [4]byte
+	n, err := reader.ReadAt(signature[:], 0)
+	return err == nil && n == len(signature) &&
+		string(signature[:]) == "PK\x03\x04"
 }
 
 func decodeDBDump(body []byte, dump *model.DBDump) error {

@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import { Plus, X, XIcon } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,13 +37,13 @@ function createEmptyRow(): HeaderRow {
     return { mode: 'set', header_key: '', header_value: '' };
 }
 
-function getErrorMessage(error: unknown) {
+function getErrorMessage(error: unknown, fallback: string) {
     if (error instanceof Error) return error.message;
     if (typeof error === 'object' && error !== null && 'message' in error) {
         const message = (error as { message?: unknown }).message;
         if (typeof message === 'string') return message;
     }
-    return '批量编辑失败';
+    return fallback;
 }
 
 /**
@@ -58,6 +59,8 @@ export function BatchEditDialog({
     allTagNames,
     selectedSiteTags,
 }: BatchEditDialogProps) {
+    const t = useTranslations('siteManagement.batchEdit');
+    const tCommon = useTranslations('siteManagement.common');
     const batchEdit = useSiteBatchEdit();
     const [addTags, setAddTags] = useState<string[]>([]);
     const [removeTags, setRemoveTags] = useState<string[]>([]);
@@ -88,7 +91,7 @@ export function BatchEditDialog({
             event.preventDefault();
 
             if (selectedSiteIds.length === 0) {
-                toast.error('请先选择站点');
+                toast.error(t('selectSiteRequired'));
                 return;
             }
 
@@ -111,7 +114,7 @@ export function BatchEditDialog({
             }
 
             if (invalid) {
-                toast.error('设置类 Header 的键和值都不能为空');
+                toast.error(t('headerRequired'));
                 return;
             }
             if (
@@ -120,7 +123,7 @@ export function BatchEditDialog({
                 upserts.length === 0 &&
                 deleteKeys.length === 0
             ) {
-                toast.error('请至少填写一项修改');
+                toast.error(t('changeRequired'));
                 return;
             }
 
@@ -134,13 +137,13 @@ export function BatchEditDialog({
                 });
                 const successCount = result.success_ids.length;
                 const failedCount = result.failed_items.length;
-                toast.success(`操作完成：成功 ${successCount}，失败 ${failedCount}`);
+                toast.success(t('completed', { successCount, failedCount }));
                 handleOpenChange(false);
             } catch (submitError) {
-                toast.error(getErrorMessage(submitError));
+                toast.error(getErrorMessage(submitError, t('failed')));
             }
         },
-        [rows, addTags, removeTags, selectedSiteIds, batchEdit, handleOpenChange],
+        [rows, addTags, removeTags, selectedSiteIds, batchEdit, handleOpenChange, t],
     );
 
     return (
@@ -152,16 +155,16 @@ export function BatchEditDialog({
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
                         <h2 className="text-2xl font-bold text-card-foreground truncate">
-                            批量编辑
+                            {t('title')}
                         </h2>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            将对 {selectedSiteIds.length} 个站点应用以下修改（未涉及的内容保持不变）
+                            {t('description', { count: selectedSiteIds.length })}
                         </p>
                     </div>
                     <button
                         type="button"
                         onClick={() => handleOpenChange(false)}
-                        aria-label="关闭"
+                        aria-label={tCommon('close')}
                         className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                     >
                         <XIcon className="size-5" />
@@ -172,7 +175,7 @@ export function BatchEditDialog({
                     <div className="flex-1 min-h-0 space-y-4 overflow-y-auto px-1">
                         <div className="space-y-1.5">
                             <label className="text-sm font-medium text-card-foreground">
-                                添加标签
+                                {t('addTags')}
                             </label>
                             <TagInput
                                 value={addTags}
@@ -182,7 +185,7 @@ export function BatchEditDialog({
                         </div>
                         <div className="space-y-1.5">
                             <label className="text-sm font-medium text-card-foreground">
-                                移除标签
+                                {t('removeTags')}
                             </label>
                             <TagInput
                                 value={removeTags}
@@ -195,7 +198,7 @@ export function BatchEditDialog({
 
                         <div className="flex items-center justify-between">
                             <label className="text-sm font-medium text-card-foreground">
-                                Header 列表 {rows.length > 0 ? `(${rows.length})` : ''}
+                                {t('headerList', { count: rows.length })}
                             </label>
                             <Button
                                 type="button"
@@ -207,7 +210,7 @@ export function BatchEditDialog({
                                 className="h-6 px-2 text-xs text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
                             >
                                 <Plus className="mr-1 h-3 w-3" />
-                                添加
+                                {tCommon('add')}
                             </Button>
                         </div>
                         <div className="space-y-2">
@@ -229,8 +232,12 @@ export function BatchEditDialog({
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent className="rounded-xl">
-                                            <SelectItem className="rounded-xl" value="set">设置</SelectItem>
-                                            <SelectItem className="rounded-xl" value="delete">删除</SelectItem>
+                                            <SelectItem className="rounded-xl" value="set">
+                                                {t('set')}
+                                            </SelectItem>
+                                            <SelectItem className="rounded-xl" value="delete">
+                                                {t('delete')}
+                                            </SelectItem>
                                         </SelectContent>
                                     </Select>
                                     <Input
@@ -244,7 +251,7 @@ export function BatchEditDialog({
                                                 ),
                                             )
                                         }
-                                        placeholder="Header Key"
+                                        placeholder={tCommon('headerKey')}
                                         className="flex-1 rounded-xl"
                                     />
                                     <Input
@@ -259,7 +266,9 @@ export function BatchEditDialog({
                                             )
                                         }
                                         placeholder={
-                                            row.mode === 'delete' ? '删除此 Key（无需值）' : 'Header Value'
+                                            row.mode === 'delete'
+                                                ? t('deleteKeyPlaceholder')
+                                                : tCommon('headerValue')
                                         }
                                         disabled={row.mode === 'delete'}
                                         className="flex-1 rounded-xl disabled:opacity-50"
@@ -275,7 +284,7 @@ export function BatchEditDialog({
                                         }
                                         disabled={rows.length <= 1}
                                         className="h-8 w-8 rounded-xl p-0 text-muted-foreground hover:bg-transparent hover:text-destructive disabled:opacity-40"
-                                        title="移除"
+                                        title={tCommon('remove')}
                                     >
                                         <X className="h-4 w-4" />
                                     </Button>
@@ -283,7 +292,7 @@ export function BatchEditDialog({
                             ))}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                            「设置」按 Key 新增或更新（大小写不敏感）；「删除」按 Key 移除。各站点其余 Header 保持不变。
+                            {t('headerHint')}
                         </p>
                     </div>
 
@@ -294,7 +303,7 @@ export function BatchEditDialog({
                             className="h-12 w-full rounded-2xl sm:flex-1"
                             onClick={() => handleOpenChange(false)}
                         >
-                            取消
+                            {tCommon('cancel')}
                         </Button>
                         <Button
                             type="submit"
@@ -305,7 +314,7 @@ export function BatchEditDialog({
                                 !hasInput
                             }
                         >
-                            {batchEdit.isPending ? '应用中...' : '应用到所选站点'}
+                            {batchEdit.isPending ? t('applying') : t('applySelected')}
                         </Button>
                     </footer>
                 </form>

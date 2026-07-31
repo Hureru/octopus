@@ -20,7 +20,7 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	fetchModel := make([]string, 0)
+	var fetchModel []string
 	switch request.Type {
 	case outbound.OutboundTypeAnthropic:
 		fetchModel, err = fetchAnthropicModels(client, ctx, request)

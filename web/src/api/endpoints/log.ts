@@ -3,6 +3,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { apiClient, API_BASE_URL } from '../client';
 import { logger } from '@/lib/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 
 /**
  * 尝试状态
@@ -257,6 +258,7 @@ const logsInfiniteQueryKey = (pageSize: number, filters?: UseLogsOptions['filter
 export function useLogs(options: UseLogsOptions = {}) {
     const { pageSize = 20, filters, mode = 'stream' } = options;
     const streamEnabled = mode === 'stream';
+    const t = useTranslations('log.list');
 
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<Error | null>(null);
@@ -395,14 +397,14 @@ export function useLogs(options: UseLogsOptions = {}) {
 
                 eventSource.onerror = () => {
                     setIsConnected(false);
-                    setError(new Error('SSE 连接断开'));
+                    setError(new Error(t('streamDisconnected')));
                     eventSource.close();
                     eventSourceRef.current = null;
                     scheduleReconnect();
                 };
             } catch (e) {
                 if (cancelled) return;
-                setError(e instanceof Error ? e : new Error('获取 stream token 失败'));
+                setError(e instanceof Error ? e : new Error(t('streamTokenFailed')));
                 logger.error('获取 stream token 失败:', e);
                 scheduleReconnect();
             }
@@ -417,7 +419,7 @@ export function useLogs(options: UseLogsOptions = {}) {
             eventSourceRef.current = null;
             setIsConnected(false);
         };
-    }, [pageSize, filters, queryClient, streamEnabled]);
+    }, [pageSize, filters, queryClient, streamEnabled, t]);
 
     const clear = useCallback(() => {
         queryClient.removeQueries({ queryKey: logsInfiniteQueryKey(pageSize, filters) });

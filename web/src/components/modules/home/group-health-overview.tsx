@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Activity, CheckCircle2, ChevronDown, Clock3, FolderTree, LoaderCircle, Play, Siren, XCircle } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useGroupHealthList, useRunAllGroupHealth, useRunGroupHealth, type GroupHealthGroupView } from '@/api/endpoints/group-health';
+import { toast } from '@/components/common/Toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -147,6 +148,7 @@ export function GroupHealthOverview() {
     const { data: views = [] } = useGroupHealthList();
     const runGroupHealth = useRunGroupHealth();
     const runAllGroupHealth = useRunAllGroupHealth();
+    const showRunError = (error: Error) => toast.error(t('runFailed'), { description: error.message });
 
     const summary = useMemo(() => {
         const running = views.filter((view) => view.latest?.status === 'running').length;
@@ -176,7 +178,7 @@ export function GroupHealthOverview() {
                     <Button
                         type="button"
                         className="h-8 rounded-2xl px-3 text-xs"
-                        onClick={() => runAllGroupHealth.mutate({})}
+                        onClick={() => runAllGroupHealth.mutate({}, { onError: showRunError })}
                         disabled={runAllGroupHealth.isPending}
                     >
                         {runAllGroupHealth.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
@@ -186,7 +188,7 @@ export function GroupHealthOverview() {
                         type="button"
                         variant="outline"
                         className="h-8 rounded-2xl px-3 text-xs"
-                        onClick={() => runAllGroupHealth.mutate({ probeMode: 'full' })}
+                        onClick={() => runAllGroupHealth.mutate({ probeMode: 'full' }, { onError: showRunError })}
                         disabled={runAllGroupHealth.isPending}
                     >
                         {runAllGroupHealth.isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Play className="size-4" />}
@@ -201,7 +203,7 @@ export function GroupHealthOverview() {
                         <GroupHealthCard
                             key={view.group_id}
                             view={view}
-                            onRun={(groupId, probeMode) => runGroupHealth.mutate({ groupId, probeMode })}
+                            onRun={(groupId, probeMode) => runGroupHealth.mutate({ groupId, probeMode }, { onError: showRunError })}
                             isRunningMutation={runGroupHealth.isPending && runGroupHealth.variables?.groupId === view.group_id}
                         />
                     ))}

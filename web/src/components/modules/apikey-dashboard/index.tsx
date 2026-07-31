@@ -46,7 +46,7 @@ export function APIKeyDashboard() {
         async (text: string, label: string) => {
             try {
                 await copyToClipboard(text);
-                toast.success(`${label} copied`);
+                toast.success(t('copied', { label }));
                 return true;
             } catch {
                 toast.error(t('error'));
@@ -113,15 +113,15 @@ export function APIKeyDashboard() {
                 <Logo size={48} />
                 <h1 className="ml-2 flex-1 truncate text-2xl font-bold tracking-tight">octopus</h1>
                 <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-xl hover:bg-accent">
+                    <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-xl hover:bg-accent" aria-label={t('toggleTheme')} title={t('toggleTheme')}>
                         <Sun className="size-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
                         <Moon className="absolute size-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={toggleLanguage} className="rounded-xl hover:bg-accent">
+                    <Button variant="ghost" size="icon" onClick={toggleLanguage} className="rounded-xl hover:bg-accent" aria-label={t('toggleLanguage')} title={t('toggleLanguage')}>
                         <Languages className="size-4" />
                     </Button>
                     <div className="w-px h-6 bg-border mx-1" />
-                    <Button variant="ghost" size="icon" onClick={logout} className="rounded-xl hover:bg-destructive/10 hover:text-destructive">
+                    <Button variant="ghost" size="icon" onClick={logout} className="rounded-xl hover:bg-destructive/10 hover:text-destructive" aria-label={t('logout')} title={t('logout')}>
                         <LogOut className="size-4" />
                     </Button>
                 </div>

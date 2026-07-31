@@ -94,7 +94,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <div id="initial-loader" role="status" aria-label="Loading">
+        <div id="initial-loader" role="status" aria-label="正在加载">
           <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
             <g className="octo-group">
               <path pathLength="1" d="M50 15 C70 15 85 30 85 50 C85 65 75 75 70 80 M50 15 C30 15 15 30 15 50 C15 65 25 75 30 80" />

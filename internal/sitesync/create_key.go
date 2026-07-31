@@ -157,7 +157,6 @@ func createSub2APIToken(ctx context.Context, siteRecord *model.Site, account *mo
 		return fmt.Errorf("API key credential account does not support quick site key creation")
 	}
 
-	accessToken := strings.TrimSpace(account.AccessToken)
 	accessToken, err := ensureFreshSub2APIAccessToken(ctx, siteRecord, account, false)
 	if err != nil {
 		return err

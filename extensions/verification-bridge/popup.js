@@ -41,7 +41,7 @@ async function initialize() {
   elements.pairingToken.value = state.pairingToken || "";
   if (activeClaimExpired()) {
     await clearActiveTask(true);
-    setStatus("The saved verification claim expired.", "error");
+    setStatus("已保存的验证任务领取凭据已过期。", "error");
     return;
   }
   renderTask();
@@ -53,19 +53,19 @@ async function saveConnection() {
     const baseURL = normalizeBaseURL(elements.baseURL.value);
     const pairingToken = elements.pairingToken.value.trim();
     if (!pairingToken) {
-      throw new Error("Pairing token is required.");
+      throw new Error("请输入配对令牌。");
     }
     if (
       state.claim &&
       (state.baseURL !== baseURL || state.pairingToken !== pairingToken)
     ) {
-      throw new Error("Release the active verification task before changing the connection.");
+      throw new Error("更改连接前请先释放当前验证任务。");
     }
     await ensureOriginPermission(baseURL);
     state.baseURL = baseURL;
     state.pairingToken = pairingToken;
     await persistState();
-    setStatus("Connection saved.", "success");
+    setStatus("连接设置已保存。", "success");
   });
 }
 
@@ -101,7 +101,7 @@ async function claimTask() {
     await persistState();
     renderTask();
     scheduleClaimExpiry();
-    setStatus("Verification task claimed.", "success");
+    setStatus("已领取验证任务。", "success");
   });
 }
 
@@ -118,7 +118,7 @@ async function openVerification() {
     });
     state.verificationWindowID = created.id ?? null;
     await persistState();
-    setStatus("Verification window opened.", "success");
+    setStatus("验证窗口已打开。", "success");
   });
 }
 
@@ -130,7 +130,7 @@ async function submitSession() {
       (cookie) => isVerificationCookie(cookie.name),
     );
     if (!cookies.length) {
-      throw new Error("No cookies are available for the verification target.");
+      throw new Error("验证目标没有可提交的 Cookie。");
     }
     await callBridge("/complete", {
       pairing_token: state.pairingToken,
@@ -146,7 +146,7 @@ async function submitSession() {
       })),
     });
     await clearActiveTask(true);
-    setStatus("Verification session submitted.", "success");
+    setStatus("验证会话已提交。", "success");
   });
 }
 
@@ -158,7 +158,7 @@ async function releaseTask() {
       task_token: state.claim.task_token,
     });
     await clearActiveTask(true);
-    setStatus("Verification task released.", "success");
+    setStatus("验证任务已释放。", "success");
   });
 }
 
@@ -173,7 +173,7 @@ async function syncConnectionFromInputs() {
   const baseURL = normalizeBaseURL(elements.baseURL.value);
   const pairingToken = elements.pairingToken.value.trim();
   if (!pairingToken) {
-    throw new Error("Pairing token is required.");
+    throw new Error("请输入配对令牌。");
   }
   await ensureOriginPermission(baseURL);
   state.baseURL = baseURL;
@@ -183,7 +183,7 @@ async function syncConnectionFromInputs() {
 
 async function callBridge(path, body) {
   if (!state.baseURL || !state.pairingToken) {
-    throw new Error("Save the Octopus connection first.");
+    throw new Error("请先保存 Octopus 连接设置。");
   }
   return callBridgeAt(state.baseURL, state.pairingToken, path, body);
 }
@@ -201,11 +201,11 @@ async function callBridgeAt(baseURL, pairingToken, path, body) {
   try {
     payload = await response.json();
   } catch {
-    throw new Error(`Octopus returned HTTP ${response.status}.`);
+    throw new Error(`Octopus 返回 HTTP ${response.status}。`);
   }
   if (!response.ok || payload.code !== 200) {
     const error = new Error(
-      payload.message || `Octopus returned HTTP ${response.status}.`,
+      payload.message || `Octopus 返回 HTTP ${response.status}。`,
     );
     error.terminal = /expired|revoked|already consumed|not claimed|not found|superseded/i.test(
       error.message,
@@ -218,11 +218,11 @@ async function callBridgeAt(baseURL, pairingToken, path, body) {
 async function requireActiveTask() {
   const task = state.claim?.task;
   if (!task || !state.claim?.task_token) {
-    throw new Error("No active verification task.");
+    throw new Error("当前没有验证任务。");
   }
   if (activeClaimExpired()) {
     await clearActiveTask(true);
-    throw new Error("The verification claim expired. Claim the task again.");
+    throw new Error("验证任务领取凭据已过期，请重新领取任务。");
   }
   return task;
 }
@@ -262,14 +262,14 @@ async function ensureOriginPermission(value) {
   }
   const granted = await chrome.permissions.request({origins: [origin]});
   if (!granted) {
-    throw new Error("Host permission was not granted.");
+    throw new Error("未授予站点访问权限。");
   }
 }
 
 function normalizeBaseURL(value) {
   const parsed = new URL(value.trim());
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("Octopus URL must use HTTP or HTTPS.");
+    throw new Error("Octopus 地址必须使用 HTTP 或 HTTPS。");
   }
   parsed.hash = "";
   parsed.search = "";
@@ -279,7 +279,7 @@ function normalizeBaseURL(value) {
 function originPattern(value) {
   const parsed = new URL(value);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("Only HTTP and HTTPS targets are supported.");
+    throw new Error("仅支持 HTTP 和 HTTPS 目标。");
   }
   return `${parsed.protocol}//${parsed.host}/*`;
 }
@@ -295,7 +295,9 @@ function renderTask() {
     return;
   }
   elements.taskHost.textContent = task.target_host || new URL(task.target_url).hostname;
-  elements.taskOperation.textContent = task.operation || "manual";
+  elements.taskOperation.textContent = task.operation === "manual"
+    ? "手动验证"
+    : (task.operation || "手动验证");
   const expiresAt = state.claim?.claim_expires_at || task.expires_at;
   elements.taskExpires.textContent = new Date(expiresAt).toLocaleString();
 }
@@ -330,7 +332,7 @@ function scheduleClaimExpiry() {
   claimExpiryTimer = window.setTimeout(async () => {
     claimExpiryTimer = null;
     await clearActiveTask(true);
-    setStatus("The verification claim expired. Claim the task again.", "error");
+    setStatus("验证任务领取凭据已过期，请重新领取任务。", "error");
   }, Math.min(delay, 2_147_000_000));
 }
 

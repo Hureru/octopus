@@ -239,7 +239,7 @@ func fetchAnyRouterManagementGroups(ctx context.Context, siteRecord *model.Site,
 		if err != nil {
 			continue
 		}
-		if payload != nil && jsonBool(payload["success"]) == false {
+		if payload != nil && !jsonBool(payload["success"]) {
 			if message := anyRouterResolveGroupFetchErrorMessage(payload); message != "" {
 				terminalErr = fmt.Errorf("%s", message)
 			}
@@ -551,7 +551,7 @@ func fetchAnyRouterGroupsByCookie(ctx context.Context, siteRecord *model.Site, a
 				if err != nil {
 					continue
 				}
-				if payload != nil && jsonBool(payload["success"]) == false {
+				if payload != nil && !jsonBool(payload["success"]) {
 					if message := anyRouterResolveGroupFetchErrorMessage(payload); message != "" {
 						terminalErr = fmt.Errorf("%s", message)
 					}

@@ -41,7 +41,10 @@
         "neverExpire": "永不过期",
         "daysLeft": "天后到期",
         "expired": "已过期",
-        "supportedModels": "支持的模型"
+        "supportedModels": "支持的模型",
+        "copied": "已复制 {label}",
+        "toggleTheme": "切换主题",
+        "toggleLanguage": "切换语言"
     },
     "navbar": {
         "navigation": "主导航",
@@ -108,7 +111,11 @@
         }
     },
     "common": {
+        "close": "关闭",
+        "loading": "正在加载...",
+        "routeNotFound": "未找到页面：{route}",
         "copy": {
+            "action": "复制",
             "success": "复制成功",
             "failed": "复制失败",
             "noContent": "无可复制内容"
@@ -161,7 +168,8 @@
             "runAllFull": "全部完整探活",
             "viewDetails": "查看详情",
             "detailTitle": "分组健康详情",
-            "detailDescription": "在首页查看各分组最新健康快照，并直接执行标准探活或完整探活。"
+            "detailDescription": "在首页查看各分组最新健康快照，并直接执行标准探活或完整探活。",
+            "runFailed": "启动分组健康检查失败"
         }
     },
     "setting": {
@@ -676,7 +684,8 @@
             },
             "empty": "暂无健康快照。",
             "errorDetails": "错误详情",
-            "noHttpStatus": "无 HTTP 状态"
+            "noHttpStatus": "无 HTTP 状态",
+            "runFailed": "启动分组健康检查失败"
         },
         "empty": "暂无分组，点击左上角按钮创建",
         "autoGroup": {
@@ -986,7 +995,9 @@
     "list": {
       "noMore": "没有更多日志了",
       "loadFailed": "日志加载失败：{message}",
-      "retry": "重试"
+      "retry": "重试",
+      "streamDisconnected": "实时日志连接已断开",
+      "streamTokenFailed": "获取实时日志流令牌失败"
         },
         "card": {
             "error": "错误",
@@ -1604,6 +1615,146 @@
             "revokeConfirmDescription": "“{name}”将无法再领取验证任务，已领取的任务会被释放。",
             "cancel": "取消",
             "operationFailed": "操作失败"
+        }
+    },
+    "siteManagement": {
+        "common": {
+            "close": "关闭",
+            "cancel": "取消",
+            "saving": "保存中...",
+            "saveChanges": "保存修改",
+            "add": "添加",
+            "remove": "移除",
+            "operationFailed": "操作失败",
+            "headerKey": "Header Key",
+            "headerValue": "Header Value"
+        },
+        "tags": {
+            "placeholder": "输入标签后回车",
+            "maxLength": "单个标签不能超过 {count} 个字符",
+            "maxCount": "标签数量不能超过 {count} 个",
+            "remove": "移除标签 {tag}"
+        },
+        "siteForm": {
+            "nameRequired": "请输入站点名称",
+            "urlRequired": "请输入站点地址",
+            "detectedPlatform": "自动检测到平台：{platform}",
+            "platformApi": "API 直连",
+            "detectFailed": "无法自动检测平台类型，请手动选择",
+            "platformRequired": "请选择平台类型",
+            "headerRequired": "自定义 Header 的键和值都不能为空",
+            "routeRequired": "协议路径覆盖的类型和地址都不能为空",
+            "duplicateRoute": "同一协议的路径覆盖只能配置一条",
+            "updated": "站点已更新",
+            "created": "站点已创建",
+            "editTitle": "编辑站点",
+            "createTitle": "新增站点",
+            "siteName": "站点名称",
+            "siteNamePlaceholder": "例如：主站 OneAPI",
+            "platform": "平台类型",
+            "autoDetect": "自动检测",
+            "siteUrl": "站点地址",
+            "defaultProtocol": "默认协议",
+            "defaultProtocolHint": "决定获取模型列表的请求格式，以及未手动指定路由类型的模型的默认端点格式",
+            "manualCheckinUrl": "手动签到 URL",
+            "manualCheckinPlaceholder": "可选：例如 https://example.com/signin",
+            "manualCheckinHint": "配置后可在站点总览中一键打开此页面进行手动签到。",
+            "tags": "标签",
+            "tagsHint": "可选：为站点打标签，便于在列表中分类筛选。",
+            "enabled": "启用站点",
+            "disabledHint": "停用后不再投影托管渠道",
+            "advancedSettings": "高级设置",
+            "customHeaders": "自定义 Header（{count}）",
+            "protocolOverrides": "协议路径覆盖（{count}）",
+            "protocolOverridesHint": "按协议覆盖请求地址，例如 Anthropic 填 https://example.com/anthropic/v1，留空则用站点地址默认推断。",
+            "routeType": "协议类型",
+            "createSite": "创建站点"
+        },
+        "accountForm": {
+            "contextMissing": "站点上下文不存在。",
+            "nameRequired": "请输入账号名称",
+            "usernamePasswordRequired": "用户名和密码不能为空",
+            "accessTokenRequired": "请输入 Access Token",
+            "apiKeyRequired": "请输入 API Key",
+            "checkinIntervalRange": "最小签到间隔必须在 1 到 720 小时之间",
+            "randomWindowRange": "随机延迟窗口必须在 0 到 1440 分钟之间",
+            "platformUserIdRequired": "请输入 Platform User ID",
+            "platformUserIdInvalid": "Platform User ID 必须是大于 0 的整数",
+            "tokenExpiresPositive": "token_expires_at 必须是正整数时间戳",
+            "tokenExpiresParseable": "token_expires_at 必须是时间戳或可解析时间",
+            "updated": "站点账号已更新",
+            "created": "站点账号已创建",
+            "editTitle": "编辑站点账号",
+            "createTitle": "新增站点账号",
+            "accountName": "账号名称",
+            "accountNamePlaceholder": "例如：主账号",
+            "credentialType": "凭据类型",
+            "credentialUsernamePassword": "用户名 / 密码",
+            "credentialAccessToken": "访问令牌（Access Token）",
+            "credentialApiKey": "API 密钥（API Key）",
+            "username": "用户名",
+            "usernamePlaceholder": "请输入用户名",
+            "password": "密码",
+            "passwordPlaceholder": "请输入密码",
+            "accessToken": "访问令牌（Access Token）",
+            "accessTokenPlaceholder": "请输入 Access Token",
+            "refreshToken": "刷新令牌（Refresh Token）",
+            "refreshTokenPlaceholder": "可选：请输入 refresh_token",
+            "tokenExpiresAt": "token_expires_at",
+            "tokenExpiresPlaceholder": "可选：F12 中的时间戳或时间字符串",
+            "sub2apiHint": "Sub2API 推荐同时填写 F12 里的 <refreshToken>refresh_token</refreshToken> 与 <expiresAt>token_expires_at</expiresAt>，会在快过期或 401 时自动续期。",
+            "platformUserId": "平台用户 ID（Platform User ID）",
+            "platformUserIdPlaceholder": "例如 11494",
+            "platformUserIdHint": "New API 站点同步 token、分组和签到时需要用户 ID。导入数据会尽量自动填充该值。",
+            "apiKey": "API 密钥（API Key）",
+            "apiKeyPlaceholder": "请输入 API Key",
+            "enabled": "启用账号",
+            "autoSync": "自动同步",
+            "autoCheckin": "自动签到",
+            "randomCheckin": "随机签到",
+            "minCheckinInterval": "最小签到间隔（小时）",
+            "randomDelayWindow": "随机延迟窗口（分钟）",
+            "proxyHint": "用于该账号的同步、签到和模型拉取；自动投影的渠道会跟随这里解析后的代理。",
+            "createAccount": "创建账号"
+        },
+        "batchEdit": {
+            "selectSiteRequired": "请先选择站点",
+            "headerRequired": "设置类 Header 的键和值都不能为空",
+            "changeRequired": "请至少填写一项修改",
+            "completed": "操作完成：成功 {successCount}，失败 {failedCount}",
+            "failed": "批量编辑失败",
+            "title": "批量编辑",
+            "description": "将对 {count} 个站点应用以下修改（未涉及的内容保持不变）",
+            "addTags": "添加标签",
+            "removeTags": "移除标签",
+            "headerList": "Header 列表（{count}）",
+            "set": "设置",
+            "delete": "删除",
+            "deleteKeyPlaceholder": "删除此 Key（无需值）",
+            "headerHint": "“设置”按 Key 新增或更新（大小写不敏感）；“删除”按 Key 移除。各站点其余 Header 保持不变。",
+            "applying": "应用中...",
+            "applySelected": "应用到所选站点"
+        },
+        "checkin": {
+            "filters": {
+                "all": "全部",
+                "success": "成功",
+                "failed": "失败",
+                "idle": "未执行",
+                "disabled": "禁用"
+            },
+            "overview": "总览",
+            "currentResult": "当前结果",
+            "visibleCounts": "{siteCount} 站点 / {accountCount} 账号",
+            "currentBalance": "当前余额",
+            "totalUsed": "累计消耗",
+            "enabledAccounts": "启用账号",
+            "todayFailures": "今日异常",
+            "search": "搜索：{term}",
+            "clearFilters": "清空筛选",
+            "openManualCheckin": "打开手动签到（{count}）",
+            "removeTagFilter": "取消按“{tag}”筛选",
+            "addTagFilter": "按“{tag}”筛选"
         }
     },
     "siteRecovery": {

@@ -122,8 +122,8 @@ const PLATFORM_LABELS: Record<SitePlatform, string> = {
 
 const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {
   [SiteCredentialType.UsernamePassword]: "用户名 / 密码",
-  [SiteCredentialType.AccessToken]: "Access Token",
-  [SiteCredentialType.APIKey]: "API Key",
+  [SiteCredentialType.AccessToken]: "访问令牌（Access Token）",
+  [SiteCredentialType.APIKey]: "API 密钥（API Key）",
 };
 
 type HealthTone = "default" | "danger" | "muted" | "warning";
@@ -1448,7 +1448,7 @@ export function Site() {
 
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
                   <CompactMetric label="账号" value={summary.accountCount} />
-                  <CompactMetric label="Key" value={summary.keyCount} />
+                  <CompactMetric label="密钥" value={summary.keyCount} />
                   <CompactMetric label="模型" value={summary.modelCount} />
                   <CompactMetric label="余额" value={formatBalance(summary.balance)} />
                   <CompactMetric

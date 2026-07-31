@@ -41,7 +41,10 @@
         "neverExpire": "永不過期",
         "daysLeft": "天後到期",
         "expired": "已過期",
-        "supportedModels": "支援的模型"
+        "supportedModels": "支援的模型",
+        "copied": "已複製 {label}",
+        "toggleTheme": "切換主題",
+        "toggleLanguage": "切換語言"
     },
     "navbar": {
         "navigation": "主導覽",
@@ -108,7 +111,11 @@
         }
     },
     "common": {
+        "close": "關閉",
+        "loading": "正在載入...",
+        "routeNotFound": "找不到頁面：{route}",
         "copy": {
+            "action": "複製",
             "success": "複製成功",
             "failed": "複製失敗",
             "noContent": "無可複製內容"
@@ -161,7 +168,8 @@
             "runAllFull": "全部完整探活",
             "viewDetails": "查看詳情",
             "detailTitle": "分組健康詳情",
-            "detailDescription": "在首頁查看各分組最新健康快照，並直接執行標準探活或完整探活。"
+            "detailDescription": "在首頁查看各分組最新健康快照，並直接執行標準探活或完整探活。",
+            "runFailed": "啟動分組健康檢查失敗"
         }
     },
     "setting": {
@@ -676,7 +684,8 @@
             },
             "empty": "暫無健康快照。",
             "errorDetails": "錯誤詳情",
-            "noHttpStatus": "無 HTTP 狀態"
+            "noHttpStatus": "無 HTTP 狀態",
+            "runFailed": "啟動分組健康檢查失敗"
         },
         "empty": "暫無分組，點擊左上角按鈕建立",
         "autoGroup": {
@@ -986,7 +995,9 @@
     "list": {
       "noMore": "沒有更多日誌了",
       "loadFailed": "日誌載入失敗：{message}",
-      "retry": "重試"
+      "retry": "重試",
+      "streamDisconnected": "即時日誌連線已中斷",
+      "streamTokenFailed": "取得即時日誌串流權杖失敗"
         },
         "card": {
             "error": "錯誤",
@@ -1604,6 +1615,146 @@
             "revokeConfirmDescription": "「{name}」將無法再領取驗證任務，已領取的任務會被釋放。",
             "cancel": "取消",
             "operationFailed": "操作失敗"
+        }
+    },
+    "siteManagement": {
+        "common": {
+            "close": "關閉",
+            "cancel": "取消",
+            "saving": "儲存中...",
+            "saveChanges": "儲存修改",
+            "add": "新增",
+            "remove": "移除",
+            "operationFailed": "操作失敗",
+            "headerKey": "Header Key",
+            "headerValue": "Header Value"
+        },
+        "tags": {
+            "placeholder": "輸入標籤後按 Enter",
+            "maxLength": "單個標籤不能超過 {count} 個字元",
+            "maxCount": "標籤數量不能超過 {count} 個",
+            "remove": "移除標籤 {tag}"
+        },
+        "siteForm": {
+            "nameRequired": "請輸入站點名稱",
+            "urlRequired": "請輸入站點地址",
+            "detectedPlatform": "自動偵測到平台：{platform}",
+            "platformApi": "API 直連",
+            "detectFailed": "無法自動偵測平台類型，請手動選擇",
+            "platformRequired": "請選擇平台類型",
+            "headerRequired": "自訂 Header 的鍵和值都不能為空",
+            "routeRequired": "協議路徑覆蓋的類型和地址都不能為空",
+            "duplicateRoute": "同一協議的路徑覆蓋只能設定一條",
+            "updated": "站點已更新",
+            "created": "站點已建立",
+            "editTitle": "編輯站點",
+            "createTitle": "新增站點",
+            "siteName": "站點名稱",
+            "siteNamePlaceholder": "例如：主站 OneAPI",
+            "platform": "平台類型",
+            "autoDetect": "自動偵測",
+            "siteUrl": "站點地址",
+            "defaultProtocol": "預設協議",
+            "defaultProtocolHint": "決定取得模型列表的請求格式，以及未手動指定路由類型的模型所使用的預設端點格式",
+            "manualCheckinUrl": "手動簽到 URL",
+            "manualCheckinPlaceholder": "可選：例如 https://example.com/signin",
+            "manualCheckinHint": "設定後可在站點總覽中一鍵開啟此頁面進行手動簽到。",
+            "tags": "標籤",
+            "tagsHint": "可選：為站點加上標籤，方便在列表中分類篩選。",
+            "enabled": "啟用站點",
+            "disabledHint": "停用後不再投影託管渠道",
+            "advancedSettings": "進階設定",
+            "customHeaders": "自訂 Header（{count}）",
+            "protocolOverrides": "協議路徑覆蓋（{count}）",
+            "protocolOverridesHint": "按協議覆蓋請求地址，例如 Anthropic 填 https://example.com/anthropic/v1，留空則使用站點地址預設推斷。",
+            "routeType": "協議類型",
+            "createSite": "建立站點"
+        },
+        "accountForm": {
+            "contextMissing": "站點上下文不存在。",
+            "nameRequired": "請輸入帳號名稱",
+            "usernamePasswordRequired": "使用者名稱和密碼不能為空",
+            "accessTokenRequired": "請輸入 Access Token",
+            "apiKeyRequired": "請輸入 API Key",
+            "checkinIntervalRange": "最小簽到間隔必須介於 1 到 720 小時",
+            "randomWindowRange": "隨機延遲視窗必須介於 0 到 1440 分鐘",
+            "platformUserIdRequired": "請輸入 Platform User ID",
+            "platformUserIdInvalid": "Platform User ID 必須是大於 0 的整數",
+            "tokenExpiresPositive": "token_expires_at 必須是正整數時間戳",
+            "tokenExpiresParseable": "token_expires_at 必須是時間戳或可解析的時間",
+            "updated": "站點帳號已更新",
+            "created": "站點帳號已建立",
+            "editTitle": "編輯站點帳號",
+            "createTitle": "新增站點帳號",
+            "accountName": "帳號名稱",
+            "accountNamePlaceholder": "例如：主帳號",
+            "credentialType": "憑證類型",
+            "credentialUsernamePassword": "使用者名稱 / 密碼",
+            "credentialAccessToken": "存取權杖（Access Token）",
+            "credentialApiKey": "API 金鑰（API Key）",
+            "username": "使用者名稱",
+            "usernamePlaceholder": "請輸入使用者名稱",
+            "password": "密碼",
+            "passwordPlaceholder": "請輸入密碼",
+            "accessToken": "存取權杖（Access Token）",
+            "accessTokenPlaceholder": "請輸入 Access Token",
+            "refreshToken": "重新整理權杖（Refresh Token）",
+            "refreshTokenPlaceholder": "可選：請輸入 refresh_token",
+            "tokenExpiresAt": "token_expires_at",
+            "tokenExpiresPlaceholder": "可選：F12 中的時間戳或時間字串",
+            "sub2apiHint": "Sub2API 建議同時填寫 F12 裡的 <refreshToken>refresh_token</refreshToken> 與 <expiresAt>token_expires_at</expiresAt>，會在即將過期或收到 401 時自動續期。",
+            "platformUserId": "平台使用者 ID（Platform User ID）",
+            "platformUserIdPlaceholder": "例如 11494",
+            "platformUserIdHint": "New API 站點同步 token、分組和簽到時需要使用者 ID。匯入資料會盡量自動填入此值。",
+            "apiKey": "API 金鑰（API Key）",
+            "apiKeyPlaceholder": "請輸入 API Key",
+            "enabled": "啟用帳號",
+            "autoSync": "自動同步",
+            "autoCheckin": "自動簽到",
+            "randomCheckin": "隨機簽到",
+            "minCheckinInterval": "最小簽到間隔（小時）",
+            "randomDelayWindow": "隨機延遲視窗（分鐘）",
+            "proxyHint": "用於此帳號的同步、簽到和模型拉取；自動投影的渠道會跟隨此處解析後的代理。",
+            "createAccount": "建立帳號"
+        },
+        "batchEdit": {
+            "selectSiteRequired": "請先選擇站點",
+            "headerRequired": "設定類 Header 的鍵和值都不能為空",
+            "changeRequired": "請至少填寫一項修改",
+            "completed": "操作完成：成功 {successCount}，失敗 {failedCount}",
+            "failed": "批次編輯失敗",
+            "title": "批次編輯",
+            "description": "將對 {count} 個站點套用以下修改（未涉及的內容保持不變）",
+            "addTags": "新增標籤",
+            "removeTags": "移除標籤",
+            "headerList": "Header 列表（{count}）",
+            "set": "設定",
+            "delete": "刪除",
+            "deleteKeyPlaceholder": "刪除此 Key（不需要值）",
+            "headerHint": "「設定」按 Key 新增或更新（不區分大小寫）；「刪除」按 Key 移除。各站點其餘 Header 保持不變。",
+            "applying": "套用中...",
+            "applySelected": "套用到所選站點"
+        },
+        "checkin": {
+            "filters": {
+                "all": "全部",
+                "success": "成功",
+                "failed": "失敗",
+                "idle": "未執行",
+                "disabled": "停用"
+            },
+            "overview": "總覽",
+            "currentResult": "目前結果",
+            "visibleCounts": "{siteCount} 站點 / {accountCount} 帳號",
+            "currentBalance": "目前餘額",
+            "totalUsed": "累計消耗",
+            "enabledAccounts": "啟用帳號",
+            "todayFailures": "今日異常",
+            "search": "搜尋：{term}",
+            "clearFilters": "清除篩選",
+            "openManualCheckin": "開啟手動簽到（{count}）",
+            "removeTagFilter": "取消按「{tag}」篩選",
+            "addTagFilter": "按「{tag}」篩選"
         }
     },
     "siteRecovery": {

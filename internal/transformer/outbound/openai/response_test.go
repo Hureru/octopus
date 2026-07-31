@@ -388,7 +388,7 @@ func anthropicCacheRequest(latestUser string) *model.InternalLLMRequest {
 func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
 	outbound := &ResponseOutbound{}
 
-	first, err := outbound.TransformStream(nil, []byte(`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_123","name":"lookup"}}`))
+	first, err := outbound.TransformStream(context.Background(), []byte(`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_123","name":"lookup"}}`))
 	if err != nil {
 		t.Fatalf("first function call stream transform failed: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
 		t.Fatalf("expected initial function call id to be preserved, got %q", got)
 	}
 
-	second, err := outbound.TransformStream(nil, []byte(`{"type":"response.function_call_arguments.delta","output_index":0,"call_id":"call_123","name":"lookup","delta":"{}"}`))
+	second, err := outbound.TransformStream(context.Background(), []byte(`{"type":"response.function_call_arguments.delta","output_index":0,"call_id":"call_123","name":"lookup","delta":"{}"}`))
 	if err != nil {
 		t.Fatalf("second function call stream transform failed: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestTransformStreamAggregatesFunctionCallIDAcrossEvents(t *testing.T) {
 		t.Fatalf("expected function call arguments delta to be preserved, got %q", toolCall.Function.Arguments)
 	}
 
-	completed, err := outbound.TransformStream(nil, []byte(`{"type":"response.completed","response":{"id":"resp_123","model":"gpt-4o","status":"completed"}}`))
+	completed, err := outbound.TransformStream(context.Background(), []byte(`{"type":"response.completed","response":{"id":"resp_123","model":"gpt-4o","status":"completed"}}`))
 	if err != nil {
 		t.Fatalf("completed stream transform failed: %v", err)
 	}
