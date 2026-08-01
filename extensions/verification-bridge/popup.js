@@ -3,6 +3,11 @@ const {
   normalizeBaseURL,
   originPattern,
 } = OctopusBridgeCommon;
+const BRIDGE_STATE_KEY = "octopusVerificationBridgeV2";
+const LEGACY_BRIDGE_STATE_KEY = "octopusVerificationBridge";
+const RUNTIME_REVISION_KEY = "octopusVerificationBridgeRuntimeRevision";
+// Bump when an upgrade must replace an already-registered service worker.
+const RUNTIME_REVISION = "0.2.3";
 
 const elements = {
   pairingList: document.querySelector("#pairing-list"),
@@ -44,7 +49,25 @@ elements.release.addEventListener("click", () => runAction("task.release"));
 elements.refresh.addEventListener("click", () => runAction("pairing.refresh"));
 
 async function initialize() {
+  if (await reloadStaleRuntime()) return;
   await reloadState();
+}
+
+async function reloadStaleRuntime() {
+  const stored = await chrome.storage.local.get([
+    RUNTIME_REVISION_KEY,
+    BRIDGE_STATE_KEY,
+    LEGACY_BRIDGE_STATE_KEY,
+  ]);
+  if (stored[RUNTIME_REVISION_KEY] === RUNTIME_REVISION) return false;
+  await chrome.storage.local.set({[RUNTIME_REVISION_KEY]: RUNTIME_REVISION});
+  const hasSavedPairing = Boolean(
+    stored[LEGACY_BRIDGE_STATE_KEY]?.pairingToken ||
+    stored[BRIDGE_STATE_KEY]?.pairings?.length
+  );
+  if (!hasSavedPairing) return false;
+  chrome.runtime.reload();
+  return true;
 }
 
 async function reloadState() {
