@@ -189,7 +189,11 @@ function renderSelectedPairing() {
     elements.taskRetry.textContent = retryLabel(task.retry_status);
   }
 
-  const claimed = record.phase === "claimed" && Boolean(record.claim);
+  const claimed = Boolean(record.claim) && [
+    "claimed",
+    "waiting",
+    "permission_required",
+  ].includes(record.phase);
   const running = record.phase === "running";
   const invalid = record.phase === "invalid";
   elements.claim.hidden = claimed || running;
@@ -255,6 +259,8 @@ function phaseLabel(phase) {
   return {
     idle: "已配对",
     claimed: "待验证",
+    waiting: "等待验证",
+    permission_required: "待授权",
     running: "执行中",
     succeeded: "已完成",
     failed: "失败",

@@ -2,27 +2,36 @@ importScripts("bridge-common.js");
 
 const {
   callBridge,
+  hasNewPendingTask,
+  isCloudflareChallengePage,
   isClaimActive,
   normalizeBaseURL,
+  originPattern,
   sameOrigin,
+  shouldAutoHandleTask,
 } = OctopusBridgeCommon;
 const STATE_KEY = "octopusVerificationBridgeV2";
 const LEGACY_KEY = "octopusVerificationBridge";
 const STATE_VERSION = 2;
 const PUMP_ALARM = "octopus-verification-bridge-pump";
+const AUTO_PAGE_WAIT_MS = 7 * 60 * 1000;
+const AUTO_PAGE_POLL_MS = 2000;
 const activePumps = new Map();
+const activeAutomations = new Map();
+const activeClaims = new Map();
+const activeBrowserStarts = new Map();
 let stateCache = null;
 let statePromise = null;
 
 chrome.runtime.onInstalled.addListener(() => {
-  void initializeBackground();
+  runDetached("初始化扩展", initializeBackground);
 });
 chrome.runtime.onStartup.addListener(() => {
-  void initializeBackground();
+  runDetached("启动扩展", initializeBackground);
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === PUMP_ALARM) {
-    void refreshAndResume();
+    runDetached("刷新验证任务", refreshAndResume);
   }
 });
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -35,7 +44,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-void initializeBackground();
+runDetached("加载扩展", initializeBackground);
+
+function runDetached(label, action) {
+  void Promise.resolve()
+    .then(action)
+    .catch((error) => {
+      console.error(`[Octopus 验证桥] ${label}失败。`, error);
+    });
+}
 
 async function initializeBackground() {
   await chrome.alarms.create(PUMP_ALARM, {periodInMinutes: 1});
@@ -108,6 +125,7 @@ function normalizeState(value) {
       claim: item.claim || null,
       task: item.task || null,
       phase: item.phase || "idle",
+      pausedTaskId: Number.isInteger(item.pausedTaskId) ? item.pausedTaskId : null,
       windowId: Number.isInteger(item.windowId) ? item.windowId : null,
       tabId: Number.isInteger(item.tabId) ? item.tabId : null,
       lastMessage: item.lastMessage || "",
@@ -137,6 +155,7 @@ function migrateLegacyState(legacy) {
       claim,
       task: null,
       phase: claim ? "claimed" : "idle",
+      pausedTaskId: null,
       windowId: Number.isInteger(legacy.verificationWindowID)
         ? legacy.verificationWindowID
         : null,
@@ -206,6 +225,7 @@ async function addPairing(baseURLValue, pairingTokenValue) {
       claim: null,
       task: null,
       phase: "idle",
+      pausedTaskId: null,
       windowId: null,
       tabId: null,
       lastMessage: "配对成功。",
@@ -215,6 +235,7 @@ async function addPairing(baseURLValue, pairingTokenValue) {
     state.selectedKey = key;
   }
   await persistState();
+  startAutomation(state.selectedKey);
   return state;
 }
 
@@ -249,27 +270,50 @@ async function removePairing(key) {
 async function claimTask(key) {
   const state = await loadState();
   const record = requirePairing(state, key);
+  await claimTaskForRecord(record, true);
+  await persistState();
+}
+
+async function claimTaskForRecord(record, force = false) {
   if (record.claim) throw new Error("当前配对已经领取任务。");
+  let promise = activeClaims.get(record.key);
+  if (!promise) {
+    promise = performTaskClaim(record)
+      .finally(() => activeClaims.delete(record.key));
+    activeClaims.set(record.key, promise);
+  }
+  const claim = await promise;
+  if (force) record.pausedTaskId = null;
+  return claim;
+}
+
+async function performTaskClaim(record) {
   const claim = await callBridge(record.baseURL, "/claim", {
     pairing_token: record.pairingToken,
   });
   record.claim = claim;
+  if (record.pausedTaskId === claim.task?.id) record.pausedTaskId = null;
   record.task = null;
   record.phase = "claimed";
   record.lastMessage = "已领取验证任务。";
   record.tone = "success";
   record.updatedAt = new Date().toISOString();
-  await persistState();
+  return claim;
 }
 
 async function openTaskWindow(key) {
   const state = await loadState();
   const record = requirePairing(state, key);
+  await openTaskWindowForRecord(record);
+  await persistState();
+}
+
+async function openTaskWindowForRecord(record) {
   const task = requireClaimedTask(record);
   if (record.tabId !== null) {
     try {
       const tab = await chrome.tabs.get(record.tabId);
-      if (tab?.id) {
+      if (tab?.id && tab.url && sameOrigin(tab.url, task.target_url)) {
         await chrome.windows.update(tab.windowId, {focused: true});
         await chrome.tabs.update(tab.id, {active: true});
         return;
@@ -278,6 +322,17 @@ async function openTaskWindow(key) {
       record.tabId = null;
       record.windowId = null;
     }
+  }
+  const existing = await findTargetTab(task.target_url);
+  if (existing?.id) {
+    record.windowId = null;
+    record.tabId = existing.id;
+    await chrome.windows.update(existing.windowId, {focused: true});
+    await chrome.tabs.update(existing.id, {active: true});
+    record.lastMessage = "已复用打开的站点页面。";
+    record.tone = "success";
+    record.updatedAt = new Date().toISOString();
+    return;
   }
   const created = await chrome.windows.create({
     url: task.target_url,
@@ -291,12 +346,27 @@ async function openTaskWindow(key) {
   record.lastMessage = "验证窗口已打开。";
   record.tone = "success";
   record.updatedAt = new Date().toISOString();
-  await persistState();
 }
 
 async function startBrowserTask(key) {
   const state = await loadState();
   const record = requirePairing(state, key);
+  await startBrowserTaskOnce(key, record);
+  await persistState();
+  startPump(key);
+}
+
+async function startBrowserTaskOnce(key, record) {
+  let promise = activeBrowserStarts.get(key);
+  if (!promise) {
+    promise = startBrowserTaskForRecord(record)
+      .finally(() => activeBrowserStarts.delete(key));
+    activeBrowserStarts.set(key, promise);
+  }
+  return promise;
+}
+
+async function startBrowserTaskForRecord(record) {
   const task = requireClaimedTask(record);
   const tab = await requireTargetTab(record, task.target_url);
   const userAgent = await readTabUserAgent(tab.id);
@@ -315,30 +385,183 @@ async function startBrowserTask(key) {
   record.lastMessage = "正在通过浏览器执行同步任务。";
   record.tone = "";
   record.updatedAt = new Date().toISOString();
-  await persistState();
-  startPump(key);
 }
 
 async function releaseTask(key) {
   const state = await loadState();
   const record = requirePairing(state, key);
-  requireClaimedTask(record);
+  const task = requireClaimedTask(record);
   await callBridge(record.baseURL, "/release", {
     pairing_token: record.pairingToken,
     task_token: record.claim.task_token,
   });
   record.claim = null;
+  record.pausedTaskId = task.id;
   record.phase = "idle";
-  record.lastMessage = "验证任务已释放。";
+  record.lastMessage = "验证任务已释放，本任务不会再次自动领取。";
   record.tone = "success";
   record.updatedAt = new Date().toISOString();
   await closeTaskWindow(record);
   await persistState();
 }
 
+function startAutomation(key) {
+  if (!key || activeAutomations.has(key)) return;
+  const promise = automateTask(key)
+    .catch((error) => recordAutomationFailure(key, error))
+    .catch((error) => {
+      console.error("[Octopus 验证桥] 记录自动验证失败状态时出错。", error);
+    })
+    .finally(() => activeAutomations.delete(key));
+  activeAutomations.set(key, promise);
+}
+
+async function automateTask(key) {
+  const state = await loadState();
+  const record = state.pairings.find((item) => item.key === key);
+  if (!record) return;
+  await refreshPairing(record);
+  const latest = record.identity?.latest_task;
+  const pairingID = record.identity?.pairing?.id;
+  if (!shouldAutoHandleTask(record, pairingID, latest)) {
+    record.updatedAt = new Date().toISOString();
+    await persistState();
+    if (record.phase === "running") startPump(key);
+    return;
+  }
+  if (!record.claim) {
+    await claimTaskForRecord(record);
+  }
+  const task = requireClaimedTask(record);
+  if (!await hasOriginPermission(task.target_url)) {
+    record.phase = "permission_required";
+    record.lastMessage = "扩展缺少目标站点权限，请重新加载新版扩展。";
+    record.tone = "error";
+    record.updatedAt = new Date().toISOString();
+    await persistState();
+    return;
+  }
+  await openTaskWindowForRecord(record);
+  record.phase = "waiting";
+  record.lastMessage = "等待目标站点完成 Cloudflare 验证。";
+  record.tone = "";
+  record.updatedAt = new Date().toISOString();
+  await persistState();
+  if (!await waitForVerificationPage(record, task)) return;
+  await startBrowserTaskOnce(key, record);
+  await persistState();
+  startPump(key);
+}
+
+async function recordAutomationFailure(key, error) {
+  const state = await loadState();
+  const record = state.pairings.find((item) => item.key === key);
+  if (!record || (record.pausedTaskId && !record.claim)) return;
+  if (record.phase === "running") {
+    startPump(key);
+    return;
+  }
+  record.lastMessage = error instanceof Error ? error.message : String(error);
+  record.tone = "error";
+  if (error?.terminal) {
+    record.phase = "invalid";
+  } else if (record.claim) {
+    record.phase = "waiting";
+  } else {
+    record.phase = "idle";
+  }
+  record.updatedAt = new Date().toISOString();
+  await persistState();
+}
+
+function hasClaimForTask(record, taskID) {
+  return Boolean(
+    record.claim?.task_token &&
+    record.claim?.task?.id === taskID &&
+    record.pausedTaskId !== taskID
+  );
+}
+
+async function recoverTaskWindow(record) {
+  await closeTaskWindow(record);
+  await openTaskWindowForRecord(record);
+  await persistState();
+}
+
+async function waitForVerificationPage(record, task) {
+  const deadline = Date.now() + AUTO_PAGE_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (!hasClaimForTask(record, task.id)) return false;
+    requireClaimedTask(record);
+    let tab;
+    try {
+      tab = await requireTargetTab(record, task.target_url);
+    } catch {
+      await recoverTaskWindow(record);
+      await sleep(AUTO_PAGE_POLL_MS);
+      continue;
+    }
+    try {
+      const snapshot = await inspectVerificationPage(tab.id);
+      const challenged = isCloudflareChallengePage(snapshot);
+      if (snapshot?.ready && !challenged) {
+        return true;
+      }
+      const message = challenged
+        ? "请在验证窗口完成 Cloudflare 验证，扩展会自动继续。"
+        : "等待目标站点加载完成。";
+      if (record.lastMessage !== message || record.phase !== "waiting") {
+        record.phase = "waiting";
+        record.lastMessage = message;
+        record.tone = "";
+        record.updatedAt = new Date().toISOString();
+        await persistState();
+      }
+    } catch (error) {
+      if (error?.terminal) throw error;
+    }
+    await sleep(AUTO_PAGE_POLL_MS);
+  }
+  throw new Error("等待 Cloudflare 验证超时，请在打开的站点窗口完成验证。");
+}
+
+async function hasOriginPermission(value) {
+  return chrome.permissions.contains({origins: [originPattern(value)]});
+}
+
+async function findTargetTab(targetURL) {
+  const tabs = await chrome.tabs.query({});
+  return tabs.find((tab) => tab.id && tab.url && sameOrigin(tab.url, targetURL)) || null;
+}
+
+async function inspectVerificationPage(tabId) {
+  const results = await chrome.scripting.executeScript({
+    target: {tabId},
+    world: "MAIN",
+    func: () => ({
+      ready: document.readyState === "interactive" || document.readyState === "complete",
+      title: document.title || "",
+      text: (document.body?.innerText || "").slice(0, 4000),
+      challengeMarker: Boolean(document.querySelector(
+        "#challenge-running, #challenge-stage, #cf-challenge-running, " +
+        ".cf-browser-verification",
+      )),
+    }),
+  });
+  return results?.[0]?.result || null;
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 function startPump(key) {
   if (activePumps.has(key)) return;
-  const promise = pumpBrowserRequests(key).finally(() => activePumps.delete(key));
+  const promise = pumpBrowserRequests(key)
+    .catch((error) => {
+      console.error("[Octopus 验证桥] 浏览器请求处理异常。", error);
+    })
+    .finally(() => activePumps.delete(key));
   activePumps.set(key, promise);
 }
 
@@ -351,6 +574,13 @@ async function pumpBrowserRequests(key) {
       await refreshPairing(record);
       if (record.phase !== "running") {
         await persistState();
+        if (shouldAutoHandleTask(
+          record,
+          record.identity?.pairing?.id,
+          record.identity?.latest_task,
+        )) {
+          startAutomation(key);
+        }
         return;
       }
       const request = await callBridge(
@@ -476,7 +706,17 @@ async function refreshAndResume() {
   }
   await persistState();
   for (const record of state.pairings) {
-    if (record.phase === "running") startPump(record.key);
+    if (record.phase === "running") {
+      startPump(record.key);
+      continue;
+    }
+    if (shouldAutoHandleTask(
+      record,
+      record.identity?.pairing?.id,
+      record.identity?.latest_task,
+    )) {
+      startAutomation(record.key);
+    }
   }
 }
 
@@ -485,7 +725,15 @@ async function refreshPairingByKey(key) {
   const record = requirePairing(state, key);
   await refreshPairing(record);
   await persistState();
-  if (record.phase === "running") startPump(record.key);
+  if (record.phase === "running") {
+    startPump(record.key);
+  } else if (shouldAutoHandleTask(
+    record,
+    record.identity?.pairing?.id,
+    record.identity?.latest_task,
+  )) {
+    startAutomation(record.key);
+  }
 }
 
 async function refreshPairing(record) {
@@ -494,7 +742,18 @@ async function refreshPairing(record) {
   });
   record.identity = identity;
   const latest = identity.latest_task;
+  if (record.pausedTaskId && latest?.id !== record.pausedTaskId) {
+    record.pausedTaskId = null;
+  }
   if (await reconcileStoredClaim(record, identity, latest)) {
+    record.updatedAt = new Date().toISOString();
+    return;
+  }
+  if (record.phase === "running" && hasNewPendingTask(record, latest)) {
+    record.task = null;
+    record.phase = "idle";
+    record.lastMessage = "检测到新的验证任务，正在重新接管。";
+    record.tone = "";
     record.updatedAt = new Date().toISOString();
     return;
   }
@@ -587,7 +846,7 @@ async function updateBadge() {
   const state = stateCache;
   if (!state) return;
   const activeCount = state.pairings.filter((record) =>
-    record.phase === "claimed" || record.phase === "running"
+    ["claimed", "waiting", "permission_required", "running"].includes(record.phase)
   ).length;
   await chrome.action.setBadgeBackgroundColor({color: "#176b51"});
   await chrome.action.setBadgeText({text: activeCount ? String(activeCount) : ""});

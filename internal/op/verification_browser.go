@@ -85,6 +85,15 @@ func verificationBridgeIdentityTask(
 	var task model.VerificationTask
 	err := query().
 		Where("pairing_id = ?", pairingID).
+		Where(
+			"status = ? OR (status = ? AND retry_status IN ?)",
+			model.VerificationTaskClaimed,
+			model.VerificationTaskCompleted,
+			[]model.VerificationRetryStatus{
+				model.VerificationRetryPending,
+				model.VerificationRetryRunning,
+			},
+		).
 		Order("created_at DESC, id DESC").
 		First(&task).Error
 	if err == nil || err != gorm.ErrRecordNotFound {

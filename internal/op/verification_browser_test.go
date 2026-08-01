@@ -111,6 +111,28 @@ func TestVerificationBridgeIdentifyPrefersPendingAndPairingBoundTask(t *testing.
 	if identity.LatestTask == nil || identity.LatestTask.ID != claimed.Task.ID {
 		t.Fatalf("pairing-bound task was obscured by newer history: %+v", identity.LatestTask)
 	}
+
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&claimed.Task).Updates(map[string]any{
+		"status":       model.VerificationTaskCompleted,
+		"retry_status": model.VerificationRetrySucceeded,
+	}).Error; err != nil {
+		t.Fatalf("complete pairing-bound task: %v", err)
+	}
+	next, err := VerificationSessionCreate(ctx, VerificationSessionCreateRequest{
+		SiteAccountID: account.ID,
+		Operation:     model.SiteOperationSync,
+	})
+	if err != nil {
+		t.Fatalf("create next pending verification task: %v", err)
+	}
+
+	identity, err = VerificationBridgeIdentify(ctx, pairing.Token)
+	if err != nil {
+		t.Fatalf("identify next pending task: %v", err)
+	}
+	if identity.LatestTask == nil || identity.LatestTask.ID != next.Task.ID {
+		t.Fatalf("completed pairing history obscured the next task: %+v", identity.LatestTask)
+	}
 }
 
 func TestVerificationTaskBrowserReadyCompletesWithoutCookie(t *testing.T) {

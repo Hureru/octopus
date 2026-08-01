@@ -38,6 +38,56 @@
     );
   }
 
+  function shouldAutoHandleTask(record, pairingID, latestTask, now = Date.now()) {
+    if (!record || record.phase === "invalid" || record.phase === "running") {
+      return false;
+    }
+    if (latestTask?.id === record.pausedTaskId) {
+      return false;
+    }
+    if (record.claim) {
+      return isClaimActive(record.claim, pairingID, latestTask, now);
+    }
+    return latestTask?.status === "pending";
+  }
+
+  function hasNewPendingTask(record, latestTask) {
+    return Boolean(
+      record?.task?.id &&
+      latestTask?.id &&
+      latestTask.id !== record.task.id &&
+      latestTask.status === "pending"
+    );
+  }
+
+  function isCloudflareChallengePage(snapshot) {
+    if (!snapshot) return true;
+    if (snapshot.challengeMarker) return true;
+    const title = String(snapshot.title || "").toLowerCase();
+    const text = String(snapshot.text || "").toLowerCase();
+    return (
+      title.includes("just a moment") ||
+      title.includes("attention required") ||
+      title.includes("checking your browser") ||
+      text.includes("checking if the site connection is secure") ||
+      text.includes("performing security verification") ||
+      text.includes("sorry, you have been blocked") ||
+      text.includes("cloudflare ray id") ||
+      text.includes("enable javascript and cookies to continue")
+    );
+  }
+
+  function isPairingTerminalBridgeError(message) {
+    const normalized = String(message || "").toLowerCase();
+    return (
+      normalized.includes("verification bridge is not paired") ||
+      normalized.includes("verification bridge pairing expired or revoked") ||
+      normalized.includes("verification bridge pairing was revoked") ||
+      normalized.includes("paired site account not found") ||
+      normalized.includes("paired site not found")
+    );
+  }
+
   async function callBridge(baseURL, path, body) {
     const response = await fetch(`${normalizeBaseURL(baseURL)}${API_PREFIX}${path}`, {
       method: "POST",
@@ -55,9 +105,7 @@
       const error = new Error(
         payload.message || `Octopus 返回 HTTP ${response.status}。`,
       );
-      error.terminal = /expired|revoked|not paired|not found|already consumed|superseded/i.test(
-        error.message,
-      );
+      error.terminal = isPairingTerminalBridgeError(error.message);
       throw error;
     }
     return payload.data ?? null;
@@ -72,9 +120,13 @@
   scope.OctopusBridgeCommon = Object.freeze({
     callBridge,
     formatTaskOperation,
+    hasNewPendingTask,
+    isCloudflareChallengePage,
     isClaimActive,
+    isPairingTerminalBridgeError,
     normalizeBaseURL,
     originPattern,
     sameOrigin,
+    shouldAutoHandleTask,
   });
 })(globalThis);

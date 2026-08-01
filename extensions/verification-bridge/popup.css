@@ -169,7 +169,9 @@ h2 {
 }
 
 .phase-running,
-.phase-claimed {
+.phase-claimed,
+.phase-waiting,
+.phase-permission_required {
   color: #9a6700;
   border-color: #d4a72c;
 }
