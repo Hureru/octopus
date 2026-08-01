@@ -1,6 +1,11 @@
 importScripts("bridge-common.js");
 
-const {callBridge, normalizeBaseURL, sameOrigin} = OctopusBridgeCommon;
+const {
+  callBridge,
+  isClaimActive,
+  normalizeBaseURL,
+  sameOrigin,
+} = OctopusBridgeCommon;
 const STATE_KEY = "octopusVerificationBridgeV2";
 const LEGACY_KEY = "octopusVerificationBridge";
 const STATE_VERSION = 2;
@@ -362,6 +367,8 @@ async function pumpBrowserRequests(key) {
           ...completion,
         });
         await refreshPairing(record);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
       record.updatedAt = new Date().toISOString();
       await persistState();
@@ -487,8 +494,36 @@ async function refreshPairing(record) {
   });
   record.identity = identity;
   const latest = identity.latest_task;
+  if (await reconcileStoredClaim(record, identity, latest)) {
+    record.updatedAt = new Date().toISOString();
+    return;
+  }
   if (!latest || !record.task || latest.id !== record.task.id) return;
   record.task = latest;
+  await applyRetryState(record, latest);
+  record.updatedAt = new Date().toISOString();
+}
+
+async function reconcileStoredClaim(record, identity, latest) {
+  const claim = record.claim;
+  if (!claim) return false;
+  if (isClaimActive(claim, identity.pairing.id, latest)) return false;
+
+  record.claim = null;
+  if (latest?.id === claim.task?.id && latest.status === "completed") {
+    record.task = latest;
+    await applyRetryState(record, latest);
+    return true;
+  }
+  record.task = null;
+  record.phase = "idle";
+  record.lastMessage = "验证任务领取已过期或已释放，请重新领取。";
+  record.tone = "error";
+  await closeTaskWindow(record);
+  return true;
+}
+
+async function applyRetryState(record, latest) {
   switch (latest.retry_status) {
     case "succeeded":
       record.phase = "succeeded";
@@ -514,7 +549,6 @@ async function refreshPairing(record) {
       record.tone = "";
       break;
   }
-  record.updatedAt = new Date().toISOString();
 }
 
 async function closeTaskWindow(record) {

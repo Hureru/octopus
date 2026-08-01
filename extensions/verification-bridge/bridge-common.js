@@ -27,6 +27,17 @@
     }
   }
 
+  function isClaimActive(claim, pairingID, latestTask, now = Date.now()) {
+    const claimExpiresAt = new Date(claim?.claim_expires_at).getTime();
+    return (
+      Number.isFinite(claimExpiresAt) &&
+      claimExpiresAt > now &&
+      latestTask?.id === claim?.task?.id &&
+      latestTask.status === "claimed" &&
+      latestTask.pairing_id === pairingID
+    );
+  }
+
   async function callBridge(baseURL, path, body) {
     const response = await fetch(`${normalizeBaseURL(baseURL)}${API_PREFIX}${path}`, {
       method: "POST",
@@ -61,6 +72,7 @@
   scope.OctopusBridgeCommon = Object.freeze({
     callBridge,
     formatTaskOperation,
+    isClaimActive,
     normalizeBaseURL,
     originPattern,
     sameOrigin,
