@@ -42,17 +42,15 @@ func VerificationBridgeIdentify(
 	if err != nil {
 		return nil, fmt.Errorf("paired site not found")
 	}
+	if err := expireVerificationTasks(ctx); err != nil {
+		return nil, err
+	}
 
-	var latestTask model.VerificationTask
-	taskErr := db.GetDB().WithContext(ctx).
-		Where(
-			"session_id IN (?)",
-			db.GetDB().Model(&model.VerificationSession{}).
-				Select("id").
-				Where("site_account_id = ?", account.ID),
-		).
-		Order("created_at DESC, id DESC").
-		First(&latestTask).Error
+	latestTask, taskErr := verificationBridgeIdentityTask(
+		ctx,
+		pairing.ID,
+		account.ID,
+	)
 	if taskErr != nil && taskErr != gorm.ErrRecordNotFound {
 		return nil, taskErr
 	}
@@ -65,9 +63,44 @@ func VerificationBridgeIdentify(
 		SiteAccountName: account.Name,
 	}
 	if taskErr == nil {
-		identity.LatestTask = &latestTask
+		identity.LatestTask = latestTask
 	}
 	return identity, nil
+}
+
+func verificationBridgeIdentityTask(
+	ctx context.Context,
+	pairingID int64,
+	accountID int,
+) (*model.VerificationTask, error) {
+	query := func() *gorm.DB {
+		return db.GetDB().WithContext(ctx).
+			Where(
+				"session_id IN (?)",
+				db.GetDB().Model(&model.VerificationSession{}).
+					Select("id").
+					Where("site_account_id = ?", accountID),
+			)
+	}
+	var task model.VerificationTask
+	err := query().
+		Where("pairing_id = ?", pairingID).
+		Order("created_at DESC, id DESC").
+		First(&task).Error
+	if err == nil || err != gorm.ErrRecordNotFound {
+		return &task, err
+	}
+	err = query().
+		Where("status = ?", model.VerificationTaskPending).
+		Order("created_at ASC, id ASC").
+		First(&task).Error
+	if err == nil || err != gorm.ErrRecordNotFound {
+		return &task, err
+	}
+	err = query().
+		Order("created_at DESC, id DESC").
+		First(&task).Error
+	return &task, err
 }
 
 func VerificationBridgePairingRotate(

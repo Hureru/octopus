@@ -47,6 +47,72 @@ func TestVerificationBridgeIdentifyAndRotate(t *testing.T) {
 	}
 }
 
+func TestVerificationBridgeIdentifyPrefersPendingAndPairingBoundTask(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+	_, account := createVerificationFixture(t, ctx)
+	pairing, err := VerificationBridgePairingCreate(ctx, "Chrome", 30, account.ID)
+	if err != nil {
+		t.Fatalf("create pairing: %v", err)
+	}
+	pending, err := VerificationSessionCreate(ctx, VerificationSessionCreateRequest{
+		SiteAccountID: account.ID,
+		Operation:     model.SiteOperationCheckin,
+	})
+	if err != nil {
+		t.Fatalf("create pending verification task: %v", err)
+	}
+	newer, err := VerificationSessionCreate(ctx, VerificationSessionCreateRequest{
+		SiteAccountID: account.ID,
+		Operation:     model.SiteOperationSync,
+	})
+	if err != nil {
+		t.Fatalf("create newer verification task: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&newer.Task).Updates(map[string]any{
+		"status":       model.VerificationTaskExpired,
+		"retry_status": model.VerificationRetryCanceled,
+	}).Error; err != nil {
+		t.Fatalf("expire newer verification task: %v", err)
+	}
+
+	identity, err := VerificationBridgeIdentify(ctx, pairing.Token)
+	if err != nil {
+		t.Fatalf("identify pending task: %v", err)
+	}
+	if identity.LatestTask == nil || identity.LatestTask.ID != pending.Task.ID {
+		t.Fatalf("pending task was obscured by newer history: %+v", identity.LatestTask)
+	}
+
+	claimed, err := VerificationTaskClaim(ctx, pairing.Token)
+	if err != nil {
+		t.Fatalf("claim pending task: %v", err)
+	}
+	if claimed.Task.ID != pending.Task.ID {
+		t.Fatalf("unexpected claimed task: %+v", claimed.Task)
+	}
+	newest, err := VerificationSessionCreate(ctx, VerificationSessionCreateRequest{
+		SiteAccountID: account.ID,
+		Operation:     model.SiteOperationSync,
+	})
+	if err != nil {
+		t.Fatalf("create newest verification task: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&newest.Task).Updates(map[string]any{
+		"status":       model.VerificationTaskExpired,
+		"retry_status": model.VerificationRetryCanceled,
+	}).Error; err != nil {
+		t.Fatalf("expire newest verification task: %v", err)
+	}
+
+	identity, err = VerificationBridgeIdentify(ctx, pairing.Token)
+	if err != nil {
+		t.Fatalf("identify pairing-bound task: %v", err)
+	}
+	if identity.LatestTask == nil || identity.LatestTask.ID != claimed.Task.ID {
+		t.Fatalf("pairing-bound task was obscured by newer history: %+v", identity.LatestTask)
+	}
+}
+
 func TestVerificationTaskBrowserReadyCompletesWithoutCookie(t *testing.T) {
 	ctx := setupBackupTestDB(t)
 	_, account := createVerificationFixture(t, ctx)
