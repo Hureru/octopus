@@ -1,357 +1,275 @@
-const STORAGE_KEY = "octopusVerificationBridge";
+const {
+  formatTaskOperation,
+  normalizeBaseURL,
+  originPattern,
+} = OctopusBridgeCommon;
 
 const elements = {
+  pairingList: document.querySelector("#pairing-list"),
+  empty: document.querySelector("#pairing-empty"),
+  selected: document.querySelector("#selected-pairing"),
+  selectedTitle: document.querySelector("#selected-title"),
+  selectedMeta: document.querySelector("#selected-meta"),
+  selectedStatus: document.querySelector("#selected-status"),
+  taskDetails: document.querySelector("#task-details"),
+  taskHost: document.querySelector("#task-host"),
+  taskOperation: document.querySelector("#task-operation"),
+  taskRetry: document.querySelector("#task-retry"),
+  claim: document.querySelector("#claim"),
+  open: document.querySelector("#open"),
+  start: document.querySelector("#start"),
+  release: document.querySelector("#release"),
+  refresh: document.querySelector("#refresh"),
+  addForm: document.querySelector("#add-form"),
   baseURL: document.querySelector("#base-url"),
   pairingToken: document.querySelector("#pairing-token"),
   showToken: document.querySelector("#show-token"),
-  save: document.querySelector("#save"),
-  claim: document.querySelector("#claim"),
-  taskSection: document.querySelector("#task-section"),
-  taskHost: document.querySelector("#task-host"),
-  taskOperation: document.querySelector("#task-operation"),
-  taskExpires: document.querySelector("#task-expires"),
-  open: document.querySelector("#open"),
-  submit: document.querySelector("#submit"),
-  release: document.querySelector("#release"),
   status: document.querySelector("#status"),
 };
 
-let state = {
-  baseURL: "",
-  pairingToken: "",
-  claim: null,
-  verificationWindowID: null,
-};
-let claimExpiryTimer = null;
+let state = {selectedKey: null, pairings: []};
 
 document.addEventListener("DOMContentLoaded", initialize);
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "state.updated") void reloadState();
+});
 elements.showToken.addEventListener("change", () => {
   elements.pairingToken.type = elements.showToken.checked ? "text" : "password";
 });
-elements.save.addEventListener("click", saveConnection);
-elements.claim.addEventListener("click", claimTask);
-elements.open.addEventListener("click", openVerification);
-elements.submit.addEventListener("click", submitSession);
-elements.release.addEventListener("click", releaseTask);
+elements.addForm.addEventListener("submit", addPairing);
+elements.claim.addEventListener("click", () => runAction("task.claim"));
+elements.open.addEventListener("click", openTask);
+elements.start.addEventListener("click", startTask);
+elements.release.addEventListener("click", () => runAction("task.release"));
+elements.refresh.addEventListener("click", () => runAction("pairing.refresh"));
 
 async function initialize() {
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
-  state = {...state, ...(stored[STORAGE_KEY] || {})};
-  elements.baseURL.value = state.baseURL || "";
-  elements.pairingToken.value = state.pairingToken || "";
-  if (activeClaimExpired()) {
-    await clearActiveTask(true);
-    setStatus("已保存的验证任务领取凭据已过期。", "error");
-    return;
-  }
-  renderTask();
-  scheduleClaimExpiry();
+  await reloadState();
 }
 
-async function saveConnection() {
-  await runBusy(elements.save, async () => {
+async function reloadState() {
+  try {
+    state = await sendMessage({type: "state.get"});
+    render();
+  } catch (error) {
+    setStatus(errorMessage(error), "error");
+  }
+}
+
+async function addPairing(event) {
+  event.preventDefault();
+  await runBusy(event.submitter, async () => {
     const baseURL = normalizeBaseURL(elements.baseURL.value);
     const pairingToken = elements.pairingToken.value.trim();
-    if (!pairingToken) {
-      throw new Error("请输入配对令牌。");
-    }
-    if (
-      state.claim &&
-      (state.baseURL !== baseURL || state.pairingToken !== pairingToken)
-    ) {
-      throw new Error("更改连接前请先释放当前验证任务。");
-    }
+    if (!pairingToken) throw new Error("请输入配对令牌。");
     await ensureOriginPermission(baseURL);
-    state.baseURL = baseURL;
-    state.pairingToken = pairingToken;
-    await persistState();
-    setStatus("连接设置已保存。", "success");
-  });
-}
-
-async function claimTask() {
-  await runBusy(elements.claim, async () => {
-    if (state.claim) {
-      const previousClaim = state.claim;
-      const previousBaseURL = state.baseURL;
-      const previousPairingToken = state.pairingToken;
-      try {
-        await callBridgeAt(
-          previousBaseURL,
-          previousPairingToken,
-          "/release",
-          {
-            pairing_token: previousPairingToken,
-            task_token: previousClaim.task_token,
-          },
-        );
-      } catch (error) {
-        if (!error?.terminal) {
-          throw error;
-        }
-      }
-      await clearActiveTask(true);
-    }
-    await syncConnectionFromInputs();
-    const data = await callBridge("/claim", {
-      pairing_token: state.pairingToken,
+    state = await sendMessage({
+      type: "pairing.add",
+      baseURL,
+      pairingToken,
     });
-    state.claim = data;
-    state.verificationWindowID = null;
-    await persistState();
-    renderTask();
-    scheduleClaimExpiry();
-    setStatus("已领取验证任务。", "success");
+    elements.pairingToken.value = "";
+    elements.showToken.checked = false;
+    elements.pairingToken.type = "password";
+    render();
+    setStatus("配对已保存。", "success");
   });
 }
 
-async function openVerification() {
+async function openTask() {
   await runBusy(elements.open, async () => {
-    const task = await requireActiveTask();
+    const record = selectedPairing();
+    const task = record?.claim?.task;
+    if (!task) throw new Error("当前没有已领取的验证任务。");
     await ensureOriginPermission(task.target_url);
-    const created = await chrome.windows.create({
-      url: task.target_url,
-      type: "popup",
-      width: 1120,
-      height: 820,
-      focused: true,
-    });
-    state.verificationWindowID = created.id ?? null;
-    await persistState();
-    setStatus("验证窗口已打开。", "success");
+    state = await sendMessage({type: "task.open", key: record.key});
+    render();
   });
 }
 
-async function submitSession() {
-  await runBusy(elements.submit, async () => {
-    const task = await requireActiveTask();
+async function startTask() {
+  await runBusy(elements.start, async () => {
+    const record = selectedPairing();
+    const task = record?.claim?.task;
+    if (!task) throw new Error("当前没有已领取的验证任务。");
     await ensureOriginPermission(task.target_url);
-    const cookies = (await chrome.cookies.getAll({url: task.target_url})).filter(
-      (cookie) => isVerificationCookie(cookie.name),
-    );
-    if (!cookies.length) {
-      throw new Error("验证目标没有可提交的 Cookie。");
-    }
-    await callBridge("/complete", {
-      pairing_token: state.pairingToken,
-      task_token: state.claim.task_token,
-      user_agent: navigator.userAgent,
-      cookies: cookies.map((cookie) => ({
-        name: cookie.name,
-        value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path,
-        secure: cookie.secure,
-        http_only: cookie.httpOnly,
-      })),
-    });
-    await clearActiveTask(true);
-    setStatus("验证会话已提交。", "success");
+    state = await sendMessage({type: "task.start", key: record.key});
+    render();
   });
 }
 
-async function releaseTask() {
-  await runBusy(elements.release, async () => {
-    await requireActiveTask();
-    await callBridge("/release", {
-      pairing_token: state.pairingToken,
-      task_token: state.claim.task_token,
-    });
-    await clearActiveTask(true);
-    setStatus("验证任务已释放。", "success");
+async function runAction(type) {
+  const record = selectedPairing();
+  if (!record) throw new Error("请先选择配对。");
+  const button = {
+    "task.claim": elements.claim,
+    "task.release": elements.release,
+    "pairing.refresh": elements.refresh,
+  }[type];
+  await runBusy(button, async () => {
+    state = await sendMessage({type, key: record.key});
+    render();
   });
 }
 
-function isVerificationCookie(name) {
-  const value = String(name || "").trim();
-  return value === "cf_clearance"
-    || value === "__cf_bm"
-    || value.startsWith("cf_chl_");
+async function removePairing(key, button) {
+  await runBusy(button, async () => {
+    state = await sendMessage({type: "pairing.remove", key});
+    render();
+    setStatus("配对已从扩展移除。", "success");
+  });
 }
 
-async function syncConnectionFromInputs() {
-  const baseURL = normalizeBaseURL(elements.baseURL.value);
-  const pairingToken = elements.pairingToken.value.trim();
-  if (!pairingToken) {
-    throw new Error("请输入配对令牌。");
-  }
-  await ensureOriginPermission(baseURL);
-  state.baseURL = baseURL;
-  state.pairingToken = pairingToken;
-  await persistState();
+async function selectPairing(key) {
+  state = await sendMessage({type: "pairing.select", key});
+  render();
 }
 
-async function callBridge(path, body) {
-  if (!state.baseURL || !state.pairingToken) {
-    throw new Error("请先保存 Octopus 连接设置。");
-  }
-  return callBridgeAt(state.baseURL, state.pairingToken, path, body);
+function render() {
+  renderPairingList();
+  renderSelectedPairing();
 }
 
-async function callBridgeAt(baseURL, pairingToken, path, body) {
-  const response = await fetch(
-    `${baseURL}/api/v1/site/recovery/verification/bridge${path}`,
-    {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body),
-    },
-  );
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error(`Octopus 返回 HTTP ${response.status}。`);
+function renderPairingList() {
+  elements.pairingList.replaceChildren();
+  elements.empty.hidden = state.pairings.length !== 0;
+  for (const record of state.pairings) {
+    const row = document.createElement("div");
+    row.className = `pairing-row${record.key === state.selectedKey ? " selected" : ""}`;
+
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "pairing-select";
+    select.addEventListener("click", () => void selectPairing(record.key));
+    const identity = record.identity;
+    const title = document.createElement("strong");
+    title.textContent = identity
+      ? `${identity.site_name} / ${identity.site_account_name}`
+      : "未验证的旧版配对";
+    const meta = document.createElement("span");
+    meta.textContent = `${identity?.pairing?.name || "验证桥"} · ${hostLabel(record.baseURL)}`;
+    select.append(title, meta);
+
+    const phase = document.createElement("span");
+    phase.className = `phase phase-${record.phase}`;
+    phase.textContent = phaseLabel(record.phase);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-button danger";
+    remove.title = "从扩展移除";
+    remove.setAttribute("aria-label", "从扩展移除");
+    remove.textContent = "×";
+    remove.addEventListener("click", () => void removePairing(record.key, remove));
+
+    row.append(select, phase, remove);
+    elements.pairingList.append(row);
   }
-  if (!response.ok || payload.code !== 200) {
-    const error = new Error(
-      payload.message || `Octopus 返回 HTTP ${response.status}。`,
-    );
-    error.terminal = /expired|revoked|already consumed|not claimed|not found|superseded/i.test(
-      error.message,
-    );
-    throw error;
-  }
-  return payload.data;
 }
 
-async function requireActiveTask() {
-  const task = state.claim?.task;
-  if (!task || !state.claim?.task_token) {
-    throw new Error("当前没有验证任务。");
+function renderSelectedPairing() {
+  const record = selectedPairing();
+  elements.selected.hidden = !record;
+  if (!record) return;
+  const identity = record.identity;
+  elements.selectedTitle.textContent = identity
+    ? `${identity.site_name} / ${identity.site_account_name}`
+    : "未验证的旧版配对";
+  elements.selectedMeta.textContent = identity
+    ? `${identity.pairing.name} · 到期 ${formatDate(identity.pairing.expires_at)}`
+    : record.baseURL;
+  elements.selectedStatus.textContent = record.lastMessage || phaseLabel(record.phase);
+  elements.selectedStatus.className = `selected-status ${record.tone || ""}`;
+
+  const task = record.claim?.task || record.task || identity?.latest_task || null;
+  elements.taskDetails.hidden = !task;
+  if (task) {
+    elements.taskHost.textContent = task.target_host || hostLabel(task.target_url);
+    elements.taskOperation.textContent = formatTaskOperation(task.operation);
+    elements.taskRetry.textContent = retryLabel(task.retry_status);
   }
-  if (activeClaimExpired()) {
-    await clearActiveTask(true);
-    throw new Error("验证任务领取凭据已过期，请重新领取任务。");
-  }
-  return task;
+
+  const claimed = record.phase === "claimed" && Boolean(record.claim);
+  const running = record.phase === "running";
+  const invalid = record.phase === "invalid";
+  elements.claim.hidden = claimed || running;
+  elements.claim.disabled = invalid;
+  elements.open.hidden = !claimed;
+  elements.start.hidden = !claimed;
+  elements.start.disabled = !record.tabId;
+  elements.release.hidden = !claimed;
 }
 
-async function clearActiveTask(removeTargetPermission) {
-  const targetURL = state.claim?.task?.target_url || "";
-  if (state.verificationWindowID !== null) {
-    try {
-      await chrome.windows.remove(state.verificationWindowID);
-    } catch {
-      // The administrator may have already closed the temporary window.
-    }
-  }
-  clearClaimExpiryTimer();
-  if (removeTargetPermission && targetURL) {
-    const targetOrigin = originPattern(targetURL);
-    const baseOrigin = state.baseURL ? originPattern(state.baseURL) : "";
-    if (targetOrigin !== baseOrigin) {
-      try {
-        await chrome.permissions.remove({origins: [targetOrigin]});
-      } catch {
-        // State cleanup must not be blocked by a stale or already-removed
-        // permission. The browser will reconcile the permission on its own.
-      }
-    }
-  }
-  state.claim = null;
-  state.verificationWindowID = null;
-  await persistState();
-  renderTask();
+function selectedPairing() {
+  return state.pairings.find((record) => record.key === state.selectedKey) || null;
 }
 
 async function ensureOriginPermission(value) {
   const origin = originPattern(value);
-  if (await chrome.permissions.contains({origins: [origin]})) {
-    return;
-  }
+  if (await chrome.permissions.contains({origins: [origin]})) return;
   const granted = await chrome.permissions.request({origins: [origin]});
-  if (!granted) {
-    throw new Error("未授予站点访问权限。");
-  }
+  if (!granted) throw new Error("未授予站点访问权限。");
 }
 
-function normalizeBaseURL(value) {
-  const parsed = new URL(value.trim());
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("Octopus 地址必须使用 HTTP 或 HTTPS。");
-  }
-  parsed.hash = "";
-  parsed.search = "";
-  return parsed.href.replace(/\/+$/, "");
-}
-
-function originPattern(value) {
-  const parsed = new URL(value);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("仅支持 HTTP 和 HTTPS 目标。");
-  }
-  return `${parsed.protocol}//${parsed.host}/*`;
-}
-
-async function persistState() {
-  await chrome.storage.local.set({[STORAGE_KEY]: state});
-}
-
-function renderTask() {
-  const task = state.claim?.task;
-  elements.taskSection.hidden = !task;
-  if (!task) {
-    return;
-  }
-  elements.taskHost.textContent = task.target_host || new URL(task.target_url).hostname;
-  elements.taskOperation.textContent = task.operation === "manual"
-    ? "手动验证"
-    : (task.operation || "手动验证");
-  const expiresAt = state.claim?.claim_expires_at || task.expires_at;
-  elements.taskExpires.textContent = new Date(expiresAt).toLocaleString();
-}
-
-function activeClaimExpired() {
-  const expiresAt = state.claim?.claim_expires_at || state.claim?.task?.expires_at;
-  if (!expiresAt) {
-    return false;
-  }
-  const deadline = new Date(expiresAt).getTime();
-  return !Number.isFinite(deadline) || deadline <= Date.now();
-}
-
-function clearClaimExpiryTimer() {
-  if (claimExpiryTimer !== null) {
-    window.clearTimeout(claimExpiryTimer);
-    claimExpiryTimer = null;
-  }
-}
-
-function scheduleClaimExpiry() {
-  clearClaimExpiryTimer();
-  const expiresAt = state.claim?.claim_expires_at || state.claim?.task?.expires_at;
-  if (!expiresAt) {
-    return;
-  }
-  const delay = new Date(expiresAt).getTime() - Date.now();
-  if (!Number.isFinite(delay) || delay <= 0) {
-    void clearActiveTask(true);
-    return;
-  }
-  claimExpiryTimer = window.setTimeout(async () => {
-    claimExpiryTimer = null;
-    await clearActiveTask(true);
-    setStatus("验证任务领取凭据已过期，请重新领取任务。", "error");
-  }, Math.min(delay, 2_147_000_000));
+async function sendMessage(message) {
+  const response = await chrome.runtime.sendMessage(message);
+  if (!response?.ok) throw new Error(response?.error || "扩展后台没有响应。");
+  return response.data;
 }
 
 async function runBusy(button, action) {
-  button.disabled = true;
+  if (button) button.disabled = true;
   setStatus("");
   try {
     await action();
   } catch (error) {
-    if (error?.terminal && state.claim) {
-      await clearActiveTask(true);
-    }
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    setStatus(errorMessage(error), "error");
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
   }
 }
 
 function setStatus(message, tone = "") {
   elements.status.textContent = message;
   elements.status.className = `status${tone ? ` ${tone}` : ""}`;
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function hostLabel(value) {
+  try {
+    return new URL(value).host;
+  } catch {
+    return value || "";
+  }
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "未知" : date.toLocaleString();
+}
+
+function phaseLabel(phase) {
+  return {
+    idle: "已配对",
+    claimed: "待验证",
+    running: "执行中",
+    succeeded: "已完成",
+    failed: "失败",
+    canceled: "已取消",
+    invalid: "已失效",
+  }[phase] || phase;
+}
+
+function retryLabel(status) {
+  return {
+    none: "未安排",
+    pending: "等待执行",
+    running: "执行中",
+    succeeded: "成功",
+    failed: "失败",
+    canceled: "已取消",
+  }[status] || status || "未安排";
 }

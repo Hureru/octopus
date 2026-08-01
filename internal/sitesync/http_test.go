@@ -42,6 +42,53 @@ func TestRequestJSONUsesBrowserHeaders(t *testing.T) {
 	}
 }
 
+func TestRequestJSONUsesVerificationBrowserTransport(t *testing.T) {
+	var captured op.VerificationBrowserRequestInput
+	ctx := withVerificationBrowserTransport(
+		context.Background(),
+		op.VerificationBrowserBinding{
+			PairingID: 7,
+			TaskID:    8,
+			SessionID: 9,
+			TargetURL: "https://api.example.com",
+		},
+		func(_ context.Context, request op.VerificationBrowserRequestInput) (*op.VerificationBrowserResponse, error) {
+			captured = request
+			return &op.VerificationBrowserResponse{
+				Status:  200,
+				Headers: map[string]string{"content-type": "application/json"},
+				Body:    `{"success":true}`,
+			}, nil
+		},
+	)
+	payload, err := requestJSON(
+		ctx,
+		&model.Site{BaseURL: "https://api.example.com"},
+		http.MethodPost,
+		"https://api.example.com/api/user/checkin",
+		map[string]any{"value": true},
+		map[string]string{
+			"Authorization": "Bearer token",
+			"Cookie":        "session=must-not-forward",
+			"User-Agent":    "must-not-forward",
+		},
+	)
+	if err != nil {
+		t.Fatalf("browser requestJSON failed: %v", err)
+	}
+	if success, _ := payload["success"].(bool); !success {
+		t.Fatalf("unexpected browser payload: %#v", payload)
+	}
+	if captured.Binding.PairingID != 7 ||
+		captured.URL != "https://api.example.com/api/user/checkin" ||
+		captured.Headers["Authorization"] != "Bearer token" ||
+		captured.Headers["Cookie"] != "" ||
+		captured.Headers["User-Agent"] != "" ||
+		!strings.Contains(captured.Body, `"value":true`) {
+		t.Fatalf("unexpected browser request: %+v", captured)
+	}
+}
+
 func TestRequestJSONCustomHeaderOverridesUserAgent(t *testing.T) {
 	observedUserAgent := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

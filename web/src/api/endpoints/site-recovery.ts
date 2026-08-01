@@ -398,3 +398,18 @@ export function useRevokeVerificationPairing() {
         },
     });
 }
+
+export function useRotateVerificationPairing() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (pairingId: number) =>
+            apiClient.post<VerificationBridgePairingCreated>(
+                `/api/v1/site/recovery/verification/pairings/${pairingId}/rotate`,
+            ),
+        onSuccess: () => {
+            queryClient.invalidateQueries({
+                queryKey: ['site-recovery', 'verification', 'pairings'],
+            });
+        },
+    });
+}

@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useTranslations } from 'next-intl';
-import { KeyRound, Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
     useCreateVerificationPairing,
     useRevokeVerificationPairing,
+    useRotateVerificationPairing,
     useVerificationPairings,
     type VerificationBridgePairing,
     type VerificationBridgePairingCreated,
@@ -68,6 +69,7 @@ export function VerificationPairingPanel({
     const pairingsQuery = useVerificationPairings(enabled);
     const createPairing = useCreateVerificationPairing();
     const revokePairing = useRevokeVerificationPairing();
+    const rotatePairing = useRotateVerificationPairing();
     const sitesQuery = useSiteList();
     const [name, setName] = useState('');
     const [ttlDays, setTTLDays] = useState(30);
@@ -76,8 +78,11 @@ export function VerificationPairingPanel({
         useState<VerificationBridgePairingCreated | null>(null);
     const [revokeTarget, setRevokeTarget] =
         useState<VerificationBridgePairing | null>(null);
+    const [rotateTarget, setRotateTarget] =
+        useState<VerificationBridgePairing | null>(null);
     const [now, setNow] = useState(() => Date.now());
     const createButtonRef = useRef<HTMLButtonElement>(null);
+    const tokenReturnFocusRef = useRef<HTMLElement | null>(null);
     const pairings = useMemo(
         () => pairingsQuery.data ?? [],
         [pairingsQuery.data],
@@ -131,6 +136,7 @@ export function VerificationPairingPanel({
                 ttl_days: Math.min(365, Math.max(1, Math.trunc(ttlDays))),
             });
             setName('');
+            tokenReturnFocusRef.current = createButtonRef.current;
             setCreatedPairing(result);
             toast.success(t('created'));
         } catch (error) {
@@ -144,6 +150,18 @@ export function VerificationPairingPanel({
             await revokePairing.mutateAsync(revokeTarget.id);
             setRevokeTarget(null);
             toast.success(t('revoked'));
+        } catch (error) {
+            toast.error(errorMessage(error, t('operationFailed')));
+        }
+    }
+
+    async function confirmRotate() {
+        if (!rotateTarget) return;
+        try {
+            const result = await rotatePairing.mutateAsync(rotateTarget.id);
+            setRotateTarget(null);
+            setCreatedPairing(result);
+            toast.success(t('rotated'));
         } catch (error) {
             toast.error(errorMessage(error, t('operationFailed')));
         }
@@ -241,19 +259,38 @@ export function VerificationPairingPanel({
                                                 </div>
                                             </div>
                                             {!revoked ? (
-                                                <Button
-                                                    type="button"
-                                                    size="icon-sm"
-                                                    variant="ghost"
-                                                    className="rounded-xl text-destructive hover:text-destructive"
-                                                    onClick={() =>
-                                                        setRevokeTarget(pairing)
-                                                    }
-                                                    aria-label={t('revoke')}
-                                                    title={t('revoke')}
-                                                >
-                                                    <Trash2 className="size-4" />
-                                                </Button>
+                                                <div className="flex shrink-0 items-center gap-1">
+                                                    {!expired ? (
+                                                        <Button
+                                                            type="button"
+                                                            size="icon-sm"
+                                                            variant="ghost"
+                                                            className="rounded-xl"
+                                                            onClick={(event) => {
+                                                                tokenReturnFocusRef.current =
+                                                                    event.currentTarget;
+                                                                setRotateTarget(pairing);
+                                                            }}
+                                                            aria-label={t('rotate')}
+                                                            title={t('rotate')}
+                                                        >
+                                                            <RefreshCw className="size-4" />
+                                                        </Button>
+                                                    ) : null}
+                                                    <Button
+                                                        type="button"
+                                                        size="icon-sm"
+                                                        variant="ghost"
+                                                        className="rounded-xl text-destructive hover:text-destructive"
+                                                        onClick={() =>
+                                                            setRevokeTarget(pairing)
+                                                        }
+                                                        aria-label={t('revoke')}
+                                                        title={t('revoke')}
+                                                    >
+                                                        <Trash2 className="size-4" />
+                                                    </Button>
+                                                </div>
                                             ) : null}
                                         </div>
                                     </article>
@@ -348,7 +385,7 @@ export function VerificationPairingPanel({
                 <DialogContent
                     className="rounded-2xl sm:max-w-xl"
                     onCloseAutoFocus={(event) => {
-                        const target = createButtonRef.current;
+                        const target = tokenReturnFocusRef.current;
                         if (!target?.isConnected) return;
                         event.preventDefault();
                         target.focus();
@@ -380,6 +417,31 @@ export function VerificationPairingPanel({
                     </Button>
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog
+                open={rotateTarget !== null}
+                onOpenChange={(open) => !open && setRotateTarget(null)}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>{t('rotateConfirmTitle')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {t('rotateConfirmDescription', {
+                                name: rotateTarget?.name ?? '',
+                            })}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmRotate}
+                            disabled={rotatePairing.isPending}
+                        >
+                            {t('rotate')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             <AlertDialog
                 open={revokeTarget !== null}

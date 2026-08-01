@@ -1,11 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Octopus 验证桥",
-  "version": "0.1.0",
-  "description": "在管理员浏览器中完成已配对的 Octopus 站点验证任务。",
+  "version": "0.2.0",
+  "description": "持久配对 Octopus，并在真实浏览器站点上下文中完成验证后的同步任务。",
   "permissions": [
-    "cookies",
+    "alarms",
+    "scripting",
     "storage",
+    "tabs",
     "windows"
   ],
   "optional_host_permissions": [
@@ -15,5 +17,8 @@
   "action": {
     "default_title": "Octopus 验证桥",
     "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
   }
 }
