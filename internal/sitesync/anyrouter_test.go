@@ -184,6 +184,132 @@ func TestAnyRouterCookieTokenCanProbeUserIDAndSyncTokens(t *testing.T) {
 	}
 }
 
+func TestAnyRouterDiscoverUserIDUsesPersistedPlatformUserID(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":false,"message":"unexpected request"}`))
+	}))
+	defer server.Close()
+
+	platformUserID := 137417
+	userID, err := anyRouterDiscoverUserID(
+		context.Background(),
+		&model.Site{BaseURL: server.URL},
+		&model.SiteAccount{PlatformUserID: &platformUserID},
+		"session=opaque-cookie",
+	)
+	if err != nil {
+		t.Fatalf("anyRouterDiscoverUserID returned error: %v", err)
+	}
+	if userID != platformUserID {
+		t.Fatalf("expected persisted user id %d, got %d", platformUserID, userID)
+	}
+	if requestCount != 0 {
+		t.Fatalf("expected persisted user id to avoid probing, requests=%d", requestCount)
+	}
+}
+
+func TestFetchAnyRouterManagementTokensFallsBackToPrimaryCookie(t *testing.T) {
+	selfRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/self":
+			selfRequests++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":false,"message":"unexpected probe"}`))
+		case "/api/token/":
+			if r.Header.Get("Authorization") != "" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(anyRouterChallengeHTML))
+				return
+			}
+			cookieHeader := r.Header.Get("Cookie")
+			if !strings.Contains(cookieHeader, "acw_sc__v2="+anyRouterChallengeACW) {
+				w.Header().Add("Set-Cookie", "cdn_sec_tc="+anyRouterChallengeCookie+"; Path=/; HttpOnly")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(anyRouterChallengeHTML))
+				return
+			}
+			if r.Header.Get("New-API-User") != "137417" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":false,"message":"wrong user id"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"items":[{"key":"cookie-managed-key","group":"default"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	tokens, err := fetchAnyRouterManagementTokens(
+		context.Background(),
+		&model.Site{BaseURL: server.URL},
+		nil,
+		"session=opaque-cookie",
+		137417,
+	)
+	if err != nil {
+		t.Fatalf("fetchAnyRouterManagementTokens returned error: %v", err)
+	}
+	if len(tokens) != 1 || tokens[0].Token != "cookie-managed-key" {
+		t.Fatalf("unexpected synced tokens: %+v", tokens)
+	}
+	if selfRequests != 0 {
+		t.Fatalf("expected primary user id before alternate probing, self requests=%d", selfRequests)
+	}
+}
+
+func TestFetchAnyRouterGroupsByCookieUsesPrimaryUserIDFirst(t *testing.T) {
+	selfRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/self":
+			selfRequests++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":false,"message":"unexpected probe"}`))
+		case "/api/user/self/groups", "/api/user_group_map":
+			cookieHeader := r.Header.Get("Cookie")
+			if !strings.Contains(cookieHeader, "acw_sc__v2="+anyRouterChallengeACW) {
+				w.Header().Add("Set-Cookie", "cdn_sec_tc="+anyRouterChallengeCookie+"; Path=/; HttpOnly")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(anyRouterChallengeHTML))
+				return
+			}
+			if r.Header.Get("New-API-User") != "137417" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":false,"message":"wrong user id"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":["default"]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	groups, err := fetchAnyRouterGroupsByCookie(
+		context.Background(),
+		&model.Site{BaseURL: server.URL},
+		nil,
+		"session=opaque-cookie",
+		137417,
+	)
+	if err != nil {
+		t.Fatalf("fetchAnyRouterGroupsByCookie returned error: %v", err)
+	}
+	if len(groups) != 1 || groups[0].GroupKey != model.SiteDefaultGroupKey {
+		t.Fatalf("unexpected synced groups: %+v", groups)
+	}
+	if selfRequests != 0 {
+		t.Fatalf("expected primary user id before alternate probing, self requests=%d", selfRequests)
+	}
+}
+
 func TestSyncAnyRouterFallsBackToAccessTokenWhenTokenListIsEmpty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

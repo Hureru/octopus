@@ -211,12 +211,11 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 func fetchAnyRouterManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, userID int) ([]model.SiteToken, error) {
 	requestURL := buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100")
 
-	payload, _, err := anyRouterRequestJSONWithCookies(ctx, siteRecord, http.MethodGet, requestURL, nil, anyRouterAuthHeaders(accessToken, userID), account)
-	if err != nil {
-		return nil, err
-	}
-	if tokens := buildSiteTokensFromPayload(payload); len(tokens) > 0 {
-		return tokens, nil
+	payload, _, bearerErr := anyRouterRequestJSONWithCookies(ctx, siteRecord, http.MethodGet, requestURL, nil, anyRouterAuthHeaders(accessToken, userID), account)
+	if bearerErr == nil {
+		if tokens := buildSiteTokensFromPayload(payload); len(tokens) > 0 {
+			return tokens, nil
+		}
 	}
 
 	cookieTokens, cookieErr := fetchAnyRouterTokensByCookie(ctx, siteRecord, account, accessToken, userID)
@@ -225,6 +224,9 @@ func fetchAnyRouterManagementTokens(ctx context.Context, siteRecord *model.Site,
 	}
 	if cookieErr != nil {
 		return nil, cookieErr
+	}
+	if bearerErr != nil {
+		return nil, bearerErr
 	}
 	return nil, nil
 }
@@ -405,6 +407,9 @@ func anyRouterShouldFallbackToCookieCheckin(message string) bool {
 }
 
 func anyRouterDiscoverUserID(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) (int, error) {
+	if account != nil && account.PlatformUserID != nil && *account.PlatformUserID > 0 {
+		return *account.PlatformUserID, nil
+	}
 	if jwtID := anyRouterTryDecodeJWTUserID(accessToken); jwtID > 0 {
 		if ok, _ := anyRouterTestBearerUserID(ctx, siteRecord, account, accessToken, jwtID); ok {
 			return jwtID, nil
@@ -508,13 +513,7 @@ func anyRouterProbeAlternateUserIDByCookie(ctx context.Context, siteRecord *mode
 
 func fetchAnyRouterTokensByCookie(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, userID int) ([]model.SiteToken, error) {
 	requestURL := buildSiteURL(siteRecord.BaseURL, "/api/token/?p=0&size=100")
-	tryUserIDs := []int{userID}
-	if alternateUserID, _ := anyRouterProbeAlternateUserIDByCookie(ctx, siteRecord, account, accessToken, userID); alternateUserID > 0 {
-		tryUserIDs = append(tryUserIDs, alternateUserID)
-	}
-	tryUserIDs = slices.Compact(tryUserIDs)
-
-	for _, candidateUserID := range tryUserIDs {
+	fetchForUserID := func(candidateUserID int) []model.SiteToken {
 		for _, cookie := range anyRouterBuildCookieCandidates(accessToken) {
 			headers := map[string]string{"Cookie": cookie}
 			anyRouterAddUserIDHeaders(headers, candidateUserID)
@@ -523,8 +522,18 @@ func fetchAnyRouterTokensByCookie(ctx context.Context, siteRecord *model.Site, a
 				continue
 			}
 			if tokens := buildSiteTokensFromPayload(payload); len(tokens) > 0 {
-				return tokens, nil
+				return tokens
 			}
+		}
+		return nil
+	}
+
+	if tokens := fetchForUserID(userID); len(tokens) > 0 {
+		return tokens, nil
+	}
+	if alternateUserID, _ := anyRouterProbeAlternateUserIDByCookie(ctx, siteRecord, account, accessToken, userID); alternateUserID > 0 && alternateUserID != userID {
+		if tokens := fetchForUserID(alternateUserID); len(tokens) > 0 {
+			return tokens, nil
 		}
 	}
 	return nil, nil
@@ -532,16 +541,9 @@ func fetchAnyRouterTokensByCookie(ctx context.Context, siteRecord *model.Site, a
 
 func fetchAnyRouterGroupsByCookie(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, userID int) ([]model.SiteUserGroup, error) {
 	endpoints := []string{"/api/user/self/groups", "/api/user_group_map"}
-	tryUserIDs := []int{userID}
-	if alternateUserID, _ := anyRouterProbeAlternateUserIDByCookie(ctx, siteRecord, account, accessToken, userID); alternateUserID > 0 {
-		tryUserIDs = append(tryUserIDs, alternateUserID)
-	}
-	tryUserIDs = slices.Compact(tryUserIDs)
-
-	seen := make(map[string]model.SiteUserGroup)
-	var terminalErr error
-
-	for _, candidateUserID := range tryUserIDs {
+	fetchForUserID := func(candidateUserID int) ([]model.SiteUserGroup, error) {
+		seen := make(map[string]model.SiteUserGroup)
+		var terminalErr error
 		for _, endpoint := range endpoints {
 			requestURL := buildSiteURL(siteRecord.BaseURL, endpoint)
 			for _, cookie := range anyRouterBuildCookieCandidates(accessToken) {
@@ -565,11 +567,26 @@ func fetchAnyRouterGroupsByCookie(ctx context.Context, siteRecord *model.Site, a
 				}
 			}
 		}
+		if len(seen) > 0 {
+			return anyRouterGroupMapToSlice(seen), nil
+		}
+		return nil, terminalErr
 	}
-	if len(seen) > 0 {
-		return anyRouterGroupMapToSlice(seen), nil
+
+	groups, primaryErr := fetchForUserID(userID)
+	if len(groups) > 0 {
+		return groups, nil
 	}
-	return nil, terminalErr
+	if alternateUserID, _ := anyRouterProbeAlternateUserIDByCookie(ctx, siteRecord, account, accessToken, userID); alternateUserID > 0 && alternateUserID != userID {
+		groups, alternateErr := fetchForUserID(alternateUserID)
+		if len(groups) > 0 {
+			return groups, nil
+		}
+		if alternateErr != nil {
+			return nil, alternateErr
+		}
+	}
+	return nil, primaryErr
 }
 
 func buildSiteTokensFromPayload(payload map[string]any) []model.SiteToken {
