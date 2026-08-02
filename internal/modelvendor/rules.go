@@ -6,28 +6,38 @@ package modelvendor
 
 // 厂商 ID 与 models.dev 的 provider ID 对齐，便于用注册表数据增强本地规则。
 const (
-	VendorOpenAI     = "openai"
-	VendorAnthropic  = "anthropic"
-	VendorGoogle     = "google"
-	VendorDeepSeek   = "deepseek"
-	VendorXAI        = "xai"
-	VendorAlibaba    = "alibaba"
-	VendorZhipuAI    = "zhipuai"
-	VendorMiniMax    = "minimax"
-	VendorMoonshotAI = "moonshotai"
-	VendorMeta       = "meta"
-	VendorMistral    = "mistral"
-	VendorByteDance  = "bytedance"
-	VendorBaidu      = "baidu"
-	VendorTencent    = "tencent"
-	VendorStepFun    = "stepfun"
-	Vendor01AI       = "01ai"
-	VendorCohere     = "cohere"
-	VendorPerplexity = "perplexity"
-	VendorAmazon     = "amazon"
-	VendorMicrosoft  = "microsoft"
-	VendorNvidia     = "nvidia"
-	VendorV0         = "v0"
+	VendorOpenAI      = "openai"
+	VendorAnthropic   = "anthropic"
+	VendorGoogle      = "google"
+	VendorDeepSeek    = "deepseek"
+	VendorXAI         = "xai"
+	VendorAlibaba     = "alibaba"
+	VendorZhipuAI     = "zhipuai"
+	VendorMiniMax     = "minimax"
+	VendorMoonshotAI  = "moonshotai"
+	VendorMeta        = "meta"
+	VendorMistral     = "mistral"
+	VendorByteDance   = "bytedance"
+	VendorBaidu       = "baidu"
+	VendorTencent     = "tencent"
+	VendorStepFun     = "stepfun"
+	Vendor01AI        = "01ai"
+	VendorCohere      = "cohere"
+	VendorPerplexity  = "perplexity"
+	VendorAmazon      = "amazon"
+	VendorMicrosoft   = "microsoft"
+	VendorNvidia      = "nvidia"
+	VendorV0          = "v0"
+	VendorXiaomi      = "xiaomi"
+	VendorBAAI        = "baai"
+	VendorJinaAI      = "jina"
+	VendorVoyageAI    = "voyageai"
+	VendorInternLM    = "internlm"
+	VendorSenseTime   = "sensetime"
+	VendorInclusionAI = "inclusionai"
+	VendorNomicAI     = "nomic"
+	VendorZeroEntropy = "zeroentropy"
+	VendorPoolside    = "poolside"
 )
 
 // shortTokenMaxLen 以内的 token 属于易误伤的短前缀（o3 / yi / phi 等），
@@ -118,6 +128,39 @@ var prefixAliases = map[string]string{
 	"nvidia": VendorNvidia,
 
 	"v0": VendorV0,
+
+	"xiaomi":     VendorXiaomi,
+	"xiaomimimo": VendorXiaomi,
+	"mimo":       VendorXiaomi,
+
+	"baai":          VendorBAAI,
+	"flagembedding": VendorBAAI,
+
+	"jina":    VendorJinaAI,
+	"jinaai":  VendorJinaAI,
+	"jina-ai": VendorJinaAI,
+
+	"voyage":    VendorVoyageAI,
+	"voyageai":  VendorVoyageAI,
+	"voyage-ai": VendorVoyageAI,
+
+	"internlm":  VendorInternLM,
+	"intern-ai": VendorInternLM,
+	"opengvlab": VendorInternLM,
+
+	"sensetime": VendorSenseTime,
+	"sensenova": VendorSenseTime,
+
+	"inclusionai":  VendorInclusionAI,
+	"inclusion-ai": VendorInclusionAI,
+
+	"nomic":    VendorNomicAI,
+	"nomic-ai": VendorNomicAI,
+
+	"zeroentropy":  VendorZeroEntropy,
+	"zero-entropy": VendorZeroEntropy,
+
+	"poolside": VendorPoolside,
 }
 
 // namePattern 描述一组共享厂商归属的模型名前缀。
@@ -134,24 +177,38 @@ var namePatterns = []namePattern{
 		"gpt", "chatgpt", "codex", "o1", "o3", "o4",
 		"text-embedding-3", "text-embedding-ada", "dall-e", "whisper", "sora", "tts-",
 	}},
-	{VendorGoogle, []string{"gemini", "gemma", "imagen", "veo"}},
+	{VendorGoogle, []string{"gemini", "gemma", "diffusiongemma", "nano-banana", "imagen", "veo"}},
 	{VendorDeepSeek, []string{"deepseek"}},
 	{VendorXAI, []string{"grok"}},
 	{VendorAlibaba, []string{"qwen", "qwq", "qvq", "wan", "tongyi"}},
 	{VendorZhipuAI, []string{"glm", "chatglm", "codegeex", "cogview", "cogvideo"}},
 	{VendorMoonshotAI, []string{"kimi", "moonshot"}},
-	{VendorMiniMax, []string{"minimax", "abab"}},
+	{VendorMiniMax, []string{"minimax", "abab", "speech-01", "speech-02", "speech-2."}},
 	{VendorMeta, []string{"llama", "codellama"}},
 	{VendorMistral, []string{"mistral", "mixtral", "ministral", "magistral", "codestral", "devstral", "pixtral"}},
 	{VendorByteDance, []string{"doubao", "seed", "seedream", "seedance", "skylark"}},
 	{VendorBaidu, []string{"ernie", "wenxin"}},
-	{VendorTencent, []string{"hunyuan"}},
+	{VendorTencent, []string{"hunyuan", "hy3"}},
 	{VendorStepFun, []string{"step"}},
 	{Vendor01AI, []string{"yi"}},
-	{VendorCohere, []string{"command", "rerank"}},
+	{VendorCohere, []string{
+		"command", "north-mini-code",
+		"embed-english", "embed-multilingual", "embed-v3", "embed-v4",
+		"rerank-english", "rerank-multilingual", "rerank-v3", "rerank-v4",
+	}},
 	{VendorPerplexity, []string{"sonar"}},
 	{VendorAmazon, []string{"nova", "titan"}},
 	{VendorMicrosoft, []string{"phi"}},
 	{VendorNvidia, []string{"nemotron"}},
 	{VendorV0, []string{"v0"}},
+	{VendorXiaomi, []string{"mimo"}},
+	{VendorBAAI, []string{"bge"}},
+	{VendorJinaAI, []string{"jina"}},
+	{VendorVoyageAI, []string{"voyage"}},
+	{VendorInternLM, []string{"internlm", "internvl", "intern-s"}},
+	{VendorSenseTime, []string{"sensenova"}},
+	{VendorInclusionAI, []string{"ling", "ring"}},
+	{VendorNomicAI, []string{"nomic"}},
+	{VendorZeroEntropy, []string{"zembed", "zerank"}},
+	{VendorPoolside, []string{"laguna"}},
 }

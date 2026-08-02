@@ -31,6 +31,16 @@ const VENDOR_LIST: VendorOption[] = [
     { id: 'microsoft', label: 'Microsoft', className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
     { id: 'nvidia', label: 'NVIDIA', className: 'bg-lime-500/10 text-lime-600 dark:text-lime-400' },
     { id: 'v0', label: 'v0', className: 'bg-neutral-500/10 text-neutral-600 dark:text-neutral-300' },
+    { id: 'xiaomi', label: 'Xiaomi', className: 'bg-orange-500/10 text-orange-600 dark:text-orange-400' },
+    { id: 'baai', label: 'BAAI', className: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' },
+    { id: 'jina', label: 'Jina AI', className: 'bg-pink-500/10 text-pink-600 dark:text-pink-400' },
+    { id: 'voyageai', label: 'Voyage AI', className: 'bg-teal-500/10 text-teal-600 dark:text-teal-400' },
+    { id: 'internlm', label: 'Shanghai AI Lab', className: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' },
+    { id: 'sensetime', label: 'SenseTime', className: 'bg-red-500/10 text-red-600 dark:text-red-400' },
+    { id: 'inclusionai', label: 'InclusionAI', className: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' },
+    { id: 'nomic', label: 'Nomic AI', className: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
+    { id: 'zeroentropy', label: 'ZeroEntropy', className: 'bg-neutral-500/10 text-neutral-700 dark:text-neutral-300' },
+    { id: 'poolside', label: 'Poolside', className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
 ];
 
 const VENDOR_BY_ID = new Map(VENDOR_LIST.map((item) => [item.id, item]));
