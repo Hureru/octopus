@@ -1461,6 +1461,40 @@ export function Site() {
                   >
                     <Plus className="size-4" />
                   </IconActionButton>
+                ) : site.accounts.length === 1 ? (
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Switch
+                            checked={site.accounts[0].auto_sync}
+                            disabled={updateSiteAccount.isPending}
+                            onCheckedChange={() =>
+                              handleToggleAutoSync(site.accounts[0])
+                            }
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {site.accounts[0].auto_sync
+                          ? "关闭自动同步"
+                          : "开启自动同步"}
+                      </TooltipContent>
+                    </Tooltip>
+                    <IconActionButton
+                      label="同步账号"
+                      disabled={syncingAccountIds.has(site.accounts[0].id)}
+                      onClick={() => handleSyncAccount(site.accounts[0])}
+                    >
+                      <RefreshCw
+                        className={cn(
+                          "size-4",
+                          syncingAccountIds.has(site.accounts[0].id) &&
+                            "animate-spin",
+                        )}
+                      />
+                    </IconActionButton>
+                  </>
                 ) : null}
 
                 <Popover>
