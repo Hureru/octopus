@@ -94,6 +94,11 @@ func SettingSetInt(key model.SettingKey, value int) error {
 	return nil
 }
 
+// SettingRefreshCache 重新载入设置缓存，并把缺失的默认设置补写进数据库。
+func SettingRefreshCache(ctx context.Context) error {
+	return settingRefreshCache(ctx)
+}
+
 func settingRefreshCache(ctx context.Context) error {
 	db := db.GetDB().WithContext(ctx)
 
