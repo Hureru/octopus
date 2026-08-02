@@ -122,6 +122,27 @@ func ensureGroupTx(
 	return &created, nil
 }
 
+// alignCanonicalNameToGroupTx 让 Canonical Model 使用分组的实际拼写。
+// 路由缓存按分组名精确查找，因此仅大小写不同也必须统一到 Group.Name。
+func alignCanonicalNameToGroupTx(
+	tx *gorm.DB,
+	canonical *model.CanonicalModel,
+	group *model.Group,
+) error {
+	if canonical == nil || group == nil || canonical.Name == group.Name {
+		return nil
+	}
+	if canonical.NormalizedName != NormalizeModelIdentity(group.Name) {
+		return nil
+	}
+	if err := tx.Model(&model.CanonicalModel{}).Where("id = ?", canonical.ID).
+		Update("name", group.Name).Error; err != nil {
+		return err
+	}
+	canonical.Name = group.Name
+	return nil
+}
+
 // findGroupByNameTx 按归一化名字查分组：分组名大小写由用户决定，而目录侧一律按小写比较。
 func findGroupByNameTx(tx *gorm.DB, name string) (*model.Group, bool, error) {
 	normalized := NormalizeModelIdentity(name)

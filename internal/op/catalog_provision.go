@@ -55,14 +55,20 @@ func CatalogProvision(
 			if err != nil {
 				return err
 			}
+			if err := alignCanonicalNameToGroupTx(tx, canonical, group); err != nil {
+				return err
+			}
 
 			if NormalizeModelIdentity(name) != canonical.NormalizedName {
-				sourceGroupID, err := remapModelToCanonicalTx(tx, name, canonical, &result)
+				remapped, err := remapModelToCanonicalTx(tx, name, canonical, group, &result)
 				if err != nil {
 					return err
 				}
-				if sourceGroupID > 0 && sourceGroupID != group.ID && request.DeleteEmptySourceGroups {
-					deletableGroupIDs = append(deletableGroupIDs, sourceGroupID)
+				affectedChannelIDs = append(affectedChannelIDs, remapped.affectedChannelIDs...)
+				if remapped.sourceGroupID > 0 &&
+					remapped.sourceGroupID != group.ID &&
+					request.DeleteEmptySourceGroups {
+					deletableGroupIDs = append(deletableGroupIDs, remapped.sourceGroupID)
 				}
 			}
 
@@ -153,14 +159,35 @@ func CatalogUnprovision(
 			}
 			result.GroupItemsRemoved += removedItems
 			affectedChannelIDs = append(affectedChannelIDs, channelIDs...)
+
+			var upstreamCandidates []model.RouteCandidate
 			if err := tx.Where("LOWER(upstream_model_name) = ?", normalized).
-				Delete(&model.RouteCandidate{}).Error; err != nil {
+				Find(&upstreamCandidates).Error; err != nil {
 				return err
 			}
+			candidateIDs, candidateChannelIDs := catalogCandidateIDsAndChannels(upstreamCandidates)
+			if err := deleteRouteCandidateReferencesTx(tx, candidateIDs); err != nil {
+				return err
+			}
+			if len(candidateIDs) > 0 {
+				if err := tx.Where("id IN ?", candidateIDs).Delete(&model.RouteCandidate{}).Error; err != nil {
+					return err
+				}
+			}
+			affectedChannelIDs = append(affectedChannelIDs, candidateChannelIDs...)
 
 			var alias model.ModelAlias
 			switch err := tx.Where("normalized_alias = ?", normalized).First(&alias).Error; {
 			case err == nil:
+				if request.DeleteGroup {
+					group, found, err := findGroupByNameTx(tx, alias.Alias)
+					if err != nil {
+						return err
+					}
+					if found {
+						groupIDsToDelete = append(groupIDsToDelete, group.ID)
+					}
+				}
 				if err := tx.Delete(&model.ModelAlias{}, alias.ID).Error; err != nil {
 					return err
 				}
@@ -206,12 +233,26 @@ func CatalogUnprovision(
 				}
 			}
 
+			var canonicalCandidates []model.RouteCandidate
 			if err := tx.Where("canonical_model_id = ?", canonical.ID).
-				Delete(&model.RouteCandidate{}).Error; err != nil {
+				Find(&canonicalCandidates).Error; err != nil {
 				return err
 			}
+			candidateIDs, candidateChannelIDs = catalogCandidateIDsAndChannels(canonicalCandidates)
+			if err := deleteRouteCandidateReferencesTx(tx, candidateIDs); err != nil {
+				return err
+			}
+			if len(candidateIDs) > 0 {
+				if err := tx.Where("id IN ?", candidateIDs).Delete(&model.RouteCandidate{}).Error; err != nil {
+					return err
+				}
+			}
+			affectedChannelIDs = append(affectedChannelIDs, candidateChannelIDs...)
 			if err := tx.Where("canonical_model_id = ?", canonical.ID).
 				Delete(&model.ModelAlias{}).Error; err != nil {
+				return err
+			}
+			if err := deleteCanonicalReferencesTx(tx, []int{canonical.ID}); err != nil {
 				return err
 			}
 			if err := tx.Delete(&model.CanonicalModel{}, canonical.ID).Error; err != nil {
@@ -226,7 +267,7 @@ func CatalogUnprovision(
 	}
 
 	// 分组删除走 GroupDel，让它负责 group items / presets / 负载均衡状态的连带清理。
-	for _, groupID := range groupIDsToDelete {
+	for _, groupID := range uniqueInts(groupIDsToDelete) {
 		if err := GroupDel(groupID, ctx); err != nil {
 			return result, fmt.Errorf("delete group %d failed: %w", groupID, err)
 		}
@@ -260,6 +301,16 @@ func removeGroupItemsByModelTx(tx *gorm.DB, normalizedModel string) (int, []int,
 		return 0, nil, err
 	}
 	return len(items), channelIDs, nil
+}
+
+func catalogCandidateIDsAndChannels(candidates []model.RouteCandidate) ([]int, []int) {
+	candidateIDs := make([]int, 0, len(candidates))
+	channelIDs := make([]int, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidateIDs = append(candidateIDs, candidate.ID)
+		channelIDs = append(channelIDs, candidate.ChannelID)
+	}
+	return uniqueInts(candidateIDs), uniqueInts(channelIDs)
 }
 
 func refreshCatalogCaches(ctx context.Context) error {

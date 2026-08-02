@@ -107,6 +107,40 @@ func TestCatalogSyncManualModeStillServesExistingGroups(t *testing.T) {
 	findCatalogCandidate(t, channel.ID, "kept-model")
 }
 
+func TestCatalogSyncRepairsExistingCanonicalGroupCaseMismatch(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	channel := model.Channel{Name: "case-repair", Model: "GLM-5.1", Enabled: true}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := GroupCreate(&model.Group{
+		Name: "glm-5.1",
+		Mode: model.GroupModeRoundRobin,
+	}, ctx); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&model.CanonicalModel{
+		Name:            "GLM-5.1",
+		NormalizedName:  "glm-5.1",
+		RoutingStrategy: model.RoutingStrategyBalanced,
+		ProtocolPolicy:  model.ProtocolPolicyAuto,
+		Enabled:         true,
+	}).Error; err != nil {
+		t.Fatalf("create mismatched canonical: %v", err)
+	}
+
+	if _, err := CatalogSync(ctx); err != nil {
+		t.Fatalf("CatalogSync: %v", err)
+	}
+	canonical, ok := CatalogResolveIdentity("GLM-5.1")
+	if !ok || canonical.Name != "glm-5.1" {
+		t.Fatalf("canonical mismatch was not repaired: ok=%v canonical=%+v", ok, canonical)
+	}
+	if _, err := GroupGetEnabledMap(canonical.Name, ctx); err != nil {
+		t.Fatalf("repaired canonical name does not route: %v", err)
+	}
+}
+
 func TestCatalogProvisionCreatesGroupPerSelectedModel(t *testing.T) {
 	ctx := setupCatalogProvisionTest(t)
 	channel := model.Channel{
@@ -149,6 +183,45 @@ func TestCatalogProvisionCreatesGroupPerSelectedModel(t *testing.T) {
 	}
 	if vendors["claude-opus-4-5"] != modelvendor.VendorAnthropic {
 		t.Fatalf("claude vendor = %q, want %q", vendors["claude-opus-4-5"], modelvendor.VendorAnthropic)
+	}
+}
+
+func TestCatalogProvisionAlignsCanonicalNameWithExistingGroupCase(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	channel := model.Channel{
+		Name:    "case-alignment",
+		Model:   "GLM-5.1",
+		Enabled: true,
+	}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := GroupCreate(&model.Group{
+		Name: "glm-5.1",
+		Mode: model.GroupModeRoundRobin,
+	}, ctx); err != nil {
+		t.Fatalf("create existing group: %v", err)
+	}
+
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models: []string{"GLM-5.1"},
+	}); err != nil {
+		t.Fatalf("CatalogProvision: %v", err)
+	}
+
+	canonical, ok := CatalogResolveIdentity("GLM-5.1")
+	if !ok {
+		t.Fatal("canonical identity was not created")
+	}
+	if canonical.Name != "glm-5.1" {
+		t.Fatalf("canonical name = %q, want existing group spelling %q", canonical.Name, "glm-5.1")
+	}
+	group, err := GroupGetEnabledMap(canonical.Name, ctx)
+	if err != nil {
+		t.Fatalf("canonical name does not resolve to its group: %v", err)
+	}
+	if len(group.Items) != 1 || group.Items[0].ChannelID != channel.ID {
+		t.Fatalf("existing group was not wired: %+v", group.Items)
 	}
 }
 
@@ -230,6 +303,225 @@ func TestCatalogProvisionRemapsUpstreamNameIntoTargetGroup(t *testing.T) {
 	}
 	if staleCanonicalCount != 0 {
 		t.Fatalf("source canonical should be merged away, found %d", staleCanonicalCount)
+	}
+}
+
+func TestCatalogProvisionRemapsExistingAliasWithoutLeavingOldRoute(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	channel := model.Channel{Name: "alias-remap", Model: "upstream-model", Enabled: true}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models:     []string{"upstream-model"},
+		TargetName: "group-A",
+	}); err != nil {
+		t.Fatalf("provision group A: %v", err)
+	}
+	sourceCandidate := findCatalogCandidate(t, channel.ID, "upstream-model")
+
+	result, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models:                  []string{"upstream-model"},
+		TargetName:              "group-B",
+		DeleteEmptySourceGroups: true,
+	})
+	if err != nil {
+		t.Fatalf("remap to group B: %v", err)
+	}
+	if result.GroupsDeleted != 1 {
+		t.Fatalf("old alias group was not deleted: %+v", result)
+	}
+	if _, err := GroupGetEnabledMap("group-A", ctx); err == nil {
+		t.Fatal("old alias group still exists")
+	}
+	target, err := GroupGetEnabledMap("group-B", ctx)
+	if err != nil {
+		t.Fatalf("load target group: %v", err)
+	}
+	if len(target.Items) != 1 || target.Items[0].ModelName != "upstream-model" {
+		t.Fatalf("target group wiring is wrong: %+v", target.Items)
+	}
+
+	var candidates []model.RouteCandidate
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("channel_id = ? AND LOWER(upstream_model_name) = ?", channel.ID, "upstream-model").
+		Find(&candidates).Error; err != nil {
+		t.Fatalf("load remapped candidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ID != sourceCandidate.ID {
+		t.Fatalf("candidate was duplicated instead of moved: %+v", candidates)
+	}
+	canonical, ok := CatalogResolveIdentity("upstream-model")
+	if !ok || canonical.Name != "group-B" || candidates[0].CanonicalModelID != canonical.ID {
+		t.Fatalf("alias or candidate still points at old target: canonical=%+v candidates=%+v", canonical, candidates)
+	}
+}
+
+func TestCatalogProvisionCandidateConflictMovesScopedReferences(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	channel := model.Channel{Name: "candidate-conflict", Model: "shared-upstream", Enabled: true}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models:     []string{"shared-upstream"},
+		TargetName: "source-group",
+	}); err != nil {
+		t.Fatalf("provision source group: %v", err)
+	}
+	sourceCandidate := findCatalogCandidate(t, channel.ID, "shared-upstream")
+
+	targetCanonical := model.CanonicalModel{
+		Name:            "target-group",
+		NormalizedName:  "target-group",
+		RoutingStrategy: model.RoutingStrategyBalanced,
+		ProtocolPolicy:  model.ProtocolPolicyAuto,
+		Enabled:         true,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&targetCanonical).Error; err != nil {
+		t.Fatalf("create target canonical: %v", err)
+	}
+	if err := GroupCreate(&model.Group{
+		Name: "target-group",
+		Mode: model.GroupModeRoundRobin,
+	}, ctx); err != nil {
+		t.Fatalf("create target group: %v", err)
+	}
+	targetCandidate := model.RouteCandidate{
+		CanonicalModelID:  targetCanonical.ID,
+		ChannelID:         channel.ID,
+		UpstreamModelName: "shared-upstream",
+		Status:            model.RouteCandidateActive,
+		Weight:            1,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&targetCandidate).Error; err != nil {
+		t.Fatalf("create target candidate: %v", err)
+	}
+	mustCreateCatalogHeaderPolicy(
+		t,
+		ctx,
+		model.HeaderPolicyScopeRouteCandidate,
+		sourceCandidate.ID,
+		"source candidate policy",
+	)
+	sourceQuote := mustCreateCatalogCandidateQuote(t, ctx, sourceCandidate.ID, 41)
+	targetQuote := mustCreateCatalogCandidateQuote(t, ctx, targetCandidate.ID, 41)
+	movedQuote := mustCreateCatalogCandidateQuote(t, ctx, sourceCandidate.ID, 42)
+
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models:                  []string{"shared-upstream"},
+		TargetName:              "target-group",
+		DeleteEmptySourceGroups: true,
+	}); err != nil {
+		t.Fatalf("remap into conflicting target: %v", err)
+	}
+
+	var sourceCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.RouteCandidate{}).
+		Where("id = ?", sourceCandidate.ID).Count(&sourceCount).Error; err != nil {
+		t.Fatalf("count source candidate: %v", err)
+	}
+	if sourceCount != 0 {
+		t.Fatal("conflicting source candidate was not removed")
+	}
+	var policy model.HeaderPolicy
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("scope = ? AND scope_id = ?", model.HeaderPolicyScopeRouteCandidate, targetCandidate.ID).
+		First(&policy).Error; err != nil {
+		t.Fatalf("candidate policy was not moved: %v", err)
+	}
+	var sourcePolicyCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.HeaderPolicy{}).
+		Where("scope = ? AND scope_id = ?", model.HeaderPolicyScopeRouteCandidate, sourceCandidate.ID).
+		Count(&sourcePolicyCount).Error; err != nil {
+		t.Fatalf("count source policy: %v", err)
+	}
+	if sourcePolicyCount != 0 {
+		t.Fatal("source candidate policy became orphaned")
+	}
+	var quotes []model.SiteModelPriceQuote
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("route_candidate_id IN ?", []int{sourceCandidate.ID, targetCandidate.ID}).
+		Find(&quotes).Error; err != nil {
+		t.Fatalf("load candidate quotes: %v", err)
+	}
+	if len(quotes) != 2 {
+		t.Fatalf("target quote must win identity collision: %+v", quotes)
+	}
+	quoteByID := make(map[int]model.SiteModelPriceQuote, len(quotes))
+	for _, quote := range quotes {
+		quoteByID[quote.ID] = quote
+	}
+	if _, found := quoteByID[sourceQuote.ID]; found {
+		t.Fatal("conflicting source quote was not removed")
+	}
+	if _, found := quoteByID[targetQuote.ID]; !found {
+		t.Fatal("target quote was removed during conflict resolution")
+	}
+	reloadedMovedQuote, found := quoteByID[movedQuote.ID]
+	if !found || reloadedMovedQuote.RouteCandidateID == nil ||
+		*reloadedMovedQuote.RouteCandidateID != targetCandidate.ID {
+		t.Fatalf("non-conflicting source quote was not moved: %+v", reloadedMovedQuote)
+	}
+	expectedMovedQuote := movedQuote
+	expectedMovedQuote.RouteCandidateID = &targetCandidate.ID
+	expectedMovedQuote.RefreshIdentityKey()
+	if reloadedMovedQuote.IdentityKey != expectedMovedQuote.IdentityKey {
+		t.Fatalf(
+			"moved quote identity = %q, want %q",
+			reloadedMovedQuote.IdentityKey,
+			expectedMovedQuote.IdentityKey,
+		)
+	}
+}
+
+func TestCatalogProvisionCanonicalMergeMovesCanonicalPolicy(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	useAutoCatalogProvisioning(t)
+	channel := model.Channel{Name: "canonical-policy", Model: "source-canonical", Enabled: true}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := CatalogSync(ctx); err != nil {
+		t.Fatalf("CatalogSync: %v", err)
+	}
+	sourceCanonical, ok := CatalogResolveIdentity("source-canonical")
+	if !ok {
+		t.Fatal("source canonical missing")
+	}
+	mustCreateCatalogHeaderPolicy(
+		t,
+		ctx,
+		model.HeaderPolicyScopeCanonicalModel,
+		sourceCanonical.ID,
+		"source canonical policy",
+	)
+
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models:                  []string{"source-canonical"},
+		TargetName:              "target-canonical",
+		DeleteEmptySourceGroups: true,
+	}); err != nil {
+		t.Fatalf("merge canonical: %v", err)
+	}
+	targetCanonical, ok := CatalogResolveIdentity("target-canonical")
+	if !ok {
+		t.Fatal("target canonical missing")
+	}
+	var policy model.HeaderPolicy
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("scope = ? AND scope_id = ?", model.HeaderPolicyScopeCanonicalModel, targetCanonical.ID).
+		First(&policy).Error; err != nil {
+		t.Fatalf("canonical policy was not moved: %v", err)
+	}
+	var sourcePolicyCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.HeaderPolicy{}).
+		Where("scope = ? AND scope_id = ?", model.HeaderPolicyScopeCanonicalModel, sourceCanonical.ID).
+		Count(&sourcePolicyCount).Error; err != nil {
+		t.Fatalf("count source canonical policy: %v", err)
+	}
+	if sourcePolicyCount != 0 {
+		t.Fatal("source canonical policy became orphaned")
 	}
 }
 
@@ -323,6 +615,103 @@ func TestCatalogUnprovisionRemovesGroupAndAlias(t *testing.T) {
 	}
 	if candidateCount != 0 {
 		t.Fatalf("route candidates for unprovisioned models remain: %d", candidateCount)
+	}
+}
+
+func TestCatalogUnprovisionAliasDeletesAliasNamedGroup(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	channel := model.Channel{Name: "alias-delete-group", Model: "alias-leaf", Enabled: true}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models:     []string{"alias-leaf"},
+		TargetName: "alias-target",
+	}); err != nil {
+		t.Fatalf("provision alias: %v", err)
+	}
+	if err := GroupCreate(&model.Group{
+		Name: "alias-leaf",
+		Mode: model.GroupModeRoundRobin,
+	}, ctx); err != nil {
+		t.Fatalf("create alias-named group: %v", err)
+	}
+
+	result, err := CatalogUnprovision(ctx, model.CatalogUnprovisionRequest{
+		Models:      []string{"alias-leaf"},
+		DeleteGroup: true,
+	})
+	if err != nil {
+		t.Fatalf("CatalogUnprovision: %v", err)
+	}
+	if result.GroupsDeleted != 1 {
+		t.Fatalf("alias-named group was not deleted: %+v", result)
+	}
+	if _, err := GroupGetEnabledMap("alias-leaf", ctx); err == nil {
+		t.Fatal("alias-named group still exists")
+	}
+}
+
+func TestCatalogUnprovisionDeletesScopedReferences(t *testing.T) {
+	ctx := setupCatalogProvisionTest(t)
+	channel := model.Channel{Name: "reference-cleanup", Model: "drop-references", Enabled: true}
+	if err := ChannelCreate(&channel, ctx); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := CatalogProvision(ctx, model.CatalogProvisionRequest{
+		Models: []string{"drop-references"},
+	}); err != nil {
+		t.Fatalf("provision model: %v", err)
+	}
+	canonical, ok := CatalogResolveIdentity("drop-references")
+	if !ok {
+		t.Fatal("canonical missing")
+	}
+	candidate := findCatalogCandidate(t, channel.ID, "drop-references")
+	mustCreateCatalogHeaderPolicy(
+		t,
+		ctx,
+		model.HeaderPolicyScopeCanonicalModel,
+		canonical.ID,
+		"canonical cleanup policy",
+	)
+	mustCreateCatalogHeaderPolicy(
+		t,
+		ctx,
+		model.HeaderPolicyScopeRouteCandidate,
+		candidate.ID,
+		"candidate cleanup policy",
+	)
+	mustCreateCatalogCandidateQuote(t, ctx, candidate.ID, 73)
+
+	if _, err := CatalogUnprovision(ctx, model.CatalogUnprovisionRequest{
+		Models: []string{"drop-references"},
+	}); err != nil {
+		t.Fatalf("CatalogUnprovision: %v", err)
+	}
+
+	var policyCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.HeaderPolicy{}).
+		Where(
+			"(scope = ? AND scope_id = ?) OR (scope = ? AND scope_id = ?)",
+			model.HeaderPolicyScopeCanonicalModel,
+			canonical.ID,
+			model.HeaderPolicyScopeRouteCandidate,
+			candidate.ID,
+		).
+		Count(&policyCount).Error; err != nil {
+		t.Fatalf("count scoped policies: %v", err)
+	}
+	if policyCount != 0 {
+		t.Fatalf("unprovision left %d scoped policies", policyCount)
+	}
+	var quoteCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteModelPriceQuote{}).
+		Where("route_candidate_id = ?", candidate.ID).Count(&quoteCount).Error; err != nil {
+		t.Fatalf("count scoped quotes: %v", err)
+	}
+	if quoteCount != 0 {
+		t.Fatalf("unprovision left %d candidate quotes", quoteCount)
 	}
 }
 
@@ -437,4 +826,50 @@ func canonicalVendorIndex(t *testing.T, ctx context.Context) map[string]string {
 		index[canonical.NormalizedName] = canonical.Vendor
 	}
 	return index
+}
+
+func mustCreateCatalogHeaderPolicy(
+	t *testing.T,
+	ctx context.Context,
+	scope model.HeaderPolicyScope,
+	scopeID int,
+	name string,
+) model.HeaderPolicy {
+	t.Helper()
+	policy, err := HeaderPolicyUpsert(ctx, model.HeaderPolicy{
+		Name:    name,
+		Scope:   scope,
+		ScopeID: scopeID,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create header policy: %v", err)
+	}
+	return *policy
+}
+
+func mustCreateCatalogCandidateQuote(
+	t *testing.T,
+	ctx context.Context,
+	candidateID int,
+	siteID int,
+) model.SiteModelPriceQuote {
+	t.Helper()
+	quote := model.SiteModelPriceQuote{
+		RouteCandidateID:  &candidateID,
+		SiteID:            siteID,
+		ModelName:         "shared-upstream",
+		Source:            model.PriceQuoteSourceManualOverride,
+		Unit:              model.PriceUnitPerMillionTokens,
+		Currency:          "USD",
+		GroupMultiplier:   1,
+		ExchangeRateToUSD: 1,
+		ManualOverride:    true,
+		Status:            model.PriceQuoteStatusValid,
+	}
+	quote.RefreshIdentityKey()
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&quote).Error; err != nil {
+		t.Fatalf("create candidate quote: %v", err)
+	}
+	return quote
 }

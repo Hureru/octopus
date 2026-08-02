@@ -6,13 +6,15 @@
 **审计者:** deepseek-v4-flash（opencode 代码审计工作流）
 **分支/基线:** `feat/model-group-provisioning` @ d3c9984
 
+> **状态更新（2026-08-02）:** 本报告是提交 `d3c9984` 的历史审计快照，不代表后续工作区的实时状态。进入本轮修复前，`058cc17` 工作区已重新通过全量验证；本轮审查修复后也再次通过 `go test ./... -count=1 -timeout 60s`、`go build ./...`、`go vet ./internal/...`、前端 lint/build 与 `git diff --check origin/dev`。下文关于“测试全量红灯”的描述仅指审计快照当时的结果。
+
 ---
 
 ## 1. 执行摘要
 
 Octopus 是一个功能完整的 LLM API 聚合网关：Go 后端（405 文件 / 11 万行）承载代理转发、负载均衡、熔断、站点同步、备份恢复等能力，Next.js 前端（170 文件 / 4.1 万行）提供管理面板。项目有 132 个 Go 测试文件、i18n 三语零缺失、大量成熟的安全实践（参数化 SQL、脱敏字段、zip-slip 防护、错误码体系），工程功底扎实。
 
-但本次审计发现的问题同样显著：**当前分支 `go test ./...` 全量红灯（internal/op 8 个 + internal/sitesync 1 个失败），CI 门禁实际处于失效状态**；代理热路径存在 4 个 Critical 级性能问题（每请求 10-20 次无缓存 DB 查询、流式转发 O(N²) 全量重扫、BPE 编码器每块重建、代理池模式每请求新建 http.Client）；安全面存在默认凭据 admin/admin 明文入日志、JWT 密钥被复用为数据加密密钥、明文密钥随 API 响应与备份导出外泄等问题。发布链上自更新无签名校验、changelog 工作流对 master 执行 force push，风险等级很高。
+但本次审计发现的问题同样显著：**审计快照 `d3c9984` 的 `go test ./...` 全量红灯（internal/op 8 个 + internal/sitesync 1 个失败），当时 CI 门禁处于失效状态**；代理热路径存在 4 个 Critical 级性能问题（每请求 10-20 次无缓存 DB 查询、流式转发 O(N²) 全量重扫、BPE 编码器每块重建、代理池模式每请求新建 http.Client）；安全面存在默认凭据 admin/admin 明文入日志、JWT 密钥被复用为数据加密密钥、明文密钥随 API 响应与备份导出外泄等问题。发布链上自更新无签名校验、changelog 工作流对 master 执行 force push，风险等级很高。
 
 总体上，这是一个"功能完成度远高于工程健康度"的项目：功能管线丰富且测试基数不小，但核心热路径、认证链路与发布链路的可靠性保障存在系统性缺口。**当前状态不建议发布稳定版**，应先修复测试红灯与 Critical 级问题。
 
@@ -94,7 +96,7 @@ Overall         ████░░░░░░  4.6  C
 
 ## 4. Detailed Findings
 
-### Finding: 当前分支 `go test ./...` 全量红灯，CI 门禁失效
+### Finding: 审计快照 `d3c9984` 的 `go test ./...` 全量红灯，CI 门禁失效
 
 - Severity: Critical
 - Confidence: High

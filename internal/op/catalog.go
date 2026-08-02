@@ -295,6 +295,9 @@ func CatalogSync(ctx context.Context) (model.CatalogSyncResult, error) {
 				groupByNormalized[NormalizeModelIdentity(created.Name)] = group
 				result.GroupsCreated++
 			}
+			if err := alignCanonicalNameToGroupTx(tx, canonical, group); err != nil {
+				return err
+			}
 
 			wiring := catalogWiring{
 				canonical:    canonical,
