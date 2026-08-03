@@ -22,6 +22,11 @@ function formatBalance(value: number): string {
     return `$${value.toFixed(2)}`;
 }
 
+function formatMultiplier(value: number): string {
+    if (!Number.isFinite(value)) return '-';
+    return `${Math.round(value * 100) / 100}x`;
+}
+
 export interface SelectedMember extends LLMChannel {
     id: string;
     item_id?: number;
@@ -128,7 +133,7 @@ function MemberItem({
                         <TooltipContent key={member.name}>{member.name}</TooltipContent>
                     </Tooltip>
                     <span className="text-[10px] text-muted-foreground truncate leading-tight">{sourceLabel}</span>
-                    {(member.is_reserve || member.balance != null || member.rate != null) && (
+                    {(member.is_reserve || member.balance != null || member.multiplier != null) && (
                         <span className="flex items-center gap-1 mt-0.5">
                             {member.is_reserve && (
                                 <span className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-300">
@@ -140,9 +145,9 @@ function MemberItem({
                                     {t('member.balanceLabel')} {formatBalance(member.balance)}
                                 </span>
                             )}
-                            {member.rate != null && (
+                            {member.multiplier != null && (
                                 <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-px text-[9px] font-medium text-sky-700 dark:text-sky-300">
-                                    {t('member.rateLabel')} ${member.rate.toFixed(2)}/M
+                                    {t('member.multiplierLabel')} {formatMultiplier(member.multiplier)}
                                 </span>
                             )}
                         </span>

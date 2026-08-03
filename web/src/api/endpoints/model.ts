@@ -36,7 +36,7 @@ export interface LLMChannel {
     endpoint_type?: string;
     is_reserve?: boolean;
     balance?: number | null;
-    rate?: number | null;
+    multiplier?: number | null;
 }
 
 /**

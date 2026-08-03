@@ -1167,7 +1167,7 @@ func TestCatalogPlanGroupSortsByReserveBalanceAndRate(t *testing.T) {
 			GroupKey: model.SiteDefaultGroupKey, ModelName: upstreamNames[index],
 			Source: model.PriceQuoteSourceSiteExact, Unit: model.PriceUnitPerMillionTokens,
 			Currency: "USD", Input: ratePerQuote[index] / 2, Output: ratePerQuote[index] / 2,
-			GroupMultiplier: 1, ExchangeRateToUSD: 1, ObservedAt: time.Now(),
+			ModelMultiplier: ratePerQuote[index], GroupMultiplier: 1, ExchangeRateToUSD: 1, ObservedAt: time.Now(),
 		}}
 		if err := SiteModelPriceQuotesUpsert(ctx, quotes); err != nil {
 			t.Fatalf("create quote %d failed: %v", index, err)

@@ -786,7 +786,11 @@ func channelBalanceByChannel(ctx context.Context, items []model.GroupItem) map[i
 
 // candidateRateByCandidate 返回 candidate_id -> 倍率（每百万 token USD，Input+Output 折算）。
 // 优先站点报价，回退全局价格；未知价格返回 +Inf（排序时排最后）。
-func candidateRateByCandidate(ctx context.Context, candidates []model.RouteCandidate) map[int]float64 {
+// candidateMultiplierByCandidate 计算每个候选渠道的倍率（1x/0.1x/0.08x 语义）：
+//   - 站点直接给出模型倍率时取 ModelMultiplier × GroupMultiplier；
+//   - 否则用站点价 ÷ 官方基准价推算相对倍率；
+//   - 均不可得时为 +Inf（排最后）。
+func candidateMultiplierByCandidate(ctx context.Context, candidates []model.RouteCandidate) map[int]float64 {
 	result := make(map[int]float64, len(candidates))
 	if len(candidates) == 0 {
 		return result
@@ -798,17 +802,26 @@ func candidateRateByCandidate(ctx context.Context, candidates []model.RouteCandi
 	now := time.Now()
 	for _, candidate := range candidates {
 		best := pickBestPriceQuote(quotes[candidate.ID], candidate, now)
-		globalRate := math.Inf(1)
+		globalInput, globalOutput := 0.0, 0.0
+		globalKnown := false
 		if candidate.ID > 0 {
 			if global, ok := globalprice.Get(strings.ToLower(strings.TrimSpace(candidate.UpstreamModelName))); ok {
-				globalRate = global.Input + global.Output
+				globalInput, globalOutput = global.Input, global.Output
+				globalKnown = true
 			}
 		}
 		switch {
 		case best != nil && best.Unit != model.PriceUnitPerRequest && best.PerRequest == 0:
-			result[candidate.ID] = (best.Input + best.Output) * best.ExchangeRateToUSD
+			switch {
+			case best.ModelMultiplier > 0 && best.GroupMultiplier > 0:
+				result[candidate.ID] = best.ModelMultiplier * best.GroupMultiplier
+			case globalKnown && globalInput+globalOutput > 0:
+				result[candidate.ID] = (best.Input+best.Output)*best.ExchangeRateToUSD / (globalInput + globalOutput)
+			default:
+				result[candidate.ID] = math.Inf(1)
+			}
 		default:
-			result[candidate.ID] = globalRate
+			result[candidate.ID] = math.Inf(1)
 		}
 	}
 	return result
@@ -963,11 +976,11 @@ func CatalogPlanGroup(
 		candidateWeight   int
 		tier              int
 		balance           float64
-		rate              float64
+		multiplier        float64
 	}
 	tierByChannel := siteReserveTierByChannel(ctx, group.Items)
 	balanceByChannel := channelBalanceByChannel(ctx, group.Items)
-	rateByCandidate := candidateRateByCandidate(ctx, candidates)
+	multiplierByCandidate := candidateMultiplierByCandidate(ctx, candidates)
 	included := make([]scoredItem, 0, len(group.Items))
 	for _, item := range group.Items {
 		decision := model.RouteDecisionReason{
@@ -1058,7 +1071,7 @@ func CatalogPlanGroup(
 			candidateWeight:   candidateWeight,
 			tier:              tierByChannel[item.ChannelID],
 			balance:           balanceByChannel[item.ChannelID],
-			rate:              rateByCandidate[candidate.ID],
+			multiplier:        multiplierByCandidate[candidate.ID],
 		})
 	}
 
@@ -1080,18 +1093,15 @@ func CatalogPlanGroup(
 		if left.tier != right.tier {
 			return left.tier < right.tier
 		}
-		// 同层内：非中转按账号余额降序（余额大优先），中转按倍率升序（倍率小优先）。
-		// 非中转余额相同 -> 倍率升序；中转倍率相同 -> 余额降序。
+		// 同层内：非中转只看账号余额（余额大优先，不参与倍率）；中转按倍率升序（倍率小优先），
+		// 倍率相同再按余额降序。
 		if left.tier == 0 {
 			if left.balance != right.balance {
 				return left.balance > right.balance
 			}
-			if left.rate != right.rate {
-				return left.rate < right.rate
-			}
 		} else {
-			if left.rate != right.rate {
-				return left.rate < right.rate
+			if left.multiplier != right.multiplier {
+				return left.multiplier < right.multiplier
 			}
 			if left.balance != right.balance {
 				return left.balance > right.balance

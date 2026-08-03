@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
-	"github.com/bestruirui/octopus/internal/globalprice"
 	"github.com/bestruirui/octopus/internal/model"
 	model2 "github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/cache"
@@ -518,7 +517,7 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 	accountCache := make(map[int]*model.SiteAccount)
 
 	balanceByAccount := accountBalanceMap(ctx, bindingMap)
-	candidateRateByKey := channelCandidateRateMap(ctx, channelIDs)
+	multiplierByKey := channelCandidateMultiplierMap(ctx, channelIDs)
 
 	models := []model.LLMChannel{}
 	for _, channel := range channelsByID {
@@ -594,13 +593,7 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 			if modelName == "" {
 				continue
 			}
-			rate := candidateRateByKey[routeCandidateKey(channel.ID, modelName)]
-			if rate == nil {
-				if global, ok := globalprice.Get(strings.ToLower(modelName)); ok {
-					value := global.Input + global.Output
-					rate = &value
-				}
-			}
+			multiplier := multiplierByKey[routeCandidateKey(channel.ID, modelName)]
 			models = append(models, model.LLMChannel{
 				Name:            modelName,
 				Enabled:         channel.Enabled,
@@ -615,7 +608,7 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 				EndpointType:    endpointType,
 				IsReserve:       channelIsReserve,
 				Balance:         balance,
-				Rate:            rate,
+				Multiplier:      multiplier,
 			})
 		}
 	}
@@ -657,8 +650,8 @@ func accountBalanceMap(ctx context.Context, bindingMap map[int]model.SiteChannel
 	return result
 }
 
-// channelCandidateRateMap 返回 (channel_id, upstream_model) -> 倍率（每百万 token USD）。
-func channelCandidateRateMap(ctx context.Context, channelIDs []int) map[string]*float64 {
+// channelCandidateMultiplierMap 返回 (channel_id, upstream_model) -> 倍率。
+func channelCandidateMultiplierMap(ctx context.Context, channelIDs []int) map[string]*float64 {
 	result := make(map[string]*float64)
 	if len(channelIDs) == 0 {
 		return result
@@ -669,12 +662,12 @@ func channelCandidateRateMap(ctx context.Context, channelIDs []int) map[string]*
 		Find(&candidates).Error; err != nil {
 		return result
 	}
-	rates := candidateRateByCandidate(ctx, candidates)
+	multipliers := candidateMultiplierByCandidate(ctx, candidates)
 	for _, candidate := range candidates {
-		if math.IsInf(rates[candidate.ID], 1) {
+		if math.IsInf(multipliers[candidate.ID], 1) {
 			continue
 		}
-		value := rates[candidate.ID]
+		value := multipliers[candidate.ID]
 		result[routeCandidateKey(candidate.ChannelID, candidate.UpstreamModelName)] = &value
 	}
 	return result

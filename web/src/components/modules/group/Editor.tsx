@@ -384,13 +384,12 @@ export function GroupEditor({
                 if (tierA !== tierB) return tierA - tierB;
                 const balanceA = a.balance ?? 0;
                 const balanceB = b.balance ?? 0;
-                const rateA = a.rate ?? Number.POSITIVE_INFINITY;
-                const rateB = b.rate ?? Number.POSITIVE_INFINITY;
+                const multiplierA = a.multiplier ?? Number.POSITIVE_INFINITY;
+                const multiplierB = b.multiplier ?? Number.POSITIVE_INFINITY;
                 if (tierA === 0) {
                     if (balanceA !== balanceB) return balanceB - balanceA;
-                    if (rateA !== rateB) return rateA - rateB;
                 } else {
-                    if (rateA !== rateB) return rateA - rateB;
+                    if (multiplierA !== multiplierB) return multiplierA - multiplierB;
                     if (balanceA !== balanceB) return balanceB - balanceA;
                 }
                 return 0;

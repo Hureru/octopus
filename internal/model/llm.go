@@ -26,7 +26,7 @@ type LLMChannel struct {
 	EndpointType    string   `json:"endpoint_type,omitempty"`
 	IsReserve       bool     `json:"is_reserve,omitempty"`
 	Balance         *float64 `json:"balance,omitempty"`
-	Rate            *float64 `json:"rate,omitempty"`
+	Multiplier      *float64 `json:"multiplier,omitempty"` // 倍率(1x/0.1x)，nil 表示未知
 }
 
 type GeminiModel struct {
