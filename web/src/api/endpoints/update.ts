@@ -10,6 +10,8 @@ export interface LatestInfo {
     published_at: string;
     body: string;
     message: string;
+    /** 当前运行在容器中时后端置 true，前端据此禁用自动更新入口 */
+    container?: boolean;
 }
 
 /**

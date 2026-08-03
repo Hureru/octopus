@@ -28,6 +28,8 @@ type LatestInfo struct {
 	PublishedAt string `json:"published_at"`
 	Body        string `json:"body"`
 	Message     string `json:"message"`
+	// Container 标记当前运行在容器中，前端据此禁用自动更新入口。
+	Container bool `json:"container"`
 }
 
 var github_pat = os.Getenv(strings.ToUpper(conf.APP_NAME) + "_GITHUB_PAT")
@@ -90,6 +92,7 @@ func GetLatestInfo() (*LatestInfo, error) {
 	if latestInfo.Message != "" {
 		return nil, fmt.Errorf("failed to get latest info: %s", latestInfo.Message)
 	}
+	latestInfo.Container = InContainer()
 	return &latestInfo, nil
 }
 

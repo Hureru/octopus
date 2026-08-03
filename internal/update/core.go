@@ -14,6 +14,11 @@ import (
 
 func UpdateCore() error {
 	log.Infof("start update core")
+	if InContainer() {
+		err := fmt.Errorf("auto update is disabled inside container")
+		log.Warnf("update core failed: %v", err)
+		return err
+	}
 
 	filename, err := getDownloadFilename()
 	if err != nil {
