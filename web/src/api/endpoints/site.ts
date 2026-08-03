@@ -211,6 +211,53 @@ export type MetAPIImportResult = {
   warnings: string[];
 };
 
+export type SiteBatchFailureGroup = {
+  site_id: number;
+  platform: string;
+  reason: string;
+  count: number;
+  failed: number;
+  skipped: number;
+  warnings: number;
+};
+
+export type SiteBatchSample = {
+  site_id: number;
+  platform: string;
+  account_id: number;
+  reason: string;
+  message: string;
+};
+
+export type SiteBatchSummary = {
+  phase: "sync" | "checkin";
+  trigger: string;
+  total: number;
+  attempted: number;
+  success: number;
+  partial: number;
+  failed: number;
+  skipped: number;
+  warnings: number;
+  canceled: boolean;
+  duration_ms: number;
+  finished_at: string;
+  failure_groups: SiteBatchFailureGroup[];
+  warning_groups: SiteBatchFailureGroup[];
+  samples?: SiteBatchSample[];
+};
+
+export function useSiteBatchSummary(phase: "sync" | "checkin") {
+  return useQuery({
+    queryKey: ["sites", "batch-summary", phase],
+    queryFn: async () =>
+      apiClient.get<SiteBatchSummary | null>(
+        `/api/v1/site/batch-summary?phase=${phase}`,
+      ),
+    refetchInterval: 30000,
+  });
+}
+
 export function useSiteList() {
   return useQuery({
     queryKey: ["sites", "list"],

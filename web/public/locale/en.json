@@ -618,7 +618,7 @@
       "confirmRemove": "Confirm removing {name}",
       "reserveBadge": "Relay",
       "balanceLabel": "Balance",
-      "rateLabel": "Rate"
+      "multiplierLabel": "Multiplier"
     },
     "detail": {
       "actions": {
@@ -1800,7 +1800,8 @@
         "success": "Succeeded",
         "failed": "Failed",
         "idle": "Not run",
-        "disabled": "Disabled"
+        "disabled": "Disabled",
+        "reserve": "Relay"
       },
       "overview": "Overview",
       "currentResult": "Current result",
@@ -1813,7 +1814,33 @@
       "clearFilters": "Clear filters",
       "openManualCheckin": "Open manual check-ins ({count})",
       "removeTagFilter": "Stop filtering by \"{tag}\"",
-      "addTagFilter": "Filter by \"{tag}\""
+      "addTagFilter": "Filter by \"{tag}\"",
+      "batchSummary": {
+        "title": "Latest Batch Failures",
+        "failedCount": "{count} failed",
+        "finishedAt": "Finished",
+        "noFailures": "No failures in the latest sync/checkin batches",
+        "phaseSync": "SYNC",
+        "phaseCheckin": "CHECKIN",
+        "siteId": "site #{id}",
+        "reasons": {
+          "unauthorized": "Unauthorized / token expired",
+          "login_failed": "Login failed",
+          "access_token_required": "Access token required",
+          "direct_token_required": "Direct token required",
+          "cloudflare_protection": "Cloudflare protection",
+          "missing_group_key": "Missing group key",
+          "upstream_http_error": "Upstream HTTP error",
+          "upstream_decode_failed": "Upstream decode failed",
+          "upstream_html_response": "Upstream returned HTML",
+          "timeout": "Timeout",
+          "unsupported_platform": "Unsupported platform",
+          "context_deadline_exceeded": "Deadline exceeded",
+          "database_error": "Database error",
+          "internal_error": "Internal error",
+          "unknown": "Unknown"
+        }
+      }
     }
   },
   "siteRecovery": {

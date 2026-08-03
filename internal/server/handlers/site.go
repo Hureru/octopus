@@ -40,6 +40,7 @@ func init() {
 		AddRoute(router.NewRoute("/checkin-all", http.MethodPost).Handle(checkinAllSiteAccounts)).
 		AddRoute(router.NewRoute("/last-sync-time", http.MethodGet).Handle(getSiteLastSyncTime)).
 		AddRoute(router.NewRoute("/last-checkin-time", http.MethodGet).Handle(getSiteLastCheckinTime)).
+		AddRoute(router.NewRoute("/batch-summary", http.MethodGet).Handle(getSiteBatchSummary)).
 		AddRoute(router.NewRoute("/:id/available-models", http.MethodGet).Handle(getSiteAvailableModels))
 
 	router.NewGroupRouter("/api/v1/site").
@@ -398,6 +399,20 @@ func getSiteLastSyncTime(c *gin.Context) {
 
 func getSiteLastCheckinTime(c *gin.Context) {
 	resp.Success(c, sitesvc.LastCheckinAllTime())
+}
+
+// getSiteBatchSummary 返回最近一次 sync/checkin 批次的失败原因分组与样例。
+func getSiteBatchSummary(c *gin.Context) {
+	phase := sitesync.SiteBatchPhase(c.Query("phase"))
+	if phase != sitesync.SiteBatchPhaseCheckin && phase != sitesync.SiteBatchPhaseSync {
+		phase = sitesync.SiteBatchPhaseSync
+	}
+	summary := sitesync.LatestBatchSummary(phase)
+	if summary == nil {
+		resp.Success(c, nil)
+		return
+	}
+	resp.Success(c, summary)
 }
 
 func detectSitePlatform(c *gin.Context) {

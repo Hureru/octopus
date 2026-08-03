@@ -67,6 +67,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
+import { BatchSummaryPanel } from "./BatchSummaryPanel";
 import { SiteEditDialog } from "./SiteEditDialog";
 import { BatchEditDialog } from "./BatchEditDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
@@ -1931,6 +1932,8 @@ export function Site() {
           activeTags={tagFilters}
           onTagFilterChange={handleTagFilterChange}
         />
+
+        <BatchSummaryPanel />
 
         {selectedSiteIds.length > 0 ? (
           <section className="sticky top-0 z-30 rounded-3xl border border-border/70 bg-card/95 p-4 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.45)] backdrop-blur supports-[backdrop-filter]:bg-card/90">

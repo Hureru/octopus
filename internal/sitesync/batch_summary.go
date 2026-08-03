@@ -213,6 +213,7 @@ func (s *SiteBatchSummary) addSample(siteID int, platform model.SitePlatform, ac
 
 func (s *SiteBatchSummary) emitLog() {
 	s.finish()
+	recordLatestSummary(s)
 	failureGroups := sortedSiteBatchGroups(s.failureGroups)
 	warningGroups := sortedSiteBatchGroups(s.warningGroups)
 	skipGroups := sortedSiteBatchGroups(s.skipGroups)

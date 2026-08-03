@@ -9,10 +9,14 @@ export type CheckinFilterStatus =
   | "success"
   | "failed"
   | "idle"
-  | "disabled";
+  | "disabled"
+  | "reserve";
 
 export type CheckinActiveFilterStatus = Exclude<CheckinFilterStatus, "all">;
-export type DerivedCheckinStatus = CheckinActiveFilterStatus;
+export type DerivedCheckinStatus = Exclude<
+  CheckinActiveFilterStatus,
+  "reserve"
+>;
 
 export type CheckinSummary = {
   total: number;
@@ -20,6 +24,7 @@ export type CheckinSummary = {
   failed: number;
   idle: number;
   disabled: number;
+  reserve: number;
 };
 
 function normalizeExecutionStatus(status?: string | null) {
@@ -33,6 +38,7 @@ export function createEmptyCheckinSummary(): CheckinSummary {
     failed: 0,
     idle: 0,
     disabled: 0,
+    reserve: 0,
   };
 }
 
@@ -107,7 +113,7 @@ export function deriveCheckinStatus(
 }
 
 export function accountMatchesCheckinFilters(
-  site: Pick<Site, "enabled" | "platform">,
+  site: Pick<Site, "enabled" | "platform" | "is_reserve">,
   account: Pick<
     SiteAccount,
     "enabled" | "auto_checkin" | "last_checkin_at" | "last_checkin_status"
@@ -119,8 +125,18 @@ export function accountMatchesCheckinFilters(
     return true;
   }
 
-  const status = deriveCheckinStatus(site, account, now);
-  return status ? filterStatuses.includes(status) : false;
+  const wantsReserve = filterStatuses.includes("reserve");
+  const statusFilters = filterStatuses.filter((f) => f !== "reserve");
+  if (statusFilters.length > 0) {
+    const status = deriveCheckinStatus(site, account, now);
+    if (!status || !statusFilters.includes(status)) {
+      return false;
+    }
+  }
+  if (wantsReserve && !site.is_reserve) {
+    return false;
+  }
+  return true;
 }
 
 export function buildCheckinSummary(
@@ -138,6 +154,9 @@ export function buildCheckinSummary(
 
       summary.total += 1;
       summary[status] += 1;
+      if (site.is_reserve) {
+        summary.reserve += 1;
+      }
     }
   }
 

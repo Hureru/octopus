@@ -618,7 +618,7 @@
       "confirmRemove": "确认移除 {name}",
       "reserveBadge": "中转",
       "balanceLabel": "余额",
-      "rateLabel": "倍率"
+      "multiplierLabel": "倍率"
     },
     "detail": {
       "actions": {
@@ -1800,7 +1800,8 @@
         "success": "成功",
         "failed": "失败",
         "idle": "未执行",
-        "disabled": "禁用"
+        "disabled": "禁用",
+        "reserve": "中转"
       },
       "overview": "总览",
       "currentResult": "当前结果",
@@ -1813,7 +1814,33 @@
       "clearFilters": "清空筛选",
       "openManualCheckin": "打开手动签到（{count}）",
       "removeTagFilter": "取消按“{tag}”筛选",
-      "addTagFilter": "按“{tag}”筛选"
+      "addTagFilter": "按“{tag}”筛选",
+      "batchSummary": {
+        "title": "最近批次失败明细",
+        "failedCount": "{count} 项失败",
+        "finishedAt": "完成于",
+        "noFailures": "最近一次同步/签到批次无失败",
+        "phaseSync": "同步",
+        "phaseCheckin": "签到",
+        "siteId": "站点 #{id}",
+        "reasons": {
+          "unauthorized": "凭据失效/未授权",
+          "login_failed": "登录失败",
+          "access_token_required": "缺少访问令牌",
+          "direct_token_required": "缺少直连令牌",
+          "cloudflare_protection": "触发 Cloudflare 风控",
+          "missing_group_key": "缺少 key 分组",
+          "upstream_http_error": "上游 HTTP 错误",
+          "upstream_decode_failed": "上游响应解析失败",
+          "upstream_html_response": "上游返回 HTML 页面",
+          "timeout": "超时",
+          "unsupported_platform": "不支持的平台",
+          "context_deadline_exceeded": "批次超时",
+          "database_error": "数据库错误",
+          "internal_error": "内部错误",
+          "unknown": "未知原因"
+        }
+      }
     }
   },
   "siteRecovery": {
