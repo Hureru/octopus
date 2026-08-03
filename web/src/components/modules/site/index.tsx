@@ -1492,14 +1492,19 @@ export function Site() {
                   </div>
                 ) : null}
 
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span>
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md hover:text-foreground"
+                    title={tProxy('mode.label')}
+                    onClick={() => openEditSiteDialog(site)}
+                  >
                     {site.proxy_mode === "pool"
                       ? tProxy('mode.pool')
                       : site.proxy_mode === "system"
                         ? tProxy('mode.system')
                         : tProxy('mode.direct')}
-                  </span>
+                  </button>
                   {site.custom_header.length > 0 ? (
                     <span>{site.custom_header.length} 个 Header</span>
                   ) : null}
