@@ -113,7 +113,9 @@ func classifySiteBatchMessage(msg string) SiteBatchReason {
 		return SiteBatchReasonCloudflareProtection
 	case strings.Contains(lowered, "签到功能未启用") ||
 		(strings.Contains(lowered, "checkin") && strings.Contains(lowered, "enabled")) ||
-		strings.Contains(lowered, "invalid url"):
+		strings.Contains(lowered, "invalid url") ||
+		strings.Contains(lowered, "签名") ||
+		strings.Contains(lowered, "完整性标记"):
 		return SiteBatchReasonUnsupportedCheckin
 	case strings.Contains(lowered, "unauthorized") || strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "invalid token") || strings.Contains(lowered, "未登录") || strings.Contains(lowered, "登录失败") || strings.Contains(lowered, "过期"):
 		return SiteBatchReasonUnauthorized
