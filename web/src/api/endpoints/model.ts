@@ -34,6 +34,9 @@ export interface LLMChannel {
     site_name?: string;
     site_account_name?: string;
     endpoint_type?: string;
+    is_reserve?: boolean;
+    balance?: number | null;
+    rate?: number | null;
 }
 
 /**

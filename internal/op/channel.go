@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
+	"github.com/bestruirui/octopus/internal/globalprice"
 	"github.com/bestruirui/octopus/internal/model"
 	model2 "github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/cache"
@@ -266,6 +269,18 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "ws_mode")
 		updates.WSMode = req.WSMode.Normalize()
 	}
+	if req.ProtocolPolicy != nil {
+		selectFields = append(selectFields, "protocol_policy")
+		updates.ProtocolPolicy = req.ProtocolPolicy.Normalize(model.ProtocolPolicyAuto)
+	}
+	if req.AllowLossy != nil {
+		selectFields = append(selectFields, "allow_lossy")
+		updates.AllowLossy = *req.AllowLossy
+	}
+	if req.IsReserve != nil {
+		selectFields = append(selectFields, "is_reserve")
+		updates.IsReserve = *req.IsReserve
+	}
 	if req.ParamOverride != nil {
 		selectFields = append(selectFields, "param_override")
 		updates.ParamOverride = req.ParamOverride
@@ -445,6 +460,20 @@ func channelDel(id int, ctx context.Context, bypassManagedCheck bool) error {
 		return fmt.Errorf("failed to delete channel stats: %w", err)
 	}
 
+	// Route candidates remain as audit/history records after their backing
+	// channel is deleted, but must never stay routable.
+	archivedAt := time.Now()
+	if err := tx.Model(&model.RouteCandidate{}).
+		Where("channel_id = ?", id).
+		Updates(map[string]any{
+			"status":            model.RouteCandidateArchived,
+			"unavailable_since": gorm.Expr("COALESCE(unavailable_since, ?)", archivedAt),
+			"archived_at":       archivedAt,
+		}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to archive route candidates: %w", err)
+	}
+
 	// 删除渠道
 	if err := tx.Delete(&model.Channel{}, id).Error; err != nil {
 		tx.Rollback()
@@ -487,6 +516,9 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 	}
 	siteCache := make(map[int]*model.Site)
 	accountCache := make(map[int]*model.SiteAccount)
+
+	balanceByAccount := accountBalanceMap(ctx, bindingMap)
+	candidateRateByKey := channelCandidateRateMap(ctx, channelIDs)
 
 	models := []model.LLMChannel{}
 	for _, channel := range channelsByID {
@@ -542,10 +574,32 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 				endpointType = "openai"
 			}
 		}
+		channelIsReserve := channel.IsReserve
+		if !channelIsReserve && binding != nil {
+			if site, ok := siteCache[binding.SiteID]; ok {
+				channelIsReserve = site.IsReserve
+			} else if site, getErr := SiteGet(binding.SiteID, ctx); getErr == nil {
+				siteCache[binding.SiteID] = site
+				channelIsReserve = site.IsReserve
+			}
+		}
+		var balance *float64
+		if binding != nil {
+			if value, ok := balanceByAccount[binding.SiteAccountID]; ok {
+				balance = &value
+			}
+		}
 		modelNames := xstrings.SplitTrimCompact(",", channel.Model, channel.CustomModel)
 		for _, modelName := range modelNames {
 			if modelName == "" {
 				continue
+			}
+			rate := candidateRateByKey[routeCandidateKey(channel.ID, modelName)]
+			if rate == nil {
+				if global, ok := globalprice.Get(strings.ToLower(modelName)); ok {
+					value := global.Input + global.Output
+					rate = &value
+				}
 			}
 			models = append(models, model.LLMChannel{
 				Name:            modelName,
@@ -559,10 +613,71 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 				SiteName:        siteName,
 				SiteAccountName: siteAccountName,
 				EndpointType:    endpointType,
+				IsReserve:       channelIsReserve,
+				Balance:         balance,
+				Rate:            rate,
 			})
 		}
 	}
 	return models, nil
+}
+
+// accountBalanceMap 返回 site_account_id -> 余额。
+func accountBalanceMap(ctx context.Context, bindingMap map[int]model.SiteChannelBinding) map[int]float64 {
+	result := make(map[int]float64, len(bindingMap))
+	accountIDs := make([]int, 0, len(bindingMap))
+	seen := make(map[int]struct{}, len(bindingMap))
+	for _, binding := range bindingMap {
+		if binding.SiteAccountID <= 0 {
+			continue
+		}
+		if _, ok := seen[binding.SiteAccountID]; ok {
+			continue
+		}
+		seen[binding.SiteAccountID] = struct{}{}
+		accountIDs = append(accountIDs, binding.SiteAccountID)
+	}
+	if len(accountIDs) == 0 {
+		return result
+	}
+	var rows []struct {
+		ID      int     `gorm:"column:id"`
+		Balance float64 `gorm:"column:balance"`
+	}
+	if err := db.GetDB().WithContext(ctx).
+		Table("site_accounts").
+		Select("id, balance").
+		Where("id IN ?", accountIDs).
+		Scan(&rows).Error; err != nil {
+		return result
+	}
+	for _, row := range rows {
+		result[row.ID] = row.Balance
+	}
+	return result
+}
+
+// channelCandidateRateMap 返回 (channel_id, upstream_model) -> 倍率（每百万 token USD）。
+func channelCandidateRateMap(ctx context.Context, channelIDs []int) map[string]*float64 {
+	result := make(map[string]*float64)
+	if len(channelIDs) == 0 {
+		return result
+	}
+	var candidates []model.RouteCandidate
+	if err := db.GetDB().WithContext(ctx).
+		Where("channel_id IN ?", channelIDs).
+		Find(&candidates).Error; err != nil {
+		return result
+	}
+	rates := candidateRateByCandidate(ctx, candidates)
+	for _, candidate := range candidates {
+		if math.IsInf(rates[candidate.ID], 1) {
+			continue
+		}
+		value := rates[candidate.ID]
+		result[routeCandidateKey(candidate.ChannelID, candidate.UpstreamModelName)] = &value
+	}
+	return result
 }
 
 func ChannelGet(id int, ctx context.Context) (*model.Channel, error) {

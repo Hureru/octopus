@@ -16,6 +16,12 @@ import type { LLMChannel } from '@/api/endpoints/model';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { useTranslations } from 'next-intl';
 
+function formatBalance(value: number): string {
+    if (!Number.isFinite(value)) return '-';
+    if (Math.abs(value) >= 1000) return `$${value.toFixed(0)}`;
+    return `$${value.toFixed(2)}`;
+}
+
 export interface SelectedMember extends LLMChannel {
     id: string;
     item_id?: number;
@@ -122,6 +128,25 @@ function MemberItem({
                         <TooltipContent key={member.name}>{member.name}</TooltipContent>
                     </Tooltip>
                     <span className="text-[10px] text-muted-foreground truncate leading-tight">{sourceLabel}</span>
+                    {(member.is_reserve || member.balance != null || member.rate != null) && (
+                        <span className="flex items-center gap-1 mt-0.5">
+                            {member.is_reserve && (
+                                <span className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-300">
+                                    {t('member.reserveBadge')}
+                                </span>
+                            )}
+                            {member.balance != null && (
+                                <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px text-[9px] font-medium text-emerald-700 dark:text-emerald-300">
+                                    {t('member.balanceLabel')} {formatBalance(member.balance)}
+                                </span>
+                            )}
+                            {member.rate != null && (
+                                <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-px text-[9px] font-medium text-sky-700 dark:text-sky-300">
+                                    {t('member.rateLabel')} ${member.rate.toFixed(2)}/M
+                                </span>
+                            )}
+                        </span>
+                    )}
                 </div>
 
                 {showWeight && (

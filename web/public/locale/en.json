@@ -1,1136 +1,1944 @@
 {
-    "login": {
-        "username": "Username",
-        "usernamePlaceholder": "Enter your username",
-        "password": "Password",
-        "passwordPlaceholder": "Enter your password",
-        "apikey": "API Key",
-        "apikeyPlaceholder": "Enter your API Key (sk-octopus-...)",
-        "mode": {
-            "user": "Account",
-            "apikey": "API Key"
-        },
-        "error": {
-            "generic": "Login failed, please check your credentials"
-        },
-        "button": {
-            "loading": "Logging in...",
-            "submit": "Login"
-        }
+  "login": {
+    "username": "Username",
+    "usernamePlaceholder": "Enter your username",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "apikey": "API Key",
+    "apikeyPlaceholder": "Enter your API Key (sk-octopus-...)",
+    "mode": {
+      "user": "Account",
+      "apikey": "API Key"
     },
-    "apiKeyDashboard": {
-        "error": "Failed to load data",
-        "logout": "Logout",
-        "requestStats": "Request Stats",
-        "totalStats": "Total Stats",
-        "inputStats": "Input Stats",
-        "outputStats": "Output Stats",
-        "requestCount": "Requests",
-        "timeConsumed": "Time Consumed",
-        "totalToken": "Tokens Used",
-        "totalCost": "Total Cost",
-        "inputTokens": "Input Tokens",
-        "inputCost": "Input Cost",
-        "outputTokens": "Output Tokens",
-        "outputCost": "Output Cost",
-        "successRequests": "Successful",
-        "failedRequests": "Failed",
-        "quota": "Remaining Quota",
-        "unlimited": "Unlimited",
-        "expireAt": "Expires",
-        "neverExpire": "Never",
-        "daysLeft": "days left",
-        "expired": "Expired",
-        "supportedModels": "Supported Models"
+    "error": {
+      "generic": "Login failed, please check your credentials"
     },
-    "navbar": {
-        "home": "Home",
-        "site": "Site",
-        "channel": "Channel",
-        "group": "Group",
-        "key": "Key",
-        "model": "Price",
-        "log": "Log",
-        "setting": "Setting"
+    "button": {
+      "loading": "Logging in...",
+      "submit": "Login"
+    }
+  },
+  "apiKeyDashboard": {
+    "error": "Failed to load data",
+    "logout": "Logout",
+    "requestStats": "Request Stats",
+    "totalStats": "Total Stats",
+    "inputStats": "Input Stats",
+    "outputStats": "Output Stats",
+    "requestCount": "Requests",
+    "timeConsumed": "Time Consumed",
+    "totalToken": "Tokens Used",
+    "totalCost": "Total Cost",
+    "inputTokens": "Input Tokens",
+    "inputCost": "Input Cost",
+    "outputTokens": "Output Tokens",
+    "outputCost": "Output Cost",
+    "successRequests": "Successful",
+    "failedRequests": "Failed",
+    "quota": "Remaining Quota",
+    "unlimited": "Unlimited",
+    "expireAt": "Expires",
+    "neverExpire": "Never",
+    "daysLeft": "days left",
+    "expired": "Expired",
+    "supportedModels": "Supported Models",
+    "copied": "{label} copied",
+    "toggleTheme": "Switch theme",
+    "toggleLanguage": "Switch language"
+  },
+  "navbar": {
+    "navigation": "Main navigation",
+    "home": "Home",
+    "site": "Site",
+    "channel": "Channel",
+    "group": "Group",
+    "key": "Key",
+    "model": "Models",
+    "log": "Log",
+    "setting": "Setting"
+  },
+  "toolbar": {
+    "search": {
+      "open": "Open search",
+      "input": "Search current view",
+      "close": "Clear and close search"
     },
-    "toolbar": {
-        "popover": {
-            "ariaLabel": "View options",
-            "layout": "Layout",
-            "sort": "Sort",
-            "grid": "Grid",
-            "list": "List",
-            "nameAsc": "Name Asc",
-            "nameDesc": "Name Desc",
-            "createdAsc": "Time Asc",
-            "createdDesc": "Time Desc",
-            "balanceDesc": "Balance High to Low",
-            "balanceAsc": "Balance Low to High",
-            "asc": "Asc",
-            "desc": "Desc",
-            "logRefresh": {
-                "refresh": "Refresh logs"
-            },
-            "logFilter": {
-                "title": "Log filters",
-                "clearAll": "Clear filters",
-                "date": {
-                    "title": "Time range",
-                    "startPlaceholder": "Start time",
-                    "endPlaceholder": "End time",
-                    "clear": "Clear time",
-                    "hint": "Selectable time is limited by the log retention period in Settings."
-                },
-                "search": {
-                    "title": "Search mode",
-                    "mode": {
-                        "prefix": "Prefix",
-                        "exact": "Exact",
-                        "contains": "Contains"
-                    },
-                    "includeContent": "Search request/response content",
-                    "slowHint": "Contains mode (especially over content) is slower; pair with a time range."
-                },
-                "channel": {
-                    "title": "Channel",
-                    "searchPlaceholder": "Search channels...",
-                    "manualGroup": "Manual channels",
-                    "siteFallback": "Site #{id}",
-                    "empty": "No channels found"
-                }
-            }
-        }
-    },
-    "common": {
-        "copy": {
-            "success": "Copied",
-            "failed": "Copy failed",
-            "noContent": "Nothing to copy"
-        }
-    },
-    "home": {
-        "activity": {
-            "requestCount": "Requests",
-            "waitTime": "Wait Time",
-            "totalToken": "Tokens Used",
-            "totalCost": "Total Cost",
-            "noData": "No Data"
+    "popover": {
+      "ariaLabel": "View options",
+      "layout": "Layout",
+      "sort": "Sort",
+      "grid": "Grid",
+      "list": "List",
+      "nameAsc": "Name Asc",
+      "nameDesc": "Name Desc",
+      "createdAsc": "Time Asc",
+      "createdDesc": "Time Desc",
+      "balanceDesc": "Balance High to Low",
+      "balanceAsc": "Balance Low to High",
+      "asc": "Asc",
+      "desc": "Desc",
+      "logRefresh": {
+        "refresh": "Refresh logs"
+      },
+      "logFilter": {
+        "title": "Log filters",
+        "clearAll": "Clear filters",
+        "date": {
+          "title": "Time range",
+          "startPlaceholder": "Start time",
+          "endPlaceholder": "End time",
+          "clear": "Clear time",
+          "hint": "Selectable time is limited by the log retention period in Settings."
         },
-        "summary": {
-            "periods": {
-                "today": "Today",
-                "last7Days": "7 days",
-                "last30Days": "30 days",
-                "allTime": "All time"
-            },
-            "headline": {
-                "today": "Today's cost",
-                "last7Days": "Last 7 days",
-                "last30Days": "Last 30 days",
-                "allTime": "Total cost"
-            },
-            "metrics": {
-                "requests": "Requests",
-                "tokens": "Tokens",
-                "waitTime": "Latency"
-            }
-        },
-        "rank": {
-            "title": "Ranking",
-            "sortByCost": "Cost",
-            "sortByCount": "Count",
-            "sortByTokens": "Tokens",
-            "noData": "No ranking data",
-            "successRate": "Success Rate"
-        },
-        "groupHealth": {
-            "title": "Group Health",
-            "total": "{count} groups",
-            "running": "{count} running",
-            "success": "{count} healthy",
-            "partial": "{count} partial",
-            "failed": "{count} failed",
-            "idle": "{count} unchecked",
-            "runAll": "Run All",
-            "runAllFull": "Full Probe All",
-            "viewDetails": "View details",
-            "detailTitle": "Group health details",
-            "detailDescription": "Inspect the latest health snapshot for each group and run standard or full probes from the home dashboard."
-        }
-    },
-    "setting": {
-        "appearance": "Appearance",
-        "theme": {
-            "label": "Theme",
-            "light": "Light",
-            "dark": "Dark",
-            "system": "System"
-        },
-        "language": {
-            "label": "Language",
-            "zh_hans": "Chinese (Simplified)",
-            "zh_hant": "Chinese (Traditional)",
-            "en": "English"
-        },
-        "proxyUrl": {
-            "label": "Proxy URL",
-            "placeholder": "Enter proxy URL"
-        },
-        "apiBaseUrl": {
-            "label": "API Base URL",
-            "placeholder": "https://octopus.example.com",
-            "description": "Base URL clients use to reach this service. When set, an export button appears in the API key list"
-        },
-        "statsSaveInterval": {
-            "label": "Stats Save Interval",
-            "placeholder": "Enter interval in minutes"
-        },
-        "corsAllowOrigins": {
-            "label": "CORS Allowed Origins",
-            "hint": "Empty = deny all, * = allow all",
-            "example": "Only allow specific domains: https://example.com,https://example2.com"
-        },
-        "responsesWS": {
-            "label": "OpenAI Responses WebSocket",
-            "description": "Opt-in upstream WebSocket for client WebSocket /v1/responses ingress. \"Enabled · Default off\" turns the capability on without using it by default (channels can opt in); Passthrough/Transform is the default mode unless overridden per channel.",
-            "mode": {
-                "disabled": "Disabled",
-                "defaultOff": "Enabled · Default off",
-                "passthrough": "Enabled · Passthrough",
-                "transform": "Enabled · Transform"
-            }
-        },
-        "sseHeartbeat": {
-            "label": "SSE Heartbeat Interval (seconds)",
-            "description": "Applies to both the in-stream heartbeat interval and the first heartbeat delay before the upstream stream is established; 0 disables. 30-60 seconds is recommended behind Cloudflare.",
-            "compatibility": "Some clients may mishandle SSE comments, so disable it if compatibility issues occur.",
-            "placeholder": "0 = disabled, recommend 30-60"
-        },
-        "groupHealth": {
-            "label": "Group Health Checks",
-            "description": "When enabled, show the home health summary, group-card health status, and allow manual health checks."
-        },
-        "circuitBreaker": {
-            "title": "Circuit Breaker",
-            "threshold": {
-                "label": "Failure Threshold (consecutive failures)",
-                "placeholder": "Enter threshold"
-            },
-            "cooldown": {
-                "label": "Base Cooldown (seconds)",
-                "placeholder": "Enter cooldown in seconds"
-            },
-            "maxCooldown": {
-                "label": "Max Cooldown (seconds)",
-                "placeholder": "Enter max cooldown in seconds"
-            },
-            "hint": "When a channel fails consecutively up to the threshold, circuit breaker trips. Cooldown grows exponentially up to the max cooldown"
-        },
-        "outlierRetirement": {
-            "title": "Passive Outlier Retirement",
-            "hint": "Temporarily disables site projected channels that keep failing on real requests (disabled, never deleted), then probes them periodically and re-enables them once they recover. Before disabling, sibling channels of the same site are cross-checked and a probe request confirms the failure to avoid false positives; at least one enabled channel is always kept per account. Applies only to site projected channels. Off by default.",
-            "enabled": {
-                "label": "Enable Passive Outlier Retirement"
-            },
-            "interval": {
-                "label": "Evaluation Interval (minutes)",
-                "description": "How often the background task runs one round of evaluation and recovery probing.",
-                "placeholder": "Enter interval in minutes"
-            },
-            "failRate": {
-                "label": "Failure Rate Threshold (%)",
-                "description": "A channel is considered abnormal only when the failure ratio within the window reaches this value.",
-                "placeholder": "Enter failure rate percent"
-            },
-            "minSamples": {
-                "label": "Minimum Samples",
-                "description": "Evaluation is skipped while the window holds fewer requests than this, avoiding misjudgment on sparse traffic.",
-                "placeholder": "Enter minimum samples"
-            },
-            "consecFails": {
-                "label": "Consecutive Failure Threshold",
-                "description": "After the failure rate is met, the most recent consecutive failures must also reach this count (or the window has no success at all).",
-                "placeholder": "Enter consecutive failures"
-            },
-            "windowMinutes": {
-                "label": "Rolling Window Duration (minutes)",
-                "description": "Only requests within this recent period are counted; older records expire automatically.",
-                "placeholder": "Enter window minutes"
-            },
-            "windowCapacity": {
-                "label": "Window Sample Capacity (≤20)",
-                "description": "Maximum number of request records kept per window; the oldest are dropped first.",
-                "placeholder": "Enter sample capacity"
-            },
-            "recoverStreak": {
-                "label": "Probe Successes to Recover",
-                "description": "A retired channel is re-enabled after this many consecutive successful probes.",
-                "placeholder": "Enter success count"
-            },
-            "reapMinutes": {
-                "label": "Idle Window Reap (minutes)",
-                "description": "Frees a channel's in-memory stats window after it has received no new requests for this long.",
-                "placeholder": "Enter reap minutes"
-            },
-            "cfRecoverMinutes": {
-                "label": "Cloudflare Recovery Cooldown (minutes)",
-                "description": "Channels retired due to Cloudflare protection wait this long before recovery probing starts, to reduce pointless probes.",
-                "placeholder": "Enter cooldown minutes"
-            }
-        },
-        "saved": "Saved",
-        "saveFailed": "Save failed",
-        "backup": {
-            "export": {
-                "title": "Export",
-                "includeStats": "Include Stats",
-                "button": "Export JSON",
-                "exporting": "Exporting...",
-                "success": "Export started",
-                "failed": "Export failed",
-                "withLogsButton": "Export Archive with Logs (ZIP)",
-                "withLogsWarning": "The archive with logs is a streamed ZIP export for archival only; it cannot be imported to restore data."
-            },
-            "import": {
-                "title": "Import (Incremental)",
-                "selected": "File selected",
-                "button": "Import JSON",
-                "importing": "Importing...",
-                "noFile": "Please select a JSON file first",
-                "invalidFileType": "Only JSON (.json) backup files are supported",
-                "success": "Import successful",
-                "failed": "Import failed",
-                "result": "Import result"
-            }
-        },
-        "apiKey": {
-            "title": "API Keys",
-            "empty": "No API keys",
-            "add": "Add Key",
-            "loadFailed": "Failed to load",
-            "export": {
-                "title": "Export to Client",
-                "cliTool": "CLI Tool",
-                "mainModel": "Main Model",
-                "name": "Name",
-                "namePlaceholder": "Enter a profile name",
-                "haikuModel": "Haiku Model",
-                "sonnetModel": "Sonnet Model",
-                "opusModel": "Opus Model",
-                "none": "Not set",
-                "apiType": "API Type",
-                "hint": "Requires the client app to be installed; the browser will ask to open it",
-                "import": "Import into {platform}"
-            },
-            "form": {
-                "name": "Name",
-                "maxCost": "Max Cost",
-                "maxCostPlaceholder": "Enter amount",
-                "unlimited": "Unlimited",
-                "maxRPM": "Max RPM (Requests/Min)",
-                "maxRPMPlaceholder": "Enter limit",
-                "expireAt": "Expire Date",
-                "selectDate": "Select date",
-                "neverExpire": "Never Expire",
-                "supportedModels": "Supported Models",
-                "noModels": "No models available",
-                "modelsHint": "Leave empty for unlimited",
-                "enabled": "Enabled",
-                "cancel": "Cancel",
-                "create": "Create",
-                "save": "Save",
-                "confirm": "Confirm"
-            },
-            "stats": {
-                "noData": "No statistics available",
-                "inputToken": "Input Token",
-                "outputToken": "Output Token",
-                "inputCost": "Input Cost",
-                "outputCost": "Output Cost",
-                "requestSuccess": "Request Success",
-                "requestFailed": "Request Failed"
-            },
-            "toast": {
-                "createSuccess": "API key created",
-                "createError": "Failed to create API key",
-                "updateSuccess": "API key updated",
-                "updateError": "Failed to update API key",
-                "deleteSuccess": "API key deleted",
-                "deleteError": "Failed to delete API key"
-            }
-        },
-        "account": {
-            "title": "Account Settings",
-            "save": "Save",
-            "saving": "Saving...",
-            "username": {
-                "label": "Change Username",
-                "placeholder": "Enter new username",
-                "empty": "Username cannot be empty",
-                "success": "Username changed successfully",
-                "failed": "Failed to change username"
-            },
-            "password": {
-                "label": "Change Password",
-                "oldPlaceholder": "Enter current password",
-                "newPlaceholder": "Enter new password",
-                "confirmPlaceholder": "Confirm new password",
-                "oldEmpty": "Please enter current password",
-                "newEmpty": "Please enter new password",
-                "mismatch": "Passwords do not match",
-                "tooShort": "Password must be at least 6 characters",
-                "change": "Change Password",
-                "success": "Password changed successfully",
-                "failed": "Failed to change password"
-            }
-        },
-        "info": {
-            "title": "Version Info",
-            "currentVersion": "Current Version",
-            "latestVersion": "Latest Version",
-            "buildTime": "Build Time",
-            "publishedAt": "Published At",
-            "github": "GitHub Repository",
-            "unknown": "Unknown",
-            "versionMismatch": "Version Mismatch",
-            "versionMismatchHint": "Frontend version ({frontend}) does not match backend version ({backend}). This may be a browser cache issue. Please force refresh the page.",
-            "forceRefresh": "Force Refresh",
-            "newVersionAvailable": "New version available",
-            "newVersionAvailableHint": "Please backup your data first, then update the system",
-            "updateNow": "Update Now",
-            "updating": "Updating...",
-            "updateSuccess": "Update successful, service will restart shortly",
-            "updateFailed": "Update failed"
-        },
-        "log": {
-            "title": "History Logs",
-            "enabled": {
-                "label": "Enable History Logs"
-            },
-            "keepPeriod": {
-                "label": "Log Retention (days)",
-                "placeholder": "Enter days"
-            },
-            "clear": {
-                "label": "Clear History Logs",
-                "button": "Clear",
-                "clearing": "Clearing..."
-            },
-            "clearSuccess": "Logs cleared",
-            "clearFailed": "Failed to clear logs"
-        },
-        "network": {
-            "title": "Network & Service"
-        },
-        "reliability": {
-            "title": "Reliability"
-        },
-        "syncTasks": {
-            "title": "Sync & Scheduled Tasks",
-            "intervalPlaceholder": "Interval (hours)",
-            "last": "Last",
-            "never": "Never",
-            "llmSync": {
-                "label": "Channel sync",
-                "button": "Sync Now",
-                "pending": "Syncing...",
-                "success": "Channel synced successfully",
-                "failed": "Failed to sync channel"
-            },
-            "llmPrice": {
-                "label": "Model price update",
-                "button": "Update Now",
-                "pending": "Updating...",
-                "success": "Price updated successfully",
-                "failed": "Failed to update price"
-            },
-            "siteSync": {
-                "label": "Site full sync",
-                "button": "Sync Now",
-                "pending": "Syncing...",
-                "success": "Background site sync triggered",
-                "failed": "Failed to trigger site sync"
-            },
-            "siteCheckin": {
-                "label": "Site check-in",
-                "button": "Check In",
-                "pending": "Checking in...",
-                "success": "Background site check-in triggered",
-                "failed": "Failed to trigger site check-in"
-            }
-        },
-        "data": {
-            "title": "Data Management"
-        },
-        "webdavBackup": {
-            "title": "WebDAV Backup",
-            "url": {
-                "label": "WebDAV URL",
-                "placeholder": "https://dav.example.com/dav"
-            },
-            "username": {
-                "label": "Username",
-                "placeholder": "Username"
-            },
-            "password": {
-                "label": "Password",
-                "placeholder": "Password"
-            },
-            "backupPath": {
-                "label": "Remote Path",
-                "placeholder": "/octopus-backups"
-            },
-            "interval": {
-                "label": "Auto Backup Interval (hours)",
-                "placeholder": "0 = disabled",
-                "description": "Set to 0 to disable auto backup"
-            },
-            "retentionCount": {
-                "label": "Retention Count",
-                "placeholder": "10"
-            },
-            "includeStats": "Include Statistics",
-            "testConnection": "Test Connection",
-            "testSuccess": "Connection successful",
-            "testFailed": "Connection failed",
-            "testing": "Testing...",
-            "triggerBackup": "Backup Now",
-            "triggerSuccess": "Backup successful",
-            "triggerFailed": "Backup failed",
-            "triggering": "Backing up...",
-            "backupList": "Remote Backups",
-            "loading": "Loading...",
-            "loadError": "Failed to load backups",
-            "noBackups": "No backup files found",
-            "restore": "Restore",
-            "restoring": "Restoring...",
-            "restoreSuccess": "Restore successful",
-            "restoreFailed": "Restore failed",
-            "restoreConfirm": "Restore from this backup? Existing data will be incrementally overwritten.",
-            "fileName": "File Name",
-            "fileSize": "Size",
-            "modifiedAt": "Modified",
-            "refresh": "Refresh",
-            "notConfigured": "WebDAV not configured"
-        }
-    },
-    "group": {
-        "toast": {
-            "created": "Created successfully",
-            "createFailed": "Create failed",
-            "updated": "Updated successfully",
-            "updateFailed": "Update failed",
-            "deleted": "Deleted successfully",
-            "deleteFailed": "Delete failed",
-            "autoAddFailed": "Auto add failed",
-            "pinned": "Pinned",
-            "unpinned": "Unpinned",
-            "pinFailed": "Pin toggle failed"
-        },
-        "pin": {
-            "pin": "Pin to top",
-            "unpin": "Unpin"
-        },
-        "preset": {
-            "title": "Presets",
-            "saveCurrent": "Save current",
-            "createBlank": "Create blank",
-            "autoNamePrefix": "New preset",
-            "cloneSuffix": "copy",
-            "namePlaceholder": "Preset name",
-            "name": "Preset Name",
-            "close": "Close",
-            "loading": "Loading...",
-            "empty": "No presets yet",
-            "activeBadge": "Active",
-            "edit": "Edit",
-            "clone": "Clone",
-            "delete": "Delete",
-            "confirmDelete": "Delete preset {name}?",
-            "confirm": "Confirm",
-            "editorTitle": "Edit Preset",
-            "save": "Save",
-            "saving": "Saving...",
-            "toast": {
-                "created": "Preset saved",
-                "createFailed": "Preset save failed",
-                "createBlankFailed": "Blank preset creation failed",
-                "cloned": "Preset cloned",
-                "cloneFailed": "Clone failed",
-                "activated": "Preset activated",
-                "activateFailed": "Activate failed",
-                "deleted": "Preset deleted",
-                "deleteFailed": "Delete failed",
-                "updated": "Preset updated",
-                "updateFailed": "Preset update failed"
-            }
-        },
-        "create": {
-            "title": "Create Group",
-            "submit": "Create",
-            "submitting": "Creating..."
-        },
-        "card": {
-            "empty": "No rules"
-        },
-        "detail": {
-            "actions": {
-                "edit": "Edit",
-                "cancel": "Cancel",
-                "save": "Save",
-                "copyName": "Copy Name",
-                "delete": "Delete",
-                "confirmDelete": "Confirm Delete"
-            }
-        },
-        "form": {
-            "name": "Group Name",
-            "matchRegex": "Match Regex",
-            "matchRegexPlaceholder": "Leave empty to use default fuzzy match by group name",
-            "matchRegexInvalid": "Invalid regex",
-            "firstTokenTimeOut": "First Token Timeout",
-            "firstTokenTimeOutHint": "Unit: seconds, only effective for streaming response, 0 = no limit",
-            "sessionKeepTime": "Session Keep Time",
-            "sessionKeepTimeHint": "Unit: seconds, keeps using the same channel within a session, 0 = disabled",
-            "retryEnabled": "Same-Channel Retry",
-            "retryEnabledHint": "When enabled, retries on the same channel for 429/5xx errors before passing through the status code to the client",
-            "maxRetries": "Max Retries",
-            "maxRetriesHint": "Same-channel retry count, only effective when same-channel retry is enabled",
-            "items": "Selected Models",
-            "addItem": "Add Model",
-            "autoAdd": "Auto Add",
-            "clear": "Clear",
-            "selectChannel": "Channel",
-            "selectModel": "Model"
-        },
-        "mode": {
-            "roundRobin": "Round Robin",
-            "random": "Random",
-            "failover": "Failover",
-            "weighted": "Weighted"
-        },
-        "health": {
-            "title": "Health",
-            "detailTitle": "Group Health Details",
-            "run": "Run",
-            "runFull": "Full Probe",
-            "lastRun": "Last run {time}",
-            "never": "Never checked",
-            "status": "Status",
-            "healthy": "Healthy",
-            "healthyCount": "{success}/{total} healthy",
-            "duration": "Duration",
-            "attempts": "Attempts",
-            "attemptListToggle": "Attempts ({count})",
-            "attemptStatus": {
-                "success": "Success",
-                "failed": "Failed",
-                "skipped": "Skipped"
-            },
-            "statusValue": {
-                "idle": "Idle",
-                "running": "Running",
-                "success": "Healthy",
-                "partial": "Partial",
-                "failed": "Failed"
-            },
-            "probeMode": {
-                "standard": "Standard",
-                "full": "Full"
-            },
-            "empty": "No health snapshot yet.",
-            "errorDetails": "Error details",
-            "noHttpStatus": "No HTTP status"
-        },
-        "empty": "No groups yet, click the button above to create one",
-        "autoGroup": {
-            "title": "Auto Group Configuration",
-            "description": "Add channels or site groups to the list, and the system will automatically add models to matching model groups by group name or regex.",
-            "loadFailed": "Failed to load auto group configuration: {message}",
-            "searchPlaceholder": "Search...",
-            "runAll": "Run all enabled now",
-            "loading": "Loading...",
-            "emptyChannels": "No channels",
-            "matchMode": "Match mode",
-            "notice": "Turning a channel off or disabling the global setting will not delete existing model group members. Remove them manually in each model group if needed.",
-            "global": {
-                "title": "Global default mode",
-                "description": "When enabled, all site-projected channels use the selected match mode. Per-channel settings below are kept and take effect after the global mode is disabled."
-            },
-            "sections": {
-                "channels": "Channels"
-            },
-            "source": {
-                "siteGroup": "Site group",
-                "disabled": "Disabled",
-                "modelCount": "{count} models",
-                "moreModels": "+{count}",
-                "noModels": "No models",
-                "unknownSite": "Unknown site",
-                "manualGroup": "Manual channels",
-                "followingGlobalTip": "Global is on; this channel is currently grouped by the global mode. The per-channel mode below takes effect after the global mode is disabled."
-            },
-            "bulk": {
-                "selected": "{count} selected",
-                "apply": "Apply",
-                "clear": "Clear",
-                "placeholder": "Set selected to..."
-            },
-            "mode": {
-                "none": "Off",
-                "fuzzy": "Fuzzy",
-                "exact": "Exact",
-                "regex": "Regex"
-            },
-            "buttons": {
-                "cancel": "Cancel",
-                "save": "Save",
-                "saving": "Saving...",
-                "saveAndRun": "Save and run now",
-                "running": "Running..."
-            },
-            "toast": {
-                "saved": "Auto group configuration saved",
-                "savedAndRun": "Auto group configuration saved and run",
-                "saveFailed": "Failed to save auto group configuration",
-                "runSuccess": "Auto grouping has run",
-                "runFailed": "Failed to run auto grouping"
-            }
-        }
-    },
-    "model": {
-        "create": {
-            "title": "Create Model",
-            "name": "Model Name",
-            "input": "Input Price",
-            "output": "Output Price",
-            "cacheRead": "Cache Read",
-            "cacheWrite": "Cache Write",
-            "submit": "Create",
-            "submitting": "Creating..."
-        },
-        "toast": {
-            "updated": "Model price updated",
-            "updateFailed": "Update failed",
-            "deleted": "Model deleted",
-            "deleteFailed": "Delete failed"
-        },
-        "card": {
-            "inputCache": "Input/Cache",
-            "outputCache": "Output/Cache",
-            "edit": "Edit",
-            "delete": "Delete"
-        },
-        "overlay": {
-            "cancel": "Cancel",
-            "deleting": "Deleting...",
-            "confirmDelete": "Confirm Delete",
-            "input": "Input",
-            "output": "Output",
-            "cacheRead": "Cache Read",
-            "cacheWrite": "Cache Write",
-            "save": "Save"
-        }
-    },
-    "log": {
-        "list": {
-            "noMore": "No more logs"
-        },
-        "card": {
-            "error": "Error",
-            "errorInfo": "Error Info",
-            "firstToken": "TTFT",
-            "totalTime": "Total",
-            "duration": "Latency",
-            "input": "Input",
-            "output": "Output",
-            "cost": "Cost",
-            "requestContent": "Request Content",
-            "responseContent": "Response Content",
-            "noRequestContent": "(No request content)",
-            "noResponseContent": "(No response content)",
-            "firstTokenTime": "First Token Time",
-            "tokens": "tokens",
-            "retryDetails": "Retry Details",
-            "attempts": "attempts",
-            "success": "Success",
-            "failed": "Failed",
-            "skipped": "Skipped",
-            "circuitBreak": "Circuit Break",
-            "disableModel": "Disable Model",
-            "disabling": "Disabling",
-            "disabled": "Disabled",
-            "ws": "WS",
-            "wsContinuation": "Continue",
-            "wsReplay": "Replay",
-            "wsPassthrough": "Passthrough",
-            "wsTransform": "Transform",
-            "wsReconnect": "Reconnect",
-            "wsReplayRecovery": "Replay Recovery",
-            "wsDowngrade": "Downgrade",
-            "wsFreshHint": "This request used a fresh upstream WebSocket session.",
-            "wsContinuationHint": "This request continued the upstream WebSocket session directly.",
-            "wsReplayHint": "This request used upstream WebSocket, but replayed history to recover the context.",
-            "wsPassthroughHint": "Upstream WebSocket events were forwarded directly without the internal transformer pipeline.",
-            "wsTransformHint": "Upstream WebSocket events were processed through the internal transformer pipeline.",
-            "wsReconnectHint": "The upstream WebSocket continuation broke, and this request recovered after reconnecting the same route.",
-            "wsReplayRecoveryHint": "This request first failed to continue, then automatically replayed the transcript to recover the context and establish a new continuation anchor.",
-            "wsDowngradeHint": "This request first tried upstream WebSocket, but automatically downgraded to HTTP when WebSocket was unavailable.",
-            "inputDetails": "Input Details",
-            "transportInput": "Transport Input",
-            "billInput": "Billed Input",
-            "cacheRead": "Cache Read",
-            "cacheWrite": "Cache Write"
-        },
-        "filters": {
-            "keywordPlaceholder": "Search model, API key or content",
-            "channel": "Channel",
-            "allChannels": "All channels",
-            "status": "Status",
-            "allStatus": "All status",
-            "success": "Success",
-            "error": "Error",
-            "reset": "Reset",
-            "refresh": "Refresh"
-        },
-        "pagination": {
-            "prev": "Prev",
-            "next": "Next",
-            "page": "Page {page}",
-            "pagesRange": "Pages {from}–{to}"
-        }
-    },
-    "channel": {
-        "tabs": {
-            "site": "Site Channels",
-            "manual": "Manual Channels"
-        },
-        "card": {
-            "requestCount": "Requests",
-            "totalCost": "Total Cost",
-            "toast": {
-                "enabled": "Channel enabled",
-                "disabled": "Channel disabled"
-            }
-        },
-        "detail": {
-            "title": {
-                "edit": "Edit Channel",
-                "view": "Channel Details"
-            },
-            "sections": {
-                "requests": "Request Details",
-                "tokens": "Token Usage",
-                "costs": "Cost Details",
-                "baseUrls": "Base URLs",
-                "keys": "Keys"
-            },
-            "noBaseUrls": "No Base URLs",
-            "noKeys": "No Keys",
-            "metrics": {
-                "totalRequests": "Total Requests",
-                "totalToken": "Total Tokens",
-                "totalCost": "Total Cost",
-                "successRequests": "Successful Requests",
-                "failedRequests": "Failed Requests",
-                "inputToken": "Input Tokens",
-                "outputToken": "Output Tokens",
-                "inputCost": "Input Cost",
-                "outputCost": "Output Cost",
-                "avgWaitTime": "Wait Time"
-            },
-            "actions": {
-                "edit": "Edit",
-                "cancel": "Cancel",
-                "save": "Save",
-                "saving": "Saving...",
-                "delete": "Delete",
-                "confirmDelete": "Confirm Delete",
-                "deleting": "Deleting..."
-            }
-        },
-        "create": {
-            "dialogTitle": "Create New Channel",
-            "submit": "Create Channel",
-            "submitting": "Creating..."
-        },
-        "form": {
-            "add": "Add",
-            "name": "Channel Name",
-            "type": "Channel Type",
-            "baseUrls": "Base URLs",
-            "baseUrlUrl": "URL",
-            "baseUrlDelay": "Delay(ms)",
-            "advanced": "Advanced Settings",
-            "apiKey": "API Key",
-            "customHeader": "Custom Headers",
-            "customHeaderKey": "Header Key",
-            "customHeaderValue": "Header Value",
-            "customHeaderAdd": "Add Header",
-            "channelProxy": "Channel Proxy",
-            "channelProxyPlaceholder": "Optional: proxy for this channel (overrides global proxy)",
-            "paramOverride": "Param Override",
-            "paramOverridePlaceholder": "Optional: JSON string to override request params",
-            "model": "Model",
-            "enabled": "Enabled",
-            "proxy": "Use Proxy",
-            "modelCustomPlaceholder": "Custom model name",
-            "modelAdd": "Add",
-            "modelRefresh": "Refresh",
-            "modelRefreshSuccess": "Models fetched successfully",
-            "modelRefreshFailed": "Failed to fetch models",
-            "modelRefreshEmpty": "No models found",
-            "modelSelected": "Selected Models",
-            "modelNoSelected": "No models selected",
-            "modelClearAll": "Clear All",
-            "typeOpenAIChat": "OpenAI Chat",
-            "typeOpenAIResponse": "OpenAI Response",
-            "typeOpenAIEmbedding": "OpenAI Embedding",
-            "typeAnthropic": "Anthropic",
-            "typeGemini": "Gemini",
-            "typeVolcengine": "Volcengine",
-            "autoSync": "Auto Sync",
-            "autoGroup": "Auto Group",
-            "autoGroupNone": "None",
-            "autoGroupFuzzy": "Fuzzy",
-            "autoGroupExact": "Exact",
-            "autoGroupRegex": "Regex",
-            "wsMode": "Responses WS Mode",
-            "wsModeInherit": "Inherit global",
-            "wsModePassthrough": "Passthrough",
-            "wsModeTransform": "Transform",
-            "wsModeOff": "Off",
-            "matchRegex": "Match Regex",
-            "matchRegexPlaceholder": "Optional: regex pattern to match request model names",
-            "remark": "Remark"
-        }
-    },
-    "siteChannel": {
-        "card": {
-            "statusEnabled": "Enabled",
-            "statusDisabled": "Disabled",
-            "maskedPending": "{n} pending",
-            "noRouteDistribution": "No model distribution",
-            "metrics": {
-                "totalRequests": "Requests",
-                "successRequests": "Success",
-                "failedRequests": "Failed",
-                "totalCost": "Cost",
-                "lastRequestAt": "Last used"
-            }
-        },
-        "advanced": {
-            "title": "Site Channel Advanced Settings",
-            "description": "Configure parameter overrides for projected channels under group {group}. Configure auto grouping from the top-right of the Model Groups page. Configure custom headers in Site Settings.",
-            "channelList": "Projected channels",
-            "empty": "No projected channels in this group",
-            "paramOverride": "Parameter override JSON",
-            "paramOverridePlaceholder": "Leave empty to clear. Non-empty value must be a JSON object, e.g. {\"temperature\":0.7,\"max_tokens\":4096}",
-            "cancel": "Cancel",
-            "save": "Save",
-            "saving": "Saving...",
-            "saved": "Advanced settings saved",
-            "invalidParamOverride": "Parameter override must be a valid JSON object",
-            "saveFailed": "Failed to save advanced settings"
-        }
-    },
-    "siteImport": {
-        "errors": {
-            "invalidJson": "The import content is not valid JSON. Check the file format or pasted content.",
-            "emptyPayload": "The import content is empty. Select a JSON file or paste exported content.",
-            "unrecognizedAllAPIHub": "No All API Hub export data was recognized. Make sure you selected the correct exported JSON.",
-            "unrecognizedMetapi": "No Metapi account export data was recognized. Make sure you selected the correct exported JSON.",
-            "noImportableAllAPIHub": "No importable All API Hub site account data was found.",
-            "noImportableMetapi": "No importable Metapi site account data was found."
-        }
-    },
-    "siteSync": {
-        "errors": {
-            "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."
-        }
-    },
-    "errors": {
-        "common": {
-            "invalid_json": "The request body is not valid JSON.",
-            "invalid_param": "The request parameters are invalid.",
-            "validation_failed": "Input validation failed. Check your input and try again.",
-            "bad_request": "The request is invalid.",
-            "not_found": "The requested resource was not found.",
-            "duplicate_resource": "The resource already exists.",
-            "database_error": "Database operation failed. Try again later.",
-            "internal_error": "Internal server error. Try again later."
-        },
-        "auth": {
-            "unauthorized": "Please sign in before continuing.",
-            "forbidden": "You do not have permission to perform this action.",
-            "invalid_token": "Your session is invalid. Please sign in again.",
-            "expired_token": "Your session has expired. Please sign in again.",
-            "invalid_credentials": "The username or password is incorrect.",
-            "api_key_expired": "The API key has expired.",
-            "api_key_missing": "The API key is missing.",
-            "password_incorrect": "The old password is incorrect.",
-            "api_key_disabled": "The API key is disabled.",
-            "api_key_cost_exceeded": "The API key has reached the maximum cost limit.",
-            "api_key_rate_limited": "The API key has exceeded the rate limit. Please wait and try again."
-        },
-        "site_channel": {
-            "account_not_found": "The site account was not found.",
-            "site_not_found": "The site was not found.",
-            "model_not_found": "The site model was not found.",
-            "route_update_failed": "Failed to update model routes. Try again later.",
-            "model_disable_failed": "Failed to update model disabled state. Try again later.",
-            "key_create_failed": "Failed to create the site key. Check the site status or try again later.",
-            "source_key_update_failed": "Failed to update source keys. Check your input and try again.",
-            "project_failed": "Failed to sync site channel projection. Try again later."
+        "search": {
+          "title": "Search mode",
+          "mode": {
+            "prefix": "Prefix",
+            "exact": "Exact",
+            "contains": "Contains"
+          },
+          "includeContent": "Search request/response content",
+          "slowHint": "Contains mode (especially over content) is slower; pair with a time range."
         },
         "channel": {
-            "not_found": "The channel was not found.",
-            "create_failed": "Failed to create the channel.",
-            "update_failed": "Failed to update the channel.",
-            "delete_failed": "Failed to delete the channel.",
-            "fetch_models_failed": "Failed to fetch channel models."
-        },
-        "group": {
-            "not_found": "The group was not found.",
-            "create_failed": "Failed to create the group.",
-            "update_failed": "Failed to update the group.",
-            "delete_failed": "Failed to delete the group."
-        },
-        "model": {
-            "price_update_failed": "Failed to update model prices.",
-            "price_delete_failed": "Failed to delete model prices.",
-            "create_failed": "Failed to create the model.",
-            "update_failed": "Failed to update the model.",
-            "delete_failed": "Failed to delete the model."
-        },
-        "relay": {
-            "model_not_supported": "This API key does not support the requested model.",
-            "model_not_found": "The model was not found or has no configured group.",
-            "no_available_channel": "No available channel.",
-            "channel_disabled": "The channel is disabled.",
-            "no_available_key": "No available key.",
-            "upstream_failed": "The upstream request failed.",
-            "timeout": "The request timed out.",
-            "circuit_breaker_tripped": "The channel circuit breaker is tripped. Try again later."
-        },
-        "site": {
-            "sync": {
-                "missing_group_key": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again.",
-                "group_models_unresolved": "Could not resolve models for group \"{groupKey}\". Check the group model configuration or key permissions.",
-                "no_group_result": "Site account sync failed: no group sync result is available.",
-                "all_groups_unresolved": "Site account sync failed: all groups could not confirm models. Historical models were kept.",
-                "unsupported_platform": "Unsupported site platform: {platform}.",
-                "snapshot_nil": "The sync result is empty. Try again later."
-            },
-            "auth": {
-                "access_token_required": "The site access token is required.",
-                "direct_token_required": "The site direct token is required.",
-                "login_failed": "Site login failed. Check the account, password, or site status.",
-                "login_token_missing": "Site login succeeded but no access token was returned. Check site compatibility."
-            },
-            "upstream": {
-                "http_error": "The upstream site request failed (HTTP {statusCode}). Check the site status or try again later.",
-                "decode_failed": "Failed to parse the site response. Check site compatibility or try again later.",
-                "cloudflare_challenge": "The site triggered Cloudflare protection. Try again later or manually complete verification on the site."
-            },
-            "import": {
-                "invalid_json": "The import content is not valid JSON. Check the file format or pasted content.",
-                "empty_payload": "The import content is empty. Select a JSON file or paste exported content.",
-                "unrecognized_all_api_hub": "No All API Hub export data was recognized. Make sure you selected the correct exported JSON.",
-                "unrecognized_metapi": "No Metapi account export data was recognized. Make sure you selected the correct exported JSON.",
-                "no_importable_all_api_hub": "No importable All API Hub site account data was found.",
-                "no_importable_metapi": "No importable Metapi site account data was found.",
-                "unsupported_payload": "This import content is not supported. Make sure the export format is correct.",
-                "persist_failed": "Failed to save imported data. Try again later."
-            },
-            "sub2api": {
-                "api_key_required": "Sub2API sync requires an API key. Create a key on the site and sync again.",
-                "model_api_key_required": "Sub2API model discovery requires an API key. Create a key on the site and sync again.",
-                "envelope_failed": "Sub2API returned an error. Check the access token, permissions, or site status.",
-                "missing_data": "Sub2API response is missing required data. Check site compatibility or try again later."
-            }
+          "title": "Channel",
+          "searchPlaceholder": "Search channels...",
+          "manualGroup": "Manual channels",
+          "siteFallback": "Site #{id}",
+          "empty": "No channels found"
         }
-    },
-    "proxyPool": {
-        "name": "Proxy Pool",
-        "manage": "Open proxy pool manager",
-        "empty": "Proxy pool is empty",
-        "noEnabled": "No enabled proxy configurations",
-        "selectConfig": "Select proxy configuration",
-        "selectRequired": "Please select a proxy pool configuration",
-        "disabledSelected": "The selected proxy configuration is disabled and will fail at runtime. Choose an enabled proxy before saving.",
-        "disabledSuffix": " (disabled)",
-        "createFailed": "Proxy configuration create failed:",
-        "updateFailed": "Proxy configuration update failed:",
-        "deleteFailed": "Proxy configuration delete failed:",
-        "testFailed": "Proxy configuration test failed:",
-        "mode": {
-            "label": "Proxy mode",
-            "inherit": "Inherit site settings",
-            "direct": "Direct",
-            "system": "System proxy",
-            "pool": "Proxy pool"
-        },
-        "dialog": {
-            "title": "Proxy Pool",
-            "description": "Manage reusable proxy configurations. Sites, site accounts, and manual channels can select proxies here.",
-            "searchPlaceholder": "Search name, URL, or remark",
-            "loading": "Loading...",
-            "loadFailed": "Failed to load: {message}",
-            "empty": "No proxy configurations",
-            "enabled": "Enabled",
-            "disabled": "Disabled",
-            "references": "Refs {count}",
-            "referencesTitle": "View references",
-            "referencesDescription": "{name} is currently used by these places. Click the jump icon to locate the reference.",
-            "referencesEmpty": "No references",
-            "jumpToReference": "Jump to reference",
-            "managedChannelTitle": "Projected channel: {channel}",
-            "expandReference": "Expand projected channels",
-            "collapseReference": "Collapse projected channels",
-            "derivedReferences": "Projected {count}",
-            "referenceTypes": {
-                "site": "Site",
-                "siteAccount": "Account",
-                "managedChannel": "Managed channel",
-                "channel": "Channel",
-                "reference": "Reference"
-            },
-            "referenceLocations": {
-                "site": "Site",
-                "archivedSite": "Archived site",
-                "siteNamed": "Site: {name}",
-                "siteAccount": "Site account",
-                "managedChannel": "Site projected channel (inherits site/account proxy; not counted)",
-                "managedChannelUnderSite": "Projected from site {site} / account proxy; not counted separately",
-                "channel": "Manual channel"
-            },
-            "test": "Test",
-            "edit": "Edit",
-            "delete": "Delete",
-            "deleteBlocked": "Still referenced, cannot delete",
-            "formTitleCreate": "New proxy configuration",
-            "formTitleEdit": "Edit proxy configuration",
-            "formDescription": "URL supports http, https, socks, and socks5.",
-            "new": "New",
-            "name": "Name",
-            "url": "Proxy URL",
-            "remark": "Remark",
-            "testUrl": "Test target URL",
-            "testDraft": "Test current form proxy",
-            "submitCreate": "Create proxy configuration",
-            "submitEdit": "Save changes",
-            "created": "Proxy configuration created",
-            "updated": "Proxy configuration updated",
-            "deleted": "Proxy configuration deleted",
-            "deleteReferenced": "This proxy configuration is still referenced. Remove references first.",
-            "formRequired": "Please enter proxy name and URL",
-            "testSuccess": "Proxy reachable: HTTP {statusCode} · {durationMs}ms",
-            "testFailed": "Proxy test failed",
-            "operationFailed": "Operation failed"
-        },
-        "site": {
-            "inherit": "Inherit site proxy"
-        }
+      }
     }
+  },
+  "common": {
+    "close": "Close",
+    "loading": "Loading...",
+    "routeNotFound": "Route not found: {route}",
+    "copy": {
+      "action": "Copy",
+      "success": "Copied",
+      "failed": "Copy failed",
+      "noContent": "Nothing to copy"
+    }
+  },
+  "home": {
+    "activity": {
+      "requestCount": "Requests",
+      "waitTime": "Wait Time",
+      "totalToken": "Tokens Used",
+      "totalCost": "Total Cost",
+      "noData": "No Data"
+    },
+    "summary": {
+      "periods": {
+        "today": "Today",
+        "last7Days": "7 days",
+        "last30Days": "30 days",
+        "allTime": "All time"
+      },
+      "headline": {
+        "today": "Today's cost",
+        "last7Days": "Last 7 days",
+        "last30Days": "Last 30 days",
+        "allTime": "Total cost"
+      },
+      "metrics": {
+        "requests": "Requests",
+        "tokens": "Tokens",
+        "waitTime": "Latency"
+      }
+    },
+    "rank": {
+      "title": "Ranking",
+      "sortByCost": "Cost",
+      "sortByCount": "Count",
+      "sortByTokens": "Tokens",
+      "noData": "No ranking data",
+      "successRate": "Success Rate"
+    },
+    "groupHealth": {
+      "title": "Group Health",
+      "total": "{count} groups",
+      "running": "{count} running",
+      "success": "{count} healthy",
+      "partial": "{count} partial",
+      "failed": "{count} failed",
+      "idle": "{count} unchecked",
+      "runAll": "Run All",
+      "runAllFull": "Full Probe All",
+      "viewDetails": "View details",
+      "detailTitle": "Group health details",
+      "detailDescription": "Inspect the latest health snapshot for each group and run standard or full probes from the home dashboard.",
+      "runFailed": "Failed to start group health check"
+    }
+  },
+  "setting": {
+    "appearance": "Appearance",
+    "theme": {
+      "label": "Theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "language": {
+      "label": "Language",
+      "zh_hans": "Chinese (Simplified)",
+      "zh_hant": "Chinese (Traditional)",
+      "en": "English"
+    },
+    "proxyUrl": {
+      "label": "Proxy URL",
+      "placeholder": "Enter proxy URL"
+    },
+    "apiBaseUrl": {
+      "label": "API Base URL",
+      "placeholder": "https://octopus.example.com",
+      "description": "Base URL clients use to reach this service. When set, an export button appears in the API key list"
+    },
+    "statsSaveInterval": {
+      "label": "Stats Save Interval",
+      "placeholder": "Enter interval in minutes"
+    },
+    "corsAllowOrigins": {
+      "label": "CORS Allowed Origins",
+      "hint": "Empty = deny all, * = allow all",
+      "example": "Only allow specific domains: https://example.com,https://example2.com"
+    },
+    "responsesWS": {
+      "label": "OpenAI Responses WebSocket",
+      "description": "Opt-in upstream WebSocket for client WebSocket /v1/responses ingress. \"Enabled · Default off\" turns the capability on without using it by default (channels can opt in); Passthrough/Transform is the default mode unless overridden per channel.",
+      "mode": {
+        "disabled": "Disabled",
+        "defaultOff": "Enabled · Default off",
+        "passthrough": "Enabled · Passthrough",
+        "transform": "Enabled · Transform"
+      }
+    },
+    "sseHeartbeat": {
+      "label": "SSE Heartbeat Interval (seconds)",
+      "description": "Applies to both the in-stream heartbeat interval and the first heartbeat delay before the upstream stream is established; 0 disables. 30-60 seconds is recommended behind Cloudflare.",
+      "compatibility": "Some clients may mishandle SSE comments, so disable it if compatibility issues occur.",
+      "placeholder": "0 = disabled, recommend 30-60"
+    },
+    "groupHealth": {
+      "label": "Group Health Checks",
+      "description": "When enabled, show the home health summary, group-card health status, and allow manual health checks."
+    },
+    "circuitBreaker": {
+      "title": "Circuit Breaker",
+      "threshold": {
+        "label": "Failure Threshold (consecutive failures)",
+        "placeholder": "Enter threshold"
+      },
+      "cooldown": {
+        "label": "Base Cooldown (seconds)",
+        "placeholder": "Enter cooldown in seconds"
+      },
+      "maxCooldown": {
+        "label": "Max Cooldown (seconds)",
+        "placeholder": "Enter max cooldown in seconds"
+      },
+      "hint": "When a channel fails consecutively up to the threshold, circuit breaker trips. Cooldown grows exponentially up to the max cooldown"
+    },
+    "usageRetention": {
+      "title": "Usage Analytics",
+      "label": "Hourly Aggregate Retention (days)",
+      "description": "How long hourly usage aggregates remain available for analytics.",
+      "placeholder": "Enter retention days"
+    },
+    "outlierRetirement": {
+      "title": "Passive Outlier Retirement",
+      "hint": "Temporarily disables site projected channels that keep failing on real requests (disabled, never deleted), then probes them periodically and re-enables them once they recover. Before disabling, sibling channels of the same site are cross-checked and a probe request confirms the failure to avoid false positives; at least one enabled channel is always kept per account. Applies only to site projected channels. Off by default.",
+      "enabled": {
+        "label": "Enable Passive Outlier Retirement"
+      },
+      "interval": {
+        "label": "Evaluation Interval (minutes)",
+        "description": "How often the background task runs one round of evaluation and recovery probing.",
+        "placeholder": "Enter interval in minutes"
+      },
+      "failRate": {
+        "label": "Failure Rate Threshold (%)",
+        "description": "A channel is considered abnormal only when the failure ratio within the window reaches this value.",
+        "placeholder": "Enter failure rate percent"
+      },
+      "minSamples": {
+        "label": "Minimum Samples",
+        "description": "Evaluation is skipped while the window holds fewer requests than this, avoiding misjudgment on sparse traffic.",
+        "placeholder": "Enter minimum samples"
+      },
+      "consecFails": {
+        "label": "Consecutive Failure Threshold",
+        "description": "After the failure rate is met, the most recent consecutive failures must also reach this count (or the window has no success at all).",
+        "placeholder": "Enter consecutive failures"
+      },
+      "windowMinutes": {
+        "label": "Rolling Window Duration (minutes)",
+        "description": "Only requests within this recent period are counted; older records expire automatically.",
+        "placeholder": "Enter window minutes"
+      },
+      "windowCapacity": {
+        "label": "Window Sample Capacity (≤20)",
+        "description": "Maximum number of request records kept per window; the oldest are dropped first.",
+        "placeholder": "Enter sample capacity"
+      },
+      "recoverStreak": {
+        "label": "Probe Successes to Recover",
+        "description": "A retired channel is re-enabled after this many consecutive successful probes.",
+        "placeholder": "Enter success count"
+      },
+      "reapMinutes": {
+        "label": "Idle Window Reap (minutes)",
+        "description": "Frees a channel's in-memory stats window after it has received no new requests for this long.",
+        "placeholder": "Enter reap minutes"
+      },
+      "cfRecoverMinutes": {
+        "label": "Cloudflare Recovery Cooldown (minutes)",
+        "description": "Channels retired due to Cloudflare protection wait this long before recovery probing starts, to reduce pointless probes.",
+        "placeholder": "Enter cooldown minutes"
+      }
+    },
+    "saved": "Saved",
+    "saveFailed": "Save failed",
+    "backup": {
+      "export": {
+        "title": "Export",
+        "includeStats": "Include Stats",
+        "button": "Export JSON",
+        "exporting": "Exporting...",
+        "success": "Export started",
+        "failed": "Export failed",
+        "withLogsButton": "Export Archive with Logs (ZIP)",
+        "withLogsWarning": "ZIP archives include logs and can be restored through incremental import."
+      },
+      "import": {
+        "title": "Import (Incremental)",
+        "selected": "File selected",
+        "button": "Import Backup",
+        "importing": "Importing...",
+        "noFile": "Please select a JSON or ZIP backup first",
+        "invalidFileType": "Only JSON (.json) and ZIP (.zip) backup files are supported",
+        "success": "Import successful",
+        "failed": "Import failed",
+        "result": "Import result"
+      }
+    },
+    "apiKey": {
+      "title": "API Keys",
+      "empty": "No API keys",
+      "add": "Add Key",
+      "expand": "Open API key manager",
+      "close": "Close API key manager",
+      "dialogDescription": "Manage API keys, access limits, and expiration.",
+      "actions": {
+        "stats": "View statistics for {name}",
+        "edit": "Edit {name}",
+        "export": "Export {name}",
+        "delete": "Delete {name}",
+        "cancelDelete": "Cancel deletion of {name}"
+      },
+      "loadFailed": "Failed to load",
+      "export": {
+        "title": "Export to Client",
+        "cliTool": "CLI Tool",
+        "mainModel": "Main Model",
+        "name": "Name",
+        "namePlaceholder": "Enter a profile name",
+        "haikuModel": "Haiku Model",
+        "sonnetModel": "Sonnet Model",
+        "opusModel": "Opus Model",
+        "none": "Not set",
+        "apiType": "API Type",
+        "hint": "Requires the client app to be installed; the browser will ask to open it",
+        "import": "Import into {platform}"
+      },
+      "form": {
+        "name": "Name",
+        "maxCost": "Max Cost",
+        "maxCostPlaceholder": "Enter amount",
+        "unlimited": "Unlimited",
+        "maxRPM": "Max RPM (Requests/Min)",
+        "maxRPMPlaceholder": "Enter limit",
+        "expireAt": "Expire Date",
+        "selectDate": "Select date",
+        "neverExpire": "Never Expire",
+        "supportedModels": "Supported Models",
+        "noModels": "No models available",
+        "modelsHint": "Leave empty for unlimited",
+        "enabled": "Enabled",
+        "cancel": "Cancel",
+        "create": "Create",
+        "save": "Save",
+        "confirm": "Confirm"
+      },
+      "stats": {
+        "noData": "No statistics available",
+        "inputToken": "Input Token",
+        "outputToken": "Output Token",
+        "inputCost": "Input Cost",
+        "outputCost": "Output Cost",
+        "requestSuccess": "Request Success",
+        "requestFailed": "Request Failed"
+      },
+      "toast": {
+        "createSuccess": "API key created",
+        "createError": "Failed to create API key",
+        "updateSuccess": "API key updated",
+        "updateError": "Failed to update API key",
+        "deleteSuccess": "API key deleted",
+        "deleteError": "Failed to delete API key"
+      }
+    },
+    "account": {
+      "title": "Account Settings",
+      "save": "Save",
+      "saving": "Saving...",
+      "username": {
+        "label": "Change Username",
+        "placeholder": "Enter new username",
+        "empty": "Username cannot be empty",
+        "success": "Username changed successfully",
+        "failed": "Failed to change username"
+      },
+      "password": {
+        "label": "Change Password",
+        "oldPlaceholder": "Enter current password",
+        "newPlaceholder": "Enter new password",
+        "confirmPlaceholder": "Confirm new password",
+        "oldEmpty": "Please enter current password",
+        "newEmpty": "Please enter new password",
+        "mismatch": "Passwords do not match",
+        "tooShort": "Password must be at least 6 characters",
+        "change": "Change Password",
+        "success": "Password changed successfully",
+        "failed": "Failed to change password"
+      }
+    },
+    "info": {
+      "title": "Version Info",
+      "currentVersion": "Current Version",
+      "latestVersion": "Latest Version",
+      "buildTime": "Build Time",
+      "publishedAt": "Published At",
+      "github": "GitHub Repository",
+      "unknown": "Unknown",
+      "versionMismatch": "Version Mismatch",
+      "versionMismatchHint": "Frontend version ({frontend}) does not match backend version ({backend}). This may be a browser cache issue. Please force refresh the page.",
+      "forceRefresh": "Force Refresh",
+      "newVersionAvailable": "New version available",
+      "newVersionAvailableHint": "Please backup your data first, then update the system",
+      "updateNow": "Update Now",
+      "updating": "Updating...",
+      "updateSuccess": "Update successful, service will restart shortly",
+      "updateFailed": "Update failed"
+    },
+    "log": {
+      "title": "History Logs",
+      "enabled": {
+        "label": "Enable History Logs"
+      },
+      "keepPeriod": {
+        "label": "Log Retention (days)",
+        "placeholder": "Enter days"
+      },
+      "clear": {
+        "label": "Clear History Logs",
+        "button": "Clear",
+        "clearing": "Clearing..."
+      },
+      "clearSuccess": "Logs cleared",
+      "clearFailed": "Failed to clear logs"
+    },
+    "network": {
+      "title": "Network & Service"
+    },
+    "reliability": {
+      "title": "Reliability"
+    },
+    "syncTasks": {
+      "title": "Sync & Scheduled Tasks",
+      "intervalPlaceholder": "Interval (hours)",
+      "last": "Last",
+      "never": "Never",
+      "llmSync": {
+        "label": "Channel sync",
+        "button": "Sync Now",
+        "pending": "Syncing...",
+        "success": "Channel synced successfully",
+        "failed": "Failed to sync channel"
+      },
+      "llmPrice": {
+        "label": "Model price update",
+        "button": "Update Now",
+        "pending": "Updating...",
+        "success": "Price updated successfully",
+        "failed": "Failed to update price"
+      },
+      "siteSync": {
+        "label": "Site full sync",
+        "button": "Sync Now",
+        "pending": "Syncing...",
+        "success": "Background site sync triggered",
+        "failed": "Failed to trigger site sync"
+      },
+      "siteCheckin": {
+        "label": "Site check-in",
+        "button": "Check In",
+        "pending": "Checking in...",
+        "success": "Background site check-in triggered",
+        "failed": "Failed to trigger site check-in"
+      }
+    },
+    "data": {
+      "title": "Data Management"
+    },
+    "webdavBackup": {
+      "title": "WebDAV Backup",
+      "url": {
+        "label": "WebDAV URL",
+        "placeholder": "https://dav.example.com/dav"
+      },
+      "username": {
+        "label": "Username",
+        "placeholder": "Username"
+      },
+      "password": {
+        "label": "Password",
+        "placeholder": "Password",
+        "show": "Show password",
+        "hide": "Hide password"
+      },
+      "backupPath": {
+        "label": "Remote Path",
+        "placeholder": "/octopus-backups"
+      },
+      "interval": {
+        "label": "Auto Backup Interval (hours)",
+        "placeholder": "0 = disabled",
+        "description": "Set to 0 to disable auto backup"
+      },
+      "retentionCount": {
+        "label": "Retention Count",
+        "placeholder": "10"
+      },
+      "includeStats": "Include Statistics",
+      "testConnection": "Test Connection",
+      "testSuccess": "Connection successful",
+      "testFailed": "Connection failed",
+      "testing": "Testing...",
+      "triggerBackup": "Backup Now",
+      "triggerSuccess": "Backup successful",
+      "triggerFailed": "Backup failed",
+      "triggering": "Backing up...",
+      "backupList": "Remote Backups",
+      "loading": "Loading...",
+      "loadError": "Failed to load backups",
+      "noBackups": "No backup files found",
+      "restore": "Restore",
+      "restoring": "Restoring...",
+      "restoreSuccess": "Restore successful",
+      "restoreFailed": "Restore failed",
+      "restoreConfirm": "Restore from this backup? Existing data will be incrementally overwritten.",
+      "restoreResult": "Restore result",
+      "restoreNoChanges": "No rows changed.",
+      "reload": "Reload application",
+      "cancel": "Cancel",
+      "retry": "Retry",
+      "unknownError": "Unknown error",
+      "fileName": "File Name",
+      "fileSize": "Size",
+      "modifiedAt": "Modified",
+      "refresh": "Refresh",
+      "notConfigured": "WebDAV not configured"
+    }
+  },
+  "group": {
+    "toast": {
+      "created": "Created successfully",
+      "createFailed": "Create failed",
+      "updated": "Updated successfully",
+      "updateFailed": "Update failed",
+      "deleted": "Deleted successfully",
+      "deleteFailed": "Delete failed",
+      "autoAddFailed": "Auto add failed",
+      "pinned": "Pinned",
+      "unpinned": "Unpinned",
+      "pinFailed": "Pin toggle failed"
+    },
+    "pin": {
+      "pin": "Pin to top",
+      "unpin": "Unpin"
+    },
+    "preset": {
+      "title": "Presets",
+      "saveCurrent": "Save current",
+      "createBlank": "Create blank",
+      "autoNamePrefix": "New preset",
+      "cloneSuffix": "copy",
+      "namePlaceholder": "Preset name",
+      "name": "Preset Name",
+      "close": "Close",
+      "loading": "Loading...",
+      "empty": "No presets yet",
+      "activeBadge": "Active",
+      "edit": "Edit",
+      "clone": "Clone",
+      "delete": "Delete",
+      "confirmDelete": "Delete preset {name}?",
+      "confirm": "Confirm",
+      "editorTitle": "Edit Preset",
+      "save": "Save",
+      "saving": "Saving...",
+      "toast": {
+        "created": "Preset saved",
+        "createFailed": "Preset save failed",
+        "createBlankFailed": "Blank preset creation failed",
+        "cloned": "Preset cloned",
+        "cloneFailed": "Clone failed",
+        "activated": "Preset activated",
+        "activateFailed": "Activate failed",
+        "deleted": "Preset deleted",
+        "deleteFailed": "Delete failed",
+        "updated": "Preset updated",
+        "updateFailed": "Preset update failed"
+      }
+    },
+    "create": {
+      "title": "Create Group",
+      "submit": "Create",
+      "submitting": "Creating..."
+    },
+    "card": {
+      "empty": "No rules"
+    },
+    "member": {
+      "reorder": "Reorder {name}",
+      "remove": "Remove {name}",
+      "cancelRemove": "Cancel removing {name}",
+      "confirmRemove": "Confirm removing {name}",
+      "reserveBadge": "Relay",
+      "balanceLabel": "Balance",
+      "rateLabel": "Rate"
+    },
+    "detail": {
+      "actions": {
+        "edit": "Edit",
+        "cancel": "Cancel",
+        "save": "Save",
+        "copyName": "Copy Name",
+        "delete": "Delete",
+        "confirmDelete": "Confirm Delete"
+      }
+    },
+    "form": {
+      "name": "Group Name",
+      "matchRegex": "Match Regex",
+      "matchRegexPlaceholder": "Leave empty to use default fuzzy match by group name",
+      "matchRegexInvalid": "Invalid regex",
+      "firstTokenTimeOut": "First Token Timeout",
+      "firstTokenTimeOutHint": "Unit: seconds, only effective for streaming response, 0 = no limit",
+      "sessionKeepTime": "Session Keep Time",
+      "sessionKeepTimeHint": "Unit: seconds, keeps using the same channel within a session, 0 = disabled",
+      "retryEnabled": "Same-Channel Retry",
+      "retryEnabledHint": "When enabled, retries on the same channel for 429/5xx errors before passing through the status code to the client",
+      "maxRetries": "Max Retries",
+      "maxRetriesHint": "Same-channel retry count, only effective when same-channel retry is enabled",
+      "items": "Selected Models",
+      "addItem": "Add Model",
+      "autoAdd": "Auto Add",
+      "clear": "Clear",
+      "selectChannel": "Channel",
+      "selectModel": "Model",
+      "autoSort": "Auto sort",
+      "autoSortHint": "Sort: non-relay (balance desc) → relay (rate asc)"
+    },
+    "mode": {
+      "roundRobin": "Round Robin",
+      "random": "Random",
+      "failover": "Failover",
+      "weighted": "Weighted"
+    },
+    "health": {
+      "title": "Health",
+      "detailTitle": "Group Health Details",
+      "run": "Run",
+      "runFull": "Full Probe",
+      "lastRun": "Last run {time}",
+      "never": "Never checked",
+      "status": "Status",
+      "healthy": "Healthy",
+      "healthyCount": "{success}/{total} healthy",
+      "duration": "Duration",
+      "attempts": "Attempts",
+      "attemptListToggle": "Attempts ({count})",
+      "attemptStatus": {
+        "success": "Success",
+        "failed": "Failed",
+        "skipped": "Skipped"
+      },
+      "statusValue": {
+        "idle": "Idle",
+        "running": "Running",
+        "success": "Healthy",
+        "partial": "Partial",
+        "failed": "Failed"
+      },
+      "probeMode": {
+        "standard": "Standard",
+        "full": "Full"
+      },
+      "empty": "No health snapshot yet.",
+      "errorDetails": "Error details",
+      "noHttpStatus": "No HTTP status",
+      "runFailed": "Failed to start group health check"
+    },
+    "empty": "No groups yet, click the button above to create one",
+    "autoGroup": {
+      "title": "Auto Group Configuration",
+      "description": "Add channels or site groups to the list, and the system will automatically add models to matching model groups by group name or regex.",
+      "loadFailed": "Failed to load auto group configuration: {message}",
+      "searchPlaceholder": "Search...",
+      "runAll": "Run all enabled now",
+      "loading": "Loading...",
+      "emptyChannels": "No channels",
+      "matchMode": "Match mode",
+      "notice": "Turning a channel off or disabling the global setting will not delete existing model group members. Remove them manually in each model group if needed.",
+      "global": {
+        "title": "Global default mode",
+        "description": "When enabled, all site-projected channels use the selected match mode. Per-channel settings below are kept and take effect after the global mode is disabled."
+      },
+      "sections": {
+        "channels": "Channels"
+      },
+      "source": {
+        "siteGroup": "Site group",
+        "disabled": "Disabled",
+        "modelCount": "{count} models",
+        "moreModels": "+{count}",
+        "noModels": "No models",
+        "unknownSite": "Unknown site",
+        "manualGroup": "Manual channels",
+        "followingGlobalTip": "Global is on; this channel is currently grouped by the global mode. The per-channel mode below takes effect after the global mode is disabled."
+      },
+      "bulk": {
+        "selected": "{count} selected",
+        "apply": "Apply",
+        "clear": "Clear",
+        "placeholder": "Set selected to..."
+      },
+      "mode": {
+        "none": "Off",
+        "fuzzy": "Fuzzy",
+        "exact": "Exact",
+        "regex": "Regex"
+      },
+      "buttons": {
+        "cancel": "Cancel",
+        "save": "Save",
+        "saving": "Saving...",
+        "saveAndRun": "Save and run now",
+        "running": "Running..."
+      },
+      "toast": {
+        "saved": "Auto group configuration saved",
+        "savedAndRun": "Auto group configuration saved and run",
+        "saveFailed": "Failed to save auto group configuration",
+        "runSuccess": "Auto grouping has run",
+        "runFailed": "Failed to run auto grouping"
+      }
+    }
+  },
+  "model": {
+    "create": {
+      "title": "Create Model",
+      "name": "Model Name",
+      "input": "Input Price",
+      "output": "Output Price",
+      "cacheRead": "Cache Read",
+      "cacheWrite": "Cache Write",
+      "submit": "Create",
+      "submitting": "Creating..."
+    },
+    "toast": {
+      "updated": "Model price updated",
+      "updateFailed": "Update failed",
+      "deleted": "Model deleted",
+      "deleteFailed": "Delete failed"
+    },
+    "card": {
+      "inputCache": "Input/Cache",
+      "outputCache": "Output/Cache",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "overlay": {
+      "cancel": "Cancel",
+      "deleting": "Deleting...",
+      "confirmDelete": "Confirm Delete",
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache Read",
+      "cacheWrite": "Cache Write",
+      "save": "Save"
+    },
+    "workspace": {
+      "ariaLabel": "Model management views",
+      "catalog": "Catalog",
+      "discovery": "Discovery",
+      "headers": "Header policies",
+      "global-prices": "Global prices"
+    },
+    "discovery": {
+      "title": "Model discovery",
+      "counter": "{shown} / {total} models",
+      "vendorFilter": "Vendor",
+      "allVendors": "All vendors",
+      "unknownVendor": "Unknown",
+      "statusFilter": "Status",
+      "statusAll": "All",
+      "statusUngrouped": "Ungrouped",
+      "statusGrouped": "Grouped",
+      "statusMapped": "Mapped",
+      "autoProvisioning": "Auto-create groups",
+      "autoProvisioningHint": "When on, every upstream model automatically gets its own group on catalog sync.",
+      "autoProvisioningFailed": "Failed to change the auto-create setting",
+      "sync": "Sync catalog",
+      "syncDone": "Catalog synced",
+      "syncResult": "{groups} groups created, {skipped} models left unselected",
+      "syncFailed": "Catalog sync failed",
+      "selectAll": "Select all shown",
+      "selected": "{count} selected",
+      "createGroups": "Create groups",
+      "mapToGroup": "Map to group",
+      "remove": "Remove from groups",
+      "clearSelection": "Clear",
+      "channelCount": "{count} channels",
+      "mappedTo": "mapped to {target}",
+      "loadFailed": "Failed to load models: {message}",
+      "retry": "Retry",
+      "emptyChannels": "No upstream models reported by any channel yet",
+      "emptyFiltered": "No models match the current filters",
+      "cancel": "Cancel",
+      "applying": "Applying...",
+      "mapTitle": "Map to a group",
+      "mapDescription": "Route the {count} selected upstream models through one group. The upstream name is kept on the channel entry, so clients can keep calling either name.",
+      "mapTargetLabel": "Target group",
+      "mapTargetPlaceholder": "e.g. glm-5.2",
+      "mapDeleteSourceGroups": "Delete the original groups when they only held the remapped models",
+      "mapSubmit": "Map",
+      "provisionDone": "Models provisioned",
+      "provisionResult": "{groups} groups created, {items} channel entries added, {aliases} models remapped, {deleted} groups removed",
+      "provisionFailed": "Provisioning failed",
+      "removeTitle": "Remove from groups",
+      "removeDescription": "Remove the {count} selected models from the catalog. Clients calling these names will get a 404 afterwards.",
+      "removeDeleteGroup": "Also delete the group named after the model",
+      "removeSubmit": "Remove",
+      "removeDone": "Models removed",
+      "removeResult": "{groups} groups deleted, {items} channel entries removed, {aliases} mappings removed, {canonicals} catalog entries removed",
+      "removeFailed": "Removal failed"
+    },
+    "catalog": {
+      "title": "Model catalog",
+      "modelCount": "{count} models",
+      "sync": "Sync catalog",
+      "syncComplete": "Catalog synced",
+      "syncResult": "{canonical} canonical models and {candidates} candidates changed",
+      "syncFailed": "Catalog sync failed",
+      "loadFailed": "Catalog load failed: {message}",
+      "retry": "Retry",
+      "empty": "No matching canonical models",
+      "loading": "Loading...",
+      "routePreview": "Route preview",
+      "capabilityMatrix": "Protocol matrix",
+      "requestedModel": "Requested model",
+      "inboundProtocol": "Inbound protocol",
+      "outboundProtocol": "Outbound protocol",
+      "previewFailed": "Route preview failed",
+      "runningPreview": "Running...",
+      "runPreview": "Run preview",
+      "noPreview": "Run a preview to inspect candidate decisions",
+      "limited": "Limited",
+      "unsupportedRoute": "This protocol pair is not supported",
+      "name": "Canonical name",
+      "strategyLabel": "Routing strategy",
+      "protocolPolicyLabel": "Protocol policy",
+      "enabled": "Enabled",
+      "allowLossy": "Allow lossy",
+      "saveCanonical": "Save canonical model",
+      "saving": "Saving...",
+      "manual": "Manual",
+      "canonicalSaved": "Canonical model saved",
+      "canonicalSaveFailed": "Failed to save canonical model",
+      "aliases": "Aliases",
+      "deleteAlias": "Delete alias {alias}",
+      "aliasPlaceholder": "Alternate model name",
+      "addAlias": "Add alias",
+      "aliasSaved": "Alias saved",
+      "aliasSaveFailed": "Failed to save alias",
+      "aliasDeleteFailed": "Failed to delete alias",
+      "candidates": "Route candidates",
+      "noCandidates": "No route candidates",
+      "statusLabel": "Lifecycle status",
+      "priority": "Priority",
+      "weight": "Weight",
+      "inherit": "Inherit",
+      "allow": "Allow",
+      "deny": "Deny",
+      "saveCandidate": "Save candidate",
+      "candidateSaved": "Route candidate saved",
+      "candidateSaveFailed": "Failed to save route candidate",
+      "serverChanged": "The server version changed while you were editing. Reload it before saving.",
+      "reloadServerVersion": "Reload server version",
+      "strategy": {
+        "balanced": "Balanced",
+        "reliability": "Reliability",
+        "lowest-cost": "Lowest cost",
+        "lowest-latency": "Lowest latency",
+        "manual": "Manual"
+      },
+      "policy": {
+        "inherit": "Inherit",
+        "auto": "Auto",
+        "passthrough-only": "Passthrough only",
+        "transform-allowed": "Transform allowed"
+      },
+      "status": {
+        "active": "Active",
+        "degraded": "Degraded",
+        "stale": "Stale",
+        "unavailable": "Unavailable",
+        "disabled": "Disabled",
+        "archived": "Archived"
+      },
+      "protocol": {
+        "openai_chat": "OpenAI Chat",
+        "openai_responses": "OpenAI Responses",
+        "anthropic": "Anthropic Messages",
+        "gemini": "Gemini",
+        "volcengine": "Volcengine",
+        "openai_embedding": "OpenAI Embeddings",
+        "unknown": "Unknown"
+      },
+      "feature": {
+        "function_tools": "Function tools",
+        "built_in_tools": "Built-in tools",
+        "structured_output": "Structured output",
+        "images": "Images",
+        "audio": "Audio",
+        "files": "Files",
+        "documents": "Documents",
+        "reasoning": "Reasoning",
+        "cache_control": "Cache control",
+        "continuation": "Continuation",
+        "responses_state": "Responses state",
+        "provider_extensions": "Provider extensions",
+        "anthropic_mcp": "Anthropic MCP",
+        "anthropic_container": "Anthropic container",
+        "anthropic_server_tools": "Anthropic server tools",
+        "gemini_extensions": "Gemini extensions",
+        "websocket": "WebSocket"
+      }
+    },
+    "pricing": {
+      "title": "Effective price",
+      "input": "Input",
+      "output": "Output",
+      "cacheRead": "Cache read",
+      "cacheWrite": "Cache write",
+      "perRequest": "Per request",
+      "exchangeRate": "Rate to USD",
+      "unknown": "Unknown",
+      "multiplier": "Multiplier",
+      "stale": "Stale",
+      "notConvertible": "Not convertible",
+      "loading": "Loading...",
+      "quotes": "Price quotes",
+      "deleteQuote": "Delete manual quote",
+      "quoteDeleteFailed": "Failed to delete quote",
+      "noQuotes": "No candidate-specific quotes",
+      "manualOverride": "Manual candidate override",
+      "unitLabel": "Price unit",
+      "currency": "Currency",
+      "quoteSaved": "Manual price saved",
+      "quoteSaveFailed": "Failed to save manual price",
+      "saving": "Saving...",
+      "saveOverride": "Save override",
+      "currencyRates": "Currency rates",
+      "invalidRate": "Enter a currency and a positive rate",
+      "rateSaved": "Currency rate saved",
+      "rateSaveFailed": "Failed to save currency rate",
+      "saveRate": "Save rate",
+      "source": {
+        "manual_override": "Manual",
+        "site_exact": "Exact site",
+        "site_wide": "Site-wide",
+        "site_stale": "Last known",
+        "global": "Global",
+        "unknown": "Unknown"
+      },
+      "unit": {
+        "per_million_tokens": "Per million tokens",
+        "per_request": "Per request",
+        "site_credit": "Site credit"
+      }
+    },
+    "headerPolicy": {
+      "title": "Header policies",
+      "policyCount": "{count} policies",
+      "loadFailed": "Header policy data failed to load: {message}",
+      "retry": "Retry",
+      "newPolicy": "New policy",
+      "disabled": "Disabled",
+      "empty": "No header policies",
+      "editPolicy": "Edit policy",
+      "nameLabel": "Policy name",
+      "namePlaceholder": "Codex-compatible headers",
+      "nameRequired": "Enter a policy name",
+      "version": "v{version}",
+      "enabled": "Enabled",
+      "scopeLabel": "Scope",
+      "targetLabel": "Target",
+      "selectTarget": "Select a target",
+      "forwardClientHeaders": "Forward client headers",
+      "allowedHeadersMode": "Client header allow-list",
+      "inherit": "Inherit",
+      "denyAll": "Deny all",
+      "custom": "Custom",
+      "allowedClientHeaders": "Allowed client headers",
+      "userAgentMode": "User-Agent",
+      "clear": "Clear",
+      "builtIn": "Built-in",
+      "setHeaders": "Set headers",
+      "addHeader": "Add header",
+      "headerName": "Header name",
+      "headerValue": "Header value",
+      "removeHeader": "Remove header",
+      "protectedHeader": "This header is protected and cannot be overridden",
+      "unsetHeaders": "Unset headers",
+      "saving": "Saving...",
+      "save": "Save policy",
+      "delete": "Delete policy",
+      "targetRequired": "Select a scope target",
+      "saved": "Header policy saved",
+      "saveFailed": "Failed to save header policy",
+      "deleted": "Header policy deleted",
+      "deleteFailed": "Failed to delete header policy",
+      "userAgentProfiles": "User-Agent profiles",
+      "profileName": "Profile name",
+      "saveProfile": "Save profile",
+      "profileRequired": "Enter a profile name and User-Agent",
+      "profileSaved": "User-Agent profile saved",
+      "profileSaveFailed": "Failed to save User-Agent profile",
+      "preview": "Effective preview",
+      "notSelected": "Not selected",
+      "yes": "Yes",
+      "no": "No",
+      "policyId": "Policy",
+      "loading": "Loading...",
+      "previewUnavailable": "Preview unavailable",
+      "scope": {
+        "global": "Global",
+        "site": "Site",
+        "site_account": "Site account",
+        "channel": "Channel",
+        "canonical_model": "Canonical model",
+        "route_candidate": "Route candidate"
+      }
+    }
+  },
+  "log": {
+    "list": {
+      "noMore": "No more logs",
+      "loadFailed": "Failed to load logs: {message}",
+      "retry": "Retry",
+      "streamDisconnected": "Live log connection disconnected",
+      "streamTokenFailed": "Failed to get live log stream token"
+    },
+    "card": {
+      "error": "Error",
+      "errorInfo": "Error Info",
+      "firstToken": "TTFT",
+      "totalTime": "Total",
+      "duration": "Latency",
+      "input": "Input",
+      "output": "Output",
+      "cost": "Cost",
+      "requestContent": "Request Content",
+      "responseContent": "Response Content",
+      "noRequestContent": "(No request content)",
+      "noResponseContent": "(No response content)",
+      "firstTokenTime": "First Token Time",
+      "tokens": "tokens",
+      "retryDetails": "Retry Details",
+      "attempts": "attempts",
+      "success": "Success",
+      "failed": "Failed",
+      "clientCanceled": "Client canceled",
+      "indeterminate": "Indeterminate",
+      "skipped": "Skipped",
+      "circuitBreak": "Circuit Break",
+      "outcome": "Request outcome",
+      "cancellationInfo": "Cancellation details",
+      "transportEvidence": "Transport evidence",
+      "protocolPath": "Protocol path",
+      "protocolMode": "Protocol mode",
+      "protocolPolicy": "Protocol policy",
+      "protocolWarnings": "Protocol warnings",
+      "protocolFailureStage": "Protocol failure stage",
+      "lossyAllowed": "lossy allowed",
+      "transportTermination": "Transport termination",
+      "completionEvidence": "Completion evidence",
+      "terminalEvent": "Terminal event",
+      "tokenSource": "Token source",
+      "priceSource": "Price source",
+      "priceStale": "stale",
+      "priceUnconvertible": "not convertible",
+      "disableModel": "Disable Model",
+      "disabling": "Disabling",
+      "disabled": "Disabled",
+      "ws": "WS",
+      "wsContinuation": "Continue",
+      "wsReplay": "Replay",
+      "wsPassthrough": "Passthrough",
+      "wsTransform": "Transform",
+      "wsReconnect": "Reconnect",
+      "wsReplayRecovery": "Replay Recovery",
+      "wsDowngrade": "Downgrade",
+      "wsFreshHint": "This request used a fresh upstream WebSocket session.",
+      "wsContinuationHint": "This request continued the upstream WebSocket session directly.",
+      "wsReplayHint": "This request used upstream WebSocket, but replayed history to recover the context.",
+      "wsPassthroughHint": "Upstream WebSocket events were forwarded directly without the internal transformer pipeline.",
+      "wsTransformHint": "Upstream WebSocket events were processed through the internal transformer pipeline.",
+      "wsReconnectHint": "The upstream WebSocket continuation broke, and this request recovered after reconnecting the same route.",
+      "wsReplayRecoveryHint": "This request first failed to continue, then automatically replayed the transcript to recover the context and establish a new continuation anchor.",
+      "wsDowngradeHint": "This request first tried upstream WebSocket, but automatically downgraded to HTTP when WebSocket was unavailable.",
+      "inputDetails": "Input Details",
+      "transportInput": "Transport Input",
+      "billInput": "Billed Input",
+      "cacheRead": "Cache Read",
+      "cacheWrite": "Cache Write"
+    },
+    "analytics": {
+      "view": {
+        "analytics": "Usage analytics",
+        "detail": "Log details"
+      },
+      "range": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "7d": "7 days",
+        "30d": "30 days",
+        "month": "This month"
+      },
+      "scope": {
+        "label": "Metric scope",
+        "request": "Client requests",
+        "attempt": "Upstream attempts"
+      },
+      "dimension": {
+        "label": "Break down by",
+        "site": "Site",
+        "site_account": "Site account",
+        "channel": "Channel",
+        "api_key": "API key",
+        "request_model": "Requested model",
+        "actual_model": "Actual model",
+        "canonical_model": "Canonical model"
+      },
+      "filters": {
+        "site": "Site",
+        "allSites": "All sites",
+        "account": "Site account",
+        "allAccounts": "All accounts",
+        "apiKey": "API key",
+        "allAPIKeys": "All API keys",
+        "api_key": "API key",
+        "all_api_key": "All API keys",
+        "request_model": "Requested model",
+        "all_request_model": "All requested models",
+        "actual_model": "Actual model",
+        "all_actual_model": "All actual models",
+        "canonical_model": "Canonical model",
+        "all_canonical_model": "All canonical models",
+        "search": "Search dimensions",
+        "noOptions": "No matching options",
+        "timezone": "Timezone",
+        "clear": "Clear business filters"
+      },
+      "kpi": {
+        "requests": "Requests",
+        "attempts": "Attempts",
+        "successRate": "Success rate",
+        "tokens": "Tokens",
+        "cost": "Cost",
+        "averageLatency": "Average latency",
+        "p95Latency": "P95 latency",
+        "averageFTUT": "Average TTFT",
+        "p95FTUT": "P95 TTFT",
+        "successFailed": "{success} succeeded / {failed} failed",
+        "inputOutput": "In {input} / Out {output}",
+        "cacheTokens": "Cache read {read} / write {write}",
+        "samples": "samples",
+        "canceled": "Canceled",
+        "indeterminate": "Indeterminate"
+      },
+      "trend": {
+        "title": "Usage trend",
+        "hourly": "Hourly",
+        "daily": "Daily"
+      },
+      "breakdown": {
+        "top20": "Top 20",
+        "topN": "Result count",
+        "top": "Top {count}",
+        "total": "{count} results",
+        "search": "Search ranking",
+        "page": "Page {page}",
+        "pageOf": "Page {page} of {pages}",
+        "previous": "Previous page",
+        "next": "Next page",
+        "name": "Name",
+        "export": "Export CSV",
+        "exporting": "Exporting CSV",
+        "exportSuccess": "Exported {filename}",
+        "exportFailed": "Failed to export usage CSV",
+        "noDrilldown": "Logs for this time range are no longer retained, so row drilldown is unavailable."
+      },
+      "repair": {
+        "open": "Historical repair",
+        "title": "Repair historical Responses outcomes",
+        "description": "Preview eligible historical streaming Responses logs before applying the versioned repair rule.",
+        "unbounded": "Unbounded",
+        "preview": "Preview",
+        "previewing": "Previewing...",
+        "previewFailed": "Repair preview failed",
+        "matched": "Matched",
+        "excluded": "Excluded",
+        "confirm": "I confirm this historical update",
+        "execute": "Apply repair",
+        "executing": "Applying...",
+        "executeFailed": "Historical repair failed",
+        "complete": "Historical repair complete",
+        "updated": "{count} logs updated"
+      },
+      "empty": "No usage data in this range",
+      "error": "Unable to load usage analytics"
+    },
+    "filters": {
+      "keywordPlaceholder": "Search model, API key or content",
+      "channel": "Channel",
+      "allChannels": "All channels",
+      "status": "Status",
+      "allStatus": "All status",
+      "success": "Success",
+      "error": "Error",
+      "reset": "Reset",
+      "refresh": "Refresh"
+    },
+    "pagination": {
+      "prev": "Prev",
+      "next": "Next",
+      "page": "Page {page}",
+      "pagesRange": "Pages {from}–{to}"
+    }
+  },
+  "channel": {
+    "tabs": {
+      "site": "Site Channels",
+      "manual": "Manual Channels"
+    },
+    "card": {
+      "requestCount": "Requests",
+      "totalCost": "Total Cost",
+      "viewDetails": "View channel {name} details",
+      "enableChannel": "Enable channel {name}",
+      "disableChannel": "Disable channel {name}",
+      "toast": {
+        "enabled": "Channel enabled",
+        "disabled": "Channel disabled"
+      }
+    },
+    "detail": {
+      "title": {
+        "edit": "Edit Channel",
+        "view": "Channel Details"
+      },
+      "sections": {
+        "requests": "Request Details",
+        "tokens": "Token Usage",
+        "costs": "Cost Details",
+        "baseUrls": "Base URLs",
+        "keys": "Keys",
+        "protocol": "Protocol routing"
+      },
+      "protocol": {
+        "policy": "Protocol policy",
+        "allowLossy": "Allow lossy conversion",
+        "wsMode": "Responses WebSocket",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "noBaseUrls": "No Base URLs",
+      "noKeys": "No Keys",
+      "metrics": {
+        "totalRequests": "Total Requests",
+        "totalToken": "Total Tokens",
+        "totalCost": "Total Cost",
+        "successRequests": "Successful Requests",
+        "failedRequests": "Failed Requests",
+        "inputToken": "Input Tokens",
+        "outputToken": "Output Tokens",
+        "inputCost": "Input Cost",
+        "outputCost": "Output Cost",
+        "avgWaitTime": "Wait Time"
+      },
+      "actions": {
+        "edit": "Edit",
+        "cancel": "Cancel",
+        "save": "Save",
+        "saving": "Saving...",
+        "delete": "Delete",
+        "confirmDelete": "Confirm Delete",
+        "deleting": "Deleting..."
+      }
+    },
+    "create": {
+      "dialogTitle": "Create New Channel",
+      "submit": "Create Channel",
+      "submitting": "Creating..."
+    },
+    "form": {
+      "add": "Add",
+      "name": "Channel Name",
+      "type": "Channel Type",
+      "baseUrls": "Base URLs",
+      "baseUrlUrl": "URL",
+      "baseUrlDelay": "Delay(ms)",
+      "advanced": "Advanced Settings",
+      "apiKey": "API Key",
+      "customHeader": "Custom Headers",
+      "customHeaderKey": "Header Key",
+      "customHeaderValue": "Header Value",
+      "customHeaderAdd": "Add Header",
+      "channelProxy": "Channel Proxy",
+      "channelProxyPlaceholder": "Optional: proxy for this channel (overrides global proxy)",
+      "paramOverride": "Param Override",
+      "paramOverridePlaceholder": "Optional: JSON string to override request params",
+      "model": "Model",
+      "enabled": "Enabled",
+      "proxy": "Use Proxy",
+      "modelCustomPlaceholder": "Custom model name",
+      "modelAdd": "Add",
+      "modelRefresh": "Refresh",
+      "modelRefreshSuccess": "Models fetched successfully",
+      "modelRefreshFailed": "Failed to fetch models",
+      "modelRefreshEmpty": "No models found",
+      "modelSelected": "Selected Models",
+      "modelNoSelected": "No models selected",
+      "modelClearAll": "Clear All",
+      "typeOpenAIChat": "OpenAI Chat",
+      "typeOpenAIResponse": "OpenAI Response",
+      "typeOpenAIEmbedding": "OpenAI Embedding",
+      "typeAnthropic": "Anthropic",
+      "typeGemini": "Gemini",
+      "typeVolcengine": "Volcengine",
+      "autoSync": "Auto Sync",
+      "autoGroup": "Auto Group",
+      "autoGroupNone": "None",
+      "autoGroupFuzzy": "Fuzzy",
+      "autoGroupExact": "Exact",
+      "autoGroupRegex": "Regex",
+      "wsMode": "Responses WS Mode",
+      "wsModeInherit": "Inherit global",
+      "wsModePassthrough": "Passthrough",
+      "wsModeTransform": "Transform",
+      "wsModeOff": "Off",
+      "protocolPolicy": "Protocol Policy",
+      "protocolPolicyAuto": "Auto",
+      "protocolPolicyPassthrough": "Passthrough only",
+      "protocolPolicyTransform": "Transform allowed",
+      "allowLossy": "Allow lossy conversion",
+      "matchRegex": "Match Regex",
+      "matchRegexPlaceholder": "Optional: regex pattern to match request model names",
+      "remark": "Remark"
+    }
+  },
+  "siteChannel": {
+    "card": {
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "maskedPending": "{n} pending",
+      "noRouteDistribution": "No model distribution",
+      "metrics": {
+        "totalRequests": "Requests",
+        "successRequests": "Success",
+        "failedRequests": "Failed",
+        "totalCost": "Cost",
+        "lastRequestAt": "Last used"
+      }
+    },
+    "advanced": {
+      "title": "Site Channel Advanced Settings",
+      "description": "Configure parameter overrides for projected channels under group {group}. Configure auto grouping from the top-right of the Model Groups page. Configure custom headers in Site Settings.",
+      "channelList": "Projected channels",
+      "empty": "No projected channels in this group",
+      "paramOverride": "Parameter override JSON",
+      "paramOverridePlaceholder": "Leave empty to clear. Non-empty value must be a JSON object, e.g. {\"temperature\":0.7,\"max_tokens\":4096}",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving...",
+      "saved": "Advanced settings saved",
+      "invalidParamOverride": "Parameter override must be a valid JSON object",
+      "saveFailed": "Failed to save advanced settings"
+    }
+  },
+  "siteImport": {
+    "errors": {
+      "invalidJson": "The import content is not valid JSON. Check the file format or pasted content.",
+      "emptyPayload": "The import content is empty. Select a JSON file or paste exported content.",
+      "unrecognizedAllAPIHub": "No All API Hub export data was recognized. Make sure you selected the correct exported JSON.",
+      "unrecognizedMetapi": "No Metapi account export data was recognized. Make sure you selected the correct exported JSON.",
+      "noImportableAllAPIHub": "No importable All API Hub site account data was found.",
+      "noImportableMetapi": "No importable Metapi site account data was found."
+    }
+  },
+  "siteSync": {
+    "errors": {
+      "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."
+    }
+  },
+  "errors": {
+    "common": {
+      "invalid_json": "The request body is not valid JSON.",
+      "invalid_param": "The request parameters are invalid.",
+      "validation_failed": "Input validation failed. Check your input and try again.",
+      "bad_request": "The request is invalid.",
+      "not_found": "The requested resource was not found.",
+      "duplicate_resource": "The resource already exists.",
+      "database_error": "Database operation failed. Try again later.",
+      "internal_error": "Internal server error. Try again later."
+    },
+    "auth": {
+      "unauthorized": "Please sign in before continuing.",
+      "forbidden": "You do not have permission to perform this action.",
+      "invalid_token": "Your session is invalid. Please sign in again.",
+      "expired_token": "Your session has expired. Please sign in again.",
+      "invalid_credentials": "The username or password is incorrect.",
+      "api_key_expired": "The API key has expired.",
+      "api_key_missing": "The API key is missing.",
+      "password_incorrect": "The old password is incorrect.",
+      "api_key_disabled": "The API key is disabled.",
+      "api_key_cost_exceeded": "The API key has reached the maximum cost limit.",
+      "api_key_rate_limited": "The API key has exceeded the rate limit. Please wait and try again."
+    },
+    "site_channel": {
+      "account_not_found": "The site account was not found.",
+      "site_not_found": "The site was not found.",
+      "model_not_found": "The site model was not found.",
+      "route_update_failed": "Failed to update model routes. Try again later.",
+      "model_disable_failed": "Failed to update model disabled state. Try again later.",
+      "key_create_failed": "Failed to create the site key. Check the site status or try again later.",
+      "source_key_update_failed": "Failed to update source keys. Check your input and try again.",
+      "project_failed": "Failed to sync site channel projection. Try again later."
+    },
+    "channel": {
+      "not_found": "The channel was not found.",
+      "create_failed": "Failed to create the channel.",
+      "update_failed": "Failed to update the channel.",
+      "delete_failed": "Failed to delete the channel.",
+      "fetch_models_failed": "Failed to fetch channel models."
+    },
+    "group": {
+      "not_found": "The group was not found.",
+      "create_failed": "Failed to create the group.",
+      "update_failed": "Failed to update the group.",
+      "delete_failed": "Failed to delete the group."
+    },
+    "model": {
+      "price_update_failed": "Failed to update model prices.",
+      "price_delete_failed": "Failed to delete model prices.",
+      "create_failed": "Failed to create the model.",
+      "update_failed": "Failed to update the model.",
+      "delete_failed": "Failed to delete the model."
+    },
+    "relay": {
+      "model_not_supported": "This API key does not support the requested model.",
+      "model_not_found": "The model was not found or has no configured group.",
+      "no_available_channel": "No available channel.",
+      "channel_disabled": "The channel is disabled.",
+      "no_available_key": "No available key.",
+      "upstream_failed": "The upstream request failed.",
+      "timeout": "The request timed out.",
+      "circuit_breaker_tripped": "The channel circuit breaker is tripped. Try again later."
+    },
+    "site": {
+      "sync": {
+        "missing_group_key": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again.",
+        "group_models_unresolved": "Could not resolve models for group \"{groupKey}\". Check the group model configuration or key permissions.",
+        "no_group_result": "Site account sync failed: no group sync result is available.",
+        "all_groups_unresolved": "Site account sync failed: all groups could not confirm models. Historical models were kept.",
+        "unsupported_platform": "Unsupported site platform: {platform}.",
+        "snapshot_nil": "The sync result is empty. Try again later."
+      },
+      "auth": {
+        "access_token_required": "The site access token is required.",
+        "direct_token_required": "The site direct token is required.",
+        "login_failed": "Site login failed. Check the account, password, or site status.",
+        "login_token_missing": "Site login succeeded but no access token was returned. Check site compatibility."
+      },
+      "upstream": {
+        "http_error": "The upstream site request failed (HTTP {statusCode}). Check the site status or try again later.",
+        "decode_failed": "Failed to parse the site response. Check site compatibility or try again later.",
+        "cloudflare_challenge": "The site triggered Cloudflare protection. Try again later or manually complete verification on the site."
+      },
+      "import": {
+        "invalid_json": "The import content is not valid JSON. Check the file format or pasted content.",
+        "empty_payload": "The import content is empty. Select a JSON file or paste exported content.",
+        "unrecognized_all_api_hub": "No All API Hub export data was recognized. Make sure you selected the correct exported JSON.",
+        "unrecognized_metapi": "No Metapi account export data was recognized. Make sure you selected the correct exported JSON.",
+        "no_importable_all_api_hub": "No importable All API Hub site account data was found.",
+        "no_importable_metapi": "No importable Metapi site account data was found.",
+        "unsupported_payload": "This import content is not supported. Make sure the export format is correct.",
+        "persist_failed": "Failed to save imported data. Try again later."
+      },
+      "sub2api": {
+        "api_key_required": "Sub2API sync requires an API key. Create a key on the site and sync again.",
+        "model_api_key_required": "Sub2API model discovery requires an API key. Create a key on the site and sync again.",
+        "envelope_failed": "Sub2API returned an error. Check the access token, permissions, or site status.",
+        "missing_data": "Sub2API response is missing required data. Check site compatibility or try again later."
+      }
+    }
+  },
+  "proxyPool": {
+    "name": "Proxy Pool",
+    "manage": "Open proxy pool manager",
+    "empty": "Proxy pool is empty",
+    "noEnabled": "No enabled proxy configurations",
+    "selectConfig": "Select proxy configuration",
+    "selectRequired": "Please select a proxy pool configuration",
+    "disabledSelected": "The selected proxy configuration is disabled and will fail at runtime. Choose an enabled proxy before saving.",
+    "disabledSuffix": " (disabled)",
+    "createFailed": "Proxy configuration create failed:",
+    "updateFailed": "Proxy configuration update failed:",
+    "deleteFailed": "Proxy configuration delete failed:",
+    "testFailed": "Proxy configuration test failed:",
+    "mode": {
+      "label": "Proxy mode",
+      "inherit": "Inherit site settings",
+      "direct": "Direct",
+      "system": "System proxy",
+      "pool": "Proxy pool"
+    },
+    "dialog": {
+      "title": "Proxy Pool",
+      "description": "Manage reusable proxy configurations. Sites, site accounts, and manual channels can select proxies here.",
+      "close": "Close",
+      "tabs": {
+        "proxies": "Proxy endpoints",
+        "clash": "Clash controllers",
+        "verification": "Verification bridge"
+      },
+      "searchPlaceholder": "Search name, URL, or remark",
+      "loading": "Loading...",
+      "loadFailed": "Failed to load: {message}",
+      "empty": "No proxy configurations",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "references": "Refs {count}",
+      "referencesTitle": "View references",
+      "referencesDescription": "{name} is currently used by these places. Click the jump icon to locate the reference.",
+      "referencesEmpty": "No references",
+      "jumpToReference": "Jump to reference",
+      "managedChannelTitle": "Projected channel: {channel}",
+      "expandReference": "Expand projected channels",
+      "collapseReference": "Collapse projected channels",
+      "derivedReferences": "Projected {count}",
+      "referenceTypes": {
+        "site": "Site",
+        "siteAccount": "Account",
+        "managedChannel": "Managed channel",
+        "channel": "Channel",
+        "reference": "Reference"
+      },
+      "referenceLocations": {
+        "site": "Site",
+        "archivedSite": "Archived site",
+        "siteNamed": "Site: {name}",
+        "siteAccount": "Site account",
+        "managedChannel": "Site projected channel (inherits site/account proxy; not counted)",
+        "managedChannelUnderSite": "Projected from site {site} / account proxy; not counted separately",
+        "channel": "Manual channel"
+      },
+      "test": "Test",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteBlocked": "Still referenced, cannot delete",
+      "formTitleCreate": "New proxy configuration",
+      "formTitleEdit": "Edit proxy configuration",
+      "formDescription": "URL supports http, https, socks, and socks5.",
+      "new": "New",
+      "name": "Name",
+      "url": "Proxy URL",
+      "clashLinkLabel": "Clash controller",
+      "clashLinkNone": "No controller",
+      "clashLinkHint": "When linked, recovery can switch nodes in this controller's dedicated group.",
+      "clashLinked": "Clash: {name}",
+      "remark": "Remark",
+      "testUrl": "Test target URL",
+      "testDraft": "Test current form proxy",
+      "submitCreate": "Create proxy configuration",
+      "submitEdit": "Save changes",
+      "created": "Proxy configuration created",
+      "updated": "Proxy configuration updated",
+      "deleted": "Proxy configuration deleted",
+      "deleteReferenced": "This proxy configuration is still referenced. Remove references first.",
+      "formRequired": "Please enter proxy name and URL",
+      "testSuccess": "Proxy reachable: HTTP {statusCode} · {durationMs}ms",
+      "testFailed": "Proxy test failed",
+      "operationFailed": "Operation failed"
+    },
+    "site": {
+      "inherit": "Inherit site proxy"
+    },
+    "clash": {
+      "title": "Clash / Mihomo Controllers",
+      "loading": "Loading controllers...",
+      "empty": "No controllers",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "loadNodes": "Load nodes",
+      "edit": "Edit controller",
+      "delete": "Delete controller",
+      "nodeState": "Node state",
+      "currentNode": "Current node: {node}",
+      "refresh": "Refresh nodes",
+      "selectNode": "Select node",
+      "switch": "Switch",
+      "switched": "Switched to {node}",
+      "createTitle": "New controller",
+      "editTitle": "Edit controller",
+      "new": "New",
+      "name": "Name",
+      "apiUrl": "Controller API URL",
+      "proxyUrl": "Traffic proxy URL",
+      "groupName": "Dedicated proxy group",
+      "secret": "Controller secret",
+      "secretKeep": "Leave blank to keep the current secret",
+      "secretOptional": "Optional",
+      "showSecret": "Show secret",
+      "hideSecret": "Hide secret",
+      "create": "Create controller",
+      "save": "Save changes",
+      "created": "Controller created",
+      "updated": "Controller updated",
+      "deleted": "Controller deleted",
+      "required": "Enter a name, API URL, proxy URL, and dedicated proxy group",
+      "deleteConfirmTitle": "Delete controller?",
+      "deleteConfirmDescription": "\"{name}\" will be deleted. The operation is rejected while a proxy endpoint still references it.",
+      "cancel": "Cancel",
+      "operationFailed": "Operation failed"
+    },
+    "verificationBridge": {
+      "title": "Verification Bridge Pairings",
+      "activeCount": "{count} active",
+      "loading": "Loading pairings...",
+      "empty": "No pairings",
+      "status": {
+        "active": "Active",
+        "expired": "Expired",
+        "revoked": "Revoked"
+      },
+      "expiresAt": "Expires: {value}",
+      "lastSeenAt": "Last seen: {value}",
+      "rotate": "Rotate pairing token",
+      "revoke": "Revoke pairing",
+      "createTitle": "Create pairing",
+      "name": "Device name",
+      "accountScope": "Site account",
+      "accountScopeValue": "Account: {value}",
+      "accountPlaceholder": "Select a site account",
+      "accountLoading": "Loading site accounts...",
+      "ttlDays": "Valid days",
+      "create": "Create pairing",
+      "nameRequired": "Enter a device name",
+      "accountRequired": "Select a site account",
+      "created": "Pairing created",
+      "rotated": "Pairing token rotated",
+      "revoked": "Pairing revoked",
+      "tokenTitle": "Pairing token shown once",
+      "tokenDescription": "This token is shown only once and remains valid until it expires or is revoked.",
+      "done": "Done",
+      "rotateConfirmTitle": "Rotate pairing token?",
+      "rotateConfirmDescription": "\"{name}\" will stop accepting its current token. Active browser work may need to be started again.",
+      "revokeConfirmTitle": "Revoke pairing?",
+      "revokeConfirmDescription": "\"{name}\" will no longer claim verification tasks. Its claimed tasks will be released.",
+      "cancel": "Cancel",
+      "operationFailed": "Operation failed"
+    }
+  },
+  "siteManagement": {
+    "common": {
+      "close": "Close",
+      "cancel": "Cancel",
+      "saving": "Saving...",
+      "saveChanges": "Save changes",
+      "add": "Add",
+      "remove": "Remove",
+      "operationFailed": "Operation failed",
+      "headerKey": "Header Key",
+      "headerValue": "Header Value"
+    },
+    "tags": {
+      "placeholder": "Enter a tag and press Enter",
+      "maxLength": "A tag cannot exceed {count} characters",
+      "maxCount": "You can add at most {count} tags",
+      "remove": "Remove tag {tag}"
+    },
+    "siteForm": {
+      "nameRequired": "Enter a site name",
+      "urlRequired": "Enter a site URL",
+      "detectedPlatform": "Detected platform: {platform}",
+      "platformApi": "Direct API",
+      "detectFailed": "The platform could not be detected. Select it manually.",
+      "platformRequired": "Select a platform",
+      "headerRequired": "Both the custom header key and value are required",
+      "routeRequired": "Both the protocol override type and URL are required",
+      "duplicateRoute": "Only one path override can be configured per protocol",
+      "updated": "Site updated",
+      "created": "Site created",
+      "editTitle": "Edit site",
+      "createTitle": "Add site",
+      "siteName": "Site name",
+      "siteNamePlaceholder": "For example: Primary OneAPI",
+      "platform": "Platform",
+      "autoDetect": "Auto-detect",
+      "siteUrl": "Site URL",
+      "defaultProtocol": "Default protocol",
+      "defaultProtocolHint": "Controls the model-list request format and the default endpoint format for models without an explicit route type",
+      "manualCheckinUrl": "Manual check-in URL",
+      "manualCheckinPlaceholder": "Optional: https://example.com/signin",
+      "manualCheckinHint": "After configuration, this page can be opened from the site overview for manual check-in.",
+      "tags": "Tags",
+      "tagsHint": "Optional: tag sites to make list filtering and grouping easier.",
+      "enabled": "Enable site",
+      "disabledHint": "Managed channels are no longer projected while disabled",
+      "advancedSettings": "Advanced settings",
+      "customHeaders": "Custom headers ({count})",
+      "protocolOverrides": "Protocol path overrides ({count})",
+      "protocolOverridesHint": "Override the request URL by protocol. For example, use https://example.com/anthropic/v1 for Anthropic. Leave blank to infer it from the site URL.",
+      "routeType": "Protocol type",
+      "createSite": "Create site"
+    },
+    "accountForm": {
+      "contextMissing": "The site context is unavailable.",
+      "nameRequired": "Enter an account name",
+      "usernamePasswordRequired": "Username and password are required",
+      "accessTokenRequired": "Enter an access token",
+      "apiKeyRequired": "Enter an API key",
+      "checkinIntervalRange": "The minimum check-in interval must be between 1 and 720 hours",
+      "randomWindowRange": "The random delay window must be between 0 and 1,440 minutes",
+      "platformUserIdRequired": "Enter the platform user ID",
+      "platformUserIdInvalid": "The platform user ID must be a positive integer",
+      "tokenExpiresPositive": "token_expires_at must be a positive integer timestamp",
+      "tokenExpiresParseable": "token_expires_at must be a timestamp or a parseable date",
+      "updated": "Site account updated",
+      "created": "Site account created",
+      "editTitle": "Edit site account",
+      "createTitle": "Add site account",
+      "accountName": "Account name",
+      "accountNamePlaceholder": "For example: Primary account",
+      "credentialType": "Credential type",
+      "credentialUsernamePassword": "Username / Password",
+      "credentialAccessToken": "Access token",
+      "credentialApiKey": "API key",
+      "username": "Username",
+      "usernamePlaceholder": "Enter the username",
+      "password": "Password",
+      "passwordPlaceholder": "Enter the password",
+      "accessToken": "Access token",
+      "accessTokenPlaceholder": "Enter the access token",
+      "refreshToken": "Refresh token",
+      "refreshTokenPlaceholder": "Optional: enter refresh_token",
+      "tokenExpiresAt": "token_expires_at",
+      "tokenExpiresPlaceholder": "Optional: timestamp or date string from DevTools",
+      "sub2apiHint": "For Sub2API, enter both <refreshToken>refresh_token</refreshToken> and <expiresAt>token_expires_at</expiresAt> from DevTools so the token can refresh before expiry or after a 401 response.",
+      "platformUserId": "Platform user ID",
+      "platformUserIdPlaceholder": "For example: 11494",
+      "platformUserIdHint": "New API needs the user ID to sync tokens, groups, and check-ins. Imports try to populate it automatically.",
+      "apiKey": "API key",
+      "apiKeyPlaceholder": "Enter the API key",
+      "enabled": "Enable account",
+      "autoSync": "Automatic sync",
+      "autoCheckin": "Automatic check-in",
+      "randomCheckin": "Randomized check-in",
+      "minCheckinInterval": "Minimum check-in interval (hours)",
+      "randomDelayWindow": "Random delay window (minutes)",
+      "proxyHint": "Used for this account's sync, check-in, and model fetches. Automatically projected channels follow the resolved proxy.",
+      "createAccount": "Create account"
+    },
+    "batchEdit": {
+      "selectSiteRequired": "Select at least one site",
+      "headerRequired": "Both the key and value are required when setting a header",
+      "changeRequired": "Enter at least one change",
+      "completed": "Completed: {successCount} succeeded, {failedCount} failed",
+      "failed": "Batch edit failed",
+      "title": "Batch edit",
+      "description": "Apply these changes to {count} sites. Unspecified settings remain unchanged.",
+      "addTags": "Add tags",
+      "removeTags": "Remove tags",
+      "headerList": "Headers ({count})",
+      "set": "Set",
+      "delete": "Delete",
+      "deleteKeyPlaceholder": "Delete this key (no value needed)",
+      "headerHint": "Set adds or updates a key without case sensitivity. Delete removes the key. Other headers remain unchanged on each site.",
+      "applying": "Applying...",
+      "applySelected": "Apply to selected sites"
+    },
+    "checkin": {
+      "filters": {
+        "all": "All",
+        "success": "Succeeded",
+        "failed": "Failed",
+        "idle": "Not run",
+        "disabled": "Disabled"
+      },
+      "overview": "Overview",
+      "currentResult": "Current result",
+      "visibleCounts": "{siteCount} sites / {accountCount} accounts",
+      "currentBalance": "Current balance",
+      "totalUsed": "Total used",
+      "enabledAccounts": "Enabled accounts",
+      "todayFailures": "Today's failures",
+      "search": "Search: {term}",
+      "clearFilters": "Clear filters",
+      "openManualCheckin": "Open manual check-ins ({count})",
+      "removeTagFilter": "Stop filtering by \"{tag}\"",
+      "addTagFilter": "Filter by \"{tag}\""
+    }
+  },
+  "siteRecovery": {
+    "title": "Proxy Recovery and Verification",
+    "menu": "Recovery and verification",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "operationFailed": "Operation failed",
+    "tabs": {
+      "overview": "Paths",
+      "attempts": "Attempt chain",
+      "verification": "Cloudflare verification"
+    },
+    "form": {
+      "sitePolicy": "Automatic proxy recovery",
+      "sitePolicyHint": "Try other network paths when site management operations fail.",
+      "accountPolicy": "Account recovery policy",
+      "accountPolicyHint": "Inherit the site policy or override it for this account.",
+      "inheritSite": "Inherit site",
+      "enable": "Enable",
+      "disable": "Disable"
+    },
+    "operation": {
+      "sync": "Sync",
+      "checkin": "Check-in"
+    },
+    "preferenceStatus": {
+      "healthy": "Healthy",
+      "cooling": "Cooling",
+      "stale": "Stale",
+      "disabled": "Disabled"
+    },
+    "sessionStatus": {
+      "pending": "Pending",
+      "completed": "Completed",
+      "expired": "Expired",
+      "revoked": "Revoked",
+      "superseded": "Superseded"
+    },
+    "taskStatus": {
+      "pending": "Pending",
+      "claimed": "Claimed",
+      "completed": "Completed",
+      "expired": "Expired",
+      "canceled": "Canceled"
+    },
+    "retryStatus": {
+      "none": "No retry",
+      "pending": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "canceled": "Canceled"
+    },
+    "overview": {
+      "effectivePolicy": "Current policy",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "inherited": "Inherited from site",
+      "accountOverride": "Account override",
+      "sitePreference": "Site preference",
+      "accountPreference": "Account preference",
+      "pathCount": "{count} paths",
+      "none": "None",
+      "learnedPaths": "Learned paths",
+      "learnedPathsHint": "Paths are learned only after a full operation succeeds. Failed paths enter cooldown.",
+      "clearAccount": "Clear account preference",
+      "clearSite": "Clear site preference",
+      "empty": "No successful path has been learned",
+      "proxyId": "Proxy #{id}",
+      "siteScope": "Site",
+      "accountScope": "Account",
+      "successFailure": "{success} success / {failure} failure",
+      "averageLatency": "Average {value}ms",
+      "lastSuccess": "Last success {value}",
+      "cooldownUntil": "Cooling until {value}",
+      "accountCleared": "Account preference cleared",
+      "siteCleared": "Site preference cleared",
+      "clearAccountConfirmTitle": "Clear account preference?",
+      "clearSiteConfirmTitle": "Clear site preference?",
+      "clearConfirmDescription": "Future operations will choose paths from the candidate order again."
+    },
+    "attempts": {
+      "empty": "No recovery attempts",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "stopReason": "Stopped: {value}",
+      "number": "Attempt {value}",
+      "duration": "{value}ms"
+    },
+    "verification": {
+      "newSession": "New verification task",
+      "newSessionHint": "A paired browser extension can claim the task, or you can import a cookie manually.",
+      "clearAccount": "Clear account verification",
+      "operation": "Recovery operation",
+      "ttlMinutes": "Valid minutes",
+      "userAgent": "User-Agent",
+      "optional": "Optional",
+      "create": "Create task",
+      "created": "Verification task created",
+      "manualImport": "Import cookie",
+      "cookie": "Cookie",
+      "showCookie": "Show cookie",
+      "hideCookie": "Hide cookie",
+      "complete": "Complete verification",
+      "cookieRequired": "Select a pending session and enter a cookie",
+      "completed": "Verification completed. The original operation will retry automatically.",
+      "history": "Verification history",
+      "empty": "No verification history",
+      "sessionId": "Session #{id}",
+      "expiresAt": "Expires: {value}",
+      "completedAt": "Completed: {value}",
+      "task": "Task",
+      "retryStatus": "Original operation",
+      "retry": "Run again",
+      "retryQueued": "Original operation queued again",
+      "revoke": "Revoke session",
+      "revoked": "Session revoked",
+      "cleared": "Account verification cleared",
+      "clearConfirmTitle": "Clear account verification?",
+      "clearConfirmDescription": "Related sessions will be revoked, tasks canceled, and saved verification state removed.",
+      "revokeConfirmTitle": "Revoke verification session?",
+      "revokeConfirmDescription": "This session and its active task will become invalid immediately."
+    }
+  }
 }

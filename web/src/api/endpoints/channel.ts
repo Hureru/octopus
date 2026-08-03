@@ -27,6 +27,7 @@ export enum AutoGroupType {
 }
 
 export type ChannelWSMode = 'inherit' | 'off' | 'passthrough' | 'transform';
+export type ChannelProtocolPolicy = 'auto' | 'passthrough-only' | 'transform-allowed';
 
 export type BaseUrl = {
     url: string;
@@ -74,6 +75,9 @@ export type Channel = {
     auto_group: AutoGroupType;
     custom_header: CustomHeader[];
     ws_mode: ChannelWSMode;
+    protocol_policy: ChannelProtocolPolicy;
+    allow_lossy: boolean;
+    is_reserve: boolean;
     param_override?: string | null;
     match_regex?: string | null;
     managed: boolean;
@@ -105,6 +109,9 @@ export type CreateChannelRequest = {
     auto_group?: AutoGroupType;
     custom_header?: CustomHeader[];
     ws_mode?: ChannelWSMode;
+    protocol_policy?: ChannelProtocolPolicy;
+    allow_lossy?: boolean;
+    is_reserve?: boolean;
     param_override?: string | null;
     match_regex?: string | null;
 };
@@ -126,6 +133,9 @@ export type UpdateChannelRequest = {
     auto_group?: AutoGroupType;
     custom_header?: CustomHeader[];
     ws_mode?: ChannelWSMode;
+    protocol_policy?: ChannelProtocolPolicy;
+    allow_lossy?: boolean;
+    is_reserve?: boolean;
     param_override?: string | null;
     match_regex?: string | null;
     // keys diff
@@ -169,6 +179,9 @@ export function useChannelList() {
                 base_urls: item.base_urls ?? [],
                 custom_header: item.custom_header ?? [],
                 ws_mode: item.ws_mode ?? 'inherit',
+                protocol_policy: item.protocol_policy ?? 'auto',
+                allow_lossy: item.allow_lossy ?? false,
+                is_reserve: item.is_reserve ?? false,
                 keys: item.keys ?? [],
                 proxy_mode: item.proxy_mode ?? 'direct',
                 proxy_config_id: item.proxy_config_id ?? null,
@@ -214,8 +227,7 @@ export function useCreateChannel() {
         onSuccess: (data) => {
             logger.log('渠道创建成功:', data);
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
-            queryClient.invalidateQueries({ queryKey: ['models', 'list'] });
-            queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['models'] });
             queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
             queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
         },
@@ -252,7 +264,7 @@ export function useUpdateChannel() {
         onSuccess: (data) => {
             logger.log('渠道更新成功:', data);
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
-            queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['models'] });
             queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
             queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
         },
@@ -280,7 +292,7 @@ export function useDeleteChannel() {
         onSuccess: () => {
             logger.log('渠道删除成功');
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
-            queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['models'] });
             queryClient.invalidateQueries({ queryKey: ['proxy-pool'] });
             queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
         },
@@ -309,7 +321,7 @@ export function useEnableChannel() {
         onSuccess: () => {
             logger.log('渠道状态更新成功');
             queryClient.invalidateQueries({ queryKey: ['channels', 'list'] });
-            queryClient.invalidateQueries({ queryKey: ['models', 'channel'] });
+            queryClient.invalidateQueries({ queryKey: ['models'] });
             queryClient.invalidateQueries({ queryKey: ['groups', 'list'] });
         },
         onError: (error) => {

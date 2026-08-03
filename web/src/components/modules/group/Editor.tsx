@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
-import { Check, ChevronDownIcon, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronDownIcon, Plus, Search, Sparkles, Trash2, ArrowDownWideNarrow } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { useModelChannelList, type LLMChannel } from '@/api/endpoints/model';
@@ -196,6 +196,7 @@ function SortSection({
     removingIds,
     showWeight,
     onClear,
+    onAutoSort,
 }: {
     members: SelectedMember[];
     onReorder: (members: SelectedMember[]) => void;
@@ -204,6 +205,7 @@ function SortSection({
     removingIds: Set<string>;
     showWeight: boolean;
     onClear: () => void;
+    onAutoSort: () => void;
 }) {
     const t = useTranslations('group');
 
@@ -218,21 +220,45 @@ function SortSection({
                         </span>
                     )}
                 </span>
-                <button
-                    type="button"
-                    onClick={onClear}
-                    disabled={members.length === 0}
-                    className={cn(
-                        'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors',
-                        members.length === 0
-                            ? 'text-muted-foreground/50 cursor-not-allowed'
-                            : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                    )}
-                    title={t('form.clear')}
-                >
-                    <Trash2 className="size-3.5" />
-                    <span>{t('form.clear')}</span>
-                </button>
+                <span className="flex items-center gap-1">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    type="button"
+                                    onClick={onAutoSort}
+                                    disabled={members.length === 0}
+                                    className={cn(
+                                        'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors',
+                                        members.length === 0
+                                            ? 'text-muted-foreground/50 cursor-not-allowed'
+                                            : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                                    )}
+                                    title={t('form.autoSort')}
+                                >
+                                    <ArrowDownWideNarrow className="size-3.5" />
+                                    <span>{t('form.autoSort')}</span>
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t('form.autoSortHint')}</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    <button
+                        type="button"
+                        onClick={onClear}
+                        disabled={members.length === 0}
+                        className={cn(
+                            'flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors',
+                            members.length === 0
+                                ? 'text-muted-foreground/50 cursor-not-allowed'
+                                : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                        )}
+                        title={t('form.clear')}
+                    >
+                        <Trash2 className="size-3.5" />
+                        <span>{t('form.clear')}</span>
+                    </button>
+                </span>
             </div>
 
             <div className="flex-1 min-h-0">
@@ -347,6 +373,30 @@ export function GroupEditor({
     const handleClearMembers = useCallback(() => {
         setSelectedMembers([]);
         setRemovingIds(new Set());
+    }, []);
+
+    const handleAutoSort = useCallback(() => {
+        setSelectedMembers((prev) => {
+            if (prev.length === 0) return prev;
+            const sorted = [...prev].sort((a, b) => {
+                const tierA = a.is_reserve ? 1 : 0;
+                const tierB = b.is_reserve ? 1 : 0;
+                if (tierA !== tierB) return tierA - tierB;
+                const balanceA = a.balance ?? 0;
+                const balanceB = b.balance ?? 0;
+                const rateA = a.rate ?? Number.POSITIVE_INFINITY;
+                const rateB = b.rate ?? Number.POSITIVE_INFINITY;
+                if (tierA === 0) {
+                    if (balanceA !== balanceB) return balanceB - balanceA;
+                    if (rateA !== rateB) return rateA - rateB;
+                } else {
+                    if (rateA !== rateB) return rateA - rateB;
+                    if (balanceA !== balanceB) return balanceB - balanceA;
+                }
+                return 0;
+            });
+            return sorted;
+        });
     }, []);
 
     const isValid = groupKey.length > 0 && selectedMembers.length > 0 && !regexError;
@@ -546,6 +596,7 @@ export function GroupEditor({
                                 removingIds={removingIds}
                                 showWeight={mode === 4}
                                 onClear={handleClearMembers}
+                                onAutoSort={handleAutoSort}
                             />
                         </div>
                     </div>

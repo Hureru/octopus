@@ -1,1136 +1,1944 @@
 {
-    "login": {
-        "username": "用户名",
-        "usernamePlaceholder": "请输入用户名",
-        "password": "密码",
-        "passwordPlaceholder": "请输入密码",
-        "apikey": "API 密钥",
-        "apikeyPlaceholder": "请输入 API 密钥 (sk-octopus-...)",
-        "mode": {
-            "user": "账户登录",
-            "apikey": "密钥登录"
-        },
-        "error": {
-            "generic": "登录失败,请检查登录凭据"
-        },
-        "button": {
-            "loading": "登录中...",
-            "submit": "登录"
-        }
+  "login": {
+    "username": "用户名",
+    "usernamePlaceholder": "请输入用户名",
+    "password": "密码",
+    "passwordPlaceholder": "请输入密码",
+    "apikey": "API 密钥",
+    "apikeyPlaceholder": "请输入 API 密钥 (sk-octopus-...)",
+    "mode": {
+      "user": "账户登录",
+      "apikey": "密钥登录"
     },
-    "apiKeyDashboard": {
-        "error": "加载数据失败",
-        "logout": "退出",
-        "requestStats": "请求统计",
-        "totalStats": "全部统计",
-        "inputStats": "输入统计",
-        "outputStats": "输出统计",
-        "requestCount": "请求次数",
-        "timeConsumed": "消耗时间",
-        "totalToken": "消耗 Token",
-        "totalCost": "消耗费用",
-        "inputTokens": "输入 Tokens",
-        "inputCost": "输入费用",
-        "outputTokens": "输出 Tokens",
-        "outputCost": "输出费用",
-        "successRequests": "成功请求",
-        "failedRequests": "失败请求",
-        "quota": "剩余额度",
-        "unlimited": "无限制",
-        "expireAt": "过期时间",
-        "neverExpire": "永不过期",
-        "daysLeft": "天后到期",
-        "expired": "已过期",
-        "supportedModels": "支持的模型"
+    "error": {
+      "generic": "登录失败,请检查登录凭据"
     },
-    "navbar": {
-        "home": "主页",
-        "site": "站点",
-        "channel": "渠道",
-        "group": "分组",
-        "key": "密钥",
-        "model": "价格",
-        "log": "日志",
-        "setting": "设置"
+    "button": {
+      "loading": "登录中...",
+      "submit": "登录"
+    }
+  },
+  "apiKeyDashboard": {
+    "error": "加载数据失败",
+    "logout": "退出",
+    "requestStats": "请求统计",
+    "totalStats": "全部统计",
+    "inputStats": "输入统计",
+    "outputStats": "输出统计",
+    "requestCount": "请求次数",
+    "timeConsumed": "消耗时间",
+    "totalToken": "消耗 Token",
+    "totalCost": "消耗费用",
+    "inputTokens": "输入 Tokens",
+    "inputCost": "输入费用",
+    "outputTokens": "输出 Tokens",
+    "outputCost": "输出费用",
+    "successRequests": "成功请求",
+    "failedRequests": "失败请求",
+    "quota": "剩余额度",
+    "unlimited": "无限制",
+    "expireAt": "过期时间",
+    "neverExpire": "永不过期",
+    "daysLeft": "天后到期",
+    "expired": "已过期",
+    "supportedModels": "支持的模型",
+    "copied": "已复制 {label}",
+    "toggleTheme": "切换主题",
+    "toggleLanguage": "切换语言"
+  },
+  "navbar": {
+    "navigation": "主导航",
+    "home": "主页",
+    "site": "站点",
+    "channel": "渠道",
+    "group": "分组",
+    "key": "密钥",
+    "model": "模型",
+    "log": "日志",
+    "setting": "设置"
+  },
+  "toolbar": {
+    "search": {
+      "open": "打开搜索",
+      "input": "搜索当前视图",
+      "close": "清空并关闭搜索"
     },
-    "toolbar": {
-        "popover": {
-            "ariaLabel": "视图选项",
-            "layout": "布局",
-            "sort": "排序",
-            "grid": "网格",
-            "list": "列表",
-            "nameAsc": "名称正序",
-            "nameDesc": "名称倒序",
-            "createdAsc": "时间正序",
-            "createdDesc": "时间倒序",
-            "balanceDesc": "余额高到低",
-            "balanceAsc": "余额低到高",
-            "asc": "升序",
-            "desc": "降序",
-            "logRefresh": {
-                "refresh": "刷新日志"
-            },
-            "logFilter": {
-                "title": "日志筛选",
-                "clearAll": "清除筛选",
-                "date": {
-                    "title": "时间范围",
-                    "startPlaceholder": "开始时间",
-                    "endPlaceholder": "结束时间",
-                    "clear": "清除时间",
-                    "hint": "可选时间会受设置中的日志保留天数限制。"
-                },
-                "search": {
-                    "title": "搜索模式",
-                    "mode": {
-                        "prefix": "前缀",
-                        "exact": "精确",
-                        "contains": "包含"
-                    },
-                    "includeContent": "搜索请求/响应内容",
-                    "slowHint": "包含模式（特别是搜索内容）较慢，建议配合时间范围使用。"
-                },
-                "channel": {
-                    "title": "渠道",
-                    "searchPlaceholder": "搜索渠道...",
-                    "manualGroup": "手动渠道",
-                    "siteFallback": "站点 #{id}",
-                    "empty": "未找到渠道"
-                }
-            }
-        }
-    },
-    "common": {
-        "copy": {
-            "success": "复制成功",
-            "failed": "复制失败",
-            "noContent": "无可复制内容"
-        }
-    },
-    "home": {
-        "activity": {
-            "requestCount": "请求次数",
-            "waitTime": "等待时间",
-            "totalToken": "消耗 Token",
-            "totalCost": "消耗费用",
-            "noData": "无数据"
+    "popover": {
+      "ariaLabel": "视图选项",
+      "layout": "布局",
+      "sort": "排序",
+      "grid": "网格",
+      "list": "列表",
+      "nameAsc": "名称正序",
+      "nameDesc": "名称倒序",
+      "createdAsc": "时间正序",
+      "createdDesc": "时间倒序",
+      "balanceDesc": "余额高到低",
+      "balanceAsc": "余额低到高",
+      "asc": "升序",
+      "desc": "降序",
+      "logRefresh": {
+        "refresh": "刷新日志"
+      },
+      "logFilter": {
+        "title": "日志筛选",
+        "clearAll": "清除筛选",
+        "date": {
+          "title": "时间范围",
+          "startPlaceholder": "开始时间",
+          "endPlaceholder": "结束时间",
+          "clear": "清除时间",
+          "hint": "可选时间会受设置中的日志保留天数限制。"
         },
-        "summary": {
-            "periods": {
-                "today": "今日",
-                "last7Days": "7 天",
-                "last30Days": "30 天",
-                "allTime": "累计"
-            },
-            "headline": {
-                "today": "今日花费",
-                "last7Days": "近 7 天花费",
-                "last30Days": "近 30 天花费",
-                "allTime": "累计总花费"
-            },
-            "metrics": {
-                "requests": "请求",
-                "tokens": "Token",
-                "waitTime": "耗时"
-            }
-        },
-        "rank": {
-            "title": "排行榜",
-            "sortByCost": "金额",
-            "sortByCount": "次数",
-            "sortByTokens": "Tokens",
-            "noData": "暂无排行数据",
-            "successRate": "成功率"
-        },
-        "groupHealth": {
-            "title": "分组健康",
-            "total": "{count} 个分组",
-            "running": "{count} 运行中",
-            "success": "{count} 健康",
-            "partial": "{count} 部分可用",
-            "failed": "{count} 失败",
-            "idle": "{count} 未检查",
-            "runAll": "全部检查",
-            "runAllFull": "全部完整探活",
-            "viewDetails": "查看详情",
-            "detailTitle": "分组健康详情",
-            "detailDescription": "在首页查看各分组最新健康快照，并直接执行标准探活或完整探活。"
-        }
-    },
-    "setting": {
-        "appearance": "外观",
-        "theme": {
-            "label": "主题",
-            "light": "浅色",
-            "dark": "深色",
-            "system": "跟随系统"
-        },
-        "language": {
-            "label": "语言",
-            "zh_hans": "简体中文",
-            "zh_hant": "繁体中文",
-            "en": "English"
-        },
-        "proxyUrl": {
-            "label": "代理地址",
-            "placeholder": "请输入代理地址"
-        },
-        "apiBaseUrl": {
-            "label": "API 地址",
-            "placeholder": "https://octopus.example.com",
-            "description": "客户端访问本服务的基础地址，填写后 API 密钥列表将显示导出按钮"
-        },
-        "statsSaveInterval": {
-            "label": "统计保存周期（分钟）",
-            "placeholder": "请输入周期（分钟）"
-        },
-        "corsAllowOrigins": {
-            "label": "CORS 跨域白名单",
-            "hint": "为空禁止跨域，* 允许所有",
-            "example": "只允许指定域名: https://example.com,https://example2.com"
-        },
-        "responsesWS": {
-            "label": "OpenAI Responses WebSocket",
-            "description": "为客户端 WebSocket /v1/responses 入站启用上游 WebSocket。「启用 · 默认关闭」表示能力开启但默认不使用，渠道可单独开启；直通/转换为渠道未覆盖时的默认模式。",
-            "mode": {
-                "disabled": "禁用",
-                "defaultOff": "启用 · 默认关闭",
-                "passthrough": "启用 · 直通",
-                "transform": "启用 · 转换"
-            }
-        },
-        "sseHeartbeat": {
-            "label": "SSE 心跳间隔（秒）",
-            "description": "同时作为流中心跳间隔与上游流建立前的首次心跳延迟；设置为 0 禁用。Cloudflare 反代场景建议 30-60 秒。",
-            "compatibility": "部分客户端可能错误处理 SSE 注释，如遇兼容问题可关闭。",
-            "placeholder": "0 = 禁用，建议 30-60"
-        },
-        "groupHealth": {
-            "label": "分组健康检查",
-            "description": "启用后显示首页分组健康摘要、分组卡片健康状态，并允许手动运行健康检查。"
-        },
-        "circuitBreaker": {
-            "title": "熔断器配置",
-            "threshold": {
-                "label": "熔断触发阈值（连续失败次数）",
-                "placeholder": "请输入阈值"
-            },
-            "cooldown": {
-                "label": "基础冷却时间（秒）",
-                "placeholder": "请输入冷却时间"
-            },
-            "maxCooldown": {
-                "label": "最大冷却时间（秒）",
-                "placeholder": "请输入最大冷却时间"
-            },
-            "hint": "当渠道连续失败达到阈值后触发熔断，冷却时间按指数退避增长，上限为最大冷却时间"
-        },
-        "outlierRetirement": {
-            "title": "被动离群退役",
-            "hint": "根据真实请求的成败记录，自动暂时禁用持续失败的站点投影渠道（禁用而非删除），之后定期探测，确认恢复后自动重新启用。禁用前会参考同站点其他渠道的状态，并发送探测请求复核，避免误判；每个账号始终保留至少一个启用的渠道。仅作用于站点投影渠道，默认关闭。",
-            "enabled": {
-                "label": "启用被动离群退役"
-            },
-            "interval": {
-                "label": "评估间隔（分钟）",
-                "description": "后台每隔该时间运行一轮评估与恢复探测。",
-                "placeholder": "请输入间隔分钟数"
-            },
-            "failRate": {
-                "label": "失败率阈值（%）",
-                "description": "窗口内失败请求占比达到该值，渠道才可能被判定为异常。",
-                "placeholder": "请输入失败率百分比"
-            },
-            "minSamples": {
-                "label": "最小样本数",
-                "description": "窗口内请求数不足该值时不做判定，避免流量稀少时误判。",
-                "placeholder": "请输入最小样本数"
-            },
-            "consecFails": {
-                "label": "连续失败阈值",
-                "description": "失败率达标后，还需最近连续失败达到该次数（或窗口内无任何成功）才会进入退役流程。",
-                "placeholder": "请输入连续失败次数"
-            },
-            "windowMinutes": {
-                "label": "滚动窗口时长（分钟）",
-                "description": "只统计最近这段时间内的请求记录，更早的记录自动失效。",
-                "placeholder": "请输入窗口分钟数"
-            },
-            "windowCapacity": {
-                "label": "窗口样本上限（≤20）",
-                "description": "窗口内最多保留的请求记录条数，超出时丢弃最旧的。",
-                "placeholder": "请输入样本上限"
-            },
-            "recoverStreak": {
-                "label": "恢复探测成功次数",
-                "description": "已退役渠道连续探测成功达到该次数后，自动重新启用。",
-                "placeholder": "请输入成功次数"
-            },
-            "reapMinutes": {
-                "label": "空闲窗口回收（分钟）",
-                "description": "渠道超过该时间没有新请求时，释放其统计窗口占用的内存。",
-                "placeholder": "请输入回收分钟数"
-            },
-            "cfRecoverMinutes": {
-                "label": "Cloudflare 恢复冷却（分钟）",
-                "description": "因 Cloudflare 拦截被退役的渠道，等待该时间后才开始恢复探测，减少无效探测。",
-                "placeholder": "请输入冷却分钟数"
-            }
-        },
-        "saved": "已保存",
-        "saveFailed": "保存失败",
-        "backup": {
-            "export": {
-                "title": "导出",
-                "includeStats": "包含统计",
-                "button": "导出 JSON",
-                "exporting": "导出中...",
-                "success": "开始导出",
-                "failed": "导出失败",
-                "withLogsButton": "导出含日志归档 (ZIP)",
-                "withLogsWarning": "含日志归档为 ZIP 流式导出，仅供留存查阅，无法导入恢复。"
-            },
-            "import": {
-                "title": "导入（增量）",
-                "selected": "已选择文件",
-                "button": "导入 JSON",
-                "importing": "导入中...",
-                "noFile": "请先选择 JSON 文件",
-                "invalidFileType": "仅支持 JSON（.json）格式的备份文件",
-                "success": "导入成功",
-                "failed": "导入失败",
-                "result": "导入结果"
-            }
-        },
-        "apiKey": {
-            "title": "API 密钥",
-            "empty": "暂无 API 密钥",
-            "add": "添加密钥",
-            "loadFailed": "加载失败",
-            "export": {
-                "title": "导出到客户端",
-                "cliTool": "CLI 工具",
-                "mainModel": "主模型",
-                "name": "名称",
-                "namePlaceholder": "请输入配置名称",
-                "haikuModel": "Haiku 模型",
-                "sonnetModel": "Sonnet 模型",
-                "opusModel": "Opus 模型",
-                "none": "不设置",
-                "apiType": "API 类型",
-                "hint": "需已安装对应客户端，浏览器将请求打开外部应用",
-                "import": "导入到 {platform}"
-            },
-            "form": {
-                "name": "名称",
-                "maxCost": "最大金额",
-                "maxCostPlaceholder": "请输入金额",
-                "unlimited": "无限制",
-                "maxRPM": "每分钟最大请求数 (RPM)",
-                "maxRPMPlaceholder": "请输入限制",
-                "expireAt": "过期日期",
-                "selectDate": "选择日期",
-                "neverExpire": "永不过期",
-                "supportedModels": "支持的模型",
-                "noModels": "暂无可选模型",
-                "modelsHint": "不选择则为无限制",
-                "enabled": "是否启用",
-                "cancel": "取消",
-                "create": "创建",
-                "save": "保存",
-                "confirm": "确认"
-            },
-            "stats": {
-                "noData": "暂无统计数据",
-                "inputToken": "输入 Token",
-                "outputToken": "输出 Token",
-                "inputCost": "输入费用",
-                "outputCost": "输出费用",
-                "requestSuccess": "成功请求",
-                "requestFailed": "失败请求"
-            },
-            "toast": {
-                "createSuccess": "API 密钥创建成功",
-                "createError": "API 密钥创建失败",
-                "updateSuccess": "API 密钥更新成功",
-                "updateError": "API 密钥更新失败",
-                "deleteSuccess": "API 密钥删除成功",
-                "deleteError": "API 密钥删除失败"
-            }
-        },
-        "account": {
-            "title": "账户设置",
-            "save": "保存",
-            "saving": "保存中...",
-            "username": {
-                "label": "修改用户名",
-                "placeholder": "请输入新用户名",
-                "empty": "用户名不能为空",
-                "success": "用户名修改成功",
-                "failed": "用户名修改失败"
-            },
-            "password": {
-                "label": "修改密码",
-                "oldPlaceholder": "请输入当前密码",
-                "newPlaceholder": "请输入新密码",
-                "confirmPlaceholder": "请确认新密码",
-                "oldEmpty": "请输入当前密码",
-                "newEmpty": "请输入新密码",
-                "mismatch": "两次输入的密码不一致",
-                "tooShort": "密码长度至少为6位",
-                "change": "修改密码",
-                "success": "密码修改成功",
-                "failed": "密码修改失败"
-            }
-        },
-        "info": {
-            "title": "版本信息",
-            "currentVersion": "当前版本",
-            "latestVersion": "最新版本",
-            "buildTime": "构建时间",
-            "publishedAt": "发布时间",
-            "github": "GitHub 仓库",
-            "unknown": "未知",
-            "versionMismatch": "版本不匹配",
-            "versionMismatchHint": "前端版本 ({frontend}) 与后端版本 ({backend}) 不一致，可能是浏览器缓存问题，请强制刷新页面。",
-            "forceRefresh": "强制刷新",
-            "newVersionAvailable": "发现新版本可用",
-            "newVersionAvailableHint": "请先备份数据，然后更新系统",
-            "updateNow": "立即更新",
-            "updating": "更新中...",
-            "updateSuccess": "更新成功，服务即将重启",
-            "updateFailed": "更新失败"
-        },
-        "log": {
-            "title": "历史日志",
-            "enabled": {
-                "label": "启用历史日志"
-            },
-            "keepPeriod": {
-                "label": "日志保存天数",
-                "placeholder": "请输入天数"
-            },
-            "clear": {
-                "label": "清空历史日志",
-                "button": "清空",
-                "clearing": "清空中..."
-            },
-            "clearSuccess": "日志已清空",
-            "clearFailed": "清空失败"
-        },
-        "network": {
-            "title": "网络与服务"
-        },
-        "reliability": {
-            "title": "可靠性"
-        },
-        "syncTasks": {
-            "title": "同步与定时任务",
-            "intervalPlaceholder": "间隔（小时）",
-            "last": "上次",
-            "never": "从未执行",
-            "llmSync": {
-                "label": "渠道同步",
-                "button": "立即同步",
-                "pending": "同步中...",
-                "success": "渠道同步成功",
-                "failed": "渠道同步失败"
-            },
-            "llmPrice": {
-                "label": "模型价格更新",
-                "button": "立即更新",
-                "pending": "更新中...",
-                "success": "价格更新成功",
-                "failed": "价格更新失败"
-            },
-            "siteSync": {
-                "label": "站点全量同步",
-                "button": "立即同步",
-                "pending": "同步中...",
-                "success": "已触发后台站点全量同步",
-                "failed": "触发同步失败"
-            },
-            "siteCheckin": {
-                "label": "站点全量签到",
-                "button": "立即签到",
-                "pending": "签到中...",
-                "success": "已触发后台站点全量签到",
-                "failed": "触发签到失败"
-            }
-        },
-        "data": {
-            "title": "数据管理"
-        },
-        "webdavBackup": {
-            "title": "WebDAV 备份",
-            "url": {
-                "label": "WebDAV 地址",
-                "placeholder": "https://dav.example.com/dav"
-            },
-            "username": {
-                "label": "用户名",
-                "placeholder": "用户名"
-            },
-            "password": {
-                "label": "密码",
-                "placeholder": "密码"
-            },
-            "backupPath": {
-                "label": "远程目录",
-                "placeholder": "/octopus-backups"
-            },
-            "interval": {
-                "label": "自动备份间隔(小时)",
-                "placeholder": "0 = 禁用",
-                "description": "设为 0 表示禁用自动备份"
-            },
-            "retentionCount": {
-                "label": "保留份数",
-                "placeholder": "10"
-            },
-            "includeStats": "包含统计数据",
-            "testConnection": "测试连接",
-            "testSuccess": "连接成功",
-            "testFailed": "连接失败",
-            "testing": "测试中...",
-            "triggerBackup": "立即备份",
-            "triggerSuccess": "备份成功",
-            "triggerFailed": "备份失败",
-            "triggering": "备份中...",
-            "backupList": "远程备份列表",
-            "loading": "加载中...",
-            "loadError": "加载备份列表失败",
-            "noBackups": "暂无备份文件",
-            "restore": "恢复",
-            "restoring": "恢复中...",
-            "restoreSuccess": "恢复成功",
-            "restoreFailed": "恢复失败",
-            "restoreConfirm": "确认从此备份恢复？已有数据将被增量覆盖。",
-            "fileName": "文件名",
-            "fileSize": "大小",
-            "modifiedAt": "修改时间",
-            "refresh": "刷新",
-            "notConfigured": "WebDAV 未配置"
-        }
-    },
-    "group": {
-        "toast": {
-            "created": "创建成功",
-            "createFailed": "创建失败",
-            "updated": "更新成功",
-            "updateFailed": "更新失败",
-            "deleted": "删除成功",
-            "deleteFailed": "删除失败",
-            "autoAddFailed": "自动添加失败",
-            "pinned": "已置顶",
-            "unpinned": "已取消置顶",
-            "pinFailed": "置顶操作失败"
-        },
-        "pin": {
-            "pin": "置顶",
-            "unpin": "取消置顶"
-        },
-        "preset": {
-            "title": "预设",
-            "saveCurrent": "保存当前",
-            "createBlank": "创建空白",
-            "autoNamePrefix": "新预设",
-            "cloneSuffix": "副本",
-            "namePlaceholder": "为预设命名",
-            "name": "预设名称",
-            "close": "关闭",
-            "loading": "加载中...",
-            "empty": "暂无预设",
-            "activeBadge": "当前",
-            "edit": "编辑",
-            "clone": "克隆",
-            "delete": "删除",
-            "confirmDelete": "删除预设 {name}？",
-            "confirm": "确定",
-            "editorTitle": "编辑预设",
-            "save": "保存",
-            "saving": "保存中...",
-            "toast": {
-                "created": "预设已保存",
-                "createFailed": "预设保存失败",
-                "createBlankFailed": "空白预设创建失败",
-                "cloned": "预设已克隆",
-                "cloneFailed": "克隆失败",
-                "activated": "预设已激活",
-                "activateFailed": "预设激活失败",
-                "deleted": "预设已删除",
-                "deleteFailed": "删除失败",
-                "updated": "预设已更新",
-                "updateFailed": "预设更新失败"
-            }
-        },
-        "create": {
-            "title": "创建分组",
-            "submit": "创建",
-            "submitting": "创建中..."
-        },
-        "card": {
-            "empty": "暂无规则"
-        },
-        "detail": {
-            "actions": {
-                "edit": "编辑",
-                "cancel": "取消",
-                "save": "保存",
-                "copyName": "复制名称",
-                "delete": "删除",
-                "confirmDelete": "确认删除"
-            }
-        },
-        "form": {
-            "name": "分组名称",
-            "matchRegex": "匹配正则",
-            "matchRegexPlaceholder": "留空则默认按分组名称模糊匹配",
-            "matchRegexInvalid": "正则无效",
-            "firstTokenTimeOut": "首字超时",
-            "firstTokenTimeOutHint": "单位秒，仅流式响应起效，0 表示不限制",
-            "sessionKeepTime": "会话保持",
-            "sessionKeepTimeHint": "单位秒，会话期间保持使用同一渠道，0 表示禁用",
-            "retryEnabled": "同通道重试",
-            "retryEnabledHint": "启用后，遇到 429/5xx 等可重试错误时先在同通道重试，全部失败后透传状态码给客户端",
-            "maxRetries": "最大重试",
-            "maxRetriesHint": "同通道重试次数，仅在开启同通道重试时生效",
-            "items": "已选模型",
-            "addItem": "添加模型",
-            "autoAdd": "自动添加",
-            "clear": "清空",
-            "selectChannel": "渠道",
-            "selectModel": "模型"
-        },
-        "mode": {
-            "roundRobin": "轮询",
-            "random": "随机",
-            "failover": "故障转移",
-            "weighted": "加权分配"
-        },
-        "health": {
-            "title": "健康",
-            "detailTitle": "分组健康详情",
-            "run": "检查",
-            "runFull": "完整探活",
-            "lastRun": "上次检查 {time}",
-            "never": "从未检查",
-            "status": "状态",
-            "healthy": "健康",
-            "healthyCount": "{success}/{total} 健康",
-            "duration": "耗时",
-            "attempts": "尝试",
-            "attemptListToggle": "尝试列表（{count}）",
-            "attemptStatus": {
-                "success": "成功",
-                "failed": "失败",
-                "skipped": "跳过"
-            },
-            "statusValue": {
-                "idle": "未检查",
-                "running": "检查中",
-                "success": "健康",
-                "partial": "部分可用",
-                "failed": "失败"
-            },
-            "probeMode": {
-                "standard": "标准",
-                "full": "完整"
-            },
-            "empty": "暂无健康快照。",
-            "errorDetails": "错误详情",
-            "noHttpStatus": "无 HTTP 状态"
-        },
-        "empty": "暂无分组，点击左上角按钮创建",
-        "autoGroup": {
-            "title": "自动分组配置",
-            "description": "将渠道或站点分组加入列表后，系统会按模型组名称或正则自动把模型加入匹配的模型组。",
-            "loadFailed": "加载自动分组配置失败：{message}",
-            "searchPlaceholder": "搜索...",
-            "runAll": "立即执行全部已启用",
-            "loading": "加载中...",
-            "emptyChannels": "暂无渠道",
-            "matchMode": "匹配方式",
-            "notice": "关闭某渠道的自动分组或全局设置后，不会删除已存在的模型组成员；如需清理，请在具体模型组中手动移除。",
-            "global": {
-                "title": "全局默认模式",
-                "description": "开启后，所有站点投影渠道会统一使用所选匹配方式；下方单独渠道设置会保留，并在全局关闭后生效。"
-            },
-            "sections": {
-                "channels": "渠道列表"
-            },
-            "source": {
-                "siteGroup": "站点组",
-                "disabled": "停用",
-                "modelCount": "{count} 个模型",
-                "moreModels": "+{count} 个",
-                "noModels": "暂无模型",
-                "unknownSite": "未知站点",
-                "manualGroup": "普通渠道",
-                "followingGlobalTip": "全局已开启，此渠道当前按全局模式分组；下方单独模式将在全局关闭后生效。"
-            },
-            "bulk": {
-                "selected": "已选 {count} 项",
-                "apply": "应用",
-                "clear": "清除",
-                "placeholder": "批量设为..."
-            },
-            "mode": {
-                "none": "关闭",
-                "fuzzy": "模糊匹配",
-                "exact": "精确匹配",
-                "regex": "正则匹配"
-            },
-            "buttons": {
-                "cancel": "取消",
-                "save": "保存",
-                "saving": "保存中...",
-                "saveAndRun": "保存并立即执行",
-                "running": "执行中..."
-            },
-            "toast": {
-                "saved": "自动分组配置已保存",
-                "savedAndRun": "自动分组配置已保存并执行",
-                "saveFailed": "保存自动分组配置失败",
-                "runSuccess": "已执行自动分组",
-                "runFailed": "执行自动分组失败"
-            }
-        }
-    },
-    "model": {
-        "create": {
-            "title": "创建模型",
-            "name": "模型名称",
-            "input": "输入价格",
-            "output": "输出价格",
-            "cacheRead": "缓存读取",
-            "cacheWrite": "缓存写入",
-            "submit": "创建",
-            "submitting": "创建中..."
-        },
-        "toast": {
-            "updated": "模型价格已更新",
-            "updateFailed": "更新失败",
-            "deleted": "模型已删除",
-            "deleteFailed": "删除失败"
-        },
-        "card": {
-            "inputCache": "输入/缓存",
-            "outputCache": "输出/缓存",
-            "edit": "编辑",
-            "delete": "删除"
-        },
-        "overlay": {
-            "cancel": "取消",
-            "deleting": "删除中...",
-            "confirmDelete": "确认删除",
-            "input": "输入",
-            "output": "输出",
-            "cacheRead": "缓存读取",
-            "cacheWrite": "缓存写入",
-            "save": "保存"
-        }
-    },
-    "log": {
-        "list": {
-            "noMore": "没有更多日志了"
-        },
-        "card": {
-            "error": "错误",
-            "errorInfo": "错误信息",
-            "firstToken": "首字",
-            "totalTime": "总耗时",
-            "duration": "耗时",
-            "input": "输入",
-            "output": "输出",
-            "cost": "费用",
-            "requestContent": "请求内容",
-            "responseContent": "响应内容",
-            "noRequestContent": "(无请求内容)",
-            "noResponseContent": "(无响应内容)",
-            "firstTokenTime": "首字时间",
-            "tokens": "tokens",
-            "retryDetails": "重试详情",
-            "attempts": "次尝试",
-            "success": "成功",
-            "failed": "失败",
-            "skipped": "跳过",
-            "circuitBreak": "熔断",
-            "disableModel": "禁用模型",
-            "disabling": "禁用中",
-            "disabled": "已禁用",
-            "ws": "WS",
-            "wsContinuation": "续传",
-            "wsReplay": "回放",
-            "wsPassthrough": "直通",
-            "wsTransform": "转换",
-            "wsReconnect": "重连恢复",
-            "wsReplayRecovery": "回放恢复",
-            "wsDowngrade": "降级",
-            "wsFreshHint": "本次请求走了上游 WebSocket 新会话。",
-            "wsContinuationHint": "本次请求直接续上了上游 WebSocket 会话。",
-            "wsReplayHint": "本次请求走了上游 WebSocket，但为了恢复上下文回放了历史内容。",
-            "wsPassthroughHint": "上游 WebSocket 事件原样直通下游，未经过内部 transformer 管线。",
-            "wsTransformHint": "上游 WebSocket 事件经过内部 transformer 管线处理。",
-            "wsReconnectHint": "本次请求原本的上游 WebSocket 链路已断开，重新建立连接后恢复成功。",
-            "wsReplayRecoveryHint": "本次请求先尝试续传失败，随后自动回放历史内容恢复了上下文，并建立了新的续传锚点。",
-            "wsDowngradeHint": "本次请求原本尝试走上游 WebSocket，但因上游不可用已自动降级为 HTTP。",
-            "inputDetails": "输入明细",
-            "transportInput": "传输输入",
-            "billInput": "计费输入",
-            "cacheRead": "缓存读取",
-            "cacheWrite": "缓存写入"
-        },
-        "filters": {
-            "keywordPlaceholder": "搜索模型、API Key 或内容",
-            "channel": "渠道",
-            "allChannels": "全部渠道",
-            "status": "状态",
-            "allStatus": "全部状态",
-            "success": "成功",
-            "error": "错误",
-            "reset": "重置",
-            "refresh": "刷新"
-        },
-        "pagination": {
-            "prev": "上一页",
-            "next": "下一页",
-            "page": "第 {page} 页",
-            "pagesRange": "第 {from} ~ {to} 页"
-        }
-    },
-    "channel": {
-        "tabs": {
-            "site": "站点渠道",
-            "manual": "普通渠道"
-        },
-        "card": {
-            "requestCount": "请求次数",
-            "totalCost": "总成本",
-            "toast": {
-                "enabled": "渠道已启用",
-                "disabled": "渠道已禁用"
-            }
-        },
-        "detail": {
-            "title": {
-                "edit": "编辑渠道",
-                "view": "渠道详情"
-            },
-            "sections": {
-                "requests": "请求详情",
-                "tokens": "Token 使用",
-                "costs": "成本详情",
-                "baseUrls": "Base URLs",
-                "keys": "密钥"
-            },
-            "noBaseUrls": "暂无 Base URL",
-            "noKeys": "暂无密钥",
-            "metrics": {
-                "totalRequests": "总请求",
-                "totalToken": "总 Token",
-                "totalCost": "总成本",
-                "successRequests": "成功请求",
-                "failedRequests": "失败请求",
-                "inputToken": "输入 Token",
-                "outputToken": "输出 Token",
-                "inputCost": "输入成本",
-                "outputCost": "输出成本",
-                "avgWaitTime": "等待时间"
-            },
-            "actions": {
-                "edit": "编辑",
-                "cancel": "取消",
-                "save": "保存",
-                "saving": "保存中...",
-                "delete": "删除",
-                "confirmDelete": "确认删除",
-                "deleting": "删除中..."
-            }
-        },
-        "create": {
-            "dialogTitle": "创建新渠道",
-            "submit": "创建渠道",
-            "submitting": "创建中..."
-        },
-        "form": {
-            "add": "添加",
-            "name": "渠道名称",
-            "type": "渠道类型",
-            "baseUrls": "Base URLs",
-            "baseUrlUrl": "地址",
-            "baseUrlDelay": "延迟(ms)",
-            "advanced": "高级设置",
-            "apiKey": "API Key",
-            "customHeader": "自定义 Header",
-            "customHeaderKey": "Header Key",
-            "customHeaderValue": "Header Value",
-            "customHeaderAdd": "添加 Header",
-            "channelProxy": "渠道代理",
-            "channelProxyPlaceholder": "可选：仅对该渠道生效（覆盖全局代理）",
-            "paramOverride": "参数覆盖",
-            "paramOverridePlaceholder": "可选：JSON 字符串，用于覆盖请求参数",
-            "model": "模型",
-            "enabled": "启用",
-            "proxy": "使用代理",
-            "modelCustomPlaceholder": "自定义模型名称",
-            "modelAdd": "添加",
-            "modelRefresh": "刷新",
-            "modelRefreshSuccess": "模型列表获取成功",
-            "modelRefreshFailed": "模型列表获取失败",
-            "modelRefreshEmpty": "未获取到模型列表",
-            "modelSelected": "已选模型",
-            "modelNoSelected": "暂未选择模型",
-            "modelClearAll": "清除全部",
-            "typeOpenAIChat": "OpenAI Chat",
-            "typeOpenAIResponse": "OpenAI Response",
-            "typeOpenAIEmbedding": "OpenAI Embedding",
-            "typeAnthropic": "Anthropic",
-            "typeGemini": "Gemini",
-            "typeVolcengine": "火山引擎",
-            "autoSync": "自动同步",
-            "autoGroup": "自动分组",
-            "autoGroupNone": "不自动分组",
-            "autoGroupFuzzy": "模糊匹配",
-            "autoGroupExact": "准确匹配",
-            "autoGroupRegex": "正则匹配",
-            "wsMode": "Responses WS 模式",
-            "wsModeInherit": "跟随全局",
-            "wsModePassthrough": "直通",
-            "wsModeTransform": "转换",
-            "wsModeOff": "关闭",
-            "matchRegex": "匹配正则",
-            "matchRegexPlaceholder": "可选：用于匹配请求模型名称的正则表达式",
-            "remark": "备注"
-        }
-    },
-    "siteChannel": {
-        "card": {
-            "statusEnabled": "启用",
-            "statusDisabled": "停用",
-            "maskedPending": "{n} 待同步",
-            "noRouteDistribution": "暂无模型分布",
-            "metrics": {
-                "totalRequests": "请求",
-                "successRequests": "成功",
-                "failedRequests": "失败",
-                "totalCost": "成本",
-                "lastRequestAt": "最近使用"
-            }
-        },
-        "advanced": {
-            "title": "站点渠道高级设置",
-            "description": "配置分组 {group} 下各投影渠道的参数覆盖。自动分组请前往「模型组」页面右上角统一配置，自定义 Header 请在站点设置中统一配置。",
-            "channelList": "投影渠道",
-            "empty": "当前分组暂无投影渠道",
-            "paramOverride": "参数覆盖 JSON",
-            "paramOverridePlaceholder": "留空表示清除；非空时必须是 JSON 对象，例如：{\"temperature\":0.7,\"max_tokens\":4096}",
-            "cancel": "取消",
-            "save": "保存",
-            "saving": "保存中...",
-            "saved": "高级设置已保存",
-            "invalidParamOverride": "参数覆盖必须是合法的 JSON 对象",
-            "saveFailed": "保存高级设置失败"
-        }
-    },
-    "siteImport": {
-        "errors": {
-            "invalidJson": "导入内容不是有效的 JSON，请检查文件格式或粘贴内容。",
-            "emptyPayload": "导入内容为空，请选择 JSON 文件或粘贴导出内容。",
-            "unrecognizedAllAPIHub": "未识别到 All API Hub 导出数据，请确认选择了正确的导出 JSON。",
-            "unrecognizedMetapi": "未识别到 Metapi 账号导出数据，请确认选择了正确的导出 JSON。",
-            "noImportableAllAPIHub": "未找到可导入的 All API Hub 站点账号数据。",
-            "noImportableMetapi": "未找到可导入的 Metapi 站点账号数据。"
-        }
-    },
-    "siteSync": {
-        "errors": {
-            "missingGroupKey": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。"
-        }
-    },
-    "errors": {
-        "common": {
-            "invalid_json": "请求内容不是有效的 JSON。",
-            "invalid_param": "请求参数无效。",
-            "validation_failed": "输入校验失败，请检查后重试。",
-            "bad_request": "请求参数有误。",
-            "not_found": "请求的资源不存在。",
-            "duplicate_resource": "资源已存在。",
-            "database_error": "数据库操作失败，请稍后重试。",
-            "internal_error": "服务内部错误，请稍后重试。"
-        },
-        "auth": {
-            "unauthorized": "请先登录后再继续操作。",
-            "forbidden": "没有权限执行此操作。",
-            "invalid_token": "登录状态已失效，请重新登录。",
-            "expired_token": "登录状态已过期，请重新登录。",
-            "invalid_credentials": "用户名或密码错误。",
-            "api_key_expired": "API Key 已过期。",
-            "api_key_missing": "缺少 API Key。",
-            "password_incorrect": "原密码不正确。",
-            "api_key_disabled": "API Key 已被禁用。",
-            "api_key_cost_exceeded": "API Key 已达到最大费用限制。",
-            "api_key_rate_limited": "API Key 已超出速率限制，请稍后重试。"
-        },
-        "site_channel": {
-            "account_not_found": "站点账号不存在。",
-            "site_not_found": "站点不存在。",
-            "model_not_found": "站点模型不存在。",
-            "route_update_failed": "更新模型路由失败，请稍后重试。",
-            "model_disable_failed": "更新模型禁用状态失败，请稍后重试。",
-            "key_create_failed": "创建站点 Key 失败，请检查站点状态或稍后重试。",
-            "source_key_update_failed": "更新源 Key 失败，请检查输入后重试。",
-            "project_failed": "同步站点渠道投影失败，请稍后重试。"
+        "search": {
+          "title": "搜索模式",
+          "mode": {
+            "prefix": "前缀",
+            "exact": "精确",
+            "contains": "包含"
+          },
+          "includeContent": "搜索请求/响应内容",
+          "slowHint": "包含模式（特别是搜索内容）较慢，建议配合时间范围使用。"
         },
         "channel": {
-            "not_found": "通道不存在。",
-            "create_failed": "创建通道失败。",
-            "update_failed": "更新通道失败。",
-            "delete_failed": "删除通道失败。",
-            "fetch_models_failed": "获取通道模型失败。"
-        },
-        "group": {
-            "not_found": "分组不存在。",
-            "create_failed": "创建分组失败。",
-            "update_failed": "更新分组失败。",
-            "delete_failed": "删除分组失败。"
-        },
-        "model": {
-            "price_update_failed": "更新模型价格失败。",
-            "price_delete_failed": "删除模型价格失败。",
-            "create_failed": "创建模型失败。",
-            "update_failed": "更新模型失败。",
-            "delete_failed": "删除模型失败。"
-        },
-        "relay": {
-            "model_not_supported": "当前 API Key 不支持该模型。",
-            "model_not_found": "模型不存在或未配置可用分组。",
-            "no_available_channel": "没有可用通道。",
-            "channel_disabled": "通道已禁用。",
-            "no_available_key": "没有可用 Key。",
-            "upstream_failed": "上游请求失败。",
-            "timeout": "请求超时。",
-            "circuit_breaker_tripped": "通道熔断中，请稍后重试。"
-        },
-        "site": {
-            "sync": {
-                "missing_group_key": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。",
-                "group_models_unresolved": "无法确认分组“{groupKey}”的模型，请检查分组模型配置或 Key 权限。",
-                "no_group_result": "站点账号同步失败：没有可用的分组同步结果。",
-                "all_groups_unresolved": "站点账号同步失败：所有分组都未能确认模型，已保留历史模型。",
-                "unsupported_platform": "不支持的站点平台：{platform}。",
-                "snapshot_nil": "同步结果为空，请稍后重试。"
-            },
-            "auth": {
-                "access_token_required": "站点 Access Token 不能为空。",
-                "direct_token_required": "站点 Direct Token 不能为空。",
-                "login_failed": "站点登录失败，请检查账号、密码或站点状态。",
-                "login_token_missing": "站点登录成功但未返回 Access Token，请检查站点兼容性。"
-            },
-            "upstream": {
-                "http_error": "站点上游请求失败（HTTP {statusCode}），请检查站点状态或稍后重试。",
-                "decode_failed": "站点响应解析失败，请检查站点兼容性或稍后重试。",
-                "cloudflare_challenge": "站点触发 Cloudflare 保护，请稍后重试，或手动访问站点完成验证。"
-            },
-            "import": {
-                "invalid_json": "导入内容不是有效的 JSON，请检查文件格式或粘贴内容。",
-                "empty_payload": "导入内容为空，请选择 JSON 文件或粘贴导出内容。",
-                "unrecognized_all_api_hub": "未识别到 All API Hub 导出数据，请确认选择了正确的导出 JSON。",
-                "unrecognized_metapi": "未识别到 Metapi 账号导出数据，请确认选择了正确的导出 JSON。",
-                "no_importable_all_api_hub": "未找到可导入的 All API Hub 站点账号数据。",
-                "no_importable_metapi": "未找到可导入的 Metapi 站点账号数据。",
-                "unsupported_payload": "暂不支持该导入内容，请确认导出格式是否正确。",
-                "persist_failed": "保存导入数据失败，请稍后重试。"
-            },
-            "sub2api": {
-                "api_key_required": "Sub2API 同步需要 API Key。请先在站点创建一个 Key 后再重新同步。",
-                "model_api_key_required": "Sub2API 模型发现需要 API Key。请先在站点创建一个 Key 后再重新同步。",
-                "envelope_failed": "Sub2API 返回错误，请检查 Access Token、权限或站点状态。",
-                "missing_data": "Sub2API 响应缺少必要数据，请检查站点兼容性或稍后重试。"
-            }
+          "title": "渠道",
+          "searchPlaceholder": "搜索渠道...",
+          "manualGroup": "手动渠道",
+          "siteFallback": "站点 #{id}",
+          "empty": "未找到渠道"
         }
-    },
-    "proxyPool": {
-        "name": "代理池",
-        "manage": "打开代理池管理",
-        "empty": "代理池为空",
-        "noEnabled": "没有可用的代理配置",
-        "selectConfig": "选择代理配置",
-        "selectRequired": "请选择代理池配置",
-        "disabledSelected": "当前选择的代理配置已停用，运行时会失败；保存前请改选可用代理。",
-        "disabledSuffix": "（已停用）",
-        "createFailed": "代理配置创建失败：",
-        "updateFailed": "代理配置更新失败：",
-        "deleteFailed": "代理配置删除失败：",
-        "testFailed": "代理配置测试失败：",
-        "mode": {
-            "label": "代理模式",
-            "inherit": "继承站点设置",
-            "direct": "直连",
-            "system": "系统代理",
-            "pool": "代理池"
-        },
-        "dialog": {
-            "title": "代理池",
-            "description": "管理可复用代理配置，站点、站点账号和普通渠道可从这里选择代理。",
-            "searchPlaceholder": "搜索名称、URL 或备注",
-            "loading": "加载中...",
-            "loadFailed": "加载失败：{message}",
-            "empty": "暂无代理配置",
-            "enabled": "启用",
-            "disabled": "停用",
-            "references": "引用 {count}",
-            "referencesTitle": "查看引用",
-            "referencesDescription": "{name} 当前被以下位置使用。点击跳转图标可定位到对应位置。",
-            "referencesEmpty": "暂无引用",
-            "jumpToReference": "跳转到引用位置",
-            "managedChannelTitle": "投影渠道：{channel}",
-            "expandReference": "展开投影渠道",
-            "collapseReference": "收起投影渠道",
-            "derivedReferences": "投影 {count}",
-            "referenceTypes": {
-                "site": "站点",
-                "siteAccount": "账号",
-                "managedChannel": "托管渠道",
-                "channel": "渠道",
-                "reference": "引用"
-            },
-            "referenceLocations": {
-                "site": "站点",
-                "archivedSite": "已归档站点",
-                "siteNamed": "站点：{name}",
-                "siteAccount": "站点账号",
-                "managedChannel": "站点投影渠道（由站点/账号继承，不计入引用数）",
-                "managedChannelUnderSite": "由站点 {site} / 账号代理投影，不单独计数",
-                "channel": "普通渠道"
-            },
-            "test": "测试",
-            "edit": "编辑",
-            "delete": "删除",
-            "deleteBlocked": "仍被引用，不能删除",
-            "formTitleCreate": "新增代理配置",
-            "formTitleEdit": "编辑代理配置",
-            "formDescription": "URL 支持 http、https、socks、socks5。",
-            "new": "新增",
-            "name": "名称",
-            "url": "代理 URL",
-            "remark": "备注",
-            "testUrl": "测试目标 URL",
-            "testDraft": "测试当前表单代理",
-            "submitCreate": "创建代理配置",
-            "submitEdit": "保存修改",
-            "created": "代理配置已创建",
-            "updated": "代理配置已更新",
-            "deleted": "代理配置已删除",
-            "deleteReferenced": "该代理配置仍被引用，请先解除引用",
-            "formRequired": "请填写代理名称和 URL",
-            "testSuccess": "代理可连通：HTTP {statusCode} · {durationMs}ms",
-            "testFailed": "代理测试失败",
-            "operationFailed": "操作失败"
-        },
-        "site": {
-            "inherit": "继承站点代理"
-        }
+      }
     }
+  },
+  "common": {
+    "close": "关闭",
+    "loading": "正在加载...",
+    "routeNotFound": "未找到页面：{route}",
+    "copy": {
+      "action": "复制",
+      "success": "复制成功",
+      "failed": "复制失败",
+      "noContent": "无可复制内容"
+    }
+  },
+  "home": {
+    "activity": {
+      "requestCount": "请求次数",
+      "waitTime": "等待时间",
+      "totalToken": "消耗 Token",
+      "totalCost": "消耗费用",
+      "noData": "无数据"
+    },
+    "summary": {
+      "periods": {
+        "today": "今日",
+        "last7Days": "7 天",
+        "last30Days": "30 天",
+        "allTime": "累计"
+      },
+      "headline": {
+        "today": "今日花费",
+        "last7Days": "近 7 天花费",
+        "last30Days": "近 30 天花费",
+        "allTime": "累计总花费"
+      },
+      "metrics": {
+        "requests": "请求",
+        "tokens": "Token",
+        "waitTime": "耗时"
+      }
+    },
+    "rank": {
+      "title": "排行榜",
+      "sortByCost": "金额",
+      "sortByCount": "次数",
+      "sortByTokens": "Tokens",
+      "noData": "暂无排行数据",
+      "successRate": "成功率"
+    },
+    "groupHealth": {
+      "title": "分组健康",
+      "total": "{count} 个分组",
+      "running": "{count} 运行中",
+      "success": "{count} 健康",
+      "partial": "{count} 部分可用",
+      "failed": "{count} 失败",
+      "idle": "{count} 未检查",
+      "runAll": "全部检查",
+      "runAllFull": "全部完整探活",
+      "viewDetails": "查看详情",
+      "detailTitle": "分组健康详情",
+      "detailDescription": "在首页查看各分组最新健康快照，并直接执行标准探活或完整探活。",
+      "runFailed": "启动分组健康检查失败"
+    }
+  },
+  "setting": {
+    "appearance": "外观",
+    "theme": {
+      "label": "主题",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "language": {
+      "label": "语言",
+      "zh_hans": "简体中文",
+      "zh_hant": "繁体中文",
+      "en": "English"
+    },
+    "proxyUrl": {
+      "label": "代理地址",
+      "placeholder": "请输入代理地址"
+    },
+    "apiBaseUrl": {
+      "label": "API 地址",
+      "placeholder": "https://octopus.example.com",
+      "description": "客户端访问本服务的基础地址，填写后 API 密钥列表将显示导出按钮"
+    },
+    "statsSaveInterval": {
+      "label": "统计保存周期（分钟）",
+      "placeholder": "请输入周期（分钟）"
+    },
+    "corsAllowOrigins": {
+      "label": "CORS 跨域白名单",
+      "hint": "为空禁止跨域，* 允许所有",
+      "example": "只允许指定域名: https://example.com,https://example2.com"
+    },
+    "responsesWS": {
+      "label": "OpenAI Responses WebSocket",
+      "description": "为客户端 WebSocket /v1/responses 入站启用上游 WebSocket。「启用 · 默认关闭」表示能力开启但默认不使用，渠道可单独开启；直通/转换为渠道未覆盖时的默认模式。",
+      "mode": {
+        "disabled": "禁用",
+        "defaultOff": "启用 · 默认关闭",
+        "passthrough": "启用 · 直通",
+        "transform": "启用 · 转换"
+      }
+    },
+    "sseHeartbeat": {
+      "label": "SSE 心跳间隔（秒）",
+      "description": "同时作为流中心跳间隔与上游流建立前的首次心跳延迟；设置为 0 禁用。Cloudflare 反代场景建议 30-60 秒。",
+      "compatibility": "部分客户端可能错误处理 SSE 注释，如遇兼容问题可关闭。",
+      "placeholder": "0 = 禁用，建议 30-60"
+    },
+    "groupHealth": {
+      "label": "分组健康检查",
+      "description": "启用后显示首页分组健康摘要、分组卡片健康状态，并允许手动运行健康检查。"
+    },
+    "circuitBreaker": {
+      "title": "熔断器配置",
+      "threshold": {
+        "label": "熔断触发阈值（连续失败次数）",
+        "placeholder": "请输入阈值"
+      },
+      "cooldown": {
+        "label": "基础冷却时间（秒）",
+        "placeholder": "请输入冷却时间"
+      },
+      "maxCooldown": {
+        "label": "最大冷却时间（秒）",
+        "placeholder": "请输入最大冷却时间"
+      },
+      "hint": "当渠道连续失败达到阈值后触发熔断，冷却时间按指数退避增长，上限为最大冷却时间"
+    },
+    "usageRetention": {
+      "title": "使用分析",
+      "label": "小时聚合保留天数",
+      "description": "使用分析中的小时粒度聚合数据保留时长。",
+      "placeholder": "请输入保留天数"
+    },
+    "outlierRetirement": {
+      "title": "被动离群退役",
+      "hint": "根据真实请求的成败记录，自动暂时禁用持续失败的站点投影渠道（禁用而非删除），之后定期探测，确认恢复后自动重新启用。禁用前会参考同站点其他渠道的状态，并发送探测请求复核，避免误判；每个账号始终保留至少一个启用的渠道。仅作用于站点投影渠道，默认关闭。",
+      "enabled": {
+        "label": "启用被动离群退役"
+      },
+      "interval": {
+        "label": "评估间隔（分钟）",
+        "description": "后台每隔该时间运行一轮评估与恢复探测。",
+        "placeholder": "请输入间隔分钟数"
+      },
+      "failRate": {
+        "label": "失败率阈值（%）",
+        "description": "窗口内失败请求占比达到该值，渠道才可能被判定为异常。",
+        "placeholder": "请输入失败率百分比"
+      },
+      "minSamples": {
+        "label": "最小样本数",
+        "description": "窗口内请求数不足该值时不做判定，避免流量稀少时误判。",
+        "placeholder": "请输入最小样本数"
+      },
+      "consecFails": {
+        "label": "连续失败阈值",
+        "description": "失败率达标后，还需最近连续失败达到该次数（或窗口内无任何成功）才会进入退役流程。",
+        "placeholder": "请输入连续失败次数"
+      },
+      "windowMinutes": {
+        "label": "滚动窗口时长（分钟）",
+        "description": "只统计最近这段时间内的请求记录，更早的记录自动失效。",
+        "placeholder": "请输入窗口分钟数"
+      },
+      "windowCapacity": {
+        "label": "窗口样本上限（≤20）",
+        "description": "窗口内最多保留的请求记录条数，超出时丢弃最旧的。",
+        "placeholder": "请输入样本上限"
+      },
+      "recoverStreak": {
+        "label": "恢复探测成功次数",
+        "description": "已退役渠道连续探测成功达到该次数后，自动重新启用。",
+        "placeholder": "请输入成功次数"
+      },
+      "reapMinutes": {
+        "label": "空闲窗口回收（分钟）",
+        "description": "渠道超过该时间没有新请求时，释放其统计窗口占用的内存。",
+        "placeholder": "请输入回收分钟数"
+      },
+      "cfRecoverMinutes": {
+        "label": "Cloudflare 恢复冷却（分钟）",
+        "description": "因 Cloudflare 拦截被退役的渠道，等待该时间后才开始恢复探测，减少无效探测。",
+        "placeholder": "请输入冷却分钟数"
+      }
+    },
+    "saved": "已保存",
+    "saveFailed": "保存失败",
+    "backup": {
+      "export": {
+        "title": "导出",
+        "includeStats": "包含统计",
+        "button": "导出 JSON",
+        "exporting": "导出中...",
+        "success": "开始导出",
+        "failed": "导出失败",
+        "withLogsButton": "导出含日志归档 (ZIP)",
+        "withLogsWarning": "ZIP 归档包含日志，可通过增量导入恢复。"
+      },
+      "import": {
+        "title": "导入（增量）",
+        "selected": "已选择文件",
+        "button": "导入备份",
+        "importing": "导入中...",
+        "noFile": "请先选择 JSON 或 ZIP 备份文件",
+        "invalidFileType": "仅支持 JSON（.json）和 ZIP（.zip）备份文件",
+        "success": "导入成功",
+        "failed": "导入失败",
+        "result": "导入结果"
+      }
+    },
+    "apiKey": {
+      "title": "API 密钥",
+      "empty": "暂无 API 密钥",
+      "add": "添加密钥",
+      "expand": "打开 API 密钥管理",
+      "close": "关闭 API 密钥管理",
+      "dialogDescription": "管理 API 密钥、访问限制和过期时间。",
+      "actions": {
+        "stats": "查看 {name} 的统计",
+        "edit": "编辑 {name}",
+        "export": "导出 {name}",
+        "delete": "删除 {name}",
+        "cancelDelete": "取消删除 {name}"
+      },
+      "loadFailed": "加载失败",
+      "export": {
+        "title": "导出到客户端",
+        "cliTool": "CLI 工具",
+        "mainModel": "主模型",
+        "name": "名称",
+        "namePlaceholder": "请输入配置名称",
+        "haikuModel": "Haiku 模型",
+        "sonnetModel": "Sonnet 模型",
+        "opusModel": "Opus 模型",
+        "none": "不设置",
+        "apiType": "API 类型",
+        "hint": "需已安装对应客户端，浏览器将请求打开外部应用",
+        "import": "导入到 {platform}"
+      },
+      "form": {
+        "name": "名称",
+        "maxCost": "最大金额",
+        "maxCostPlaceholder": "请输入金额",
+        "unlimited": "无限制",
+        "maxRPM": "每分钟最大请求数 (RPM)",
+        "maxRPMPlaceholder": "请输入限制",
+        "expireAt": "过期日期",
+        "selectDate": "选择日期",
+        "neverExpire": "永不过期",
+        "supportedModels": "支持的模型",
+        "noModels": "暂无可选模型",
+        "modelsHint": "不选择则为无限制",
+        "enabled": "是否启用",
+        "cancel": "取消",
+        "create": "创建",
+        "save": "保存",
+        "confirm": "确认"
+      },
+      "stats": {
+        "noData": "暂无统计数据",
+        "inputToken": "输入 Token",
+        "outputToken": "输出 Token",
+        "inputCost": "输入费用",
+        "outputCost": "输出费用",
+        "requestSuccess": "成功请求",
+        "requestFailed": "失败请求"
+      },
+      "toast": {
+        "createSuccess": "API 密钥创建成功",
+        "createError": "API 密钥创建失败",
+        "updateSuccess": "API 密钥更新成功",
+        "updateError": "API 密钥更新失败",
+        "deleteSuccess": "API 密钥删除成功",
+        "deleteError": "API 密钥删除失败"
+      }
+    },
+    "account": {
+      "title": "账户设置",
+      "save": "保存",
+      "saving": "保存中...",
+      "username": {
+        "label": "修改用户名",
+        "placeholder": "请输入新用户名",
+        "empty": "用户名不能为空",
+        "success": "用户名修改成功",
+        "failed": "用户名修改失败"
+      },
+      "password": {
+        "label": "修改密码",
+        "oldPlaceholder": "请输入当前密码",
+        "newPlaceholder": "请输入新密码",
+        "confirmPlaceholder": "请确认新密码",
+        "oldEmpty": "请输入当前密码",
+        "newEmpty": "请输入新密码",
+        "mismatch": "两次输入的密码不一致",
+        "tooShort": "密码长度至少为6位",
+        "change": "修改密码",
+        "success": "密码修改成功",
+        "failed": "密码修改失败"
+      }
+    },
+    "info": {
+      "title": "版本信息",
+      "currentVersion": "当前版本",
+      "latestVersion": "最新版本",
+      "buildTime": "构建时间",
+      "publishedAt": "发布时间",
+      "github": "GitHub 仓库",
+      "unknown": "未知",
+      "versionMismatch": "版本不匹配",
+      "versionMismatchHint": "前端版本 ({frontend}) 与后端版本 ({backend}) 不一致，可能是浏览器缓存问题，请强制刷新页面。",
+      "forceRefresh": "强制刷新",
+      "newVersionAvailable": "发现新版本可用",
+      "newVersionAvailableHint": "请先备份数据，然后更新系统",
+      "updateNow": "立即更新",
+      "updating": "更新中...",
+      "updateSuccess": "更新成功，服务即将重启",
+      "updateFailed": "更新失败"
+    },
+    "log": {
+      "title": "历史日志",
+      "enabled": {
+        "label": "启用历史日志"
+      },
+      "keepPeriod": {
+        "label": "日志保存天数",
+        "placeholder": "请输入天数"
+      },
+      "clear": {
+        "label": "清空历史日志",
+        "button": "清空",
+        "clearing": "清空中..."
+      },
+      "clearSuccess": "日志已清空",
+      "clearFailed": "清空失败"
+    },
+    "network": {
+      "title": "网络与服务"
+    },
+    "reliability": {
+      "title": "可靠性"
+    },
+    "syncTasks": {
+      "title": "同步与定时任务",
+      "intervalPlaceholder": "间隔（小时）",
+      "last": "上次",
+      "never": "从未执行",
+      "llmSync": {
+        "label": "渠道同步",
+        "button": "立即同步",
+        "pending": "同步中...",
+        "success": "渠道同步成功",
+        "failed": "渠道同步失败"
+      },
+      "llmPrice": {
+        "label": "模型价格更新",
+        "button": "立即更新",
+        "pending": "更新中...",
+        "success": "价格更新成功",
+        "failed": "价格更新失败"
+      },
+      "siteSync": {
+        "label": "站点全量同步",
+        "button": "立即同步",
+        "pending": "同步中...",
+        "success": "已触发后台站点全量同步",
+        "failed": "触发同步失败"
+      },
+      "siteCheckin": {
+        "label": "站点全量签到",
+        "button": "立即签到",
+        "pending": "签到中...",
+        "success": "已触发后台站点全量签到",
+        "failed": "触发签到失败"
+      }
+    },
+    "data": {
+      "title": "数据管理"
+    },
+    "webdavBackup": {
+      "title": "WebDAV 备份",
+      "url": {
+        "label": "WebDAV 地址",
+        "placeholder": "https://dav.example.com/dav"
+      },
+      "username": {
+        "label": "用户名",
+        "placeholder": "用户名"
+      },
+      "password": {
+        "label": "密码",
+        "placeholder": "密码",
+        "show": "显示密码",
+        "hide": "隐藏密码"
+      },
+      "backupPath": {
+        "label": "远程目录",
+        "placeholder": "/octopus-backups"
+      },
+      "interval": {
+        "label": "自动备份间隔(小时)",
+        "placeholder": "0 = 禁用",
+        "description": "设为 0 表示禁用自动备份"
+      },
+      "retentionCount": {
+        "label": "保留份数",
+        "placeholder": "10"
+      },
+      "includeStats": "包含统计数据",
+      "testConnection": "测试连接",
+      "testSuccess": "连接成功",
+      "testFailed": "连接失败",
+      "testing": "测试中...",
+      "triggerBackup": "立即备份",
+      "triggerSuccess": "备份成功",
+      "triggerFailed": "备份失败",
+      "triggering": "备份中...",
+      "backupList": "远程备份列表",
+      "loading": "加载中...",
+      "loadError": "加载备份列表失败",
+      "noBackups": "暂无备份文件",
+      "restore": "恢复",
+      "restoring": "恢复中...",
+      "restoreSuccess": "恢复成功",
+      "restoreFailed": "恢复失败",
+      "restoreConfirm": "确认从此备份恢复？已有数据将被增量覆盖。",
+      "restoreResult": "恢复结果",
+      "restoreNoChanges": "没有数据发生变化。",
+      "reload": "重新加载应用",
+      "cancel": "取消",
+      "retry": "重试",
+      "unknownError": "未知错误",
+      "fileName": "文件名",
+      "fileSize": "大小",
+      "modifiedAt": "修改时间",
+      "refresh": "刷新",
+      "notConfigured": "WebDAV 未配置"
+    }
+  },
+  "group": {
+    "toast": {
+      "created": "创建成功",
+      "createFailed": "创建失败",
+      "updated": "更新成功",
+      "updateFailed": "更新失败",
+      "deleted": "删除成功",
+      "deleteFailed": "删除失败",
+      "autoAddFailed": "自动添加失败",
+      "pinned": "已置顶",
+      "unpinned": "已取消置顶",
+      "pinFailed": "置顶操作失败"
+    },
+    "pin": {
+      "pin": "置顶",
+      "unpin": "取消置顶"
+    },
+    "preset": {
+      "title": "预设",
+      "saveCurrent": "保存当前",
+      "createBlank": "创建空白",
+      "autoNamePrefix": "新预设",
+      "cloneSuffix": "副本",
+      "namePlaceholder": "为预设命名",
+      "name": "预设名称",
+      "close": "关闭",
+      "loading": "加载中...",
+      "empty": "暂无预设",
+      "activeBadge": "当前",
+      "edit": "编辑",
+      "clone": "克隆",
+      "delete": "删除",
+      "confirmDelete": "删除预设 {name}？",
+      "confirm": "确定",
+      "editorTitle": "编辑预设",
+      "save": "保存",
+      "saving": "保存中...",
+      "toast": {
+        "created": "预设已保存",
+        "createFailed": "预设保存失败",
+        "createBlankFailed": "空白预设创建失败",
+        "cloned": "预设已克隆",
+        "cloneFailed": "克隆失败",
+        "activated": "预设已激活",
+        "activateFailed": "预设激活失败",
+        "deleted": "预设已删除",
+        "deleteFailed": "删除失败",
+        "updated": "预设已更新",
+        "updateFailed": "预设更新失败"
+      }
+    },
+    "create": {
+      "title": "创建分组",
+      "submit": "创建",
+      "submitting": "创建中..."
+    },
+    "card": {
+      "empty": "暂无规则"
+    },
+    "member": {
+      "reorder": "调整 {name} 的顺序",
+      "remove": "移除 {name}",
+      "cancelRemove": "取消移除 {name}",
+      "confirmRemove": "确认移除 {name}",
+      "reserveBadge": "中转",
+      "balanceLabel": "余额",
+      "rateLabel": "倍率"
+    },
+    "detail": {
+      "actions": {
+        "edit": "编辑",
+        "cancel": "取消",
+        "save": "保存",
+        "copyName": "复制名称",
+        "delete": "删除",
+        "confirmDelete": "确认删除"
+      }
+    },
+    "form": {
+      "name": "分组名称",
+      "matchRegex": "匹配正则",
+      "matchRegexPlaceholder": "留空则默认按分组名称模糊匹配",
+      "matchRegexInvalid": "正则无效",
+      "firstTokenTimeOut": "首字超时",
+      "firstTokenTimeOutHint": "单位秒，仅流式响应起效，0 表示不限制",
+      "sessionKeepTime": "会话保持",
+      "sessionKeepTimeHint": "单位秒，会话期间保持使用同一渠道，0 表示禁用",
+      "retryEnabled": "同通道重试",
+      "retryEnabledHint": "启用后，遇到 429/5xx 等可重试错误时先在同通道重试，全部失败后透传状态码给客户端",
+      "maxRetries": "最大重试",
+      "maxRetriesHint": "同通道重试次数，仅在开启同通道重试时生效",
+      "items": "已选模型",
+      "addItem": "添加模型",
+      "autoAdd": "自动添加",
+      "clear": "清空",
+      "selectChannel": "渠道",
+      "selectModel": "模型",
+      "autoSort": "自动排序",
+      "autoSortHint": "按规则排序：非中转(余额大→小) → 中转(倍率小→大)"
+    },
+    "mode": {
+      "roundRobin": "轮询",
+      "random": "随机",
+      "failover": "故障转移",
+      "weighted": "加权分配"
+    },
+    "health": {
+      "title": "健康",
+      "detailTitle": "分组健康详情",
+      "run": "检查",
+      "runFull": "完整探活",
+      "lastRun": "上次检查 {time}",
+      "never": "从未检查",
+      "status": "状态",
+      "healthy": "健康",
+      "healthyCount": "{success}/{total} 健康",
+      "duration": "耗时",
+      "attempts": "尝试",
+      "attemptListToggle": "尝试列表（{count}）",
+      "attemptStatus": {
+        "success": "成功",
+        "failed": "失败",
+        "skipped": "跳过"
+      },
+      "statusValue": {
+        "idle": "未检查",
+        "running": "检查中",
+        "success": "健康",
+        "partial": "部分可用",
+        "failed": "失败"
+      },
+      "probeMode": {
+        "standard": "标准",
+        "full": "完整"
+      },
+      "empty": "暂无健康快照。",
+      "errorDetails": "错误详情",
+      "noHttpStatus": "无 HTTP 状态",
+      "runFailed": "启动分组健康检查失败"
+    },
+    "empty": "暂无分组，点击左上角按钮创建",
+    "autoGroup": {
+      "title": "自动分组配置",
+      "description": "将渠道或站点分组加入列表后，系统会按模型组名称或正则自动把模型加入匹配的模型组。",
+      "loadFailed": "加载自动分组配置失败：{message}",
+      "searchPlaceholder": "搜索...",
+      "runAll": "立即执行全部已启用",
+      "loading": "加载中...",
+      "emptyChannels": "暂无渠道",
+      "matchMode": "匹配方式",
+      "notice": "关闭某渠道的自动分组或全局设置后，不会删除已存在的模型组成员；如需清理，请在具体模型组中手动移除。",
+      "global": {
+        "title": "全局默认模式",
+        "description": "开启后，所有站点投影渠道会统一使用所选匹配方式；下方单独渠道设置会保留，并在全局关闭后生效。"
+      },
+      "sections": {
+        "channels": "渠道列表"
+      },
+      "source": {
+        "siteGroup": "站点组",
+        "disabled": "停用",
+        "modelCount": "{count} 个模型",
+        "moreModels": "+{count} 个",
+        "noModels": "暂无模型",
+        "unknownSite": "未知站点",
+        "manualGroup": "普通渠道",
+        "followingGlobalTip": "全局已开启，此渠道当前按全局模式分组；下方单独模式将在全局关闭后生效。"
+      },
+      "bulk": {
+        "selected": "已选 {count} 项",
+        "apply": "应用",
+        "clear": "清除",
+        "placeholder": "批量设为..."
+      },
+      "mode": {
+        "none": "关闭",
+        "fuzzy": "模糊匹配",
+        "exact": "精确匹配",
+        "regex": "正则匹配"
+      },
+      "buttons": {
+        "cancel": "取消",
+        "save": "保存",
+        "saving": "保存中...",
+        "saveAndRun": "保存并立即执行",
+        "running": "执行中..."
+      },
+      "toast": {
+        "saved": "自动分组配置已保存",
+        "savedAndRun": "自动分组配置已保存并执行",
+        "saveFailed": "保存自动分组配置失败",
+        "runSuccess": "已执行自动分组",
+        "runFailed": "执行自动分组失败"
+      }
+    }
+  },
+  "model": {
+    "create": {
+      "title": "创建模型",
+      "name": "模型名称",
+      "input": "输入价格",
+      "output": "输出价格",
+      "cacheRead": "缓存读取",
+      "cacheWrite": "缓存写入",
+      "submit": "创建",
+      "submitting": "创建中..."
+    },
+    "toast": {
+      "updated": "模型价格已更新",
+      "updateFailed": "更新失败",
+      "deleted": "模型已删除",
+      "deleteFailed": "删除失败"
+    },
+    "card": {
+      "inputCache": "输入/缓存",
+      "outputCache": "输出/缓存",
+      "edit": "编辑",
+      "delete": "删除"
+    },
+    "overlay": {
+      "cancel": "取消",
+      "deleting": "删除中...",
+      "confirmDelete": "确认删除",
+      "input": "输入",
+      "output": "输出",
+      "cacheRead": "缓存读取",
+      "cacheWrite": "缓存写入",
+      "save": "保存"
+    },
+    "workspace": {
+      "ariaLabel": "模型管理视图",
+      "catalog": "模型目录",
+      "discovery": "模型发现",
+      "headers": "Header 策略",
+      "global-prices": "全局价格"
+    },
+    "discovery": {
+      "title": "模型发现",
+      "counter": "{shown} / {total} 个模型",
+      "vendorFilter": "厂商",
+      "allVendors": "全部厂商",
+      "unknownVendor": "未知",
+      "statusFilter": "状态",
+      "statusAll": "全部",
+      "statusUngrouped": "未分组",
+      "statusGrouped": "已分组",
+      "statusMapped": "已映射",
+      "autoProvisioning": "自动建组",
+      "autoProvisioningHint": "开启后，目录同步会给每个上游模型自动建一个同名分组。",
+      "autoProvisioningFailed": "自动建组开关修改失败",
+      "sync": "同步目录",
+      "syncDone": "目录同步完成",
+      "syncResult": "新建 {groups} 个分组，{skipped} 个模型未选中",
+      "syncFailed": "目录同步失败",
+      "selectAll": "全选当前列表",
+      "selected": "已选 {count} 项",
+      "createGroups": "各建分组",
+      "mapToGroup": "映射到分组",
+      "remove": "取消分组",
+      "clearSelection": "清空选择",
+      "channelCount": "{count} 个渠道",
+      "mappedTo": "映射到 {target}",
+      "loadFailed": "模型列表加载失败：{message}",
+      "retry": "重试",
+      "emptyChannels": "还没有任何渠道上报上游模型",
+      "emptyFiltered": "没有符合当前筛选的模型",
+      "cancel": "取消",
+      "applying": "处理中...",
+      "mapTitle": "映射到分组",
+      "mapDescription": "把选中的 {count} 个上游模型都走同一个分组。上游名会保留在渠道条目上，客户端用任一名字请求都能命中。",
+      "mapTargetLabel": "目标分组",
+      "mapTargetPlaceholder": "例如 glm-5.2",
+      "mapDeleteSourceGroups": "原分组只剩被映射走的模型时一并删除",
+      "mapSubmit": "映射",
+      "provisionDone": "模型已纳入分组",
+      "provisionResult": "新建 {groups} 个分组、{items} 条渠道条目，重映射 {aliases} 个模型，删除 {deleted} 个分组",
+      "provisionFailed": "纳入分组失败",
+      "removeTitle": "取消分组",
+      "removeDescription": "把选中的 {count} 个模型移出目录。之后客户端再用这些名字请求会返回 404。",
+      "removeDeleteGroup": "同时删除与模型同名的分组",
+      "removeSubmit": "取消分组",
+      "removeDone": "已取消分组",
+      "removeResult": "删除 {groups} 个分组、{items} 条渠道条目、{aliases} 条映射、{canonicals} 条目录记录",
+      "removeFailed": "取消分组失败"
+    },
+    "catalog": {
+      "title": "模型目录",
+      "modelCount": "{count} 个模型",
+      "sync": "同步目录",
+      "syncComplete": "目录同步完成",
+      "syncResult": "变更 {canonical} 个 Canonical Model、{candidates} 个候选",
+      "syncFailed": "目录同步失败",
+      "loadFailed": "目录加载失败：{message}",
+      "retry": "重试",
+      "empty": "没有匹配的 Canonical Model",
+      "loading": "加载中...",
+      "routePreview": "路由预览",
+      "capabilityMatrix": "协议能力矩阵",
+      "requestedModel": "请求模型",
+      "inboundProtocol": "入站协议",
+      "outboundProtocol": "出站协议",
+      "previewFailed": "路由预览失败",
+      "runningPreview": "预览中...",
+      "runPreview": "运行预览",
+      "noPreview": "运行预览后查看候选决策",
+      "limited": "有限支持",
+      "unsupportedRoute": "不支持此协议组合",
+      "name": "Canonical 名称",
+      "strategyLabel": "路由策略",
+      "protocolPolicyLabel": "协议策略",
+      "enabled": "启用",
+      "allowLossy": "允许有损转换",
+      "saveCanonical": "保存 Canonical Model",
+      "saving": "保存中...",
+      "manual": "人工维护",
+      "canonicalSaved": "Canonical Model 已保存",
+      "canonicalSaveFailed": "保存 Canonical Model 失败",
+      "aliases": "模型别名",
+      "deleteAlias": "删除别名 {alias}",
+      "aliasPlaceholder": "备用模型名称",
+      "addAlias": "添加别名",
+      "aliasSaved": "别名已保存",
+      "aliasSaveFailed": "保存别名失败",
+      "aliasDeleteFailed": "删除别名失败",
+      "candidates": "路由候选",
+      "noCandidates": "暂无路由候选",
+      "statusLabel": "生命周期状态",
+      "priority": "优先级",
+      "weight": "权重",
+      "inherit": "继承",
+      "allow": "允许",
+      "deny": "禁止",
+      "saveCandidate": "保存候选",
+      "candidateSaved": "路由候选已保存",
+      "candidateSaveFailed": "保存路由候选失败",
+      "serverChanged": "编辑期间服务端版本已变化，请重新载入后再保存。",
+      "reloadServerVersion": "重新载入服务端版本",
+      "strategy": {
+        "balanced": "均衡",
+        "reliability": "可靠性优先",
+        "lowest-cost": "成本最低",
+        "lowest-latency": "延迟最低",
+        "manual": "人工排序"
+      },
+      "policy": {
+        "inherit": "继承",
+        "auto": "自动",
+        "passthrough-only": "仅透传",
+        "transform-allowed": "允许转换"
+      },
+      "status": {
+        "active": "活跃",
+        "degraded": "降级",
+        "stale": "陈旧",
+        "unavailable": "不可用",
+        "disabled": "已禁用",
+        "archived": "已归档"
+      },
+      "protocol": {
+        "openai_chat": "OpenAI Chat",
+        "openai_responses": "OpenAI Responses",
+        "anthropic": "Anthropic Messages",
+        "gemini": "Gemini",
+        "volcengine": "火山引擎",
+        "openai_embedding": "OpenAI Embeddings",
+        "unknown": "未知"
+      },
+      "feature": {
+        "function_tools": "函数工具",
+        "built_in_tools": "内置工具",
+        "structured_output": "结构化输出",
+        "images": "图像",
+        "audio": "音频",
+        "files": "文件",
+        "documents": "文档",
+        "reasoning": "推理",
+        "cache_control": "缓存控制",
+        "continuation": "续传",
+        "responses_state": "Responses 状态",
+        "provider_extensions": "供应商扩展",
+        "anthropic_mcp": "Anthropic MCP",
+        "anthropic_container": "Anthropic Container",
+        "anthropic_server_tools": "Anthropic 服务端工具",
+        "gemini_extensions": "Gemini 扩展",
+        "websocket": "WebSocket"
+      }
+    },
+    "pricing": {
+      "title": "有效价格",
+      "input": "输入",
+      "output": "输出",
+      "cacheRead": "缓存读取",
+      "cacheWrite": "缓存写入",
+      "perRequest": "每请求",
+      "exchangeRate": "兑 USD 汇率",
+      "unknown": "未知",
+      "multiplier": "倍率",
+      "stale": "已过期",
+      "notConvertible": "不可换算",
+      "loading": "加载中...",
+      "quotes": "价格报价",
+      "deleteQuote": "删除人工报价",
+      "quoteDeleteFailed": "删除报价失败",
+      "noQuotes": "暂无候选专属报价",
+      "manualOverride": "候选人工覆盖",
+      "unitLabel": "价格单位",
+      "currency": "币种",
+      "quoteSaved": "人工价格已保存",
+      "quoteSaveFailed": "保存人工价格失败",
+      "saving": "保存中...",
+      "saveOverride": "保存覆盖",
+      "currencyRates": "汇率",
+      "invalidRate": "请输入币种和正数汇率",
+      "rateSaved": "汇率已保存",
+      "rateSaveFailed": "保存汇率失败",
+      "saveRate": "保存汇率",
+      "source": {
+        "manual_override": "人工覆盖",
+        "site_exact": "站点精确",
+        "site_wide": "站点范围",
+        "site_stale": "历史报价",
+        "global": "全局价格",
+        "unknown": "未知"
+      },
+      "unit": {
+        "per_million_tokens": "每百万 Token",
+        "per_request": "每请求",
+        "site_credit": "站点积分"
+      }
+    },
+    "headerPolicy": {
+      "title": "Header 策略",
+      "policyCount": "{count} 条策略",
+      "loadFailed": "请求头策略数据加载失败：{message}",
+      "retry": "重试",
+      "newPolicy": "新建策略",
+      "disabled": "已禁用",
+      "empty": "暂无 Header 策略",
+      "editPolicy": "编辑策略",
+      "nameLabel": "策略名称",
+      "namePlaceholder": "Codex 兼容 Header",
+      "nameRequired": "请输入策略名称",
+      "version": "v{version}",
+      "enabled": "启用",
+      "scopeLabel": "作用域",
+      "targetLabel": "目标",
+      "selectTarget": "选择目标",
+      "forwardClientHeaders": "转发客户端 Header",
+      "allowedHeadersMode": "客户端 Header 白名单",
+      "inherit": "继承",
+      "denyAll": "全部拒绝",
+      "custom": "自定义",
+      "allowedClientHeaders": "允许的客户端 Header",
+      "userAgentMode": "User-Agent",
+      "clear": "清空",
+      "builtIn": "内置",
+      "setHeaders": "设置 Header",
+      "addHeader": "添加 Header",
+      "headerName": "Header 名称",
+      "headerValue": "Header 值",
+      "removeHeader": "移除 Header",
+      "protectedHeader": "该 Header 受保护，不能覆盖",
+      "unsetHeaders": "移除 Header",
+      "saving": "保存中...",
+      "save": "保存策略",
+      "delete": "删除策略",
+      "targetRequired": "请选择作用域目标",
+      "saved": "Header 策略已保存",
+      "saveFailed": "保存 Header 策略失败",
+      "deleted": "Header 策略已删除",
+      "deleteFailed": "删除 Header 策略失败",
+      "userAgentProfiles": "User-Agent 配置",
+      "profileName": "配置名称",
+      "saveProfile": "保存配置",
+      "profileRequired": "请输入配置名称和 User-Agent",
+      "profileSaved": "User-Agent 配置已保存",
+      "profileSaveFailed": "保存 User-Agent 配置失败",
+      "preview": "有效策略预览",
+      "notSelected": "未选择",
+      "yes": "是",
+      "no": "否",
+      "policyId": "策略",
+      "loading": "加载中...",
+      "previewUnavailable": "无法预览",
+      "scope": {
+        "global": "全局",
+        "site": "站点",
+        "site_account": "站点账号",
+        "channel": "Channel",
+        "canonical_model": "Canonical Model",
+        "route_candidate": "路由候选"
+      }
+    }
+  },
+  "log": {
+    "list": {
+      "noMore": "没有更多日志了",
+      "loadFailed": "日志加载失败：{message}",
+      "retry": "重试",
+      "streamDisconnected": "实时日志连接已断开",
+      "streamTokenFailed": "获取实时日志流令牌失败"
+    },
+    "card": {
+      "error": "错误",
+      "errorInfo": "错误信息",
+      "firstToken": "首字",
+      "totalTime": "总耗时",
+      "duration": "耗时",
+      "input": "输入",
+      "output": "输出",
+      "cost": "费用",
+      "requestContent": "请求内容",
+      "responseContent": "响应内容",
+      "noRequestContent": "(无请求内容)",
+      "noResponseContent": "(无响应内容)",
+      "firstTokenTime": "首字时间",
+      "tokens": "tokens",
+      "retryDetails": "重试详情",
+      "attempts": "次尝试",
+      "success": "成功",
+      "failed": "失败",
+      "clientCanceled": "客户端取消",
+      "indeterminate": "结果不确定",
+      "skipped": "跳过",
+      "circuitBreak": "熔断",
+      "outcome": "请求结果",
+      "cancellationInfo": "取消详情",
+      "transportEvidence": "传输证据",
+      "protocolPath": "协议路径",
+      "protocolMode": "协议模式",
+      "protocolPolicy": "协议策略",
+      "protocolWarnings": "协议警告",
+      "protocolFailureStage": "协议失败阶段",
+      "lossyAllowed": "允许有损转换",
+      "transportTermination": "传输终止方式",
+      "completionEvidence": "完成证据",
+      "terminalEvent": "终态事件",
+      "tokenSource": "Token 来源",
+      "priceSource": "价格来源",
+      "priceStale": "已过期",
+      "priceUnconvertible": "不可换算",
+      "disableModel": "禁用模型",
+      "disabling": "禁用中",
+      "disabled": "已禁用",
+      "ws": "WS",
+      "wsContinuation": "续传",
+      "wsReplay": "回放",
+      "wsPassthrough": "直通",
+      "wsTransform": "转换",
+      "wsReconnect": "重连恢复",
+      "wsReplayRecovery": "回放恢复",
+      "wsDowngrade": "降级",
+      "wsFreshHint": "本次请求走了上游 WebSocket 新会话。",
+      "wsContinuationHint": "本次请求直接续上了上游 WebSocket 会话。",
+      "wsReplayHint": "本次请求走了上游 WebSocket，但为了恢复上下文回放了历史内容。",
+      "wsPassthroughHint": "上游 WebSocket 事件原样直通下游，未经过内部 transformer 管线。",
+      "wsTransformHint": "上游 WebSocket 事件经过内部 transformer 管线处理。",
+      "wsReconnectHint": "本次请求原本的上游 WebSocket 链路已断开，重新建立连接后恢复成功。",
+      "wsReplayRecoveryHint": "本次请求先尝试续传失败，随后自动回放历史内容恢复了上下文，并建立了新的续传锚点。",
+      "wsDowngradeHint": "本次请求原本尝试走上游 WebSocket，但因上游不可用已自动降级为 HTTP。",
+      "inputDetails": "输入明细",
+      "transportInput": "传输输入",
+      "billInput": "计费输入",
+      "cacheRead": "缓存读取",
+      "cacheWrite": "缓存写入"
+    },
+    "analytics": {
+      "view": {
+        "analytics": "使用分析",
+        "detail": "日志明细"
+      },
+      "range": {
+        "today": "今天",
+        "yesterday": "昨天",
+        "7d": "近 7 天",
+        "30d": "近 30 天",
+        "month": "本月"
+      },
+      "scope": {
+        "label": "统计口径",
+        "request": "客户端请求",
+        "attempt": "上游尝试"
+      },
+      "dimension": {
+        "label": "拆分维度",
+        "site": "站点",
+        "site_account": "站点账号",
+        "channel": "渠道",
+        "api_key": "API Key",
+        "request_model": "请求模型",
+        "actual_model": "实际模型",
+        "canonical_model": "规范模型"
+      },
+      "filters": {
+        "site": "站点",
+        "allSites": "全部站点",
+        "account": "站点账号",
+        "allAccounts": "全部账号",
+        "apiKey": "API Key",
+        "allAPIKeys": "全部 API Key",
+        "api_key": "API Key",
+        "all_api_key": "全部 API Key",
+        "request_model": "请求模型",
+        "all_request_model": "全部请求模型",
+        "actual_model": "实际模型",
+        "all_actual_model": "全部实际模型",
+        "canonical_model": "Canonical Model",
+        "all_canonical_model": "全部 Canonical Model",
+        "search": "搜索维度",
+        "noOptions": "没有匹配项",
+        "timezone": "时区",
+        "clear": "清除业务筛选"
+      },
+      "kpi": {
+        "requests": "请求数",
+        "attempts": "尝试数",
+        "successRate": "成功率",
+        "tokens": "Token",
+        "cost": "成本",
+        "averageLatency": "平均耗时",
+        "p95Latency": "P95 耗时",
+        "averageFTUT": "平均首字",
+        "p95FTUT": "P95 首字",
+        "successFailed": "成功 {success} / 失败 {failed}",
+        "inputOutput": "输入 {input} / 输出 {output}",
+        "cacheTokens": "缓存读 {read} / 写 {write}",
+        "samples": "个样本",
+        "canceled": "客户端取消",
+        "indeterminate": "结果不确定"
+      },
+      "trend": {
+        "title": "使用趋势",
+        "hourly": "按小时",
+        "daily": "按天"
+      },
+      "breakdown": {
+        "top20": "前 20 项",
+        "topN": "结果数量",
+        "top": "前 {count} 项",
+        "total": "共 {count} 项",
+        "search": "搜索排行",
+        "page": "第 {page} 页",
+        "pageOf": "第 {page} / {pages} 页",
+        "previous": "上一页",
+        "next": "下一页",
+        "name": "名称",
+        "export": "导出 CSV",
+        "exporting": "正在导出 CSV",
+        "exportSuccess": "已导出 {filename}",
+        "exportFailed": "使用统计 CSV 导出失败",
+        "noDrilldown": "该时间范围的原始日志已过保留期，无法下钻到日志明细。"
+      },
+      "repair": {
+        "open": "历史修复",
+        "title": "修复历史 Responses 结果",
+        "description": "先预览符合版本化规则的历史流式 Responses 日志，再执行修复。",
+        "unbounded": "无限制",
+        "preview": "预览",
+        "previewing": "预览中...",
+        "previewFailed": "修复预览失败",
+        "matched": "匹配",
+        "excluded": "排除",
+        "confirm": "确认执行本次历史更新",
+        "execute": "执行修复",
+        "executing": "执行中...",
+        "executeFailed": "历史修复失败",
+        "complete": "历史修复完成",
+        "updated": "已更新 {count} 条日志"
+      },
+      "empty": "当前时间范围暂无使用数据",
+      "error": "使用分析加载失败"
+    },
+    "filters": {
+      "keywordPlaceholder": "搜索模型、API Key 或内容",
+      "channel": "渠道",
+      "allChannels": "全部渠道",
+      "status": "状态",
+      "allStatus": "全部状态",
+      "success": "成功",
+      "error": "错误",
+      "reset": "重置",
+      "refresh": "刷新"
+    },
+    "pagination": {
+      "prev": "上一页",
+      "next": "下一页",
+      "page": "第 {page} 页",
+      "pagesRange": "第 {from} ~ {to} 页"
+    }
+  },
+  "channel": {
+    "tabs": {
+      "site": "站点渠道",
+      "manual": "普通渠道"
+    },
+    "card": {
+      "requestCount": "请求次数",
+      "totalCost": "总成本",
+      "viewDetails": "查看渠道 {name} 详情",
+      "enableChannel": "启用渠道 {name}",
+      "disableChannel": "停用渠道 {name}",
+      "toast": {
+        "enabled": "渠道已启用",
+        "disabled": "渠道已禁用"
+      }
+    },
+    "detail": {
+      "title": {
+        "edit": "编辑渠道",
+        "view": "渠道详情"
+      },
+      "sections": {
+        "requests": "请求详情",
+        "tokens": "Token 使用",
+        "costs": "成本详情",
+        "baseUrls": "Base URLs",
+        "keys": "密钥",
+        "protocol": "协议路由"
+      },
+      "protocol": {
+        "policy": "协议策略",
+        "allowLossy": "允许有损转换",
+        "wsMode": "Responses WebSocket",
+        "yes": "是",
+        "no": "否"
+      },
+      "noBaseUrls": "暂无 Base URL",
+      "noKeys": "暂无密钥",
+      "metrics": {
+        "totalRequests": "总请求",
+        "totalToken": "总 Token",
+        "totalCost": "总成本",
+        "successRequests": "成功请求",
+        "failedRequests": "失败请求",
+        "inputToken": "输入 Token",
+        "outputToken": "输出 Token",
+        "inputCost": "输入成本",
+        "outputCost": "输出成本",
+        "avgWaitTime": "等待时间"
+      },
+      "actions": {
+        "edit": "编辑",
+        "cancel": "取消",
+        "save": "保存",
+        "saving": "保存中...",
+        "delete": "删除",
+        "confirmDelete": "确认删除",
+        "deleting": "删除中..."
+      }
+    },
+    "create": {
+      "dialogTitle": "创建新渠道",
+      "submit": "创建渠道",
+      "submitting": "创建中..."
+    },
+    "form": {
+      "add": "添加",
+      "name": "渠道名称",
+      "type": "渠道类型",
+      "baseUrls": "Base URLs",
+      "baseUrlUrl": "地址",
+      "baseUrlDelay": "延迟(ms)",
+      "advanced": "高级设置",
+      "apiKey": "API Key",
+      "customHeader": "自定义 Header",
+      "customHeaderKey": "Header Key",
+      "customHeaderValue": "Header Value",
+      "customHeaderAdd": "添加 Header",
+      "channelProxy": "渠道代理",
+      "channelProxyPlaceholder": "可选：仅对该渠道生效（覆盖全局代理）",
+      "paramOverride": "参数覆盖",
+      "paramOverridePlaceholder": "可选：JSON 字符串，用于覆盖请求参数",
+      "model": "模型",
+      "enabled": "启用",
+      "proxy": "使用代理",
+      "modelCustomPlaceholder": "自定义模型名称",
+      "modelAdd": "添加",
+      "modelRefresh": "刷新",
+      "modelRefreshSuccess": "模型列表获取成功",
+      "modelRefreshFailed": "模型列表获取失败",
+      "modelRefreshEmpty": "未获取到模型列表",
+      "modelSelected": "已选模型",
+      "modelNoSelected": "暂未选择模型",
+      "modelClearAll": "清除全部",
+      "typeOpenAIChat": "OpenAI Chat",
+      "typeOpenAIResponse": "OpenAI Response",
+      "typeOpenAIEmbedding": "OpenAI Embedding",
+      "typeAnthropic": "Anthropic",
+      "typeGemini": "Gemini",
+      "typeVolcengine": "火山引擎",
+      "autoSync": "自动同步",
+      "autoGroup": "自动分组",
+      "autoGroupNone": "不自动分组",
+      "autoGroupFuzzy": "模糊匹配",
+      "autoGroupExact": "准确匹配",
+      "autoGroupRegex": "正则匹配",
+      "wsMode": "Responses WS 模式",
+      "wsModeInherit": "跟随全局",
+      "wsModePassthrough": "直通",
+      "wsModeTransform": "转换",
+      "wsModeOff": "关闭",
+      "protocolPolicy": "协议策略",
+      "protocolPolicyAuto": "自动",
+      "protocolPolicyPassthrough": "仅透传",
+      "protocolPolicyTransform": "允许转换",
+      "allowLossy": "允许有损转换",
+      "matchRegex": "匹配正则",
+      "matchRegexPlaceholder": "可选：用于匹配请求模型名称的正则表达式",
+      "remark": "备注"
+    }
+  },
+  "siteChannel": {
+    "card": {
+      "statusEnabled": "启用",
+      "statusDisabled": "停用",
+      "maskedPending": "{n} 待同步",
+      "noRouteDistribution": "暂无模型分布",
+      "metrics": {
+        "totalRequests": "请求",
+        "successRequests": "成功",
+        "failedRequests": "失败",
+        "totalCost": "成本",
+        "lastRequestAt": "最近使用"
+      }
+    },
+    "advanced": {
+      "title": "站点渠道高级设置",
+      "description": "配置分组 {group} 下各投影渠道的参数覆盖。自动分组请前往「模型组」页面右上角统一配置，自定义 Header 请在站点设置中统一配置。",
+      "channelList": "投影渠道",
+      "empty": "当前分组暂无投影渠道",
+      "paramOverride": "参数覆盖 JSON",
+      "paramOverridePlaceholder": "留空表示清除；非空时必须是 JSON 对象，例如：{\"temperature\":0.7,\"max_tokens\":4096}",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中...",
+      "saved": "高级设置已保存",
+      "invalidParamOverride": "参数覆盖必须是合法的 JSON 对象",
+      "saveFailed": "保存高级设置失败"
+    }
+  },
+  "siteImport": {
+    "errors": {
+      "invalidJson": "导入内容不是有效的 JSON，请检查文件格式或粘贴内容。",
+      "emptyPayload": "导入内容为空，请选择 JSON 文件或粘贴导出内容。",
+      "unrecognizedAllAPIHub": "未识别到 All API Hub 导出数据，请确认选择了正确的导出 JSON。",
+      "unrecognizedMetapi": "未识别到 Metapi 账号导出数据，请确认选择了正确的导出 JSON。",
+      "noImportableAllAPIHub": "未找到可导入的 All API Hub 站点账号数据。",
+      "noImportableMetapi": "未找到可导入的 Metapi 站点账号数据。"
+    }
+  },
+  "siteSync": {
+    "errors": {
+      "missingGroupKey": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。"
+    }
+  },
+  "errors": {
+    "common": {
+      "invalid_json": "请求内容不是有效的 JSON。",
+      "invalid_param": "请求参数无效。",
+      "validation_failed": "输入校验失败，请检查后重试。",
+      "bad_request": "请求参数有误。",
+      "not_found": "请求的资源不存在。",
+      "duplicate_resource": "资源已存在。",
+      "database_error": "数据库操作失败，请稍后重试。",
+      "internal_error": "服务内部错误，请稍后重试。"
+    },
+    "auth": {
+      "unauthorized": "请先登录后再继续操作。",
+      "forbidden": "没有权限执行此操作。",
+      "invalid_token": "登录状态已失效，请重新登录。",
+      "expired_token": "登录状态已过期，请重新登录。",
+      "invalid_credentials": "用户名或密码错误。",
+      "api_key_expired": "API Key 已过期。",
+      "api_key_missing": "缺少 API Key。",
+      "password_incorrect": "原密码不正确。",
+      "api_key_disabled": "API Key 已被禁用。",
+      "api_key_cost_exceeded": "API Key 已达到最大费用限制。",
+      "api_key_rate_limited": "API Key 已超出速率限制，请稍后重试。"
+    },
+    "site_channel": {
+      "account_not_found": "站点账号不存在。",
+      "site_not_found": "站点不存在。",
+      "model_not_found": "站点模型不存在。",
+      "route_update_failed": "更新模型路由失败，请稍后重试。",
+      "model_disable_failed": "更新模型禁用状态失败，请稍后重试。",
+      "key_create_failed": "创建站点 Key 失败，请检查站点状态或稍后重试。",
+      "source_key_update_failed": "更新源 Key 失败，请检查输入后重试。",
+      "project_failed": "同步站点渠道投影失败，请稍后重试。"
+    },
+    "channel": {
+      "not_found": "通道不存在。",
+      "create_failed": "创建通道失败。",
+      "update_failed": "更新通道失败。",
+      "delete_failed": "删除通道失败。",
+      "fetch_models_failed": "获取通道模型失败。"
+    },
+    "group": {
+      "not_found": "分组不存在。",
+      "create_failed": "创建分组失败。",
+      "update_failed": "更新分组失败。",
+      "delete_failed": "删除分组失败。"
+    },
+    "model": {
+      "price_update_failed": "更新模型价格失败。",
+      "price_delete_failed": "删除模型价格失败。",
+      "create_failed": "创建模型失败。",
+      "update_failed": "更新模型失败。",
+      "delete_failed": "删除模型失败。"
+    },
+    "relay": {
+      "model_not_supported": "当前 API Key 不支持该模型。",
+      "model_not_found": "模型不存在或未配置可用分组。",
+      "no_available_channel": "没有可用通道。",
+      "channel_disabled": "通道已禁用。",
+      "no_available_key": "没有可用 Key。",
+      "upstream_failed": "上游请求失败。",
+      "timeout": "请求超时。",
+      "circuit_breaker_tripped": "通道熔断中，请稍后重试。"
+    },
+    "site": {
+      "sync": {
+        "missing_group_key": "分组“{groupKey}”没有可用的 Key。请先到站点创建这个分组的 Key，再重新同步。",
+        "group_models_unresolved": "无法确认分组“{groupKey}”的模型，请检查分组模型配置或 Key 权限。",
+        "no_group_result": "站点账号同步失败：没有可用的分组同步结果。",
+        "all_groups_unresolved": "站点账号同步失败：所有分组都未能确认模型，已保留历史模型。",
+        "unsupported_platform": "不支持的站点平台：{platform}。",
+        "snapshot_nil": "同步结果为空，请稍后重试。"
+      },
+      "auth": {
+        "access_token_required": "站点 Access Token 不能为空。",
+        "direct_token_required": "站点 Direct Token 不能为空。",
+        "login_failed": "站点登录失败，请检查账号、密码或站点状态。",
+        "login_token_missing": "站点登录成功但未返回 Access Token，请检查站点兼容性。"
+      },
+      "upstream": {
+        "http_error": "站点上游请求失败（HTTP {statusCode}），请检查站点状态或稍后重试。",
+        "decode_failed": "站点响应解析失败，请检查站点兼容性或稍后重试。",
+        "cloudflare_challenge": "站点触发 Cloudflare 保护，请稍后重试，或手动访问站点完成验证。"
+      },
+      "import": {
+        "invalid_json": "导入内容不是有效的 JSON，请检查文件格式或粘贴内容。",
+        "empty_payload": "导入内容为空，请选择 JSON 文件或粘贴导出内容。",
+        "unrecognized_all_api_hub": "未识别到 All API Hub 导出数据，请确认选择了正确的导出 JSON。",
+        "unrecognized_metapi": "未识别到 Metapi 账号导出数据，请确认选择了正确的导出 JSON。",
+        "no_importable_all_api_hub": "未找到可导入的 All API Hub 站点账号数据。",
+        "no_importable_metapi": "未找到可导入的 Metapi 站点账号数据。",
+        "unsupported_payload": "暂不支持该导入内容，请确认导出格式是否正确。",
+        "persist_failed": "保存导入数据失败，请稍后重试。"
+      },
+      "sub2api": {
+        "api_key_required": "Sub2API 同步需要 API Key。请先在站点创建一个 Key 后再重新同步。",
+        "model_api_key_required": "Sub2API 模型发现需要 API Key。请先在站点创建一个 Key 后再重新同步。",
+        "envelope_failed": "Sub2API 返回错误，请检查 Access Token、权限或站点状态。",
+        "missing_data": "Sub2API 响应缺少必要数据，请检查站点兼容性或稍后重试。"
+      }
+    }
+  },
+  "proxyPool": {
+    "name": "代理池",
+    "manage": "打开代理池管理",
+    "empty": "代理池为空",
+    "noEnabled": "没有可用的代理配置",
+    "selectConfig": "选择代理配置",
+    "selectRequired": "请选择代理池配置",
+    "disabledSelected": "当前选择的代理配置已停用，运行时会失败；保存前请改选可用代理。",
+    "disabledSuffix": "（已停用）",
+    "createFailed": "代理配置创建失败：",
+    "updateFailed": "代理配置更新失败：",
+    "deleteFailed": "代理配置删除失败：",
+    "testFailed": "代理配置测试失败：",
+    "mode": {
+      "label": "代理模式",
+      "inherit": "继承站点设置",
+      "direct": "直连",
+      "system": "系统代理",
+      "pool": "代理池"
+    },
+    "dialog": {
+      "title": "代理池",
+      "description": "管理可复用代理配置，站点、站点账号和普通渠道可从这里选择代理。",
+      "close": "关闭",
+      "tabs": {
+        "proxies": "代理端点",
+        "clash": "Clash 控制器",
+        "verification": "验证桥接"
+      },
+      "searchPlaceholder": "搜索名称、URL 或备注",
+      "loading": "加载中...",
+      "loadFailed": "加载失败：{message}",
+      "empty": "暂无代理配置",
+      "enabled": "启用",
+      "disabled": "停用",
+      "references": "引用 {count}",
+      "referencesTitle": "查看引用",
+      "referencesDescription": "{name} 当前被以下位置使用。点击跳转图标可定位到对应位置。",
+      "referencesEmpty": "暂无引用",
+      "jumpToReference": "跳转到引用位置",
+      "managedChannelTitle": "投影渠道：{channel}",
+      "expandReference": "展开投影渠道",
+      "collapseReference": "收起投影渠道",
+      "derivedReferences": "投影 {count}",
+      "referenceTypes": {
+        "site": "站点",
+        "siteAccount": "账号",
+        "managedChannel": "托管渠道",
+        "channel": "渠道",
+        "reference": "引用"
+      },
+      "referenceLocations": {
+        "site": "站点",
+        "archivedSite": "已归档站点",
+        "siteNamed": "站点：{name}",
+        "siteAccount": "站点账号",
+        "managedChannel": "站点投影渠道（由站点/账号继承，不计入引用数）",
+        "managedChannelUnderSite": "由站点 {site} / 账号代理投影，不单独计数",
+        "channel": "普通渠道"
+      },
+      "test": "测试",
+      "edit": "编辑",
+      "delete": "删除",
+      "deleteBlocked": "仍被引用，不能删除",
+      "formTitleCreate": "新增代理配置",
+      "formTitleEdit": "编辑代理配置",
+      "formDescription": "URL 支持 http、https、socks、socks5。",
+      "new": "新增",
+      "name": "名称",
+      "url": "代理 URL",
+      "clashLinkLabel": "Clash 控制器",
+      "clashLinkNone": "不关联控制器",
+      "clashLinkHint": "关联后，恢复策略可在该控制器的专用组中切换节点。",
+      "clashLinked": "Clash：{name}",
+      "remark": "备注",
+      "testUrl": "测试目标 URL",
+      "testDraft": "测试当前表单代理",
+      "submitCreate": "创建代理配置",
+      "submitEdit": "保存修改",
+      "created": "代理配置已创建",
+      "updated": "代理配置已更新",
+      "deleted": "代理配置已删除",
+      "deleteReferenced": "该代理配置仍被引用，请先解除引用",
+      "formRequired": "请填写代理名称和 URL",
+      "testSuccess": "代理可连通：HTTP {statusCode} · {durationMs}ms",
+      "testFailed": "代理测试失败",
+      "operationFailed": "操作失败"
+    },
+    "site": {
+      "inherit": "继承站点代理"
+    },
+    "clash": {
+      "title": "Clash / Mihomo 控制器",
+      "loading": "正在加载控制器...",
+      "empty": "暂无控制器",
+      "enabled": "启用",
+      "disabled": "停用",
+      "loadNodes": "加载节点",
+      "edit": "编辑控制器",
+      "delete": "删除控制器",
+      "nodeState": "节点状态",
+      "currentNode": "当前节点：{node}",
+      "refresh": "刷新节点",
+      "selectNode": "选择节点",
+      "switch": "切换",
+      "switched": "已切换到 {node}",
+      "createTitle": "新增控制器",
+      "editTitle": "编辑控制器",
+      "new": "新增",
+      "name": "名称",
+      "apiUrl": "Controller API URL",
+      "proxyUrl": "流量代理 URL",
+      "groupName": "专用代理组",
+      "secret": "Controller Secret",
+      "secretKeep": "留空以保留当前 Secret",
+      "secretOptional": "可选",
+      "showSecret": "显示 Secret",
+      "hideSecret": "隐藏 Secret",
+      "create": "创建控制器",
+      "save": "保存修改",
+      "created": "控制器已创建",
+      "updated": "控制器已更新",
+      "deleted": "控制器已删除",
+      "required": "请填写名称、API URL、代理 URL 和专用代理组",
+      "deleteConfirmTitle": "删除控制器？",
+      "deleteConfirmDescription": "将删除“{name}”。仍被代理端点引用时操作会被拒绝。",
+      "cancel": "取消",
+      "operationFailed": "操作失败"
+    },
+    "verificationBridge": {
+      "title": "Verification Bridge 配对",
+      "activeCount": "有效 {count}",
+      "loading": "正在加载配对...",
+      "empty": "暂无配对",
+      "status": {
+        "active": "有效",
+        "expired": "已过期",
+        "revoked": "已撤销"
+      },
+      "expiresAt": "过期：{value}",
+      "lastSeenAt": "最近连接：{value}",
+      "rotate": "轮换配对令牌",
+      "revoke": "撤销配对",
+      "createTitle": "创建配对",
+      "name": "设备名称",
+      "accountScope": "站点账号",
+      "accountScopeValue": "账号：{value}",
+      "accountPlaceholder": "选择站点账号",
+      "accountLoading": "正在加载站点账号...",
+      "ttlDays": "有效天数",
+      "create": "创建配对",
+      "nameRequired": "请输入设备名称",
+      "accountRequired": "请选择站点账号",
+      "created": "配对已创建",
+      "rotated": "配对令牌已轮换",
+      "revoked": "配对已撤销",
+      "tokenTitle": "仅显示一次的配对令牌",
+      "tokenDescription": "此令牌只显示一次，在过期或撤销前持续有效。",
+      "done": "完成",
+      "rotateConfirmTitle": "轮换配对令牌？",
+      "rotateConfirmDescription": "“{name}”的当前令牌会立即失效，正在执行的浏览器任务可能需要重新开始。",
+      "revokeConfirmTitle": "撤销配对？",
+      "revokeConfirmDescription": "“{name}”将无法再领取验证任务，已领取的任务会被释放。",
+      "cancel": "取消",
+      "operationFailed": "操作失败"
+    }
+  },
+  "siteManagement": {
+    "common": {
+      "close": "关闭",
+      "cancel": "取消",
+      "saving": "保存中...",
+      "saveChanges": "保存修改",
+      "add": "添加",
+      "remove": "移除",
+      "operationFailed": "操作失败",
+      "headerKey": "Header Key",
+      "headerValue": "Header Value"
+    },
+    "tags": {
+      "placeholder": "输入标签后回车",
+      "maxLength": "单个标签不能超过 {count} 个字符",
+      "maxCount": "标签数量不能超过 {count} 个",
+      "remove": "移除标签 {tag}"
+    },
+    "siteForm": {
+      "nameRequired": "请输入站点名称",
+      "urlRequired": "请输入站点地址",
+      "detectedPlatform": "自动检测到平台：{platform}",
+      "platformApi": "API 直连",
+      "detectFailed": "无法自动检测平台类型，请手动选择",
+      "platformRequired": "请选择平台类型",
+      "headerRequired": "自定义 Header 的键和值都不能为空",
+      "routeRequired": "协议路径覆盖的类型和地址都不能为空",
+      "duplicateRoute": "同一协议的路径覆盖只能配置一条",
+      "updated": "站点已更新",
+      "created": "站点已创建",
+      "editTitle": "编辑站点",
+      "createTitle": "新增站点",
+      "siteName": "站点名称",
+      "siteNamePlaceholder": "例如：主站 OneAPI",
+      "platform": "平台类型",
+      "autoDetect": "自动检测",
+      "siteUrl": "站点地址",
+      "defaultProtocol": "默认协议",
+      "defaultProtocolHint": "决定获取模型列表的请求格式，以及未手动指定路由类型的模型的默认端点格式",
+      "manualCheckinUrl": "手动签到 URL",
+      "manualCheckinPlaceholder": "可选：例如 https://example.com/signin",
+      "manualCheckinHint": "配置后可在站点总览中一键打开此页面进行手动签到。",
+      "tags": "标签",
+      "tagsHint": "可选：为站点打标签，便于在列表中分类筛选。",
+      "enabled": "启用站点",
+      "disabledHint": "停用后不再投影托管渠道",
+      "advancedSettings": "高级设置",
+      "customHeaders": "自定义 Header（{count}）",
+      "protocolOverrides": "协议路径覆盖（{count}）",
+      "protocolOverridesHint": "按协议覆盖请求地址，例如 Anthropic 填 https://example.com/anthropic/v1，留空则用站点地址默认推断。",
+      "routeType": "协议类型",
+      "createSite": "创建站点"
+    },
+    "accountForm": {
+      "contextMissing": "站点上下文不存在。",
+      "nameRequired": "请输入账号名称",
+      "usernamePasswordRequired": "用户名和密码不能为空",
+      "accessTokenRequired": "请输入 Access Token",
+      "apiKeyRequired": "请输入 API Key",
+      "checkinIntervalRange": "最小签到间隔必须在 1 到 720 小时之间",
+      "randomWindowRange": "随机延迟窗口必须在 0 到 1440 分钟之间",
+      "platformUserIdRequired": "请输入 Platform User ID",
+      "platformUserIdInvalid": "Platform User ID 必须是大于 0 的整数",
+      "tokenExpiresPositive": "token_expires_at 必须是正整数时间戳",
+      "tokenExpiresParseable": "token_expires_at 必须是时间戳或可解析时间",
+      "updated": "站点账号已更新",
+      "created": "站点账号已创建",
+      "editTitle": "编辑站点账号",
+      "createTitle": "新增站点账号",
+      "accountName": "账号名称",
+      "accountNamePlaceholder": "例如：主账号",
+      "credentialType": "凭据类型",
+      "credentialUsernamePassword": "用户名 / 密码",
+      "credentialAccessToken": "访问令牌（Access Token）",
+      "credentialApiKey": "API 密钥（API Key）",
+      "username": "用户名",
+      "usernamePlaceholder": "请输入用户名",
+      "password": "密码",
+      "passwordPlaceholder": "请输入密码",
+      "accessToken": "访问令牌（Access Token）",
+      "accessTokenPlaceholder": "请输入 Access Token",
+      "refreshToken": "刷新令牌（Refresh Token）",
+      "refreshTokenPlaceholder": "可选：请输入 refresh_token",
+      "tokenExpiresAt": "token_expires_at",
+      "tokenExpiresPlaceholder": "可选：F12 中的时间戳或时间字符串",
+      "sub2apiHint": "Sub2API 推荐同时填写 F12 里的 <refreshToken>refresh_token</refreshToken> 与 <expiresAt>token_expires_at</expiresAt>，会在快过期或 401 时自动续期。",
+      "platformUserId": "平台用户 ID（Platform User ID）",
+      "platformUserIdPlaceholder": "例如 11494",
+      "platformUserIdHint": "New API 站点同步 token、分组和签到时需要用户 ID。导入数据会尽量自动填充该值。",
+      "apiKey": "API 密钥（API Key）",
+      "apiKeyPlaceholder": "请输入 API Key",
+      "enabled": "启用账号",
+      "autoSync": "自动同步",
+      "autoCheckin": "自动签到",
+      "randomCheckin": "随机签到",
+      "minCheckinInterval": "最小签到间隔（小时）",
+      "randomDelayWindow": "随机延迟窗口（分钟）",
+      "proxyHint": "用于该账号的同步、签到和模型拉取；自动投影的渠道会跟随这里解析后的代理。",
+      "createAccount": "创建账号"
+    },
+    "batchEdit": {
+      "selectSiteRequired": "请先选择站点",
+      "headerRequired": "设置类 Header 的键和值都不能为空",
+      "changeRequired": "请至少填写一项修改",
+      "completed": "操作完成：成功 {successCount}，失败 {failedCount}",
+      "failed": "批量编辑失败",
+      "title": "批量编辑",
+      "description": "将对 {count} 个站点应用以下修改（未涉及的内容保持不变）",
+      "addTags": "添加标签",
+      "removeTags": "移除标签",
+      "headerList": "Header 列表（{count}）",
+      "set": "设置",
+      "delete": "删除",
+      "deleteKeyPlaceholder": "删除此 Key（无需值）",
+      "headerHint": "“设置”按 Key 新增或更新（大小写不敏感）；“删除”按 Key 移除。各站点其余 Header 保持不变。",
+      "applying": "应用中...",
+      "applySelected": "应用到所选站点"
+    },
+    "checkin": {
+      "filters": {
+        "all": "全部",
+        "success": "成功",
+        "failed": "失败",
+        "idle": "未执行",
+        "disabled": "禁用"
+      },
+      "overview": "总览",
+      "currentResult": "当前结果",
+      "visibleCounts": "{siteCount} 站点 / {accountCount} 账号",
+      "currentBalance": "当前余额",
+      "totalUsed": "累计消耗",
+      "enabledAccounts": "启用账号",
+      "todayFailures": "今日异常",
+      "search": "搜索：{term}",
+      "clearFilters": "清空筛选",
+      "openManualCheckin": "打开手动签到（{count}）",
+      "removeTagFilter": "取消按“{tag}”筛选",
+      "addTagFilter": "按“{tag}”筛选"
+    }
+  },
+  "siteRecovery": {
+    "title": "代理恢复与验证",
+    "menu": "恢复与验证",
+    "close": "关闭",
+    "cancel": "取消",
+    "confirm": "确认",
+    "loading": "正在加载...",
+    "operationFailed": "操作失败",
+    "tabs": {
+      "overview": "路径",
+      "attempts": "尝试链",
+      "verification": "Cloudflare 验证"
+    },
+    "form": {
+      "sitePolicy": "自动代理恢复",
+      "sitePolicyHint": "站点管理操作失败后按恢复策略尝试其他网络路径。",
+      "accountPolicy": "账号恢复策略",
+      "accountPolicyHint": "账号可继承站点策略，或单独启用、停用。",
+      "inheritSite": "继承站点",
+      "enable": "启用",
+      "disable": "停用"
+    },
+    "operation": {
+      "sync": "同步",
+      "checkin": "签到"
+    },
+    "preferenceStatus": {
+      "healthy": "健康",
+      "cooling": "冷却中",
+      "stale": "已过期",
+      "disabled": "已停用"
+    },
+    "sessionStatus": {
+      "pending": "待验证",
+      "completed": "已完成",
+      "expired": "已过期",
+      "revoked": "已撤销",
+      "superseded": "已被新会话取代"
+    },
+    "taskStatus": {
+      "pending": "待领取",
+      "claimed": "已领取",
+      "completed": "已完成",
+      "expired": "已过期",
+      "canceled": "已取消"
+    },
+    "retryStatus": {
+      "none": "无重试",
+      "pending": "等待重试",
+      "running": "重试中",
+      "succeeded": "重试成功",
+      "failed": "重试失败",
+      "canceled": "已取消"
+    },
+    "overview": {
+      "effectivePolicy": "当前策略",
+      "enabled": "已启用",
+      "disabled": "已停用",
+      "inherited": "继承站点",
+      "accountOverride": "账号覆盖",
+      "sitePreference": "站点偏好",
+      "accountPreference": "账号偏好",
+      "pathCount": "{count} 条路径",
+      "none": "无",
+      "learnedPaths": "已学习路径",
+      "learnedPathsHint": "仅完整操作成功后记录，失败路径会进入冷却。",
+      "clearAccount": "清除账号偏好",
+      "clearSite": "清除站点偏好",
+      "empty": "尚未学习到成功路径",
+      "proxyId": "代理 #{id}",
+      "siteScope": "站点",
+      "accountScope": "账号",
+      "successFailure": "成功 {success} / 失败 {failure}",
+      "averageLatency": "平均 {value}ms",
+      "lastSuccess": "最近成功 {value}",
+      "cooldownUntil": "冷却至 {value}",
+      "accountCleared": "账号偏好已清除",
+      "siteCleared": "站点偏好已清除",
+      "clearAccountConfirmTitle": "清除账号偏好？",
+      "clearSiteConfirmTitle": "清除站点偏好？",
+      "clearConfirmDescription": "后续操作将重新按候选顺序选择路径。"
+    },
+    "attempts": {
+      "empty": "暂无恢复尝试记录",
+      "succeeded": "成功",
+      "failed": "失败",
+      "stopReason": "停止：{value}",
+      "number": "第 {value} 次",
+      "duration": "{value}ms"
+    },
+    "verification": {
+      "newSession": "新建验证任务",
+      "newSessionHint": "任务可由已配对的浏览器扩展领取，也可手动导入 Cookie。",
+      "clearAccount": "清除账号验证",
+      "operation": "恢复操作",
+      "ttlMinutes": "有效分钟",
+      "userAgent": "User-Agent",
+      "optional": "可选",
+      "create": "创建任务",
+      "created": "验证任务已创建",
+      "manualImport": "手动导入 Cookie",
+      "cookie": "Cookie",
+      "showCookie": "显示 Cookie",
+      "hideCookie": "隐藏 Cookie",
+      "complete": "完成验证",
+      "cookieRequired": "请选择待验证会话并填写 Cookie",
+      "completed": "验证已完成，原操作将自动重试",
+      "history": "验证记录",
+      "empty": "暂无验证记录",
+      "sessionId": "会话 #{id}",
+      "expiresAt": "过期：{value}",
+      "completedAt": "完成：{value}",
+      "task": "任务",
+      "retryStatus": "原操作",
+      "retry": "再次运行",
+      "retryQueued": "原操作已重新排队",
+      "revoke": "撤销会话",
+      "revoked": "会话已撤销",
+      "cleared": "账号验证信息已清除",
+      "clearConfirmTitle": "清除账号验证？",
+      "clearConfirmDescription": "将撤销相关会话、取消任务并删除账号保存的验证状态。",
+      "revokeConfirmTitle": "撤销验证会话？",
+      "revokeConfirmDescription": "该会话及其活动任务将立即失效。"
+    }
+  }
 }

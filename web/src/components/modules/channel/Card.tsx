@@ -1,12 +1,7 @@
-import {
-    MorphingDialog,
-    MorphingDialogTrigger,
-    MorphingDialogContainer,
-    MorphingDialogContent,
-} from '@/components/ui/morphing-dialog';
+import { MorphingDialog, MorphingDialogTrigger, MorphingDialogContainer, MorphingDialogContent } from '@/components/ui/morphing-dialog';
 import { CheckCircle2, DollarSign, Key, Layers, MessageSquare, XCircle } from 'lucide-react';
 import { type StatsMetricsFormatted } from '@/api/endpoints/stats';
-import { type Channel, useEnableChannel } from '@/api/endpoints/channel';
+import { type Channel, useEnableChannel, useUpdateChannel } from '@/api/endpoints/channel';
 import { CardContent } from './CardContent';
 import { useTranslations } from 'next-intl';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/animate-ui/components/animate/tooltip';
@@ -19,6 +14,7 @@ export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; st
     const tSections = useTranslations('channel.detail.sections');
     const tMetrics = useTranslations('channel.detail.metrics');
     const enableChannel = useEnableChannel();
+    const updateChannel = useUpdateChannel();
     const isListLayout = layout === 'list';
 
     const splitModels = (models: string) =>
@@ -47,6 +43,20 @@ export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; st
         );
     };
 
+    const handleReserveChange = (checked: boolean) => {
+        updateChannel.mutate(
+            { id: channel.id, is_reserve: checked },
+            {
+                onSuccess: () => {
+                    toast.success(checked ? '已设为中转渠道' : '已转为公益渠道');
+                },
+                onError: (error) => {
+                    toast.error(error.message);
+                },
+            }
+        );
+    };
+
     return (
         <MorphingDialog>
             <MorphingDialogTrigger className="w-full">
@@ -65,7 +75,28 @@ export function Card({ channel, stats, layout = 'grid' }: { channel: Channel; st
                                         站点投影
                                     </span>
                                 </div>
-                            ) : null}
+                            ) : (
+                                <div className="mt-1.5 flex items-center gap-1.5">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span className="inline-flex items-center gap-1.5 cursor-pointer">
+                                                <Switch
+                                                    checked={channel.is_reserve}
+                                                    disabled={updateChannel.isPending}
+                                                    onCheckedChange={handleReserveChange}
+                                                    aria-label={channel.is_reserve ? '转为公益渠道' : '设为中转渠道'}
+                                                />
+                                                <span className="text-[10px] font-medium text-muted-foreground">
+                                                    {channel.is_reserve ? '中转' : '公益'}
+                                                </span>
+                                            </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {channel.is_reserve ? '转为公益渠道' : '设为中转渠道'}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
+                            )}
                         </div>
                         <Switch
                             checked={channel.enabled}
