@@ -16,6 +16,21 @@ import type { LLMChannel } from '@/api/endpoints/model';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { useTranslations } from 'next-intl';
 
+function formatBalance(value: number): string {
+    if (!Number.isFinite(value)) return '-';
+    if (Math.abs(value) >= 1000) {
+        const scaled = value / 1000;
+        const text = scaled >= 100 ? Math.round(scaled).toString() : (Math.round(scaled * 10) / 10).toString();
+        return `$${text}k`;
+    }
+    return `$${value.toFixed(2)}`;
+}
+
+function formatMultiplier(value: number): string {
+    if (!Number.isFinite(value)) return '-';
+    return `${Math.round(value * 100) / 100}x`;
+}
+
 export interface SelectedMember extends LLMChannel {
     id: string;
     item_id?: number;
@@ -59,6 +74,7 @@ function MemberItem({
 }) {
     const { Avatar: ModelAvatar } = getModelIcon(member.name);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const t = useTranslations('group');
     const isDisabled = member.enabled === false;
     const isSiteChannel = member.site_id != null;
     const sourceLabel = [member.channel_name, isSiteChannel ? null : member.endpoint_type?.trim()]
@@ -103,6 +119,7 @@ function MemberItem({
                     )}
                     // eslint-disable-next-line react-hooks/refs
                     {...dnd.dragHandleProps}
+                    aria-label={t('member.reorder', { name: member.name })}
                 >
                     <GripVertical className="size-3.5 text-muted-foreground" />
                 </div>
@@ -122,6 +139,25 @@ function MemberItem({
                         <TooltipContent key={member.name}>{member.name}</TooltipContent>
                     </Tooltip>
                     <span className="text-[10px] text-muted-foreground truncate leading-tight">{sourceLabel}</span>
+                    {(member.is_reserve || member.balance != null || member.multiplier != null) && (
+                        <span className="flex items-center gap-1 mt-0.5">
+                            {member.is_reserve && (
+                                <span className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-300">
+                                    {t('member.reserveBadge')}
+                                </span>
+                            )}
+                            {member.balance != null && (
+                                <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px text-[9px] font-medium text-emerald-700 dark:text-emerald-300">
+                                    {t('member.balanceLabel')} {formatBalance(member.balance)}
+                                </span>
+                            )}
+                            {member.multiplier != null && (
+                                <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-px text-[9px] font-medium text-sky-700 dark:text-sky-300">
+                                    {t('member.multiplierLabel')} {formatMultiplier(member.multiplier)}
+                                </span>
+                            )}
+                        </span>
+                    )}
                 </div>
 
                 {showWeight && (
@@ -142,6 +178,7 @@ function MemberItem({
                         layoutId={`delete-btn-member-${layoutScope ?? 'default'}-${member.id}`}
                         type="button"
                         onClick={() => showConfirmDelete ? setConfirmDelete(true) : onRemove(member.id)}
+                        aria-label={t('member.remove', { name: member.name })}
                         className="p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors"
                         initial={false}
                         animate={{ opacity: 1, x: 0 }}
@@ -162,6 +199,7 @@ function MemberItem({
                             <button
                                 type="button"
                                 onClick={() => setConfirmDelete(false)}
+                                aria-label={t('member.cancelRemove', { name: member.name })}
                                 className="flex h-6 w-6 items-center justify-center rounded-md bg-destructive-foreground/20 text-destructive-foreground transition-all hover:bg-destructive-foreground/30 active:scale-95"
                             >
                                 <X className="h-3 w-3" />
@@ -169,6 +207,7 @@ function MemberItem({
                             <button
                                 type="button"
                                 onClick={() => onRemove(member.id)}
+                                aria-label={t('member.confirmRemove', { name: member.name })}
                                 className="flex-1 h-6 flex items-center justify-center gap-1.5 rounded-md bg-destructive-foreground text-destructive text-xs font-semibold transition-all hover:bg-destructive-foreground/90 active:scale-[0.98]"
                             >
                                 <Trash2 className="h-3 w-3" />
