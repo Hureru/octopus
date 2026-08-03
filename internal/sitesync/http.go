@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/bestruirui/octopus/internal/client"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 func siteHTTPClient(ctx context.Context, siteRecord *model.Site, accounts ...*model.SiteAccount) (*http.Client, error) {
@@ -53,36 +55,56 @@ func resolveSiteAccountProxy(siteRecord *model.Site, accounts ...*model.SiteAcco
 }
 
 func requestJSON(ctx context.Context, siteRecord *model.Site, method string, requestURL string, body any, headers map[string]string, accounts ...*model.SiteAccount) (map[string]any, error) {
-	httpClient, err := siteHTTPClient(ctx, siteRecord, accounts...)
-	if err != nil {
-		return nil, err
+	if siteRecord == nil {
+		return nil, fmt.Errorf("site is nil")
 	}
-
-	var bodyReader io.Reader
+	var payloadBytes []byte
+	var err error
 	if body != nil {
-		payload, marshalErr := json.Marshal(body)
-		if marshalErr != nil {
-			return nil, marshalErr
+		payloadBytes, err = json.Marshal(body)
+		if err != nil {
+			return nil, err
 		}
-		bodyReader = bytes.NewReader(payload)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, bodyReader)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		method,
+		requestURL,
+		bytes.NewReader(payloadBytes),
+	)
 	if err != nil {
 		return nil, err
 	}
 	applyDefaultSiteRequestHeaders(req, body != nil)
-	for _, item := range siteRecord.CustomHeader {
-		if strings.TrimSpace(item.HeaderKey) != "" {
-			req.Header.Set(strings.TrimSpace(item.HeaderKey), item.HeaderValue)
+	account := firstSiteAccount(accounts...)
+	policy := resolveSiteRequestHeaderPolicy(ctx, siteRecord, account)
+	op.ApplyHeaderPolicy(req.Header, nil, siteRecord.CustomHeader, policy)
+	verificationCookie, verificationUserAgent := siteVerificationHeaders(ctx, siteRecord, account)
+	applyTrustedSiteRequestHeaders(req.Header, headers, verificationCookie, verificationUserAgent)
+
+	if transport, ok := verificationBrowserTransportFromContext(ctx); ok {
+		response, err := transport.request(ctx, op.VerificationBrowserRequestInput{
+			Binding: transport.binding,
+			Method:  req.Method,
+			URL:     req.URL.String(),
+			Headers: verificationBrowserHeaders(req.Header),
+			Body:    string(payloadBytes),
+		})
+		if err != nil {
+			return nil, err
 		}
-	}
-	for key, value := range headers {
-		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
-			req.Header.Set(key, value)
-		}
+		return parseSiteJSONResponse(
+			response.Status,
+			verificationBrowserResponseHeader(response.Headers),
+			[]byte(response.Body),
+		)
 	}
 
+	httpClient, err := siteHTTPClient(ctx, siteRecord, accounts...)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -93,18 +115,137 @@ func requestJSON(ctx context.Context, siteRecord *model.Site, method string, req
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, formatSiteHTTPError(resp.StatusCode, resp.Header, bodyBytes)
+	return parseSiteJSONResponse(resp.StatusCode, resp.Header, bodyBytes)
+}
+
+func parseSiteJSONResponse(
+	statusCode int,
+	header http.Header,
+	bodyBytes []byte,
+) (map[string]any, error) {
+	if statusCode < 200 || statusCode >= 300 {
+		return nil, formatSiteHTTPError(statusCode, header, bodyBytes)
 	}
 	if len(bodyBytes) == 0 {
 		return map[string]any{}, nil
 	}
-
 	var payload map[string]any
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		return nil, formatSiteDecodeError(resp.Header.Get("Content-Type"), bodyBytes, err)
+		if IsCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+			return nil, wrapCloudflareProtectionError(
+				newCloudflareProtectionError(statusCode, header),
+			)
+		}
+		return nil, formatSiteDecodeError(header.Get("Content-Type"), bodyBytes, err)
 	}
 	return payload, nil
+}
+
+func firstSiteAccount(accounts ...*model.SiteAccount) *model.SiteAccount {
+	for _, account := range accounts {
+		if account != nil {
+			return account
+		}
+	}
+	return nil
+}
+
+func resolveSiteRequestHeaderPolicy(
+	ctx context.Context,
+	siteRecord *model.Site,
+	account *model.SiteAccount,
+) model.ResolvedHeaderPolicy {
+	if siteRecord == nil || siteRecord.ID <= 0 {
+		return op.HeaderPolicyFailureFallback()
+	}
+	accountID := 0
+	if account != nil {
+		accountID = account.ID
+	}
+	policy, err := op.ResolveSiteHeaderPolicy(ctx, siteRecord.ID, accountID)
+	if err == nil {
+		return policy
+	}
+	// ctx 已超时/取消时失败是连锁反应而非独立故障，避免刷屏噪音
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return op.HeaderPolicyFailureFallback()
+	}
+	log.Warnf(
+		"resolve site header policy failed (site=%d account=%d): %v",
+		siteRecord.ID,
+		accountID,
+		err,
+	)
+	return op.HeaderPolicyFailureFallback()
+}
+
+func siteVerificationHeaders(
+	ctx context.Context,
+	siteRecord *model.Site,
+	account *model.SiteAccount,
+) (cookie string, userAgent string) {
+	if siteRecord == nil || account == nil {
+		return "", ""
+	}
+	_, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
+	clashNode := account.PreferredClashNode
+	if clashNode == "" {
+		clashNode = siteRecord.PreferredClashNode
+	}
+	if path, ok := ctx.Value(recoveryPathContextKey{}).(siteRecoveryPath); ok {
+		proxyConfigID = cloneInt(path.proxyConfigID)
+		clashNode = path.clashNode
+	}
+	cookie, userAgent, ok := op.VerificationHeadersForAccount(account, proxyConfigID, clashNode)
+	if !ok {
+		return "", ""
+	}
+	return cookie, userAgent
+}
+
+func applyTrustedSiteRequestHeaders(
+	target http.Header,
+	headers map[string]string,
+	verificationCookie string,
+	verificationUserAgent string,
+) {
+	if target == nil {
+		return
+	}
+	cookieHeader := target.Get("Cookie")
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		if strings.EqualFold(key, "Cookie") {
+			cookieHeader = mergeCookieHeaderValues(cookieHeader, value)
+			continue
+		}
+		target.Set(key, value)
+	}
+	cookieHeader = mergeCookieHeaderValues(cookieHeader, verificationCookie)
+	if cookieHeader != "" {
+		target.Set("Cookie", cookieHeader)
+	}
+	if verificationUserAgent != "" {
+		target.Set("User-Agent", verificationUserAgent)
+	}
+}
+
+func mergeCookieHeaderValues(values ...string) string {
+	merged := ""
+	for _, value := range values {
+		for _, pair := range strings.Split(value, ";") {
+			parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+			if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+				continue
+			}
+			merged = anyRouterUpsertCookie(merged, strings.TrimSpace(parts[0]), parts[1])
+		}
+	}
+	return merged
 }
 
 func applyDefaultSiteRequestHeaders(req *http.Request, hasJSONBody bool) {
@@ -140,10 +281,12 @@ func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) e
 	return newSiteHTTPError(statusCode, "上游返回非 JSON 响应，无法解析为接口响应")
 }
 
-// IsCloudflareProtectionResponse 判断一次上游响应是否为 Cloudflare 防护拦截（403 + CF 指纹）。
+// IsCloudflareProtectionResponse 判断一次上游响应是否为 Cloudflare 防护拦截。
 // 供 sitesync 内部与被动离群退役（POR）门3 复用。
 func IsCloudflareProtectionResponse(statusCode int, header http.Header, bodyBytes []byte) bool {
-	if statusCode != http.StatusForbidden {
+	switch statusCode {
+	case http.StatusOK, http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable:
+	default:
 		return false
 	}
 	body := strings.ToLower(string(bodyBytes))
@@ -154,8 +297,19 @@ func IsCloudflareProtectionResponse(statusCode int, header http.Header, bodyByte
 		strings.Contains(body, "cloudflare") {
 		return true
 	}
+	if json.Valid(bodyBytes) {
+		return false
+	}
 	server := strings.ToLower(header.Get("Server"))
-	return header.Get("CF-Ray") != "" || strings.Contains(server, "cloudflare")
+	hasCloudflareHeader := header.Get("CF-Ray") != "" || strings.Contains(server, "cloudflare")
+	if !hasCloudflareHeader {
+		return false
+	}
+	contentType := strings.ToLower(header.Get("Content-Type"))
+	htmlLike := strings.Contains(contentType, "text/html") ||
+		strings.HasPrefix(strings.TrimSpace(body), "<!doctype html") ||
+		strings.HasPrefix(strings.TrimSpace(body), "<html")
+	return statusCode != http.StatusOK || htmlLike
 }
 
 func formatSiteDecodeError(contentType string, bodyBytes []byte, err error) error {

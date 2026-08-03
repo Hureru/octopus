@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
+	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"golang.org/x/net/proxy"
@@ -93,6 +95,14 @@ func clonedDefaultTransport() (*http.Transport, error) {
 		return nil, fmt.Errorf("default transport is not *http.Transport")
 	}
 	cloned := transport.Clone()
+	// 被墙/不可达站点会卡在 TCP 连接或 TLS 握手阶段（Go 默认无连接超时，
+	// TLS 握手 10s），导致 Failover 前等待过长。这里应用可配置的短超时，
+	// 让故障快速降级到下一个候选。
+	cloned.DialContext = (&net.Dialer{
+		Timeout:   conf.ClientDialTimeout(),
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	cloned.TLSHandshakeTimeout = conf.ClientTLSHandshakeTimeout()
 	return cloned, nil
 }
 

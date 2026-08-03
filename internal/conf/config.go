@@ -34,6 +34,13 @@ type Database struct {
 	Path string `mapstructure:"path"`
 }
 
+type Client struct {
+	// DialTimeoutSeconds 上游 TCP 连接（含 DNS）超时，默认 5。
+	DialTimeoutSeconds int `mapstructure:"dial_timeout_seconds"`
+	// TLSHandshakeTimeoutSeconds 上游 TLS 握手超时，默认 5。
+	TLSHandshakeTimeoutSeconds int `mapstructure:"tls_handshake_timeout_seconds"`
+}
+
 type Startup struct {
 	CacheInitTimeoutSeconds int `mapstructure:"cache_init_timeout_seconds"`
 }
@@ -42,6 +49,7 @@ type Config struct {
 	Server   Server   `mapstructure:"server"`
 	Log      Log      `mapstructure:"log"`
 	Database Database `mapstructure:"database"`
+	Client   Client   `mapstructure:"client"`
 	Startup  Startup  `mapstructure:"startup"`
 }
 
@@ -51,6 +59,22 @@ func CacheInitTimeout() time.Duration {
 	seconds := AppConfig.Startup.CacheInitTimeoutSeconds
 	if seconds <= 0 {
 		seconds = 120
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func ClientDialTimeout() time.Duration {
+	seconds := AppConfig.Client.DialTimeoutSeconds
+	if seconds <= 0 {
+		seconds = 5
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func ClientTLSHandshakeTimeout() time.Duration {
+	seconds := AppConfig.Client.TLSHandshakeTimeoutSeconds
+	if seconds <= 0 {
+		seconds = 5
 	}
 	return time.Duration(seconds) * time.Second
 }
@@ -105,4 +129,6 @@ func setDefaults() {
 	viper.SetDefault("log.access.slow_threshold_ms", 3000)
 	viper.SetDefault("log.relay.summary", true)
 	viper.SetDefault("startup.cache_init_timeout_seconds", 120)
+	viper.SetDefault("client.dial_timeout_seconds", 5)
+	viper.SetDefault("client.tls_handshake_timeout_seconds", 5)
 }
