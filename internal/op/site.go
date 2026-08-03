@@ -170,6 +170,10 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 		merged.IsPinned = *req.IsPinned
 		selectFields = append(selectFields, "is_pinned")
 	}
+	if req.IsReserve != nil {
+		merged.IsReserve = *req.IsReserve
+		selectFields = append(selectFields, "is_reserve")
+	}
 	if req.SortOrder != nil {
 		merged.SortOrder = *req.SortOrder
 		selectFields = append(selectFields, "sort_order")
@@ -223,6 +227,9 @@ func SiteUpdate(req *model.SiteUpdateRequest, ctx context.Context) (*model.Site,
 	}
 	if req.IsPinned != nil {
 		updates.IsPinned = merged.IsPinned
+	}
+	if req.IsReserve != nil {
+		updates.IsReserve = merged.IsReserve
 	}
 	if req.SortOrder != nil {
 		updates.SortOrder = merged.SortOrder

@@ -692,6 +692,47 @@ func CatalogCandidateFor(ctx context.Context, canonicalModelID, channelID int, u
 	return &item, err
 }
 
+// siteReserveTierByChannel 返回 channel_id -> 备用层标志（1=中转/备用，0=公益）。
+// 中转站点排在同协议公益站点之后，作为 Failover 降级目标。
+func siteReserveTierByChannel(ctx context.Context, items []model.GroupItem) map[int]int {
+	result := make(map[int]int, len(items))
+	if len(items) == 0 {
+		return result
+	}
+	channelIDs := make([]int, 0, len(items))
+	seen := make(map[int]struct{}, len(items))
+	for _, item := range items {
+		if item.ChannelID <= 0 {
+			continue
+		}
+		if _, ok := seen[item.ChannelID]; ok {
+			continue
+		}
+		seen[item.ChannelID] = struct{}{}
+		channelIDs = append(channelIDs, item.ChannelID)
+	}
+	if len(channelIDs) == 0 {
+		return result
+	}
+	var rows []struct {
+		ChannelID int  `gorm:"column:channel_id"`
+		IsReserve bool `gorm:"column:is_reserve"`
+	}
+	if err := db.GetDB().WithContext(ctx).
+		Table("site_channel_bindings AS b").
+		Select("b.channel_id, s.is_reserve").
+		Joins("JOIN sites AS s ON s.id = b.site_id").
+		Where("b.channel_id IN ?", channelIDs).
+		Scan(&rows).Error; err == nil {
+		for _, row := range rows {
+			if row.IsReserve {
+				result[row.ChannelID] = 1
+			}
+		}
+	}
+	return result
+}
+
 func CatalogPlanGroup(
 	ctx context.Context,
 	requestedModel string,
@@ -755,7 +796,9 @@ func CatalogPlanGroup(
 		rank              int
 		candidatePriority int
 		candidateWeight   int
+		tier              int
 	}
+	tierByChannel := siteReserveTierByChannel(ctx, group.Items)
 	included := make([]scoredItem, 0, len(group.Items))
 	for _, item := range group.Items {
 		decision := model.RouteDecisionReason{
@@ -843,6 +886,7 @@ func CatalogPlanGroup(
 			rank:              rank,
 			candidatePriority: candidatePriority,
 			candidateWeight:   candidateWeight,
+			tier:              tierByChannel[item.ChannelID],
 		})
 	}
 
@@ -860,6 +904,9 @@ func CatalogPlanGroup(
 		right := included[j]
 		if left.rank != right.rank {
 			return left.rank > right.rank
+		}
+		if left.tier != right.tier {
+			return left.tier < right.tier
 		}
 		if strategy == model.RoutingStrategyManual {
 			if left.candidatePriority != right.candidatePriority {

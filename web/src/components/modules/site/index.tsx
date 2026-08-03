@@ -1183,6 +1183,18 @@ export function Site() {
     }
   }
 
+  async function handleToggleReserve(site: SiteRecord) {
+    try {
+      await updateSite.mutateAsync({
+        id: site.id,
+        is_reserve: !site.is_reserve,
+      });
+      toast.success(site.is_reserve ? "已转为公益站点" : "已设为中转站点");
+    } catch (reserveError) {
+      toast.error(getSiteErrorMessage(locale, reserveError, t));
+    }
+  }
+
   function handleCheckinFilterChange(status: CheckinFilterStatus) {
     if (status === "all") {
       setCheckinFilterStatuses([]);
@@ -1479,6 +1491,20 @@ export function Site() {
                         {site.accounts[0].auto_sync
                           ? "关闭自动同步"
                           : "开启自动同步"}
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Switch
+                            checked={site.is_reserve}
+                            disabled={updateSite.isPending}
+                            onCheckedChange={() => handleToggleReserve(site)}
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {site.is_reserve ? "转为公益站点" : "设为中转站点"}
                       </TooltipContent>
                     </Tooltip>
                     <IconActionButton

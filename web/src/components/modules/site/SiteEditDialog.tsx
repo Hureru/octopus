@@ -53,6 +53,7 @@ type SiteFormState = {
     proxy_config_id: number | null;
     external_checkin_url: string;
     is_pinned: boolean;
+    is_reserve: boolean;
     sort_order: number;
     global_weight: number;
     custom_header: CustomHeader[];
@@ -98,6 +99,7 @@ function createEmptySiteForm(): SiteFormState {
         proxy_config_id: null,
         external_checkin_url: '',
         is_pinned: false,
+        is_reserve: false,
         sort_order: 0,
         global_weight: 1,
         custom_header: [{ header_key: '', header_value: '' }],
@@ -117,6 +119,7 @@ function createSiteForm(site: SiteRecord): SiteFormState {
         proxy_config_id: site.proxy_config_id ?? null,
         external_checkin_url: site.external_checkin_url ?? '',
         is_pinned: site.is_pinned,
+        is_reserve: site.is_reserve,
         sort_order: site.sort_order,
         global_weight: site.global_weight,
         custom_header: site.custom_header.length > 0
@@ -138,6 +141,7 @@ function normalizeSiteRecord(site: SiteRecord): SiteRecord {
         proxy_config_id: site.proxy_config_id ?? null,
         external_checkin_url: site.external_checkin_url ?? null,
         is_pinned: site.is_pinned ?? false,
+        is_reserve: site.is_reserve ?? false,
         sort_order: typeof site.sort_order === 'number' ? site.sort_order : 0,
         global_weight:
             typeof site.global_weight === 'number' && site.global_weight > 0
@@ -286,6 +290,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                     siteForm.proxy_mode === 'pool' ? siteForm.proxy_config_id : null,
                 external_checkin_url: siteForm.external_checkin_url.trim() || null,
                 is_pinned: siteForm.is_pinned,
+                is_reserve: siteForm.is_reserve,
                 sort_order: siteForm.sort_order,
                 global_weight: siteForm.global_weight,
                 custom_header: customHeader,
