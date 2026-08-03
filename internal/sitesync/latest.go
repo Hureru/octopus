@@ -8,30 +8,30 @@ import (
 // SiteBatchSummaryView 是最近一次同步/签到批次的可公开视图，
 // 供站点总览页做失败原因分组展示。
 type SiteBatchSummaryView struct {
-	Phase         SiteBatchPhase            `json:"phase"`
-	Trigger       SiteBatchTrigger          `json:"trigger"`
-	Total         int                       `json:"total"`
-	Attempted     int                       `json:"attempted"`
-	Success       int                       `json:"success"`
-	Partial       int                       `json:"partial"`
-	Failed        int                       `json:"failed"`
-	Skipped       int                       `json:"skipped"`
-	Warnings      int                       `json:"warnings"`
-	Canceled      bool                      `json:"canceled"`
-	CancelReason  SiteBatchReason           `json:"cancel_reason,omitempty"`
-	DurationMS    int64                     `json:"duration_ms"`
-	FinishedAt    time.Time                 `json:"finished_at"`
-	FailureGroups []SiteBatchOutcomeGroup   `json:"failure_groups"`
-	WarningGroups []SiteBatchOutcomeGroup   `json:"warning_groups"`
-	Samples       []SiteBatchFailureSample  `json:"samples,omitempty"`
+	Phase         SiteBatchPhase           `json:"phase"`
+	Trigger       SiteBatchTrigger         `json:"trigger"`
+	Total         int                      `json:"total"`
+	Attempted     int                      `json:"attempted"`
+	Success       int                      `json:"success"`
+	Partial       int                      `json:"partial"`
+	Failed        int                      `json:"failed"`
+	Skipped       int                      `json:"skipped"`
+	Warnings      int                      `json:"warnings"`
+	Canceled      bool                     `json:"canceled"`
+	CancelReason  SiteBatchReason          `json:"cancel_reason,omitempty"`
+	DurationMS    int64                    `json:"duration_ms"`
+	FinishedAt    time.Time                `json:"finished_at"`
+	FailureGroups []SiteBatchOutcomeGroup  `json:"failure_groups"`
+	WarningGroups []SiteBatchOutcomeGroup  `json:"warning_groups"`
+	Samples       []SiteBatchFailureSample `json:"samples,omitempty"`
 }
 
 const maxLatestSamples = 12
 
 var latestSummaries = struct {
 	sync.RWMutex
-	syncBatch  *SiteBatchSummaryView
-	checkin    *SiteBatchSummaryView
+	syncBatch *SiteBatchSummaryView
+	checkin   *SiteBatchSummaryView
 }{}
 
 // recordLatestSummary 在批次结束（emitLog）时保存最近一次视图。
@@ -40,19 +40,19 @@ func recordLatestSummary(s *SiteBatchSummary) {
 		return
 	}
 	view := &SiteBatchSummaryView{
-		Phase:        s.Phase,
-		Trigger:      s.Trigger,
-		Total:        s.Total,
-		Attempted:    s.Attempted,
-		Success:      s.Success,
-		Partial:      s.Partial,
-		Failed:       s.Failed,
-		Skipped:      s.Skipped,
-		Warnings:     s.Warnings,
-		Canceled:     s.Canceled,
-		CancelReason: s.CancelReason,
-		DurationMS:   s.Duration.Milliseconds(),
-		FinishedAt:   time.Now(),
+		Phase:         s.Phase,
+		Trigger:       s.Trigger,
+		Total:         s.Total,
+		Attempted:     s.Attempted,
+		Success:       s.Success,
+		Partial:       s.Partial,
+		Failed:        s.Failed,
+		Skipped:       s.Skipped,
+		Warnings:      s.Warnings,
+		Canceled:      s.Canceled,
+		CancelReason:  s.CancelReason,
+		DurationMS:    s.Duration.Milliseconds(),
+		FinishedAt:    time.Now(),
 		FailureGroups: sortedSiteBatchGroups(s.failureGroups),
 		WarningGroups: sortedSiteBatchGroups(s.warningGroups),
 	}

@@ -13,6 +13,9 @@ import (
 
 const maxSiteBatchLogGroups = 5
 
+// maxSiteBatchSamples 是失败样例的保留上限（展示用，独立于日志分组上限）。
+const maxSiteBatchSamples = 12
+
 type SiteBatchPhase string
 
 const (
@@ -79,21 +82,21 @@ type SiteBatchSummary struct {
 }
 
 type SiteBatchOutcomeGroup struct {
-	SiteID   int
-	Platform model.SitePlatform
-	Reason   SiteBatchReason
-	Count    int
-	Failed   int
-	Skipped  int
-	Warnings int
+	SiteID   int                `json:"site_id"`
+	Platform model.SitePlatform `json:"platform"`
+	Reason   SiteBatchReason    `json:"reason"`
+	Count    int                `json:"count"`
+	Failed   int                `json:"failed"`
+	Skipped  int                `json:"skipped"`
+	Warnings int                `json:"warnings"`
 }
 
 type SiteBatchFailureSample struct {
-	SiteID    int
-	Platform  model.SitePlatform
-	AccountID int
-	Reason    SiteBatchReason
-	Message   string
+	SiteID    int                `json:"site_id"`
+	Platform  model.SitePlatform `json:"platform"`
+	AccountID int                `json:"account_id"`
+	Reason    SiteBatchReason    `json:"reason"`
+	Message   string             `json:"message"`
 }
 
 type siteBatchGroupKey struct {
@@ -142,7 +145,7 @@ func (s *SiteBatchSummary) recordResult(siteID int, platform model.SitePlatform,
 		s.addGroup(s.skipGroups, siteID, platform, SiteBatchReasonUnsupportedCheckin, func(g *SiteBatchOutcomeGroup) { g.Skipped++ })
 	case model.SiteExecutionStatusFailed:
 		s.Failed++
-		s.addFailure(siteID, platform, accountID, SiteBatchReasonUnknown, safeMessage)
+		s.addFailure(siteID, platform, accountID, classifySiteBatchMessage(safeMessage), safeMessage)
 	default:
 		s.Success++
 	}
@@ -200,7 +203,7 @@ func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutc
 }
 
 func (s *SiteBatchSummary) addSample(siteID int, platform model.SitePlatform, accountID int, reason SiteBatchReason, message string) {
-	if len(s.Samples) >= maxSiteBatchLogGroups || message == "" {
+	if len(s.Samples) >= maxSiteBatchSamples || message == "" {
 		return
 	}
 	for _, sample := range s.Samples {

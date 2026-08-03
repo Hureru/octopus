@@ -1843,7 +1843,8 @@
           "context_deadline_exceeded": "批次超时",
           "database_error": "数据库错误",
           "internal_error": "内部错误",
-          "unknown": "未知原因"
+          "unknown": "未知原因",
+          "unsupported_checkin": "站点不支持签到功能"
         }
       }
     }

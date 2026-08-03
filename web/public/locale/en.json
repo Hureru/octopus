@@ -1843,7 +1843,8 @@
           "context_deadline_exceeded": "Deadline exceeded",
           "database_error": "Database error",
           "internal_error": "Internal error",
-          "unknown": "Unknown"
+          "unknown": "Unknown",
+          "unsupported_checkin": "Check-in not supported by site"
         }
       }
     }

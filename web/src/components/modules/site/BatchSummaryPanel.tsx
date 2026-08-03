@@ -33,7 +33,7 @@ const FAILURE_META: Record<
   upstream_html_response: { severity: "transient" },
   timeout: { severity: "transient" },
   unsupported_platform: { severity: "transient" },
-  unsupported_checkin: { severity: "transient", hide: true },
+  unsupported_checkin: { severity: "transient" },
   scheduled_later: { severity: "other", hide: true },
   batch_canceled: { severity: "other", hide: true },
   context_canceled: { severity: "other", hide: true },

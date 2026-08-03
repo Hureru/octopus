@@ -101,11 +101,21 @@ func siteBatchReason(err error) SiteBatchReason {
 	case apperror.CodeCommonDatabaseError:
 		return SiteBatchReasonDatabaseError
 	}
-	lowered := strings.ToLower(apperror.Message(err))
+	return classifySiteBatchMessage(apperror.Message(err))
+}
+
+// classifySiteBatchMessage 从错误消息文本推断失败原因，用于只有消息
+// 没有 apperror 包装的错误（如 checkin 的 result 状态路径）。
+func classifySiteBatchMessage(msg string) SiteBatchReason {
+	lowered := strings.ToLower(msg)
 	switch {
-	case strings.Contains(lowered, "cloudflare") || strings.Contains(lowered, "just a moment"):
+	case strings.Contains(lowered, "cloudflare") || strings.Contains(lowered, "just a moment") || strings.Contains(lowered, "turnstile"):
 		return SiteBatchReasonCloudflareProtection
-	case strings.Contains(lowered, "unauthorized") || strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "invalid token") || strings.Contains(lowered, "未登录") || strings.Contains(lowered, "登录") || strings.Contains(lowered, "过期"):
+	case strings.Contains(lowered, "签到功能未启用") ||
+		(strings.Contains(lowered, "checkin") && strings.Contains(lowered, "enabled")) ||
+		strings.Contains(lowered, "invalid url"):
+		return SiteBatchReasonUnsupportedCheckin
+	case strings.Contains(lowered, "unauthorized") || strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "invalid token") || strings.Contains(lowered, "未登录") || strings.Contains(lowered, "登录失败") || strings.Contains(lowered, "过期"):
 		return SiteBatchReasonUnauthorized
 	case strings.Contains(lowered, "deadline exceeded"):
 		return SiteBatchReasonContextDeadlineExceeded
