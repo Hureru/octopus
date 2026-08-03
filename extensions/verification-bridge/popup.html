@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Octopus 验证桥</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true">O</div>
+        <div>
+          <h1>Octopus 验证桥</h1>
+          <p>已配对站点</p>
+        </div>
+      </header>
+
+      <section class="pairings" aria-labelledby="pairings-title">
+        <div class="section-heading">
+          <h2 id="pairings-title">配对</h2>
+          <button id="refresh" class="icon-button" type="button" title="刷新" aria-label="刷新">↻</button>
+        </div>
+        <div id="pairing-empty" class="empty">暂无配对</div>
+        <div id="pairing-list" class="pairing-list"></div>
+      </section>
+
+      <section id="selected-pairing" aria-labelledby="selected-title" hidden>
+        <div class="selected-heading">
+          <div>
+            <h2 id="selected-title"></h2>
+            <p id="selected-meta"></p>
+          </div>
+          <span id="selected-status" class="selected-status"></span>
+        </div>
+
+        <dl id="task-details" hidden>
+          <div>
+            <dt>目标</dt>
+            <dd id="task-host"></dd>
+          </div>
+          <div>
+            <dt>操作</dt>
+            <dd id="task-operation"></dd>
+          </div>
+          <div>
+            <dt>重试</dt>
+            <dd id="task-retry"></dd>
+          </div>
+        </dl>
+
+        <div class="button-grid">
+          <button id="claim" class="primary" type="button">领取任务</button>
+          <button id="open" class="primary" type="button" hidden>打开验证页面</button>
+          <button id="start" type="button" hidden>验证完成并执行</button>
+          <button id="release" class="danger" type="button" hidden>释放任务</button>
+        </div>
+      </section>
+
+      <details class="add-pairing">
+        <summary>添加配对</summary>
+        <form id="add-form">
+          <label>
+            Octopus 地址
+            <input id="base-url" type="url" placeholder="http://192.168.50.139:8088" autocomplete="url" required>
+          </label>
+          <label>
+            配对令牌
+            <input id="pairing-token" type="password" autocomplete="off" required>
+          </label>
+          <label class="check-row">
+            <input id="show-token" type="checkbox">
+            显示令牌
+          </label>
+          <button class="primary" type="submit">验证并保存</button>
+        </form>
+      </details>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </main>
+    <script src="bridge-common.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
