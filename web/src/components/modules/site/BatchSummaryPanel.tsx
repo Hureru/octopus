@@ -102,7 +102,7 @@ export function BatchSummaryPanel() {
     }> = [];
     for (const data of [sync.data, checkin.data]) {
       if (!data || data.failed === 0) continue;
-      for (const group of data.failure_groups) {
+      for (const group of data.failure_groups ?? []) {
         const meta = failureMeta(group.reason);
         if (meta.hide || group.failed === 0) continue;
         items.push({
