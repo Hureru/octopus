@@ -671,12 +671,20 @@ func updateAccountCheckinState(ctx context.Context, account *model.SiteAccount, 
 	account.LastCheckinAt = &now
 	account.LastCheckinStatus = status
 	if success {
+		account.CheckinFailStreak = 0
+		updatePayload["checkin_fail_streak"] = 0
 		nextAt := buildNextRandomCheckinAt(account, now)
 		account.NextAutoCheckinAt = nextAt
 		updatePayload["next_auto_checkin_at"] = nextAt
 	} else if !account.Enabled || !account.AutoCheckin || !account.RandomCheckin {
 		account.NextAutoCheckinAt = nil
 		updatePayload["next_auto_checkin_at"] = nil
+	} else {
+		account.CheckinFailStreak++
+		updatePayload["checkin_fail_streak"] = account.CheckinFailStreak
+		nextAt := buildNextRandomCheckinAt(account, now)
+		account.NextAutoCheckinAt = nextAt
+		updatePayload["next_auto_checkin_at"] = nextAt
 	}
 	if strings.TrimSpace(accessToken) != "" {
 		updatePayload["access_token"] = strings.TrimSpace(accessToken)

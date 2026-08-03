@@ -11,6 +11,21 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 )
 
+const maxCheckinBackoffHours = 72
+
+// checkinBackoffDelay returns the exponential backoff delay for a failed
+// checkin: 1x interval for the first failure, 2x for the second, 4x for the
+// third and beyond, capped at 72 hours.
+func checkinBackoffDelay(account *model.SiteAccount) time.Duration {
+	intervalHours := account.CheckinIntervalHours
+	if intervalHours <= 0 {
+		intervalHours = 24
+	}
+	multiplier := 1 << min(max(account.CheckinFailStreak-1, 0), 2)
+	hours := min(intervalHours*multiplier, maxCheckinBackoffHours)
+	return time.Duration(hours) * time.Hour
+}
+
 func buildNextRandomCheckinAt(account *model.SiteAccount, now time.Time) *time.Time {
 	if account == nil || !account.Enabled || !account.AutoCheckin || !account.RandomCheckin {
 		return nil
@@ -26,10 +41,19 @@ func buildNextRandomCheckinAt(account *model.SiteAccount, now time.Time) *time.T
 	}
 
 	base := now
-	if account.LastCheckinAt != nil && !account.LastCheckinAt.IsZero() && account.LastCheckinStatus == model.SiteExecutionStatusSuccess {
-		earliest := account.LastCheckinAt.Add(time.Duration(intervalHours) * time.Hour)
-		if earliest.After(base) {
-			base = earliest
+	if account.LastCheckinAt != nil && !account.LastCheckinAt.IsZero() {
+		if account.LastCheckinStatus == model.SiteExecutionStatusSuccess {
+			earliest := account.LastCheckinAt.Add(time.Duration(intervalHours) * time.Hour)
+			if earliest.After(base) {
+				base = earliest
+			}
+		} else {
+			// Failed checkins back off exponentially instead of retrying
+			// immediately, so a blocked account does not hammer the site.
+			backoff := account.LastCheckinAt.Add(checkinBackoffDelay(account))
+			if backoff.After(base) {
+				base = backoff
+			}
 		}
 	}
 

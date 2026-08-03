@@ -241,6 +241,7 @@ type SiteAccount struct {
 	LastCheckinAt              *time.Time           `json:"last_checkin_at"`
 	LastSyncStatus             SiteExecutionStatus  `json:"last_sync_status" gorm:"type:varchar(16);default:'idle'"`
 	LastCheckinStatus          SiteExecutionStatus  `json:"last_checkin_status" gorm:"type:varchar(16);default:'idle'"`
+	CheckinFailStreak          int                  `json:"checkin_fail_streak" gorm:"default:0"`
 	LastSyncMessage            string               `json:"last_sync_message"`
 	LastCheckinMessage         string               `json:"last_checkin_message"`
 	Tokens                     []SiteToken          `json:"tokens,omitempty" gorm:"foreignKey:SiteAccountID"`
