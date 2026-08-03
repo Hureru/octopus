@@ -107,7 +107,7 @@ export function APIKeyDashboard() {
     };
 
     return (
-        <div className="w-full px-3 md:px-6">
+        <div className="mx-auto w-full max-w-[1600px] px-3 md:px-6">
             {/* Header - Consistent with app.tsx */}
             <header className="my-6 flex items-center gap-2 px-2">
                 <Logo size={48} />
