@@ -296,6 +296,11 @@
         "label": "Cloudflare Recovery Cooldown (minutes)",
         "description": "Channels retired due to Cloudflare protection wait this long before recovery probing starts, to reduce pointless probes.",
         "placeholder": "Enter cooldown minutes"
+      },
+      "recoverProbeMinutes": {
+        "label": "Recover Probe Cooldown (min)",
+        "description": "Minimum interval between recovery probes for retired channels without a Cloudflare block.",
+        "placeholder": "Enter cooldown minutes"
       }
     },
     "saved": "Saved",

@@ -296,6 +296,11 @@
         "label": "Cloudflare 恢复冷却（分钟）",
         "description": "因 Cloudflare 拦截被退役的渠道，等待该时间后才开始恢复探测，减少无效探测。",
         "placeholder": "请输入冷却分钟数"
+      },
+      "recoverProbeMinutes": {
+        "label": "恢复探活冷却（分钟）",
+        "description": "非 Cloudflare 拦截的退役渠道，两次恢复探测之间的最小间隔，降低探测频率。",
+        "placeholder": "请输入冷却分钟数"
       }
     },
     "saved": "已保存",

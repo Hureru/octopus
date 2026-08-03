@@ -19,6 +19,7 @@ type outlierConfig struct {
 	reapTTL           time.Duration
 	recoverStreak     int
 	cfRecoverCooldown time.Duration
+	recoverCooldown   time.Duration
 }
 
 // channelProber 抽象探活能力，便于测试注入；*grouphealth.Prober 满足该接口。
@@ -126,6 +127,10 @@ func recoverRetired(ctx context.Context, prober channelProber, cfg outlierConfig
 		}
 		// CF 退役渠道按更长冷却才探活，减少无谓探测
 		if st.CloudflareBlocked && st.RetiredAt != nil && now.Sub(*st.RetiredAt) < cfg.cfRecoverCooldown {
+			continue
+		}
+		// 普通退役渠道同样按冷却间隔探活：POR 每 2 分钟一轮，不能每轮都打上游
+		if !st.CloudflareBlocked && st.LastProbeAt != nil && now.Sub(*st.LastProbeAt) < cfg.recoverCooldown {
 			continue
 		}
 		usedKey := ch.GetChannelKey()
@@ -345,5 +350,6 @@ func loadOutlierConfig() outlierConfig {
 		reapTTL:           time.Duration(getInt(model.SettingKeyOutlierReapMinutes, 30)) * time.Minute,
 		recoverStreak:     getInt(model.SettingKeyOutlierRecoverStreak, 2),
 		cfRecoverCooldown: time.Duration(getInt(model.SettingKeyOutlierCFRecoverMinutes, 30)) * time.Minute,
+		recoverCooldown:   time.Duration(getInt(model.SettingKeyOutlierRecoverProbeMinutes, 30)) * time.Minute,
 	}
 }

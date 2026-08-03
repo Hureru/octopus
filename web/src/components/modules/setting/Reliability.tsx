@@ -18,6 +18,7 @@ const OUTLIER_FIELDS: { key: string; labelKey: string; min: number; max?: number
     { key: SettingKey.OutlierRecoverStreak, labelKey: 'recoverStreak', min: 1 },
     { key: SettingKey.OutlierReapMinutes, labelKey: 'reapMinutes', min: 1 },
     { key: SettingKey.OutlierCFRecoverMinutes, labelKey: 'cfRecoverMinutes', min: 1 },
+    { key: SettingKey.OutlierRecoverProbeMinutes, labelKey: 'recoverProbeMinutes', min: 1 },
 ];
 
 function NumberFieldRow({ settingKey, label, placeholder, tooltip, icon, min, max }: {

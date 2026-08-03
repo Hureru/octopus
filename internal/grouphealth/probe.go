@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -117,10 +118,22 @@ func buildProbeRequest(ctx context.Context, channel *model.Channel, usedKey *mod
 	return adapter.TransformRequest(ctx, request, channel.GetBaseUrl(), usedKey.ChannelKey)
 }
 
+// probePrompts is a pool of natural, low-cost prompts used for health
+// probes. Randomized so providers cannot fingerprint probes by a fixed
+// "ping" string, while keeping generation tiny.
+var probePrompts = []string{
+	"Hi! Please reply with a single short word.",
+	"Reply with only the word 'ok'.",
+	"What is 1+1? Answer in one word.",
+	"Say hello in exactly one short word.",
+}
+
 func buildProbeInternalRequest(channelType outbound.OutboundType, modelName string) *transformerModel.InternalLLMRequest {
 	stream := false
-	ping := "ping"
-	one := int64(1)
+	// 自然问题池随机取一条，替代固定的 "ping"
+	ping := probePrompts[rand.Intn(len(probePrompts))]
+	// 足够小的 token 上限：校验链路可用，但成本几乎为零
+	sixteen := int64(16)
 
 	switch channelType {
 	case outbound.OutboundTypeOpenAIEmbedding:
@@ -137,7 +150,7 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 			RawAPIFormat:        transformerModel.APIFormatOpenAIResponse,
 			Messages:            []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
 			Stream:              &stream,
-			MaxCompletionTokens: &one,
+			MaxCompletionTokens: &sixteen,
 		}
 	case outbound.OutboundTypeAnthropic:
 		return &transformerModel.InternalLLMRequest{
@@ -145,7 +158,7 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 			RawAPIFormat: transformerModel.APIFormatAnthropicMessage,
 			Messages:     []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
 			Stream:       &stream,
-			MaxTokens:    &one,
+			MaxTokens:    &sixteen,
 		}
 	case outbound.OutboundTypeGemini:
 		return &transformerModel.InternalLLMRequest{
@@ -153,7 +166,7 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 			RawAPIFormat: transformerModel.APIFormatGeminiContents,
 			Messages:     []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
 			Stream:       &stream,
-			MaxTokens:    &one,
+			MaxTokens:    &sixteen,
 		}
 	case outbound.OutboundTypeVolcengine:
 		return &transformerModel.InternalLLMRequest{
@@ -161,7 +174,7 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 			RawAPIFormat: transformerModel.APIFormatOpenAIChatCompletion,
 			Messages:     []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
 			Stream:       &stream,
-			MaxTokens:    &one,
+			MaxTokens:    &sixteen,
 		}
 	default:
 		return &transformerModel.InternalLLMRequest{
@@ -169,7 +182,7 @@ func buildProbeInternalRequest(channelType outbound.OutboundType, modelName stri
 			RawAPIFormat: transformerModel.APIFormatOpenAIChatCompletion,
 			Messages:     []transformerModel.Message{{Role: "user", Content: transformerModel.MessageContent{Content: &ping}}},
 			Stream:       &stream,
-			MaxTokens:    &one,
+			MaxTokens:    &sixteen,
 		}
 	}
 }
