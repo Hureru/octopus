@@ -325,7 +325,7 @@ func matchingPriceQuotes(
 	query := db.GetDB().WithContext(ctx).
 		Where("LOWER(model_name) = ? AND status = ?", strings.ToLower(strings.TrimSpace(modelName)), model.PriceQuoteStatusValid)
 	if candidate.SiteID != nil {
-		query = query.Where("route_candidate_id = ? OR site_id = ?", candidate.ID, *candidate.SiteID)
+		query = query.Where("(route_candidate_id = ? OR site_id = ?)", candidate.ID, *candidate.SiteID)
 	} else {
 		query = query.Where("route_candidate_id = ?", candidate.ID)
 	}

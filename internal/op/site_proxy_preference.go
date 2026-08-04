@@ -218,7 +218,7 @@ func SiteProxyPreferenceClearSite(ctx context.Context, siteID int) error {
 		return fmt.Errorf("site not found")
 	}
 	return db.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("site_id = ? AND site_account_id = 0").
+		if err := tx.Where("site_id = ? AND site_account_id = 0", siteID).
 			Delete(&model.SiteProxyPreference{}).Error; err != nil {
 			return err
 		}

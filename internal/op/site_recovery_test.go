@@ -650,16 +650,28 @@ func TestVerificationRetryPendingSessionIDsIncludesPendingAndStaleRunning(t *tes
 	pending := createRetry()
 	active := createRetry()
 	stale := createRetry()
+	invalid := createRetry()
 	if work, err := VerificationRetryAcquire(ctx, active.Session.ID); err != nil || work == nil {
 		t.Fatalf("acquire active retry: work=%+v err=%v", work, err)
 	}
 	if work, err := VerificationRetryAcquire(ctx, stale.Session.ID); err != nil || work == nil {
 		t.Fatalf("acquire stale retry: work=%+v err=%v", work, err)
 	}
+	if work, err := VerificationRetryAcquire(ctx, invalid.Session.ID); err != nil || work == nil {
+		t.Fatalf("acquire invalid retry: work=%+v err=%v", work, err)
+	}
 	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.VerificationTask{}).
 		Where("session_id = ?", stale.Session.ID).
 		Update("retry_started_at", time.Now().Add(-verificationRetryStaleAfter-time.Second)).Error; err != nil {
 		t.Fatalf("age stale retry: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.VerificationTask{}).
+		Where("session_id = ?", invalid.Session.ID).
+		Updates(map[string]any{
+			"status":           model.VerificationTaskPending,
+			"retry_started_at": time.Now().Add(-verificationRetryStaleAfter - time.Second),
+		}).Error; err != nil {
+		t.Fatalf("invalidate stale retry: %v", err)
 	}
 
 	sessionIDs, err := VerificationRetryPendingSessionIDs(ctx, 10)
@@ -675,6 +687,9 @@ func TestVerificationRetryPendingSessionIDsIncludesPendingAndStaleRunning(t *tes
 	}
 	if found[active.Session.ID] {
 		t.Fatalf("pending sweep selected an active retry: ids=%v", sessionIDs)
+	}
+	if found[invalid.Session.ID] {
+		t.Fatalf("pending sweep selected a non-completed retry: ids=%v", sessionIDs)
 	}
 }
 
@@ -813,6 +828,48 @@ func TestSiteProxyPreferenceCooldownExpiryAndSuccessRecovery(t *testing.T) {
 	recovered.ExpiresAt = &expired
 	if SiteProxyPreferenceUsable(recovered, time.Now()) {
 		t.Fatal("expired preference should not be usable")
+	}
+}
+
+func TestSiteProxyPreferenceClearSiteKeepsOtherSites(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+	site, _ := createVerificationFixture(t, ctx)
+	otherSite := model.Site{
+		Name:              "verification-other-site",
+		Platform:          model.SitePlatformNewAPI,
+		BaseURL:           "https://other.example.com",
+		Enabled:           true,
+		ProxyMode:         model.ProxyUsageModeDirect,
+		AutoProxyRecovery: true,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&otherSite).Error; err != nil {
+		t.Fatalf("create other site: %v", err)
+	}
+	for _, siteID := range []int{site.ID, otherSite.ID} {
+		if err := SiteProxyPreferenceRecordSuccess(ctx, SiteProxyPathDescriptor{
+			SiteID:    siteID,
+			ProxyMode: model.ProxyUsageModeDirect,
+		}, 100*time.Millisecond); err != nil {
+			t.Fatalf("record site preference for %d: %v", siteID, err)
+		}
+	}
+
+	if err := SiteProxyPreferenceClearSite(ctx, site.ID); err != nil {
+		t.Fatalf("clear site preference: %v", err)
+	}
+	var clearedCount, otherCount int64
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteProxyPreference{}).
+		Where("site_id = ? AND site_account_id = 0", site.ID).
+		Count(&clearedCount).Error; err != nil {
+		t.Fatalf("count cleared site preferences: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteProxyPreference{}).
+		Where("site_id = ? AND site_account_id = 0", otherSite.ID).
+		Count(&otherCount).Error; err != nil {
+		t.Fatalf("count other site preferences: %v", err)
+	}
+	if clearedCount != 0 || otherCount != 1 {
+		t.Fatalf("site preference clear escaped its scope: cleared=%d other=%d", clearedCount, otherCount)
 	}
 }
 
