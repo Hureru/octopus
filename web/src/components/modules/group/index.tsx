@@ -36,10 +36,10 @@ export function Group() {
     }, [sortedGroups, searchTerm]);
 
     const groupColumnCompute = useCallback((width: number) => {
-        const MIN_CARD_WIDTH = 400;
-        const GUTTER = 16;
-        const cols = Math.floor((width + GUTTER) / (MIN_CARD_WIDTH + GUTTER));
-        return Math.max(1, Math.min(4, cols));
+        if (width >= 1240) return 4;
+        if (width >= 830) return 3;
+        if (width >= 560) return 2;
+        return 1;
     }, []);
 
     return (
