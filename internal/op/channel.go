@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
@@ -266,6 +269,18 @@ func ChannelUpdate(req *model.ChannelUpdateRequest, ctx context.Context) (*model
 		selectFields = append(selectFields, "ws_mode")
 		updates.WSMode = req.WSMode.Normalize()
 	}
+	if req.ProtocolPolicy != nil {
+		selectFields = append(selectFields, "protocol_policy")
+		updates.ProtocolPolicy = req.ProtocolPolicy.Normalize(model.ProtocolPolicyAuto)
+	}
+	if req.AllowLossy != nil {
+		selectFields = append(selectFields, "allow_lossy")
+		updates.AllowLossy = *req.AllowLossy
+	}
+	if req.IsReserve != nil {
+		selectFields = append(selectFields, "is_reserve")
+		updates.IsReserve = *req.IsReserve
+	}
 	if req.ParamOverride != nil {
 		selectFields = append(selectFields, "param_override")
 		updates.ParamOverride = req.ParamOverride
@@ -445,6 +460,20 @@ func channelDel(id int, ctx context.Context, bypassManagedCheck bool) error {
 		return fmt.Errorf("failed to delete channel stats: %w", err)
 	}
 
+	// Route candidates remain as audit/history records after their backing
+	// channel is deleted, but must never stay routable.
+	archivedAt := time.Now()
+	if err := tx.Model(&model.RouteCandidate{}).
+		Where("channel_id = ?", id).
+		Updates(map[string]any{
+			"status":            model.RouteCandidateArchived,
+			"unavailable_since": gorm.Expr("COALESCE(unavailable_since, ?)", archivedAt),
+			"archived_at":       archivedAt,
+		}).Error; err != nil {
+		tx.Rollback()
+		return fmt.Errorf("failed to archive route candidates: %w", err)
+	}
+
 	// 删除渠道
 	if err := tx.Delete(&model.Channel{}, id).Error; err != nil {
 		tx.Rollback()
@@ -487,6 +516,10 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 	}
 	siteCache := make(map[int]*model.Site)
 	accountCache := make(map[int]*model.SiteAccount)
+
+	balanceByAccount := accountBalanceMap(ctx, bindingMap)
+	multiplierByKey := channelCandidateMultiplierMap(ctx, channelIDs)
+	groupMultiplierByChannel := channelGroupMultiplierMap(ctx, bindingMap)
 
 	models := []model.LLMChannel{}
 	for _, channel := range channelsByID {
@@ -542,11 +575,27 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 				endpointType = "openai"
 			}
 		}
+		channelIsReserve := channel.IsReserve
+		if !channelIsReserve && binding != nil {
+			if site, ok := siteCache[binding.SiteID]; ok {
+				channelIsReserve = site.IsReserve
+			} else if site, getErr := SiteGet(binding.SiteID, ctx); getErr == nil {
+				siteCache[binding.SiteID] = site
+				channelIsReserve = site.IsReserve
+			}
+		}
+		var balance *float64
+		if binding != nil {
+			if value, ok := balanceByAccount[binding.SiteAccountID]; ok {
+				balance = &value
+			}
+		}
 		modelNames := xstrings.SplitTrimCompact(",", channel.Model, channel.CustomModel)
 		for _, modelName := range modelNames {
 			if modelName == "" {
 				continue
 			}
+			multiplier := multiplierByKey[routeCandidateKey(channel.ID, modelName)]
 			models = append(models, model.LLMChannel{
 				Name:            modelName,
 				Enabled:         channel.Enabled,
@@ -559,10 +608,136 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 				SiteName:        siteName,
 				SiteAccountName: siteAccountName,
 				EndpointType:    endpointType,
+				IsReserve:       channelIsReserve,
+				Balance:         balance,
+				Multiplier:      multiplier,
+				GroupMultiplier: groupMultiplierByChannel[channel.ID],
 			})
 		}
 	}
 	return models, nil
+}
+
+func channelGroupMultiplierMap(
+	ctx context.Context,
+	bindingMap map[int]model.SiteChannelBinding,
+) map[int]*float64 {
+	result := make(map[int]*float64, len(bindingMap))
+	accountIDs := distinctSiteAccountIDs(bindingMap)
+	if len(accountIDs) == 0 {
+		return result
+	}
+
+	values := persistedSiteGroupMultiplierMap(ctx, accountIDs)
+	for channelID, binding := range bindingMap {
+		groupKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
+		if value, ok := values[siteAccountGroupKey(binding.SiteAccountID, groupKey)]; ok {
+			multiplier := value
+			result[channelID] = &multiplier
+		}
+	}
+	return result
+}
+
+func distinctSiteAccountIDs(bindingMap map[int]model.SiteChannelBinding) []int {
+	seen := make(map[int]struct{}, len(bindingMap))
+	result := make([]int, 0, len(bindingMap))
+	for _, binding := range bindingMap {
+		if binding.SiteAccountID <= 0 {
+			continue
+		}
+		if _, exists := seen[binding.SiteAccountID]; exists {
+			continue
+		}
+		seen[binding.SiteAccountID] = struct{}{}
+		result = append(result, binding.SiteAccountID)
+	}
+	return result
+}
+
+func persistedSiteGroupMultiplierMap(ctx context.Context, accountIDs []int) map[string]float64 {
+	result := make(map[string]float64)
+	var groups []model.SiteUserGroup
+	if err := db.GetDB().WithContext(ctx).
+		Select("site_account_id, group_key, multiplier, raw_payload").
+		Where("site_account_id IN ? AND multiplier IS NOT NULL", accountIDs).
+		Find(&groups).Error; err != nil {
+		return result
+	}
+	for _, group := range groups {
+		if group.Multiplier == nil || !validGroupMultiplier(*group.Multiplier) {
+			continue
+		}
+		result[siteAccountGroupKey(group.SiteAccountID, group.GroupKey)] = *group.Multiplier
+	}
+	var rawGroups []model.SiteUserGroup
+	if err := db.GetDB().WithContext(ctx).
+		Select("site_account_id, group_key, raw_payload").
+		Where("site_account_id IN ? AND multiplier IS NULL AND raw_payload <> ''", accountIDs).
+		Find(&rawGroups).Error; err != nil {
+		return result
+	}
+	for _, group := range rawGroups {
+		if multiplier, ok := storedSiteGroupMultiplier(group.RawPayload, group.GroupKey); ok {
+			result[siteAccountGroupKey(group.SiteAccountID, group.GroupKey)] = multiplier
+		}
+	}
+	return result
+}
+
+func validGroupMultiplier(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func siteAccountGroupKey(accountID int, groupKey string) string {
+	return strconv.Itoa(accountID) + "\x00" + model.NormalizeSiteGroupKey(groupKey)
+}
+
+// accountBalanceMap 返回 site_account_id -> 余额。
+func accountBalanceMap(ctx context.Context, bindingMap map[int]model.SiteChannelBinding) map[int]float64 {
+	result := make(map[int]float64, len(bindingMap))
+	accountIDs := distinctSiteAccountIDs(bindingMap)
+	if len(accountIDs) == 0 {
+		return result
+	}
+	var rows []struct {
+		ID      int     `gorm:"column:id"`
+		Balance float64 `gorm:"column:balance"`
+	}
+	if err := db.GetDB().WithContext(ctx).
+		Table("site_accounts").
+		Select("id, balance").
+		Where("id IN ?", accountIDs).
+		Scan(&rows).Error; err != nil {
+		return result
+	}
+	for _, row := range rows {
+		result[row.ID] = row.Balance
+	}
+	return result
+}
+
+// channelCandidateMultiplierMap 返回 (channel_id, upstream_model) -> 倍率。
+func channelCandidateMultiplierMap(ctx context.Context, channelIDs []int) map[string]*float64 {
+	result := make(map[string]*float64)
+	if len(channelIDs) == 0 {
+		return result
+	}
+	var candidates []model.RouteCandidate
+	if err := db.GetDB().WithContext(ctx).
+		Where("channel_id IN ?", channelIDs).
+		Find(&candidates).Error; err != nil {
+		return result
+	}
+	multipliers := candidateMultiplierByCandidate(ctx, candidates)
+	for _, candidate := range candidates {
+		if math.IsInf(multipliers[candidate.ID], 1) {
+			continue
+		}
+		value := multipliers[candidate.ID]
+		result[routeCandidateKey(candidate.ChannelID, candidate.UpstreamModelName)] = &value
+	}
+	return result
 }
 
 func ChannelGet(id int, ctx context.Context) (*model.Channel, error) {

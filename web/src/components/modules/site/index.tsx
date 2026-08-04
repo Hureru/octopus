@@ -28,10 +28,12 @@ import {
   useImportMetAPI,
   useRestoreSite,
   useSiteBatchAction,
+  useSiteBatchSummary,
   useSiteList,
   useSyncAllSites,
   useSyncSiteAccount,
   useUpdateSite,
+  useUpdateSiteAccount,
 } from "@/api/endpoints/site";
 import { PageWrapper } from "@/components/common/PageWrapper";
 import { toast } from "@/components/common/Toast";
@@ -67,9 +69,14 @@ import {
 import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
+import {
+  buildBatchFailureAccountIds,
+  type BatchFailureCategory,
+} from "./batch-failure";
 import { SiteEditDialog } from "./SiteEditDialog";
 import { BatchEditDialog } from "./BatchEditDialog";
 import { AccountEditDialog } from "./AccountEditDialog";
+import { RecoveryDialog } from "./RecoveryDialog";
 import {
   accountHasCheckinEnabled,
   accountMatchesCheckinFilters,
@@ -100,6 +107,7 @@ import {
   Power,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Square,
   Archive,
   ArchiveRestore,
@@ -122,8 +130,8 @@ const PLATFORM_LABELS: Record<SitePlatform, string> = {
 
 const CREDENTIAL_LABELS: Record<SiteCredentialType, string> = {
   [SiteCredentialType.UsernamePassword]: "用户名 / 密码",
-  [SiteCredentialType.AccessToken]: "Access Token",
-  [SiteCredentialType.APIKey]: "API Key",
+  [SiteCredentialType.AccessToken]: "访问令牌（Access Token）",
+  [SiteCredentialType.APIKey]: "API 密钥（API Key）",
 };
 
 type HealthTone = "default" | "danger" | "muted" | "warning";
@@ -553,28 +561,21 @@ function IconActionButton({
   );
 }
 
-function estimateVisibleSiteCardHeight(item: VisibleSite, expanded: boolean) {
-  const tagRow = item.site.tags.length > 0 ? 30 : 0;
-  if (item.forceExpanded || expanded) {
-    return 360 + tagRow + item.visibleAccounts.length * 190;
-  }
-  if (item.site.accounts.length === 0) {
-    return 280 + tagRow;
-  }
-  return 310 + tagRow;
-}
-
 export function Site() {
   const t = useTranslations();
   const tProxy = useTranslations('proxyPool');
+  const tRecovery = useTranslations('siteRecovery');
   const locale = useSettingStore((state) => state.locale);
   const { data: sites, isLoading, error } = useSiteList();
+  const { data: syncBatchSummary } = useSiteBatchSummary("sync");
+  const { data: checkinBatchSummary } = useSiteBatchSummary("checkin");
   const updateSite = useUpdateSite();
   const enableSite = useEnableSite();
   const deleteSite = useDeleteSite();
   const archiveSite = useArchiveSite();
   const restoreSite = useRestoreSite();
   const enableSiteAccount = useEnableSiteAccount();
+  const updateSiteAccount = useUpdateSiteAccount();
   const deleteSiteAccount = useDeleteSiteAccount();
   const syncSiteAccount = useSyncSiteAccount();
   const checkinSiteAccount = useCheckinSiteAccount();
@@ -608,6 +609,10 @@ export function Site() {
   const [editingAccount, setEditingAccount] = useState<SiteAccount | null>(
     null,
   );
+  const [recoveryContext, setRecoveryContext] = useState<{
+    site: SiteRecord;
+    account: SiteAccount;
+  } | null>(null);
 
   // Batch selection
   const [selectedSiteIds, setSelectedSiteIds] = useState<number[]>([]);
@@ -628,14 +633,10 @@ export function Site() {
   const [checkinAccountIds, setCheckinAccountIds] = useState<Set<number>>(
     () => new Set(),
   );
-  const [siteCardHeights, setSiteCardHeights] = useState<Record<number, number>>(
-    {},
-  );
   const [statusDayKey, setStatusDayKey] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
   });
-  const cardObserversRef = useRef<Map<number, ResizeObserver>>(new Map());
   const cardElementsRef = useRef<Map<number, HTMLElement>>(new Map());
   const cardMeasureRefCallbacks = useRef<
     Map<number, (node: HTMLElement | null) => void>
@@ -662,6 +663,12 @@ export function Site() {
   const setCheckinFilterStatuses = useSiteUIStore(
     (state) => state.setCheckinFilterStatuses,
   );
+  const batchFailureFilters = useSiteUIStore(
+    (state) => state.batchFailureFilters,
+  );
+  const setBatchFailureFilters = useSiteUIStore(
+    (state) => state.setBatchFailureFilters,
+  );
   const tagFilters = useSiteUIStore((state) => state.tagFilters);
   const setTagFilters = useSiteUIStore((state) => state.setTagFilters);
   const setSiteHandlers = useSiteUIStore((state) => state.setHandlers);
@@ -678,7 +685,6 @@ export function Site() {
 
   const setSiteCardMeasureRef = useCallback(
     (siteID: number, node: HTMLElement | null) => {
-      const observers = cardObserversRef.current;
       const elements = cardElementsRef.current;
       const currentNode = elements.get(siteID);
 
@@ -686,36 +692,11 @@ export function Site() {
         return;
       }
 
-      if (currentNode) {
-        observers.get(siteID)?.disconnect();
-        observers.delete(siteID);
+      if (node) {
+        elements.set(siteID, node);
+      } else {
         elements.delete(siteID);
       }
-
-      if (!node) {
-        return;
-      }
-
-      elements.set(siteID, node);
-      const observer = new ResizeObserver((entries) => {
-        const nextHeight = Math.round(
-          entries[0]?.contentRect.height ?? node.getBoundingClientRect().height,
-        );
-        setSiteCardHeights((current) =>
-          current[siteID] === nextHeight
-            ? current
-            : { ...current, [siteID]: nextHeight },
-        );
-      });
-      observer.observe(node);
-      observers.set(siteID, observer);
-
-      const initialHeight = Math.round(node.getBoundingClientRect().height);
-      setSiteCardHeights((current) =>
-        current[siteID] === initialHeight
-          ? current
-          : { ...current, [siteID]: initialHeight },
-      );
     },
     [],
   );
@@ -823,8 +804,23 @@ export function Site() {
     return Array.from(tags);
   }, [sites, selectedSiteIds]);
 
+  const batchFailureAccountIds = useMemo(
+    () => buildBatchFailureAccountIds([syncBatchSummary, checkinBatchSummary]),
+    [syncBatchSummary, checkinBatchSummary],
+  );
+  const batchFailureFilterCounts = useMemo(
+    () => ({
+      credential: batchFailureAccountIds.credential.size,
+      risk: batchFailureAccountIds.risk.size,
+      transient: batchFailureAccountIds.transient.size,
+      other: batchFailureAccountIds.other.size,
+    }),
+    [batchFailureAccountIds],
+  );
+
   const visibleSites = useMemo<VisibleSite[]>(() => {
     const hasSearch = normalizedQuery.length > 0;
+    const hasBatchFailureFilters = batchFailureFilters.length > 0;
 
     const list = (sites ?? []).flatMap((site) => {
       const summary = buildSiteSummary(site);
@@ -854,11 +850,20 @@ export function Site() {
         : site.accounts;
 
       let visibleAccounts = site.accounts;
-      let forceExpanded = hasCheckinFilters || isForcedTarget;
+      let forceExpanded =
+        hasCheckinFilters || hasBatchFailureFilters || isForcedTarget;
 
       if (hasCheckinFilters && !isForcedTarget) {
         visibleAccounts = visibleAccounts.filter((account) =>
           accountMatchesCheckinFilters(site, account, checkinFilterStatuses),
+        );
+      }
+
+      if (hasBatchFailureFilters && !isForcedTarget) {
+        visibleAccounts = visibleAccounts.filter((account) =>
+          batchFailureFilters.some((category) =>
+            batchFailureAccountIds[category].has(account.id),
+          ),
         );
       }
 
@@ -874,7 +879,7 @@ export function Site() {
       const visible =
         isForcedTarget
           ? true
-          : hasCheckinFilters
+          : hasCheckinFilters || hasBatchFailureFilters
             ? visibleAccounts.length > 0
             : !hasSearch || siteMatchesQuery || matchedAccountsBySearch.length > 0;
 
@@ -919,6 +924,8 @@ export function Site() {
     sites,
     normalizedQuery,
     checkinFilterStatuses,
+    batchFailureFilters,
+    batchFailureAccountIds,
     tagFilters,
     forcedSiteId,
     siteSortField,
@@ -928,6 +935,7 @@ export function Site() {
   const hasActiveFilters =
     normalizedQuery.length > 0 ||
     checkinFilterStatuses.length > 0 ||
+    batchFailureFilters.length > 0 ||
     tagFilters.length > 0;
   const visibleAccountCount = visibleSites.reduce(
     (sum, item) => sum + item.visibleAccounts.length,
@@ -971,6 +979,16 @@ export function Site() {
     }
   }
 
+  function openRecoveryDialog(site: SiteRecord, account: SiteAccount) {
+    setRecoveryContext({ site, account });
+  }
+
+  function closeRecoveryDialog(open: boolean) {
+    if (!open) {
+      setRecoveryContext(null);
+    }
+  }
+
   async function handleToggleSite(site: SiteRecord) {
     try {
       await enableSite.mutateAsync({ id: site.id, enabled: !site.enabled });
@@ -1004,6 +1022,20 @@ export function Site() {
         enabled: !account.enabled,
       });
       toast.success(account.enabled ? "站点账号已停用" : "站点账号已启用");
+    } catch (toggleError) {
+      toast.error(getSiteErrorMessage(locale, toggleError, t));
+    }
+  }
+
+  async function handleToggleAutoSync(account: SiteAccount) {
+    try {
+      await updateSiteAccount.mutateAsync({
+        id: account.id,
+        auto_sync: !account.auto_sync,
+      });
+      toast.success(
+        account.auto_sync ? "已关闭自动同步" : "已开启自动同步",
+      );
     } catch (toggleError) {
       toast.error(getSiteErrorMessage(locale, toggleError, t));
     }
@@ -1208,9 +1240,26 @@ export function Site() {
     }
   }
 
+  async function handleToggleReserve(site: SiteRecord) {
+    try {
+      await updateSite.mutateAsync({
+        id: site.id,
+        is_reserve: !site.is_reserve,
+      });
+      toast.success(
+        site.is_reserve
+          ? t("siteManagement.siteForm.relayDisabled")
+          : t("siteManagement.siteForm.relayEnabled"),
+      );
+    } catch (reserveError) {
+      toast.error(getSiteErrorMessage(locale, reserveError, t));
+    }
+  }
+
   function handleCheckinFilterChange(status: CheckinFilterStatus) {
     if (status === "all") {
       setCheckinFilterStatuses([]);
+      setBatchFailureFilters([]);
       return;
     }
 
@@ -1218,6 +1267,14 @@ export function Site() {
       current.includes(status)
         ? current.filter((item) => item !== status)
         : [...current, status],
+    );
+  }
+
+  function handleBatchFailureFilterChange(category: BatchFailureCategory) {
+    setBatchFailureFilters((current) =>
+      current.includes(category)
+        ? current.filter((item) => item !== category)
+        : [...current, category],
     );
   }
 
@@ -1232,6 +1289,7 @@ export function Site() {
   function clearFilters() {
     setSearchTerm("site", "");
     setCheckinFilterStatuses([]);
+    setBatchFailureFilters([]);
     setTagFilters([]);
   }
 
@@ -1292,15 +1350,10 @@ export function Site() {
   }, []);
 
   useEffect(() => {
-    const observerMap = cardObserversRef.current;
     const elementMap = cardElementsRef.current;
     const callbackMap = cardMeasureRefCallbacks.current;
     const accountMap = accountElementsRef.current;
     return () => {
-      for (const observer of observerMap.values()) {
-        observer.disconnect();
-      }
-      observerMap.clear();
       elementMap.clear();
       callbackMap.clear();
       accountMap.clear();
@@ -1342,29 +1395,6 @@ export function Site() {
     return () => window.clearTimeout(timer);
   }, [pendingSiteJump, visibleSites, clearPendingJump, flashTarget]);
 
-  const masonryColumns = useMemo<[VisibleSite[], VisibleSite[]]>(() => {
-    const left: VisibleSite[] = [];
-    const right: VisibleSite[] = [];
-    let leftHeight = 0;
-    let rightHeight = 0;
-
-    for (const item of visibleSites) {
-      const isExpanded = item.forceExpanded || expandedSiteIds.has(item.site.id);
-      const estimatedHeight =
-        siteCardHeights[item.site.id] ??
-        estimateVisibleSiteCardHeight(item, isExpanded);
-      if (leftHeight <= rightHeight) {
-        left.push(item);
-        leftHeight += estimatedHeight;
-      } else {
-        right.push(item);
-        rightHeight += estimatedHeight;
-      }
-    }
-
-    return [left, right];
-  }, [visibleSites, expandedSiteIds, siteCardHeights]);
-
   const renderSiteCard = ({
     site,
     summary,
@@ -1404,15 +1434,7 @@ export function Site() {
             <div className="flex items-start gap-3">
               <div
                 className="min-w-0 flex-1 cursor-pointer text-left"
-                role="button"
-                tabIndex={0}
                 onClick={() => toggleSiteExpanded(site.id, forceExpanded)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    toggleSiteExpanded(site.id, forceExpanded);
-                  }
-                }}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-lg font-semibold">{site.name}</h2>
@@ -1431,6 +1453,24 @@ export function Site() {
                   >
                     {summary.healthLabel}
                   </Badge>
+                  <button
+                    type="button"
+                    className="rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50"
+                    aria-label={`${isExpanded ? "收起" : "展开"}站点 ${site.name}`}
+                    aria-expanded={isExpanded}
+                    disabled={forceExpanded}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleSiteExpanded(site.id, forceExpanded);
+                    }}
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "size-4 transition-transform",
+                        isExpanded && "rotate-180",
+                      )}
+                    />
+                  </button>
                 </div>
 
                 <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
@@ -1448,7 +1488,7 @@ export function Site() {
 
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
                   <CompactMetric label="账号" value={summary.accountCount} />
-                  <CompactMetric label="Key" value={summary.keyCount} />
+                  <CompactMetric label="密钥" value={summary.keyCount} />
                   <CompactMetric label="模型" value={summary.modelCount} />
                   <CompactMetric label="余额" value={formatBalance(summary.balance)} />
                   <CompactMetric
@@ -1491,14 +1531,19 @@ export function Site() {
                   </div>
                 ) : null}
 
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span>
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md hover:text-foreground"
+                    title={tProxy('mode.label')}
+                    onClick={() => openEditSiteDialog(site)}
+                  >
                     {site.proxy_mode === "pool"
                       ? tProxy('mode.pool')
                       : site.proxy_mode === "system"
                         ? tProxy('mode.system')
                         : tProxy('mode.direct')}
-                  </span>
+                  </button>
                   {site.custom_header.length > 0 ? (
                     <span>{site.custom_header.length} 个 Header</span>
                   ) : null}
@@ -1513,6 +1558,60 @@ export function Site() {
                     onClick={() => openCreateAccountDialog(site)}
                   >
                     <Plus className="size-4" />
+                  </IconActionButton>
+                ) : site.accounts.length === 1 ? (
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Switch
+                            checked={site.accounts[0].auto_sync}
+                            disabled={updateSiteAccount.isPending}
+                            aria-label={`${site.accounts[0].name} 自动同步`}
+                            onCheckedChange={() =>
+                              handleToggleAutoSync(site.accounts[0])
+                            }
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {site.accounts[0].auto_sync
+                          ? "关闭自动同步"
+                          : "开启自动同步"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </>
+                ) : null}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Switch
+                        checked={site.is_reserve}
+                        disabled={updateSite.isPending}
+                        onCheckedChange={() => handleToggleReserve(site)}
+                        aria-label={t("siteManagement.siteForm.relayPolicy")}
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {site.is_reserve
+                      ? t("siteManagement.siteForm.setPublic")
+                      : t("siteManagement.siteForm.setRelay")}
+                  </TooltipContent>
+                </Tooltip>
+                {site.accounts.length === 1 ? (
+                  <IconActionButton
+                    label="同步账号"
+                    disabled={syncingAccountIds.has(site.accounts[0].id)}
+                    onClick={() => handleSyncAccount(site.accounts[0])}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "size-4",
+                        syncingAccountIds.has(site.accounts[0].id) &&
+                          "animate-spin",
+                      )}
+                    />
                   </IconActionButton>
                 ) : null}
 
@@ -1745,6 +1844,7 @@ export function Site() {
                                           <Switch
                                             checked={account.enabled}
                                             disabled={enableSiteAccount.isPending}
+                                            aria-label={`${account.name} 启用账号`}
                                             onCheckedChange={() =>
                                               handleToggleAccount(account)
                                             }
@@ -1753,6 +1853,26 @@ export function Site() {
                                       </TooltipTrigger>
                                       <TooltipContent>
                                         {account.enabled ? "停用账号" : "启用账号"}
+                                      </TooltipContent>
+                                    </Tooltip>
+
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span>
+                                          <Switch
+                                            checked={account.auto_sync}
+                                            disabled={updateSiteAccount.isPending}
+                                            aria-label={`${account.name} 自动同步`}
+                                            onCheckedChange={() =>
+                                              handleToggleAutoSync(account)
+                                            }
+                                          />
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        {account.auto_sync
+                                          ? "关闭自动同步"
+                                          : "开启自动同步"}
                                       </TooltipContent>
                                     </Tooltip>
 
@@ -1822,6 +1942,16 @@ export function Site() {
                                           >
                                             <Pencil className="size-4" />
                                             <span>编辑账号</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={MENU_BUTTON_CLASS}
+                                            onClick={() =>
+                                              openRecoveryDialog(site, account)
+                                            }
+                                          >
+                                            <ShieldCheck className="size-4" />
+                                            <span>{tRecovery('menu')}</span>
                                           </button>
                                           <button
                                             type="button"
@@ -1927,6 +2057,9 @@ export function Site() {
           onClearFilters={clearFilters}
           activeFilterStatuses={checkinFilterStatuses}
           onFilterChange={handleCheckinFilterChange}
+          failureFilterCounts={batchFailureFilterCounts}
+          activeFailureFilters={batchFailureFilters}
+          onFailureFilterChange={handleBatchFailureFilterChange}
           allTags={allTags}
           activeTags={tagFilters}
           onTagFilterChange={handleTagFilterChange}
@@ -2074,40 +2207,16 @@ export function Site() {
         ) : null}
 
         {visibleSites.length > 0 ? (
-          <>
-            <div className="space-y-4 md:hidden">
-              {visibleSites.map((item) => (
-                <div
-                  key={item.site.id}
-                  ref={getSiteCardMeasureRef(item.site.id)}
-                >
-                  {renderSiteCard(item)}
-                </div>
-              ))}
-            </div>
-            <div className="hidden items-start gap-4 md:grid md:grid-cols-2">
-              <div className="space-y-4">
-                {masonryColumns[0].map((item) => (
-                  <div
-                    key={item.site.id}
-                    ref={getSiteCardMeasureRef(item.site.id)}
-                  >
-                    {renderSiteCard(item)}
-                  </div>
-                ))}
+          <div className="space-y-4">
+            {visibleSites.map((item) => (
+              <div
+                key={item.site.id}
+                ref={getSiteCardMeasureRef(item.site.id)}
+              >
+                {renderSiteCard(item)}
               </div>
-              <div className="space-y-4">
-                {masonryColumns[1].map((item) => (
-                  <div
-                    key={item.site.id}
-                    ref={getSiteCardMeasureRef(item.site.id)}
-                  >
-                    {renderSiteCard(item)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
+            ))}
+          </div>
         ) : null}
       </PageWrapper>
 
@@ -2140,6 +2249,18 @@ export function Site() {
         onOpenChange={closeAccountDialog}
         site={accountSite}
         account={editingAccount}
+      />
+
+      <RecoveryDialog
+        key={
+          recoveryContext
+            ? `site-recovery-${recoveryContext.account.id}`
+            : "site-recovery"
+        }
+        open={recoveryContext !== null}
+        onOpenChange={closeRecoveryDialog}
+        site={recoveryContext?.site ?? null}
+        account={recoveryContext?.account ?? null}
       />
 
       <Dialog

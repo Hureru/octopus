@@ -2,7 +2,7 @@
 
 import { useStatsDaily, useStatsHourly, useStatsTotal } from '@/api/endpoints/stats';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useTranslations } from 'next-intl';
 import { formatCount, formatMoney, formatTime } from '@/lib/utils';
@@ -33,8 +33,19 @@ const PERIOD_KEY: Record<ChartPeriod, 'today' | 'last7Days' | 'last30Days' | 'al
     all: 'allTime',
 };
 
+const CHART_PERIODS: Array<{
+    value: ChartPeriod;
+    label: 'today' | 'last7Days' | 'last30Days' | 'allTime';
+}> = [
+    { value: '1', label: 'today' },
+    { value: '7', label: 'last7Days' },
+    { value: '30', label: 'last30Days' },
+    { value: 'all', label: 'allTime' },
+];
+
 export function StatsChart() {
     const t = useTranslations('home.summary');
+    const tabsId = useId();
 
     const { data: statsTotal } = useStatsTotal();
     const { data: statsDaily } = useStatsDaily();
@@ -193,51 +204,70 @@ export function StatsChart() {
                 </div>
                 <Tabs value={period} onValueChange={(v) => setChartPeriod(v as ChartPeriod)}>
                     <TabsList>
-                        <TabsTrigger value="1">{t('periods.today')}</TabsTrigger>
-                        <TabsTrigger value="7">{t('periods.last7Days')}</TabsTrigger>
-                        <TabsTrigger value="30">{t('periods.last30Days')}</TabsTrigger>
-                        <TabsTrigger value="all">{t('periods.allTime')}</TabsTrigger>
+                        {CHART_PERIODS.map(({ value, label }) => (
+                            <TabsTrigger
+                                key={value}
+                                value={value}
+                                id={`${tabsId}-tab-${value}`}
+                                panelId={`${tabsId}-panel-${value}`}
+                            >
+                                {t(`periods.${label}`)}
+                            </TabsTrigger>
+                        ))}
                     </TabsList>
                 </Tabs>
             </header>
 
-            {/* Metrics row */}
-            <div className="mx-5 flex items-baseline gap-6 border-t border-border/60 py-3 text-sm tabular-nums">
-                <StatItem label={t('metrics.requests')} value={metrics.requests} />
-                <span className="h-4 w-px bg-border/60" />
-                <StatItem label={t('metrics.tokens')} value={metrics.tokens} />
-                <span className="h-4 w-px bg-border/60" />
-                <StatItem label={t('metrics.waitTime')} value={metrics.waitTime} />
-            </div>
+            {CHART_PERIODS.map(({ value }) => (
+                <div
+                    key={value}
+                    id={`${tabsId}-panel-${value}`}
+                    role="tabpanel"
+                    aria-labelledby={`${tabsId}-tab-${value}`}
+                    hidden={period !== value}
+                    tabIndex={period === value ? 0 : -1}
+                >
+                    {period === value ? (
+                        <>
+                            <div className="mx-5 flex items-baseline gap-6 border-t border-border/60 py-3 text-sm tabular-nums">
+                                <StatItem label={t('metrics.requests')} value={metrics.requests} />
+                                <span className="h-4 w-px bg-border/60" />
+                                <StatItem label={t('metrics.tokens')} value={metrics.tokens} />
+                                <span className="h-4 w-px bg-border/60" />
+                                <StatItem label={t('metrics.waitTime')} value={metrics.waitTime} />
+                            </div>
 
-            {/* Area chart — only total_cost */}
-            <ChartContainer config={chartConfig} className="h-40 w-full">
-                <AreaChart accessibilityLayer data={chartData}>
-                    <defs>
-                        <linearGradient id="fillCost" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.35} />
-                            <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.05} />
-                        </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                    <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(value) => {
-                            const formatted = formatMoney(value);
-                            return `${formatted.formatted.value}${formatted.formatted.unit}`;
-                        }}
-                    />
-                    <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-                    <Area
-                        type="monotone"
-                        dataKey="total_cost"
-                        stroke="var(--chart-1)"
-                        fill="url(#fillCost)"
-                    />
-                </AreaChart>
-            </ChartContainer>
+                            <ChartContainer config={chartConfig} className="h-40 w-full">
+                                <AreaChart accessibilityLayer data={chartData}>
+                                    <defs>
+                                        <linearGradient id="fillCost" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.35} />
+                                            <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.05} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                    <XAxis dataKey="date" tickLine={false} axisLine={false} />
+                                    <YAxis
+                                        tickLine={false}
+                                        axisLine={false}
+                                        tickFormatter={(tickValue) => {
+                                            const formatted = formatMoney(tickValue);
+                                            return `${formatted.formatted.value}${formatted.formatted.unit}`;
+                                        }}
+                                    />
+                                    <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="total_cost"
+                                        stroke="var(--chart-1)"
+                                        fill="url(#fillCost)"
+                                    />
+                                </AreaChart>
+                            </ChartContainer>
+                        </>
+                    ) : null}
+                </div>
+            ))}
         </section>
     );
 }

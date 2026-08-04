@@ -3,6 +3,7 @@ package shutdown
 import (
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -15,39 +16,73 @@ type logger interface {
 
 var ilog logger
 var funcs []func() error
+var stateMu sync.Mutex
+var requestCh chan struct{}
+var requestOnce *sync.Once
+var shutdownOnce *sync.Once
 
 func Init(log logger) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	ilog = log
 	funcs = make([]func() error, 0)
+	requestCh = make(chan struct{})
+	requestOnce = &sync.Once{}
+	shutdownOnce = &sync.Once{}
 }
 
 func Register(fn func() error) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	funcs = append(funcs, fn)
 }
 
 func Listen() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(quit)
 	ilog.Infof("Program started, press Ctrl+C to exit")
-	sig := <-quit
-	ilog.Warnf("Received exit signal: %v", sig)
-	if len(funcs) == 0 {
-		return
+
+	stateMu.Lock()
+	requested := requestCh
+	stateMu.Unlock()
+	select {
+	case sig := <-quit:
+		ilog.Warnf("Received exit signal: %v", sig)
+	case <-requested:
+		ilog.Warnf("Received application shutdown request")
 	}
-	for i := len(funcs) - 1; i >= 0; i-- {
-		if err := funcs[i](); err != nil {
-			ilog.Errorf("Closing functions execution failed: %v", err)
-		}
-	}
-	ilog.Infof("Shutdown completed successfully")
-	os.Exit(0)
+	Shutdown()
 }
 
 func Shutdown() {
-	for i := len(funcs) - 1; i >= 0; i-- {
-		if err := funcs[i](); err != nil {
-			ilog.Errorf("Closing functions execution failed: %v", err)
-		}
+	stateMu.Lock()
+	once := shutdownOnce
+	stateMu.Unlock()
+	if once == nil {
+		return
 	}
-	ilog.Infof("Shutdown completed successfully")
+	once.Do(func() {
+		stateMu.Lock()
+		hooks := append([]func() error(nil), funcs...)
+		stateMu.Unlock()
+		for i := len(hooks) - 1; i >= 0; i-- {
+			if err := hooks[i](); err != nil {
+				ilog.Errorf("Closing functions execution failed: %v", err)
+			}
+		}
+		ilog.Infof("Shutdown completed successfully")
+	})
+}
+
+// Request asks the goroutine blocked in Listen to run the normal shutdown path.
+func Request() {
+	stateMu.Lock()
+	ch := requestCh
+	once := requestOnce
+	stateMu.Unlock()
+	if ch == nil || once == nil {
+		return
+	}
+	once.Do(func() { close(ch) })
 }

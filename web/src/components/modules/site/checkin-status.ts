@@ -1,8 +1,4 @@
-import {
-  type Site,
-  type SiteAccount,
-  SitePlatform,
-} from "@/api/endpoints/site";
+import type { Site, SiteAccount } from "@/api/endpoints/site";
 
 export type CheckinFilterStatus =
   | "all"
@@ -38,9 +34,9 @@ export function createEmptyCheckinSummary(): CheckinSummary {
 
 export function sitePlatformSupportsCheckin(platform: Site["platform"]) {
   switch (platform) {
-    case SitePlatform.DoneHub:
-    case SitePlatform.Sub2API:
-    case SitePlatform.API:
+    case "done-hub":
+    case "sub2api":
+    case "api":
       return false;
     default:
       return true;
@@ -89,6 +85,12 @@ export function deriveCheckinStatus(
 
   if (!accountHasCheckinEnabled(account, site.platform)) {
     return null;
+  }
+
+  // 同步部分成功是正常状态（如部分分组缺 Key/模型），独立呈现，
+  // 不并入失败/未执行，但只对属于签到维度的账号生效。
+  if (normalizeExecutionStatus(account.last_sync_status) === "partial") {
+    return "partial";
   }
 
   if (!happenedToday(account.last_checkin_at, now)) {

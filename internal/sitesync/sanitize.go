@@ -12,7 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/apperror"
 )
 
-const maxSiteStatusMessageRunes = 300
+const maxSiteStatusMessageRunes = 2048
 
 var (
 	bearerTokenPattern     = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._~+/=-]+`)
@@ -85,7 +85,7 @@ func siteBatchReason(err error) SiteBatchReason {
 		return SiteBatchReasonDirectTokenRequired
 	case CodeSiteSyncUnsupportedPlatform:
 		return SiteBatchReasonUnsupportedPlatform
-	case CodeSiteSyncMissingGroupKey:
+	case CodeSiteSyncMissingGroupKey, CodeSiteSyncNoAvailableKey:
 		return SiteBatchReasonMissingGroupKey
 	case CodeSiteUpstreamDecodeFailed:
 		return SiteBatchReasonUpstreamDecodeFailed
@@ -101,11 +101,26 @@ func siteBatchReason(err error) SiteBatchReason {
 	case apperror.CodeCommonDatabaseError:
 		return SiteBatchReasonDatabaseError
 	}
-	lowered := strings.ToLower(apperror.Message(err))
+	return classifySiteBatchMessage(apperror.Message(err))
+}
+
+// classifySiteBatchMessage 从错误消息文本推断失败原因，用于只有消息
+// 没有 apperror 包装的错误（如 checkin 的 result 状态路径）。
+func classifySiteBatchMessage(msg string) SiteBatchReason {
+	lowered := strings.ToLower(msg)
 	switch {
-	case strings.Contains(lowered, "cloudflare") || strings.Contains(lowered, "just a moment"):
+	case strings.Contains(lowered, "cloudflare") ||
+		strings.Contains(lowered, "just a moment") ||
+		strings.Contains(lowered, "attention required") ||
+		strings.Contains(lowered, "turnstile"):
 		return SiteBatchReasonCloudflareProtection
-	case strings.Contains(lowered, "unauthorized") || strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "invalid token") || strings.Contains(lowered, "未登录") || strings.Contains(lowered, "登录") || strings.Contains(lowered, "过期"):
+	case strings.Contains(lowered, "签到功能未启用") ||
+		(strings.Contains(lowered, "checkin") && strings.Contains(lowered, "enabled")) ||
+		strings.Contains(lowered, "invalid url") ||
+		strings.Contains(lowered, "签名") ||
+		strings.Contains(lowered, "完整性标记"):
+		return SiteBatchReasonUnsupportedCheckin
+	case strings.Contains(lowered, "unauthorized") || strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "invalid token") || strings.Contains(lowered, "未登录") || strings.Contains(lowered, "登录失败") || strings.Contains(lowered, "过期"):
 		return SiteBatchReasonUnauthorized
 	case strings.Contains(lowered, "deadline exceeded"):
 		return SiteBatchReasonContextDeadlineExceeded
@@ -113,11 +128,24 @@ func siteBatchReason(err error) SiteBatchReason {
 		return SiteBatchReasonContextCanceled
 	case strings.Contains(lowered, "timeout") || strings.Contains(lowered, "timed out"):
 		return SiteBatchReasonTimeout
-	case isLikelyHTML(lowered):
-		return SiteBatchReasonUpstreamHTMLResponse
-	default:
-		return SiteBatchReasonUnknown
 	}
+
+	statusCode := statusCodeFromSiteMessage(msg)
+	switch statusCode {
+	case 401, 403:
+		return SiteBatchReasonUnauthorized
+	case 408:
+		return SiteBatchReasonTimeout
+	case 429:
+		return SiteBatchReasonUpstreamHTTPError
+	}
+	if statusCode >= 500 && statusCode <= 599 {
+		return SiteBatchReasonUpstreamHTTPError
+	}
+	if isLikelyHTML(lowered) {
+		return SiteBatchReasonUpstreamHTMLResponse
+	}
+	return SiteBatchReasonUnknown
 }
 
 func siteErrorStatusCode(err error) int {
@@ -137,13 +165,19 @@ func siteErrorStatusCode(err error) int {
 			}
 		}
 	}
-	if match := statusCodePattern.FindStringSubmatch(apperror.Message(err)); len(match) >= 2 {
-		var parsed int
-		if _, scanErr := fmt.Sscanf(match[1], "%d", &parsed); scanErr == nil {
-			return parsed
-		}
+	return statusCodeFromSiteMessage(apperror.Message(err))
+}
+
+func statusCodeFromSiteMessage(message string) int {
+	match := statusCodePattern.FindStringSubmatch(message)
+	if len(match) < 2 {
+		return 0
 	}
-	return 0
+	var parsed int
+	if _, err := fmt.Sscanf(match[1], "%d", &parsed); err != nil {
+		return 0
+	}
+	return parsed
 }
 
 func isLikelyHTML(text string) bool {

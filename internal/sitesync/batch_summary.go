@@ -13,6 +13,9 @@ import (
 
 const maxSiteBatchLogGroups = 5
 
+// maxSiteBatchSamples 是失败样例的保留上限（展示用，独立于日志分组上限）。
+const maxSiteBatchSamples = 12
+
 type SiteBatchPhase string
 
 const (
@@ -79,21 +82,22 @@ type SiteBatchSummary struct {
 }
 
 type SiteBatchOutcomeGroup struct {
-	SiteID   int
-	Platform model.SitePlatform
-	Reason   SiteBatchReason
-	Count    int
-	Failed   int
-	Skipped  int
-	Warnings int
+	SiteID     int                `json:"site_id"`
+	Platform   model.SitePlatform `json:"platform"`
+	Reason     SiteBatchReason    `json:"reason"`
+	Count      int                `json:"count"`
+	Failed     int                `json:"failed"`
+	Skipped    int                `json:"skipped"`
+	Warnings   int                `json:"warnings"`
+	AccountIDs []int              `json:"account_ids,omitempty"`
 }
 
 type SiteBatchFailureSample struct {
-	SiteID    int
-	Platform  model.SitePlatform
-	AccountID int
-	Reason    SiteBatchReason
-	Message   string
+	SiteID    int                `json:"site_id"`
+	Platform  model.SitePlatform `json:"platform"`
+	AccountID int                `json:"account_id"`
+	Reason    SiteBatchReason    `json:"reason"`
+	Message   string             `json:"message"`
 }
 
 type siteBatchGroupKey struct {
@@ -142,7 +146,7 @@ func (s *SiteBatchSummary) recordResult(siteID int, platform model.SitePlatform,
 		s.addGroup(s.skipGroups, siteID, platform, SiteBatchReasonUnsupportedCheckin, func(g *SiteBatchOutcomeGroup) { g.Skipped++ })
 	case model.SiteExecutionStatusFailed:
 		s.Failed++
-		s.addFailure(siteID, platform, accountID, SiteBatchReasonUnknown, safeMessage)
+		s.addFailure(siteID, platform, accountID, classifySiteBatchMessage(safeMessage), safeMessage)
 	default:
 		s.Success++
 	}
@@ -168,7 +172,8 @@ func (s *SiteBatchSummary) markCanceled(ctxErr error) {
 }
 
 func (s *SiteBatchSummary) addFailure(siteID int, platform model.SitePlatform, accountID int, reason SiteBatchReason, message string) {
-	s.addGroup(s.failureGroups, siteID, platform, reason, func(g *SiteBatchOutcomeGroup) { g.Failed++ })
+	group := s.addGroup(s.failureGroups, siteID, platform, reason, func(g *SiteBatchOutcomeGroup) { g.Failed++ })
+	addSiteBatchAccountID(group, accountID)
 	s.addSample(siteID, platform, accountID, reason, message)
 }
 
@@ -181,11 +186,11 @@ func (s *SiteBatchSummary) addWarning(siteID int, platform model.SitePlatform, a
 	s.addSample(siteID, platform, accountID, reason, sanitizeSiteStatusText(message))
 }
 
-func (s *SiteBatchSummary) addGroup(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, update func(*SiteBatchOutcomeGroup)) {
-	s.addGroupN(groups, siteID, platform, reason, 1, func(g *SiteBatchOutcomeGroup, _ int) { update(g) })
+func (s *SiteBatchSummary) addGroup(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, update func(*SiteBatchOutcomeGroup)) *SiteBatchOutcomeGroup {
+	return s.addGroupN(groups, siteID, platform, reason, 1, func(g *SiteBatchOutcomeGroup, _ int) { update(g) })
 }
 
-func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, n int, update func(*SiteBatchOutcomeGroup, int)) {
+func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, n int, update func(*SiteBatchOutcomeGroup, int)) *SiteBatchOutcomeGroup {
 	if reason == "" {
 		reason = SiteBatchReasonUnknown
 	}
@@ -197,10 +202,24 @@ func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutc
 	}
 	group.Count += n
 	update(group, n)
+	return group
+}
+
+func addSiteBatchAccountID(group *SiteBatchOutcomeGroup, accountID int) {
+	if group == nil || accountID <= 0 {
+		return
+	}
+	index := sort.SearchInts(group.AccountIDs, accountID)
+	if index < len(group.AccountIDs) && group.AccountIDs[index] == accountID {
+		return
+	}
+	group.AccountIDs = append(group.AccountIDs, 0)
+	copy(group.AccountIDs[index+1:], group.AccountIDs[index:])
+	group.AccountIDs[index] = accountID
 }
 
 func (s *SiteBatchSummary) addSample(siteID int, platform model.SitePlatform, accountID int, reason SiteBatchReason, message string) {
-	if len(s.Samples) >= maxSiteBatchLogGroups || message == "" {
+	if len(s.Samples) >= maxSiteBatchSamples || message == "" {
 		return
 	}
 	for _, sample := range s.Samples {
@@ -213,6 +232,7 @@ func (s *SiteBatchSummary) addSample(siteID int, platform model.SitePlatform, ac
 
 func (s *SiteBatchSummary) emitLog() {
 	s.finish()
+	recordLatestSummary(s)
 	failureGroups := sortedSiteBatchGroups(s.failureGroups)
 	warningGroups := sortedSiteBatchGroups(s.warningGroups)
 	skipGroups := sortedSiteBatchGroups(s.skipGroups)
