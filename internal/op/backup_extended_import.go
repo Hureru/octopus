@@ -69,7 +69,7 @@ func importClashControllers(
 			}
 			idMap[oldID] = existing.ID
 			continue
-		} else if err != gorm.ErrRecordNotFound {
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("import clash_controllers: %w", err)
 		}
 		if err := tx.Create(&item).Error; err != nil {

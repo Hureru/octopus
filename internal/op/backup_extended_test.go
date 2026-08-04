@@ -772,6 +772,56 @@ func TestDBExportZipIncludesExtendedTablesWithoutVerificationState(t *testing.T)
 	}
 }
 
+func TestWriteZipUsageAttemptFactsAdvancesZeroIDCursor(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+	conn := dbpkg.GetDB().WithContext(ctx)
+	facts := make([]model.UsageAttemptFact, dbExportLogBatchSize+1)
+	for index := range facts {
+		facts[index] = model.UsageAttemptFact{
+			RelayLogID:    0,
+			AttemptNumber: index + 1,
+		}
+	}
+	if err := conn.CreateInBatches(facts, 100).Error; err != nil {
+		t.Fatalf("create zero-ID attempt facts: %v", err)
+	}
+
+	exportCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	queryCount := 0
+	callbackName := "test:cancel-zero-id-attempt-export"
+	if err := conn.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "usage_attempt_facts" {
+			return
+		}
+		queryCount++
+		if queryCount == 2 {
+			cancel()
+		}
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Callback().Query().Remove(callbackName)
+	})
+
+	var payload bytes.Buffer
+	writer := zip.NewWriter(&payload)
+	if err := writeZipUsageAttemptFactsNDJSON(exportCtx, writer, conn); err != nil {
+		t.Fatalf("write zero-ID attempt facts: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close attempt facts ZIP: %v", err)
+	}
+	reader, err := zipReaderFromBytes(payload.Bytes())
+	if err != nil {
+		t.Fatalf("open attempt facts ZIP: %v", err)
+	}
+	if got := linesCount(readZipFile(t, reader, "usage_attempt_facts.ndjson")); got != len(facts) {
+		t.Fatalf("exported attempt fact lines = %d, want %d", got, len(facts))
+	}
+}
+
 func TestDBExportZipCanBeImported(t *testing.T) {
 	ctx := setupBackupTestDB(t)
 	seed := seedExtendedBackupData(t, ctx)

@@ -119,7 +119,7 @@ export function ModelCatalog() {
             >
                 {selected ? (
                     <CatalogDetail
-                        key={selected.id}
+                        key={`${selected.id}:${selected.updated_at}`}
                         canonical={selected}
                         channelNameById={channelNameById}
                         siteNameById={siteNameById}

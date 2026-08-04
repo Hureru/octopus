@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,7 +27,10 @@ import (
 
 var projectedAutoGroupQueued atomic.Bool
 
-const maxDBImportUploadBytes = 128 << 20
+const (
+	maxDBImportUploadBytes       = 128 << 20
+	maxDBImportMultipartOverhead = 1 << 20
+)
 
 func init() {
 	router.NewGroupRouter("/api/v1/setting").
@@ -170,8 +174,18 @@ func importDB(c *gin.Context) {
 
 	contentType := c.GetHeader("Content-Type")
 	if strings.Contains(contentType, "multipart/form-data") {
+		c.Request.Body = http.MaxBytesReader(
+			c.Writer,
+			c.Request.Body,
+			maxDBImportUploadBytes+maxDBImportMultipartOverhead,
+		)
 		fh, err := c.FormFile("file")
 		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				resp.Error(c, http.StatusRequestEntityTooLarge, "backup file exceeds upload limit")
+				return
+			}
 			resp.Error(c, http.StatusBadRequest, "missing upload file field 'file'")
 			return
 		}
