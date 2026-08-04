@@ -21,6 +21,8 @@ const (
 	TaskSiteCheckin       = "site_checkin"
 	TaskWSAffinityCleanup = "ws_affinity_cleanup"
 	TaskWebDAVBackup      = "webdav_backup"
+	TaskUsageMaintenance  = "usage_maintenance"
+	TaskVerificationRetry = "verification_retry"
 )
 
 func Init() {
@@ -92,6 +94,9 @@ func Init() {
 			log.Debugf("ws response affinity cleanup removed %d expired rows", deleted)
 		}
 	})
+
+	Register(TaskUsageMaintenance, 10*time.Minute, true, UsageMaintenanceTask)
+	Register(TaskVerificationRetry, time.Minute, true, VerificationRetryTask)
 
 	// 注册被动离群退役(POR)任务（默认间隔 2 分钟，总开关在任务内判断）
 	outlierIntervalMinutes, err := op.SettingGetInt(model.SettingKeyOutlierRetireInterval)

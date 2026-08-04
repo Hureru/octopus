@@ -265,9 +265,6 @@ func (p *StreamProcessor) processEvent(data []byte) error {
 	// transport failure.
 	if p.terminalEvent == "" {
 		p.terminalEvent = terminalEventFromSSE(output, p.config.TerminalEvents)
-		if p.terminalEvent == "" && p.config.BufferRawStream {
-			p.terminalEvent = p.streamTerminalEvent()
-		}
 	}
 	if _, err := p.config.Writer.Write(output); err != nil {
 		p.termination = TerminationWriteError

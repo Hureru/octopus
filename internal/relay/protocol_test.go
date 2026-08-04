@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,42 @@ import (
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
+	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
+
+func TestResponsesCompactRejectsBlankPreviousResponseID(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := newRelayTestContext(
+		recorder,
+		"/v1/responses/compact",
+		`{"model":"compact-model","previous_response_id":"   "}`,
+	)
+	HandleResponsesCompact(c)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("blank previous_response_id status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}
+
+func TestWSUpstreamReaderStopsAfterSemanticErrorFrame(t *testing.T) {
+	clientConn, serverConn := newTestWSConnPair(t)
+	defer clientConn.CloseNow()
+	defer serverConn.CloseNow()
+	ctx := context.Background()
+	if err := serverConn.Write(ctx, websocket.MessageText, []byte(`{"type":"error","error":{"message":"failed"}}`)); err != nil {
+		t.Fatalf("write error frame: %v", err)
+	}
+	if err := serverConn.Write(ctx, websocket.MessageText, []byte(`{"type":"response.created"}`)); err != nil {
+		t.Fatalf("write trailing frame: %v", err)
+	}
+	reader := newWSUpstreamReader(&pooledConn{conn: clientConn}, 1, 1)
+	if _, err := reader.ReadEvent(ctx); err != nil {
+		t.Fatalf("read error frame: %v", err)
+	}
+	if _, err := reader.ReadEvent(ctx); !errors.Is(err, io.EOF) {
+		t.Fatalf("reader continued after semantic error frame: %v", err)
+	}
+}
 
 func TestHandlerPassthroughsOpenAIChatSameProtocol(t *testing.T) {
 	ctx := setupRelayTestDB(t)
@@ -192,7 +227,7 @@ func TestCandidateHeaderPolicyAppliesToSpecialRelayTransports(t *testing.T) {
 	)
 	assertSpecialRouteHeaderPolicy(t, "websocket", wsHeaders, wsPolicy)
 
-	unscopedWSHeaders := buildUpstreamWSHeaders(nil, channel, "secret")
+	unscopedWSHeaders := buildUpstreamWSHeaders(ctx, nil, channel, "secret")
 	if unscopedWSHeaders.Get("X-Route-Scope") != "" {
 		t.Fatalf("unscoped WebSocket headers inherited route policy: %#v", unscopedWSHeaders)
 	}

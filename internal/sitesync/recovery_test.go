@@ -308,6 +308,56 @@ func TestBuildSiteRecoveryPathsKeepsExplicitPathAheadOfLearnedPreference(t *test
 	}
 }
 
+func TestBuildSiteRecoveryPathsSkipsControllerEnumerationWhenFull(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	siteRecord, account := createRecoveryFixture(t, ctx)
+	current := model.ProxyConfiguration{Name: "current", URL: "http://127.0.0.1:18091", Enabled: true}
+	preferred := model.ProxyConfiguration{Name: "preferred", URL: "http://127.0.0.1:18092", Enabled: true}
+	if err := op.ProxyConfigurationCreate(&current, ctx); err != nil {
+		t.Fatalf("create current proxy: %v", err)
+	}
+	if err := op.ProxyConfigurationCreate(&preferred, ctx); err != nil {
+		t.Fatalf("create preferred proxy: %v", err)
+	}
+	controllerCalls := 0
+	controllerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		controllerCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"proxies":{"Octopus":{"type":"Selector","now":"node-a","all":["node-a"]}}}`))
+	}))
+	defer controllerServer.Close()
+	controller := model.ClashController{
+		Name: "unused-controller", APIURL: controllerServer.URL,
+		ProxyURL: "http://127.0.0.1:18093", GroupName: "Octopus", Enabled: true,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&controller).Error; err != nil {
+		t.Fatalf("create controller: %v", err)
+	}
+	unused := model.ProxyConfiguration{
+		Name: "unused", URL: controller.ProxyURL, Enabled: true, ClashControllerID: &controller.ID,
+	}
+	if err := op.ProxyConfigurationCreate(&unused, ctx); err != nil {
+		t.Fatalf("create unused proxy: %v", err)
+	}
+	account.ProxyMode = model.ProxyUsageModePool
+	account.ProxyConfigID = &current.ID
+	account.PreferredProxyConfigID = &preferred.ID
+	if err := dbpkg.GetDB().WithContext(ctx).Save(&account).Error; err != nil {
+		t.Fatalf("save account proxy paths: %v", err)
+	}
+
+	paths, err := buildSiteRecoveryPaths(ctx, &siteRecord, &account)
+	if err != nil {
+		t.Fatalf("build recovery paths: %v", err)
+	}
+	if len(paths) != siteRecoveryMaxPaths {
+		t.Fatalf("recovery path count = %d, want %d", len(paths), siteRecoveryMaxPaths)
+	}
+	if controllerCalls != 0 {
+		t.Fatalf("full path list still queried controller %d times", controllerCalls)
+	}
+}
+
 func TestLearnSiteRecoveryPathBootstrapsExplicitAccountOverride(t *testing.T) {
 	ctx := setupProjectTestDB(t)
 	siteRecord, account := createRecoveryFixture(t, ctx)

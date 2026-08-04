@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -431,6 +432,38 @@ func TestHandlerPassthroughsOpenAIResponsesSameProtocolStream(t *testing.T) {
 	}
 	if _, ok := payload["tools"]; ok {
 		t.Fatalf("ordinary same-protocol request should not require native tools to passthrough, got %#v", payload["tools"])
+	}
+}
+
+func TestUpdateChannelKeyWithObservedCostCachesFailureCost(t *testing.T) {
+	ctx := setupRelayTestDB(t)
+	channel := &model.Channel{
+		Name:    "failure-cost-channel",
+		Type:    outbound.OutboundTypeOpenAIResponse,
+		Enabled: true,
+		Model:   "gpt-test",
+		Keys:    []model.ChannelKey{{Enabled: true, ChannelKey: "test-key"}},
+	}
+	if err := op.ChannelCreate(channel, ctx); err != nil {
+		t.Fatalf("ChannelCreate failed: %v", err)
+	}
+	if len(channel.Keys) != 1 || channel.Keys[0].ID == 0 {
+		t.Fatalf("channel key was not created: %+v", channel.Keys)
+	}
+	ra := &relayAttempt{
+		relayRequest: &relayRequest{metrics: &RelayMetrics{
+			Stats: model.StatsMetrics{InputCost: 1.25, OutputCost: 2.5},
+		}},
+		usedKey: channel.Keys[0],
+	}
+	ra.updateChannelKeyWithObservedCost()
+
+	reloaded, err := op.ChannelGet(channel.ID, ctx)
+	if err != nil {
+		t.Fatalf("ChannelGet failed: %v", err)
+	}
+	if len(reloaded.Keys) != 1 || math.Abs(reloaded.Keys[0].TotalCost-3.75) > 1e-9 {
+		t.Fatalf("observed failure cost was not cached: %+v", reloaded.Keys)
 	}
 }
 
@@ -1090,7 +1123,7 @@ func TestHandlerStopsFailoverWhenContinuationTransportIsUnavailable(t *testing.T
 		t.Fatalf("expected sticky to be cleared after continuation failure, got %#v", sticky)
 	}
 	wsUpstreamPool.Remove(pc.poolKey)
-	wsUpstreamPool.Remove(newWSPoolKey(secondChannel.ID, secondChannel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Header, secondChannel, secondChannel.Keys[0].ChannelKey)))
+	wsUpstreamPool.Remove(newWSPoolKey(secondChannel.ID, secondChannel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Context(), c.Request.Header, secondChannel, secondChannel.Keys[0].ChannelKey)))
 }
 
 func TestForwardViaWSRedialsFreshRequestAfterStalePooledConnection(t *testing.T) {
@@ -1247,7 +1280,7 @@ func TestForwardViaWSReconnectsContinuationAfterReadFailureBeforeFirstEvent(t *t
 	if !strings.Contains(writer.Body.String(), `"response.completed"`) {
 		t.Fatalf("expected ws reconnect stream to complete, got %s", writer.Body.String())
 	}
-	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Header, channel, channel.Keys[0].ChannelKey)))
+	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Context(), c.Request.Header, channel, channel.Keys[0].ChannelKey)))
 }
 
 func TestForwardDoesNotUseWSForFreshHTTPIngress(t *testing.T) {
@@ -1425,7 +1458,7 @@ func TestForwardViaWSPreservesClientUserAgentHeaders(t *testing.T) {
 		t.Fatalf("expected accept-language to be forwarded, got %#v", got)
 	}
 
-	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Header, channel, channel.Keys[0].ChannelKey)))
+	wsUpstreamPool.Remove(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(c.Request.Context(), c.Request.Header, channel, channel.Keys[0].ChannelKey)))
 }
 
 func TestHandlerRetryEnabledDoesNotTurnRecent429IntoNoAvailableKey(t *testing.T) {

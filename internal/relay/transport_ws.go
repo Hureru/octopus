@@ -87,6 +87,7 @@ func (r *wsUpstreamReader) ReadEvent(ctx context.Context) ([]byte, error) {
 			r.done = true
 		}
 		if isWSStreamErrorEvent(event.Type) || event.Error != nil || (event.Response != nil && event.Response.Error != nil) {
+			r.done = true
 			if event.Status > 0 {
 				r.statusCode = event.Status
 			} else if r.statusCode < 400 {

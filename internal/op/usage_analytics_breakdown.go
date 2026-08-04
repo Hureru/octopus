@@ -364,11 +364,11 @@ func UsageAnalyticsBreakdownExportGet(
 		dimension,
 		search,
 		1,
-		0,
+		usageBreakdownExportPageSize,
 		sortBy,
 		descending,
-		true,
-		usageBreakdownMaxPageSize,
+		false,
+		usageBreakdownExportPageSize,
 	)
 }
 

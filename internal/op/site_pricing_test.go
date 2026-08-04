@@ -142,6 +142,38 @@ func TestEffectivePricePrecedenceAndFallback(t *testing.T) {
 	}
 }
 
+func TestEffectivePriceIgnoresSameSiteQuoteForDifferentModel(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+	fixture := createPricingFixture(t, ctx, "model-scope")
+	now := time.Now()
+	target := model.SiteModelPriceQuote{
+		SiteID: fixture.site.ID, GroupKey: model.SiteDefaultGroupKey,
+		ModelName: fixture.candidate.UpstreamModelName,
+		Source:    model.PriceQuoteSourceSiteWide, Unit: model.PriceUnitPerMillionTokens,
+		Currency: "USD", Input: 1, Output: 2, GroupMultiplier: 1,
+		ExchangeRateToUSD: 1, ObservedAt: now.Add(-time.Minute),
+	}
+	unrelated := model.SiteModelPriceQuote{
+		SiteID: fixture.site.ID, GroupKey: model.SiteDefaultGroupKey,
+		ModelName: "provider/unrelated-model",
+		Source:    model.PriceQuoteSourceSiteWide, Unit: model.PriceUnitPerMillionTokens,
+		Currency: "USD", Input: 99, Output: 199, GroupMultiplier: 1,
+		ExchangeRateToUSD: 1, ObservedAt: now,
+	}
+	quotes := []model.SiteModelPriceQuote{target, unrelated}
+	if err := SiteModelPriceQuotesUpsert(ctx, quotes); err != nil {
+		t.Fatalf("upsert scoped price quotes: %v", err)
+	}
+
+	price, err := EffectivePriceForCandidate(ctx, fixture.candidate.ID, "")
+	if err != nil {
+		t.Fatalf("resolve scoped price: %v", err)
+	}
+	if price.QuoteID != quotes[0].ID || price.Input != target.Input || price.Output != target.Output {
+		t.Fatalf("different-model quote polluted effective price: %+v", price)
+	}
+}
+
 func TestEffectivePricePreservesUnknownSiteCreditUntilRateConfigured(t *testing.T) {
 	ctx := setupBackupTestDB(t)
 	fixture := createPricingFixture(t, ctx, "credit")

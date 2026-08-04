@@ -93,7 +93,7 @@ func TestBestEffortWarmupUpstreamWSPrimesPoolAndSticky(t *testing.T) {
 		t.Fatalf("expected sticky to target warmed channel/key, got %#v", sticky)
 	}
 
-	pc := wsUpstreamPool.Get(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(nil, channel, channel.Keys[0].ChannelKey)))
+	pc := wsUpstreamPool.Get(newWSPoolKey(channel.ID, channel.Keys[0].ID, buildUpstreamWSHeaders(context.Background(), nil, channel, channel.Keys[0].ChannelKey)))
 	if pc == nil {
 		t.Fatalf("expected warmed upstream ws connection to be stored in pool")
 	}

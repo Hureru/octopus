@@ -253,7 +253,6 @@ func (ra *relayAttempt) handleWSPassthroughStream(ctx context.Context, pc *poole
 					log.Debugf("ws passthrough downstream write failed; draining upstream (channel=%d, key=%d): %v", ra.channel.ID, ra.usedKey.ID, writeErr)
 					dropDownstream = true
 					stats.DownstreamDropped = true
-					ra.streamPayloadWritten.Store(true)
 					if stats.TerminalEvent != "" {
 						return stats, nil
 					}
@@ -514,11 +513,10 @@ func (ra *relayAttempt) setWSPassthroughStreamResult(stats *wsPassthroughStats, 
 	if result.TerminalEvent != "" {
 		result.Termination = stream.TerminationProtocolTerminal
 	}
-	if err != nil {
+	if stats != nil && stats.DownstreamDropped {
+		result.Termination = stream.TerminationWriteError
+	} else if err != nil {
 		result.Termination = stream.TerminationReadError
-		if result.TerminalEvent != "" && stats != nil && stats.DownstreamDropped {
-			result.Termination = stream.TerminationWriteError
-		}
 	}
 	if ra.requestContext().Err() != nil && result.TerminalEvent == "" {
 		result.Termination = stream.TerminationClientCanceled

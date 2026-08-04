@@ -225,13 +225,8 @@ func processWSResponseCreate(
 	requestModel = executionRequest.Model
 	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky, bodyBytes)
 	if err != nil {
-		status := 404
-		code := "model_not_found"
-		if err.Error() == "no available channel" {
-			status = 503
-			code = "no_available_channel"
-		}
-		writeWSError(ctx, conn, status, code, err.Error())
+		publicErr := wsRelaySetupPublicError(err)
+		writeWSError(ctx, conn, publicErr.Status, publicErr.Code, publicErr.Message)
 		return conversationState
 	}
 
@@ -421,25 +416,25 @@ func newWSRelayRequest(
 	routingModel := requestModel
 	if canonical, ok := op.CatalogResolveIdentity(requestModel); ok {
 		if !canonical.Enabled {
-			return nil, nil, fmt.Errorf("model disabled")
+			return nil, nil, errWSModelDisabled
 		}
 		routingModel = canonical.Name
 	}
 	group, err := op.GroupGetEnabledMap(routingModel, ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("model not found")
+		return nil, nil, errWSModelNotFound
 	}
 	requirements := op.ProtocolRequirementsFromRequest(executionRequest)
 	requirements.InboundProtocol = dbmodel.ProtocolOpenAIResponses
 	requirements.Features = append(requirements.Features, dbmodel.ProtocolFeatureWebSocket)
 	group, preview, canonical, err := op.CatalogPlanGroup(ctx, requestModel, requirements, group)
 	if err != nil {
-		return nil, nil, fmt.Errorf("route planning failed: %w", err)
+		return nil, nil, fmt.Errorf("%w: %v", errWSRoutePlanning, err)
 	}
 
 	iter := balancer.NewIteratorWithPreference(group, apiKeyID, requestModel, preferredSticky)
 	if iter.Len() == 0 {
-		return nil, nil, fmt.Errorf("no available channel")
+		return nil, nil, errWSNoAvailableChannel
 	}
 
 	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest)
@@ -693,6 +688,7 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 			outcome = dbmodel.RequestOutcomeFailed
 		}
 	}
+	result.Outcome = outcome
 	if result.Success || outcome == dbmodel.RequestOutcomeIndeterminate {
 		req.metrics.SaveOutcomeWithChannelStats(ctx, outcome, nil, req.iter.Attempts(), false)
 		return result

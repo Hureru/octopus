@@ -142,6 +142,36 @@ func TestRequestJSONDetectsCloudflareAcrossChallengeStatuses(t *testing.T) {
 	}
 }
 
+func TestCloudflareDetectionIgnoresValidJSONMentions(t *testing.T) {
+	header := http.Header{
+		"Content-Type": []string{"application/json"},
+		"Server":       []string{"cloudflare"},
+		"CF-Ray":       []string{"test-ray"},
+	}
+	body := []byte(`{"provider":"cloudflare","error":"temporary upstream failure"}`)
+	if IsCloudflareProtectionResponse(http.StatusServiceUnavailable, header, body) {
+		t.Fatal("valid JSON mentioning Cloudflare was classified as a challenge")
+	}
+}
+
+func TestSiteRecoveryStatusMatchingDoesNotUseNumericSubstrings(t *testing.T) {
+	if siteRecoveryErrorRetryable(errors.New("quota 500000 exceeded")) {
+		t.Fatal("unrelated numeric text was treated as an HTTP 500")
+	}
+	if !siteRecoveryErrorRetryable(newSiteHTTPError(http.StatusInternalServerError, "quota exceeded")) {
+		t.Fatal("typed HTTP 500 should be retryable")
+	}
+	if got := classifySiteRecoveryError(errors.New("account 429000 disabled")); got == "rate_limit" {
+		t.Fatalf("unrelated numeric text was classified as a rate limit: %s", got)
+	}
+	if got := classifySiteRecoveryError(newSiteHTTPError(http.StatusTooManyRequests, "slow down")); got != "rate_limit" {
+		t.Fatalf("typed HTTP 429 classification = %s, want rate_limit", got)
+	}
+	if siteRecoveryErrorRetryable(errors.New("cloudflare tunnel is unavailable")) {
+		t.Fatal("plain Cloudflare text must not trigger automatic recovery retries")
+	}
+}
+
 func TestRequestJSONKeepsJSONForbiddenMessage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

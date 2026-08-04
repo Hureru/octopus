@@ -377,6 +377,9 @@ func buildSiteRecoveryPaths(
 	// configured current path on the first attempt, while direct remains an explicit
 	// last-resort candidate.
 	appendPath(siteRecoveryPath{proxyMode: model.ProxyUsageModeDirect, label: "direct"})
+	if len(paths) >= siteRecoveryMaxPaths {
+		return paths, nil
+	}
 	otherPaths := make([]siteRecoveryPath, 0, len(proxies)*2+1)
 	for _, proxy := range proxies {
 		if !proxy.Enabled {
@@ -741,7 +744,6 @@ func siteRecoveryErrorRetryable(err error) bool {
 		"no such host",
 		"network is unreachable",
 		"unexpected eof",
-		"cloudflare",
 	} {
 		if strings.Contains(lowered, marker) {
 			return true

@@ -253,8 +253,7 @@ func CatalogSync(ctx context.Context) (model.CatalogSyncResult, error) {
 				if err := tx.Create(&created).Error; err != nil {
 					return err
 				}
-				canonicals = append(canonicals, created)
-				canonical = &canonicals[len(canonicals)-1]
+				canonical = &created
 				canonicalByName[normalized] = canonical
 				result.CanonicalCreated++
 			}
@@ -271,8 +270,7 @@ func CatalogSync(ctx context.Context) (model.CatalogSyncResult, error) {
 				if err := tx.Create(&created).Error; err != nil {
 					return err
 				}
-				groups = append(groups, created)
-				group = &groups[len(groups)-1]
+				group = &created
 				groupByNormalized[NormalizeModelIdentity(created.Name)] = group
 				result.GroupsCreated++
 			}

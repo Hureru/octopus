@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -118,6 +119,10 @@ func exportDB(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "invalid format")
 		return
 	}
+	if err := validateDBExportOptions(format, includeLogs, includeStats); err != nil {
+		resp.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if format == "zip" {
 		filename := "octopus-export-" + time.Now().Format("20060102150405") + ".zip"
@@ -147,6 +152,16 @@ func exportDB(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", "attachment; filename=\"octopus-export-"+time.Now().Format("20060102150405")+".json\"")
 	c.JSON(http.StatusOK, dump)
+}
+
+func validateDBExportOptions(format string, includeLogs, includeStats bool) error {
+	if format == "json" && includeLogs {
+		return fmt.Errorf("JSON exports cannot include logs; use ZIP format")
+	}
+	if format == "json" && includeStats {
+		return fmt.Errorf("JSON exports cannot include stats; use ZIP format")
+	}
+	return nil
 }
 
 func importDB(c *gin.Context) {

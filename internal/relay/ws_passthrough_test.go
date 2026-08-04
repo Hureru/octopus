@@ -11,6 +11,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/relay/stream"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
@@ -67,7 +68,7 @@ func TestForwardViaWSPassthroughNormalizesPayloadAndRecordsMetrics(t *testing.T)
 	poolKey := newWSPoolKey(
 		channel.ID,
 		channel.Keys[0].ID,
-		buildUpstreamWSHeaders(nil, channel, channel.Keys[0].ChannelKey),
+		buildUpstreamWSHeaders(context.Background(), nil, channel, channel.Keys[0].ChannelKey),
 	)
 	defer wsUpstreamPool.Remove(poolKey)
 
@@ -141,6 +142,20 @@ func TestForwardViaWSPassthroughNormalizesPayloadAndRecordsMetrics(t *testing.T)
 	}
 	if _, ok := getWSAffinityStore().Get(context.Background(), wsAffinityScope{APIKeyID: 1, GroupID: 1, RequestModel: "client-model", ResponseID: "resp_passthrough"}); !ok {
 		t.Fatalf("expected db response affinity")
+	}
+}
+
+func TestWSPassthroughResultPrioritizesDownstreamWriteFailure(t *testing.T) {
+	ra := &relayAttempt{relayRequest: &relayRequest{ctx: context.Background()}}
+	ra.setWSPassthroughStreamResult(&wsPassthroughStats{
+		TerminalEvent:     "response.completed",
+		DownstreamDropped: true,
+	}, nil)
+	if ra.streamResult.Termination != stream.TerminationWriteError {
+		t.Fatalf("termination = %q, want write_error", ra.streamResult.Termination)
+	}
+	if ra.streamResult.PayloadWritten {
+		t.Fatal("failed first downstream write was reported as delivered")
 	}
 }
 

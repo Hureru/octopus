@@ -14,9 +14,14 @@ func Get(modelName string) (model.LLMPrice, bool) {
 }
 
 func Replace(updated map[string]model.LLMPrice) {
+	replacement := make(map[string]model.LLMPrice, len(updated))
+	for name, price := range updated {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			replacement[name] = price
+		}
+	}
 	priceLock.Lock()
 	defer priceLock.Unlock()
-	for name, price := range updated {
-		prices[strings.ToLower(strings.TrimSpace(name))] = price
-	}
+	prices = replacement
 }

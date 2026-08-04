@@ -1,11 +1,14 @@
 package relay
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/relay/balancer"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
@@ -94,6 +97,43 @@ func TestClassifyWSPublicErrorRecognizesNoAvailableAccount(t *testing.T) {
 	}
 	if publicErr.ResetConversation {
 		t.Fatalf("expected no available account error to keep cached conversation")
+	}
+}
+
+func TestWSRelaySetupPublicErrorUsesTypedCauses(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "model not found", err: errWSModelNotFound, wantStatus: http.StatusNotFound, wantCode: "model_not_found"},
+		{name: "model disabled", err: errWSModelDisabled, wantStatus: http.StatusServiceUnavailable, wantCode: "no_available_channel"},
+		{name: "no channel", err: errWSNoAvailableChannel, wantStatus: http.StatusServiceUnavailable, wantCode: "no_available_channel"},
+		{name: "route planning", err: fmt.Errorf("detail: %w", errWSRoutePlanning), wantStatus: http.StatusInternalServerError, wantCode: "route_planning_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wsRelaySetupPublicError(tt.err)
+			if got.Status != tt.wantStatus || got.Code != tt.wantCode {
+				t.Fatalf("public error = %+v, want status=%d code=%q", got, tt.wantStatus, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestFinalizeWSRelayWritesDerivedOutcomeBackToResult(t *testing.T) {
+	ctx := setupRelayTestDB(t)
+	req := &relayRequest{
+		metrics: NewRelayMetrics(0, "test-model", nil, nil),
+		iter:    balancer.NewIterator(model.Group{}, 0, "test-model"),
+	}
+	result := finalizeWSRelay(ctx, nil, req, wsRelayResult{
+		Canceled: true,
+		Err:      context.Canceled,
+	})
+	if result.Outcome != model.RequestOutcomeClientCanceled {
+		t.Fatalf("derived outcome was not returned: %q", result.Outcome)
 	}
 }
 

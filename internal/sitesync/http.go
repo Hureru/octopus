@@ -228,13 +228,13 @@ func applyDefaultSiteRequestHeaders(req *http.Request, hasJSONBody bool) {
 }
 
 func formatSiteHTTPError(statusCode int, header http.Header, bodyBytes []byte) error {
+	if IsCloudflareProtectionResponse(statusCode, header, bodyBytes) {
+		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
+	}
 	if payload, ok := parseSiteJSONMap(bodyBytes); ok {
 		if message := extractSiteResponseMessage(payload); message != "" {
 			return newSiteHTTPError(statusCode, message)
 		}
-	}
-	if IsCloudflareProtectionResponse(statusCode, header, bodyBytes) {
-		return wrapCloudflareProtectionError(newCloudflareProtectionError(statusCode, header))
 	}
 	if summary := extractSiteHTMLResponseSummary(header.Get("Content-Type"), bodyBytes); summary != "" {
 		return newSiteHTTPError(statusCode, summary)
@@ -250,16 +250,16 @@ func IsCloudflareProtectionResponse(statusCode int, header http.Header, bodyByte
 	default:
 		return false
 	}
-	body := strings.ToLower(string(bodyBytes))
-	if strings.Contains(body, "attention required") ||
-		strings.Contains(body, "just a moment") ||
-		strings.Contains(body, "cf-error-code") ||
-		strings.Contains(body, "cloudflare ray id") ||
-		strings.Contains(body, "cloudflare") {
-		return true
-	}
 	if json.Valid(bodyBytes) {
-		return false
+		payload, ok := parseSiteJSONMap(bodyBytes)
+		if !ok {
+			return false
+		}
+		return isCloudflareChallengeText(extractSiteResponseMessage(payload))
+	}
+	body := strings.ToLower(string(bodyBytes))
+	if isCloudflareChallengeText(body) {
+		return true
 	}
 	server := strings.ToLower(header.Get("Server"))
 	hasCloudflareHeader := header.Get("CF-Ray") != "" || strings.Contains(server, "cloudflare")
@@ -271,6 +271,14 @@ func IsCloudflareProtectionResponse(statusCode int, header http.Header, bodyByte
 		strings.HasPrefix(strings.TrimSpace(body), "<!doctype html") ||
 		strings.HasPrefix(strings.TrimSpace(body), "<html")
 	return statusCode != http.StatusOK || htmlLike
+}
+
+func isCloudflareChallengeText(value string) bool {
+	value = strings.ToLower(value)
+	return strings.Contains(value, "attention required") ||
+		strings.Contains(value, "just a moment") ||
+		strings.Contains(value, "cf-error-code") ||
+		strings.Contains(value, "cloudflare ray id")
 }
 
 func formatSiteDecodeError(contentType string, bodyBytes []byte, err error) error {

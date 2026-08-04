@@ -57,7 +57,9 @@ func HandleResponsesCompact(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, "model is required")
 		return
 	}
-	if len(compactReq.Input) == 0 && compactReq.PreviousResponseID == nil {
+	hasPreviousResponse := compactReq.PreviousResponseID != nil &&
+		strings.TrimSpace(*compactReq.PreviousResponseID) != ""
+	if len(compactReq.Input) == 0 && !hasPreviousResponse {
 		resp.Error(c, http.StatusBadRequest, "either input or previous_response_id is required")
 		return
 	}
@@ -90,7 +92,7 @@ func HandleResponsesCompact(c *gin.Context) {
 		return
 	}
 	features := []dbmodel.ProtocolFeature{dbmodel.ProtocolFeatureResponsesState}
-	if compactReq.PreviousResponseID != nil {
+	if hasPreviousResponse {
 		features = append(features, dbmodel.ProtocolFeatureContinuation)
 	}
 	group, preview, plannedCanonical, err := op.CatalogPlanGroup(

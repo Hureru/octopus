@@ -453,9 +453,9 @@ func (p *wsPool) Dial(ctx context.Context, key wsPoolKey, channel *dbmodel.Chann
 	return pc, false, nil
 }
 
-func buildUpstreamWSHeaders(clientHeaders http.Header, channel *dbmodel.Channel, key string) http.Header {
+func buildUpstreamWSHeaders(ctx context.Context, clientHeaders http.Header, channel *dbmodel.Channel, key string) http.Header {
 	headers, _ := buildUpstreamWSHeadersForRoute(
-		context.Background(),
+		ctx,
 		clientHeaders,
 		channel,
 		key,
@@ -763,7 +763,7 @@ func TryUpstreamWS(ctx context.Context, channel *dbmodel.Channel, baseUrl, key s
 }
 
 func TryUpstreamWSWithPreference(ctx context.Context, channel *dbmodel.Channel, baseUrl, key string, keyID int, clientHeaders http.Header, preferredConnID string, forceRedial ...bool) *pooledConn {
-	headers := buildUpstreamWSHeaders(clientHeaders, channel, key)
+	headers := buildUpstreamWSHeaders(ctx, clientHeaders, channel, key)
 	return tryUpstreamWSWithPreference(
 		ctx,
 		channel,

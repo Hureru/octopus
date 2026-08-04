@@ -408,7 +408,7 @@ func priceQuotesForCandidate(
 		query = query.Where("status = ?", model.PriceQuoteStatusValid)
 	}
 	if candidate.SiteID != nil {
-		query = query.Where("route_candidate_id = ? OR site_id = ?", candidate.ID, *candidate.SiteID)
+		query = query.Where("(route_candidate_id = ? OR site_id = ?)", candidate.ID, *candidate.SiteID)
 	} else {
 		query = query.Where("route_candidate_id = ?", candidate.ID)
 	}

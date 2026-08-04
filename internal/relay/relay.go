@@ -641,7 +641,6 @@ func (ra *relayAttempt) attempt() attemptResult {
 		}
 	}
 
-	op.ChannelKeyUpdate(ra.usedKey)
 	attribution := dbmodel.AttemptAttributionUpstream
 	if ra.protocolFailureStage != "" {
 		attribution = dbmodel.AttemptAttributionRelay
@@ -652,7 +651,7 @@ func (ra *relayAttempt) attempt() attemptResult {
 		ra.collectResponse()
 	}
 	span.SetUsage(ra.metrics.AttemptUsageSnapshot())
-	ra.addObservedAttemptCost()
+	ra.updateChannelKeyWithObservedCost()
 	span.EndDetailed(
 		dbmodel.AttemptFailed,
 		statusCode,
@@ -696,6 +695,11 @@ func (ra *relayAttempt) addObservedAttemptCost() {
 		return
 	}
 	ra.usedKey.TotalCost += ra.metrics.Stats.InputCost + ra.metrics.Stats.OutputCost
+}
+
+func (ra *relayAttempt) updateChannelKeyWithObservedCost() {
+	ra.addObservedAttemptCost()
+	_ = op.ChannelKeyUpdate(ra.usedKey)
 }
 
 func (ra *relayAttempt) captureCompletion(statusCode int, err error) (

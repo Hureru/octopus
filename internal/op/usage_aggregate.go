@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -26,6 +27,8 @@ var usageLatencyBucketUpperBounds = []int64{
 }
 
 var usageAggregateLock sync.Mutex
+
+var errUsageAggregateClaimConflict = errors.New("usage aggregate facts already claimed")
 
 type usageAggregateFact struct {
 	time             int64
@@ -84,25 +87,23 @@ func aggregateUsageRequestFacts(ctx context.Context, limit int) (int, error) {
 		if len(facts) == 0 {
 			return nil
 		}
+		if err := claimUsageRequestFacts(tx, facts, time.Now()); err != nil {
+			return err
+		}
 		deltas := make(map[string]*model.UsageAggregate)
-		ids := make([]int64, 0, len(facts))
 		for i := range facts {
 			fact := usageAggregateFactFromRequest(facts[i])
 			addUsageAggregateDeltas(deltas, fact)
-			ids = append(ids, facts[i].RelayLogID)
 		}
 		if err := persistUsageAggregateDeltas(tx, deltas); err != nil {
-			return err
-		}
-		now := time.Now()
-		if err := tx.Model(&model.UsageRequestFact{}).
-			Where("relay_log_id IN ? AND aggregated_at IS NULL", ids).
-			Update("aggregated_at", now).Error; err != nil {
 			return err
 		}
 		processed = len(facts)
 		return nil
 	})
+	if errors.Is(err, errUsageAggregateClaimConflict) {
+		return 0, nil
+	}
 	return processed, err
 }
 
@@ -120,6 +121,9 @@ func aggregateUsageAttemptFacts(ctx context.Context, limit int) (int, error) {
 		if len(facts) == 0 {
 			return nil
 		}
+		if err := claimUsageAttemptFacts(tx, facts, time.Now()); err != nil {
+			return err
+		}
 		deltas := make(map[string]*model.UsageAggregate)
 		for i := range facts {
 			addUsageAggregateDeltas(deltas, usageAggregateFactFromAttempt(facts[i]))
@@ -127,21 +131,48 @@ func aggregateUsageAttemptFacts(ctx context.Context, limit int) (int, error) {
 		if err := persistUsageAggregateDeltas(tx, deltas); err != nil {
 			return err
 		}
-		now := time.Now()
-		for i := range facts {
-			if err := tx.Model(&model.UsageAttemptFact{}).
-				Where("relay_log_id = ? AND attempt_number = ? AND aggregated_at IS NULL",
-					facts[i].RelayLogID,
-					facts[i].AttemptNumber,
-				).
-				Update("aggregated_at", now).Error; err != nil {
-				return err
-			}
-		}
 		processed = len(facts)
 		return nil
 	})
+	if errors.Is(err, errUsageAggregateClaimConflict) {
+		return 0, nil
+	}
 	return processed, err
+}
+
+func claimUsageRequestFacts(tx *gorm.DB, facts []model.UsageRequestFact, claimedAt time.Time) error {
+	ids := make([]int64, 0, len(facts))
+	for i := range facts {
+		ids = append(ids, facts[i].RelayLogID)
+	}
+	result := tx.Model(&model.UsageRequestFact{}).
+		Where("relay_log_id IN ? AND aggregated_at IS NULL", ids).
+		Update("aggregated_at", claimedAt)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != int64(len(facts)) {
+		return errUsageAggregateClaimConflict
+	}
+	return nil
+}
+
+func claimUsageAttemptFacts(tx *gorm.DB, facts []model.UsageAttemptFact, claimedAt time.Time) error {
+	for i := range facts {
+		result := tx.Model(&model.UsageAttemptFact{}).
+			Where("relay_log_id = ? AND attempt_number = ? AND aggregated_at IS NULL",
+				facts[i].RelayLogID,
+				facts[i].AttemptNumber,
+			).
+			Update("aggregated_at", claimedAt)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errUsageAggregateClaimConflict
+		}
+	}
+	return nil
 }
 
 func addUsageAggregateDeltas(deltas map[string]*model.UsageAggregate, fact usageAggregateFact) {

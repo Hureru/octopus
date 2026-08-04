@@ -124,12 +124,15 @@ func updateSiteProxyPreference(
 		}
 
 		now := time.Now()
+		disabled := item.Status == model.SiteProxyPreferenceDisabled
 		expiresAt := now.Add(siteProxyPreferenceTTL)
 		item.ExpiresAt = &expiresAt
 		if success {
 			item.SuccessCount++
 			item.ConsecutiveFailures = 0
-			item.Status = model.SiteProxyPreferenceHealthy
+			if !disabled {
+				item.Status = model.SiteProxyPreferenceHealthy
+			}
 			item.CooldownUntil = nil
 			item.LastSuccessAt = &now
 			if latency > 0 {
@@ -143,7 +146,9 @@ func updateSiteProxyPreference(
 		} else {
 			item.FailureCount++
 			item.ConsecutiveFailures++
-			item.Status = model.SiteProxyPreferenceCooling
+			if !disabled {
+				item.Status = model.SiteProxyPreferenceCooling
+			}
 			item.LastFailureAt = &now
 			cooldown := siteProxyFailureCooldown(item.ConsecutiveFailures, failureClass)
 			cooldownUntil := now.Add(cooldown)

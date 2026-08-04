@@ -1383,6 +1383,35 @@ func TestSiteProxyPreferenceCooldownExpiryAndSuccessRecovery(t *testing.T) {
 	}
 }
 
+func TestSiteProxyPreferenceOutcomePreservesDisabledStatus(t *testing.T) {
+	ctx := setupBackupTestDB(t)
+	path := SiteProxyPathDescriptor{
+		SiteID: 71, SiteAccountID: 72, ProxyMode: model.ProxyUsageModePool, ProxyConfigID: 73,
+	}
+	if err := SiteProxyPreferenceRecordSuccess(ctx, path, time.Millisecond); err != nil {
+		t.Fatalf("seed preference: %v", err)
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Model(&model.SiteProxyPreference{}).
+		Where("identity_key = ?", path.IdentityKey()).
+		Update("status", model.SiteProxyPreferenceDisabled).Error; err != nil {
+		t.Fatalf("disable preference: %v", err)
+	}
+	if err := SiteProxyPreferenceRecordFailure(ctx, path, "network", time.Millisecond); err != nil {
+		t.Fatalf("record disabled failure: %v", err)
+	}
+	if err := SiteProxyPreferenceRecordSuccess(ctx, path, time.Millisecond); err != nil {
+		t.Fatalf("record disabled success: %v", err)
+	}
+	var reloaded model.SiteProxyPreference
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("identity_key = ?", path.IdentityKey()).First(&reloaded).Error; err != nil {
+		t.Fatalf("reload disabled preference: %v", err)
+	}
+	if reloaded.Status != model.SiteProxyPreferenceDisabled {
+		t.Fatalf("outcome recording changed disabled status to %q", reloaded.Status)
+	}
+}
+
 func TestSiteProxyPreferenceClearSiteKeepsAccountPreferences(t *testing.T) {
 	ctx := setupBackupTestDB(t)
 	site, account := createVerificationFixture(t, ctx)
