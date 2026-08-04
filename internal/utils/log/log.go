@@ -2,6 +2,7 @@ package log
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ type Config struct {
 	Format          string
 	Caller          bool
 	StacktraceLevel string
+	// FilePath 非空时，日志同时输出到该文件（用于无控制台的桌面模式）。
+	FilePath string
 }
 
 var Logger *zap.SugaredLogger
@@ -57,7 +60,16 @@ func Configure(cfg Config) {
 		encoder = zapcore.NewConsoleEncoder(encoderConfig)
 	}
 
-	core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), atomicLevel)
+	var sink zapcore.WriteSyncer = zapcore.AddSync(os.Stdout)
+	if filePath := strings.TrimSpace(cfg.FilePath); filePath != "" {
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err == nil {
+			if file, openErr := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); openErr == nil {
+				sink = zapcore.NewMultiWriteSyncer(sink, file)
+			}
+		}
+	}
+
+	core := zapcore.NewCore(encoder, sink, atomicLevel)
 	opts := []zap.Option{zap.AddCallerSkip(1)}
 	if cfg.Caller {
 		opts = append(opts, zap.AddCaller())

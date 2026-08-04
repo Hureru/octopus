@@ -13,6 +13,7 @@ trap 'handle_error $? $LINENO' ERR
 # Project configuration
 readonly APP_NAME="octopus"
 readonly MAIN_DIR="./"
+readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly OUTPUT_DIR="build"
 
 # Build metadata
@@ -306,6 +307,92 @@ build_standard() {
     log_success "Built ${os}/${arch} → bin/$(basename "${output_file}")"
 }
 
+# build_desktop 构建 Windows 桌面版：GUI 子系统（无终端窗口），
+# 内置 desktop 子命令（用户数据目录、文件日志、托盘、自动打开浏览器）。
+build_desktop() {
+    local arch="${1:-x86_64}"
+    local go_arch
+
+    if ! go_arch="$(get_go_arch "${arch}")"; then
+        return 1
+    fi
+
+    local output_file="${OUTPUT_DIR}/bin/${APP_NAME}-desktop-${arch}.exe"
+    local desktop_ldflags="${LDFLAGS} -H windowsgui"
+
+    log_info "Building desktop ${arch} (GUI, no console)..."
+
+    if ! GOOS="windows" GOARCH="${go_arch}" CGO_ENABLED=0 \
+        go build -o "${output_file}" -ldflags="${desktop_ldflags}" -tags=jsoniter "${MAIN_DIR}" 2>&1; then
+        log_error "Failed to build desktop ${arch}"
+        log_error "Build command: GOOS=windows GOARCH=${go_arch} CGO_ENABLED=0 go build -o ${output_file} -ldflags=\"${desktop_ldflags}\" -tags=jsoniter ${MAIN_DIR}"
+        return 1
+    fi
+
+    if [ ! -f "${output_file}" ]; then
+        log_error "Build completed but output file not found: ${output_file}"
+        return 1
+    fi
+
+    log_success "Built desktop ${arch} → bin/$(basename "${output_file}")"
+}
+
+# package_installer 用 NSIS 生成 Windows 安装包（需要 makensis）。
+# 用法: package_installer <desktop-exe> [arch]
+package_installer() {
+    local desktop_bin="${1:-${OUTPUT_DIR}/bin/${APP_NAME}-desktop-x86_64.exe}"
+    local arch="${2:-x86_64}"
+
+    if ! command_exists makensis; then
+        log_error "makensis not found. Install NSIS first: brew install nsis (macOS) or https://nsis.sourceforge.io/"
+        return 1
+    fi
+
+    if [ ! -f "${desktop_bin}" ]; then
+        log_error "Desktop binary not found: ${desktop_bin}"
+        return 1
+    fi
+
+    local installer_dir="${OUTPUT_DIR}/installer"
+    local version="${GIT_VERSION}"
+
+    log_step "Packaging Windows installer (NSIS)"
+
+    # NSIS 3.12 在含空格的当前工作目录下 File 指令解析异常（已知 bug），
+    # 因此用无空格的临时目录作为构建工作目录。
+    local work_dir
+    if ! work_dir="$(mktemp -d "${TMPDIR:-/tmp}/octopus-nsis-XXXXXX")"; then
+        log_error "Failed to create temp work dir"
+        return 1
+    fi
+
+    mkdir -p "${installer_dir}"
+    cp "${desktop_bin}" "${work_dir}/octopus-desktop.exe"
+    cp LICENSE "${work_dir}/LICENSE" 2>/dev/null || true
+
+    if ! (cd "${work_dir}" && makensis \
+        -DVERSION="${version}" \
+        "-DBIN_PATH=${work_dir}/octopus-desktop.exe" \
+        "-DLICENSE_PATH=${work_dir}/LICENSE" \
+        "-DOUT_PATH=${work_dir}/octopus-setup-${version}.exe" \
+        "${ROOT_DIR}/scripts/installer/windows/octopus.nsi"); then
+        log_error "Failed to run makensis"
+        rm -rf "${work_dir}"
+        return 1
+    fi
+
+    local installer_file="${installer_dir}/octopus-setup-${version}-${arch}.exe"
+    if [ -f "${work_dir}/octopus-setup-${version}.exe" ]; then
+        mv "${work_dir}/octopus-setup-${version}.exe" "${installer_file}"
+        rm -rf "${work_dir}"
+        log_success "Installer ready: ${installer_file}"
+    else
+        log_error "makensis finished but installer not found"
+        rm -rf "${work_dir}"
+        return 1
+    fi
+}
+
 # =============================================================================
 # Post-build Functions
 # =============================================================================
@@ -553,6 +640,50 @@ main() {
         log_step "Build completed"
         log_success "Binary ready: ${OUTPUT_DIR}/bin/${APP_NAME}-${os}-${arch}"
         ;;
+    "desktop")
+        if [ $# -lt 2 ]; then
+            log_error "Desktop build requires architecture"
+            log_error "Usage: $0 desktop [x86_64|arm64]"
+            show_usage
+            exit 1
+        fi
+
+        local arch="${2:-x86_64}"
+
+        log_step "Starting desktop build"
+        echo "📦 Building ${APP_NAME} desktop ${GIT_VERSION} (${COMMIT_ID}) for windows/${arch}"
+        echo ""
+
+        if ! prepare_environment; then
+            log_error "Failed to prepare build environment"
+            exit 1
+        fi
+
+        if ! build_frontend; then
+            log_error "Failed to build frontend"
+            exit 1
+        fi
+
+        if ! update_price; then
+            log_error "Failed to update price"
+            exit 1
+        fi
+
+        log_step "Building desktop binary"
+        if ! build_desktop "${arch}"; then
+            log_error "Failed to build desktop ${arch}"
+            exit 1
+        fi
+
+        log_step "Packaging installer"
+        if ! package_installer "${OUTPUT_DIR}/bin/${APP_NAME}-desktop-${arch}.exe" "${arch}"; then
+            log_warning "Installer packaging failed (NSIS), binary is still available"
+        fi
+
+        log_step "Build completed"
+        log_success "Desktop binary: ${OUTPUT_DIR}/bin/${APP_NAME}-desktop-${arch}.exe"
+        log_success "Installer: ${OUTPUT_DIR}/installer/octopus-setup-*.exe"
+        ;;
     "release")
         log_step "Starting release build"
         echo "📦 Building ${APP_NAME} ${GIT_VERSION} (${COMMIT_ID})"
@@ -610,6 +741,14 @@ main() {
             log_warning "Failed to prepare Docker binaries, but continuing..."
         fi
 
+        # Desktop build + installer (Windows GUI, no console)
+        if ! build_desktop x86_64; then
+            log_warning "Failed to build desktop x86_64, but continuing..."
+        fi
+        if ! package_installer "${OUTPUT_DIR}/bin/${APP_NAME}-desktop-x86_64.exe" "x86_64"; then
+            log_warning "Failed to package installer, but continuing..."
+        fi
+
         if ! generate_checksums; then
             log_warning "Failed to generate checksums, but continuing..."
         fi
@@ -623,6 +762,7 @@ main() {
         log_info "  • Binaries: ${OUTPUT_DIR}/bin/"
         log_info "  • Docker binaries: ${OUTPUT_DIR}/docker/"
         log_info "  • Archives: ${OUTPUT_DIR}/archives/"
+        log_info "  • Desktop installer: ${OUTPUT_DIR}/installer/"
         ;;
     "help" | "-h" | "--help")
         show_usage
