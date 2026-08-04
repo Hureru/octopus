@@ -57,10 +57,7 @@ func parseSitePricingQuotes(siteID, accountID int, payload map[string]any) []mod
 	if siteID <= 0 || accountID <= 0 || payload == nil {
 		return nil
 	}
-	items := normalizeItemSlice(payload["data"])
-	if len(items) == 0 {
-		items = normalizeItemSlice(nestedValue(payload, "data", "items"))
-	}
+	items := sitePricingItems(payload)
 	groupRatios := parseSitePricingGroupMultipliers(payload)
 	defaultCurrency := firstNonEmptyString(
 		jsonString(payload["currency"]),
@@ -201,7 +198,27 @@ func parseSitePricingGroupMultipliers(payload map[string]any) map[string]float64
 	if len(result) == 0 {
 		result = parsePricingGroupRatios(nestedValue(payload, "data", "group_ratio"))
 	}
+	if len(result) == 0 {
+		return result
+	}
+	// New API omits default 1x groups from group_ratio but still lists them in enable_groups.
+	for _, item := range sitePricingItems(payload) {
+		for _, group := range normalizeStringList(item["enable_groups"]) {
+			groupKey := model.NormalizeSiteGroupKey(group)
+			if _, configured := result[groupKey]; !configured {
+				result[groupKey] = 1
+			}
+		}
+	}
 	return result
+}
+
+func sitePricingItems(payload map[string]any) []map[string]any {
+	items := normalizeItemSlice(payload["data"])
+	if len(items) == 0 {
+		items = normalizeItemSlice(nestedValue(payload, "data", "items"))
+	}
+	return items
 }
 
 func parsePricingGroupRatios(value any) map[string]float64 {

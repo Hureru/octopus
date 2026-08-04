@@ -82,6 +82,36 @@ func TestParseSitePricingGroupMultipliersDoesNotRequireModelQuotes(t *testing.T)
 	}
 }
 
+func TestParseSitePricingGroupMultipliersDefaultsExplicitUnconfiguredGroup(t *testing.T) {
+	payload := map[string]any{
+		"group_ratio": map[string]any{
+			"GPT-Pro-正价": 0.31,
+		},
+		"data": []any{
+			map[string]any{
+				"model_name":    "gpt-5.6-sol",
+				"enable_groups": []any{"GPT-Plus-正价", "GPT-Pro-正价"},
+				"model_ratio":   2.5,
+			},
+		},
+	}
+
+	multipliers := parseSitePricingGroupMultipliers(payload)
+	if len(multipliers) != 2 || multipliers["GPT-Plus-正价"] != 1 || multipliers["GPT-Pro-正价"] != 0.31 {
+		t.Fatalf("unexpected group multipliers: %+v", multipliers)
+	}
+
+	quotes := parseSitePricingQuotes(11, 22, payload)
+	if len(quotes) != 2 {
+		t.Fatalf("got %d quotes, want 2", len(quotes))
+	}
+	for _, quote := range quotes {
+		if !quote.GroupMultiplierKnown {
+			t.Fatalf("explicitly enabled group %q was left unknown: %+v", quote.GroupKey, quote)
+		}
+	}
+}
+
 func TestParseSitePricingQuotesPreservesPerRequestAndSiteCreditUnits(t *testing.T) {
 	payload := map[string]any{
 		"currency":    "credits",
