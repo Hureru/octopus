@@ -10,6 +10,7 @@ import (
 
 const (
 	CodeSiteSyncMissingGroupKey       = "site.sync.missing_group_key"
+	CodeSiteSyncNoAvailableKey        = "site.sync.no_available_key"
 	CodeSiteSyncGroupModelsUnresolved = "site.sync.group_models_unresolved"
 	CodeSiteSyncNoGroupResult         = "site.sync.no_group_result"
 	CodeSiteSyncAllGroupsUnresolved   = "site.sync.all_groups_unresolved"
@@ -26,13 +27,11 @@ const (
 	CodeSiteUpstreamCloudflareChallenge = "site.upstream.cloudflare_challenge"
 )
 
-func newMissingGroupKeyError(groupKey string) *apperror.Error {
-	groupKey = model.NormalizeSiteGroupKey(groupKey)
-	return apperror.Newf(
-		CodeSiteSyncMissingGroupKey,
-		"site sync requires a key for group %q; create a key for that group on the site and sync again",
-		groupKey,
-	).WithStatus(http.StatusBadRequest).WithParam("groupKey", groupKey)
+func newNoAvailableKeyError() *apperror.Error {
+	return apperror.New(
+		CodeSiteSyncNoAvailableKey,
+		"site sync requires at least one available key; create a key for an existing group on the site and sync again",
+	).WithStatus(http.StatusBadRequest)
 }
 
 func newUnsupportedSitePlatformError(platform model.SitePlatform) *apperror.Error {

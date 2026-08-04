@@ -623,7 +623,7 @@
       "confirmRemove": "Confirm removing {name}",
       "reserveBadge": "Relay",
       "balanceLabel": "Balance",
-      "multiplierLabel": "Multiplier"
+      "multiplierLabel": "Key multiplier"
     },
     "detail": {
       "actions": {
@@ -1409,7 +1409,8 @@
   },
   "siteSync": {
     "errors": {
-      "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again."
+      "missingGroupKey": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again.",
+      "noAvailableKey": "This account has no available key. Create a key for one of its actual groups on the site and sync again."
     }
   },
   "errors": {
@@ -1478,6 +1479,7 @@
     },
     "site": {
       "sync": {
+        "no_available_key": "This account has no available key. Create a key for one of its actual groups on the site and sync again.",
         "missing_group_key": "Group \"{groupKey}\" has no available key. Create a key for this group on the site and sync again.",
         "group_models_unresolved": "Could not resolve models for group \"{groupKey}\". Check the group model configuration or key permissions.",
         "no_group_result": "Site account sync failed: no group sync result is available.",
@@ -1725,6 +1727,12 @@
       "manualCheckinHint": "After configuration, this page can be opened from the site overview for manual check-in.",
       "tags": "Tags",
       "tagsHint": "Optional: tag sites to make list filtering and grouping easier.",
+      "relayPolicy": "Relay fallback",
+      "relayPolicyHint": "Use this site as a relay fallback only after public sites are unavailable during failover.",
+      "setRelay": "Use as relay fallback",
+      "setPublic": "Use as public site",
+      "relayEnabled": "Site set as relay fallback",
+      "relayDisabled": "Site set as public",
       "enabled": "Enable site",
       "disabledHint": "Managed channels are no longer projected while disabled",
       "advancedSettings": "Advanced settings",
@@ -1806,7 +1814,12 @@
         "failed": "Failed",
         "idle": "Not run",
         "disabled": "Disabled",
-        "reserve": "Relay"
+        "reserve": "Relay",
+        "failureCredential": "Credentials",
+        "failureRisk": "CF protection",
+        "failureTransient": "Upstream errors",
+        "failureOther": "Other errors",
+        "partial": "Partial"
       },
       "overview": "Overview",
       "currentResult": "Current result",
@@ -1819,34 +1832,7 @@
       "clearFilters": "Clear filters",
       "openManualCheckin": "Open manual check-ins ({count})",
       "removeTagFilter": "Stop filtering by \"{tag}\"",
-      "addTagFilter": "Filter by \"{tag}\"",
-      "batchSummary": {
-        "title": "Latest Batch Failures",
-        "failedCount": "{count} failed",
-        "finishedAt": "Finished",
-        "noFailures": "No failures in the latest sync/checkin batches",
-        "phaseSync": "SYNC",
-        "phaseCheckin": "CHECKIN",
-        "siteId": "site #{id}",
-        "reasons": {
-          "unauthorized": "Unauthorized / token expired",
-          "login_failed": "Login failed",
-          "access_token_required": "Access token required",
-          "direct_token_required": "Direct token required",
-          "cloudflare_protection": "Cloudflare protection",
-          "missing_group_key": "Missing group key",
-          "upstream_http_error": "Upstream HTTP error",
-          "upstream_decode_failed": "Upstream decode failed",
-          "upstream_html_response": "Upstream returned HTML",
-          "timeout": "Timeout",
-          "unsupported_platform": "Unsupported platform",
-          "context_deadline_exceeded": "Deadline exceeded",
-          "database_error": "Database error",
-          "internal_error": "Internal error",
-          "unknown": "Unknown",
-          "unsupported_checkin": "Check-in not supported by site"
-        }
-      }
+      "addTagFilter": "Filter by \"{tag}\""
     }
   },
   "siteRecovery": {

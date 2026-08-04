@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -518,6 +519,7 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 
 	balanceByAccount := accountBalanceMap(ctx, bindingMap)
 	multiplierByKey := channelCandidateMultiplierMap(ctx, channelIDs)
+	groupMultiplierByChannel := channelGroupMultiplierMap(ctx, bindingMap)
 
 	models := []model.LLMChannel{}
 	for _, channel := range channelsByID {
@@ -609,27 +611,119 @@ func ChannelLLMList(ctx context.Context) ([]model.LLMChannel, error) {
 				IsReserve:       channelIsReserve,
 				Balance:         balance,
 				Multiplier:      multiplier,
+				GroupMultiplier: groupMultiplierByChannel[channel.ID],
 			})
 		}
 	}
 	return models, nil
 }
 
-// accountBalanceMap 返回 site_account_id -> 余额。
-func accountBalanceMap(ctx context.Context, bindingMap map[int]model.SiteChannelBinding) map[int]float64 {
-	result := make(map[int]float64, len(bindingMap))
-	accountIDs := make([]int, 0, len(bindingMap))
+func channelGroupMultiplierMap(
+	ctx context.Context,
+	bindingMap map[int]model.SiteChannelBinding,
+) map[int]*float64 {
+	result := make(map[int]*float64, len(bindingMap))
+	accountIDs := distinctSiteAccountIDs(bindingMap)
+	if len(accountIDs) == 0 {
+		return result
+	}
+
+	values := persistedSiteGroupMultiplierMap(ctx, accountIDs)
+	for key, value := range quotedSiteGroupMultiplierMap(ctx, accountIDs) {
+		if _, exists := values[key]; !exists {
+			values[key] = value
+		}
+	}
+	for channelID, binding := range bindingMap {
+		groupKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
+		if value, ok := values[siteAccountGroupKey(binding.SiteAccountID, groupKey)]; ok {
+			multiplier := value
+			result[channelID] = &multiplier
+		}
+	}
+	return result
+}
+
+func distinctSiteAccountIDs(bindingMap map[int]model.SiteChannelBinding) []int {
 	seen := make(map[int]struct{}, len(bindingMap))
+	result := make([]int, 0, len(bindingMap))
 	for _, binding := range bindingMap {
 		if binding.SiteAccountID <= 0 {
 			continue
 		}
-		if _, ok := seen[binding.SiteAccountID]; ok {
+		if _, exists := seen[binding.SiteAccountID]; exists {
 			continue
 		}
 		seen[binding.SiteAccountID] = struct{}{}
-		accountIDs = append(accountIDs, binding.SiteAccountID)
+		result = append(result, binding.SiteAccountID)
 	}
+	return result
+}
+
+func persistedSiteGroupMultiplierMap(ctx context.Context, accountIDs []int) map[string]float64 {
+	result := make(map[string]float64)
+	var groups []model.SiteUserGroup
+	if err := db.GetDB().WithContext(ctx).
+		Select("site_account_id, group_key, multiplier, raw_payload").
+		Where("site_account_id IN ? AND multiplier IS NOT NULL", accountIDs).
+		Find(&groups).Error; err != nil {
+		return result
+	}
+	for _, group := range groups {
+		if group.Multiplier == nil || !validGroupMultiplier(*group.Multiplier) {
+			continue
+		}
+		result[siteAccountGroupKey(group.SiteAccountID, group.GroupKey)] = *group.Multiplier
+	}
+	var rawGroups []model.SiteUserGroup
+	if err := db.GetDB().WithContext(ctx).
+		Select("site_account_id, group_key, raw_payload").
+		Where("site_account_id IN ? AND multiplier IS NULL AND raw_payload <> ''", accountIDs).
+		Find(&rawGroups).Error; err != nil {
+		return result
+	}
+	for _, group := range rawGroups {
+		if multiplier, ok := storedSiteGroupMultiplier(group.RawPayload, group.GroupKey); ok {
+			result[siteAccountGroupKey(group.SiteAccountID, group.GroupKey)] = multiplier
+		}
+	}
+	return result
+}
+
+func quotedSiteGroupMultiplierMap(ctx context.Context, accountIDs []int) map[string]float64 {
+	result := make(map[string]float64)
+	var quotes []model.SiteModelPriceQuote
+	if err := db.GetDB().WithContext(ctx).
+		Select("id, site_account_id, group_key, group_multiplier, observed_at").
+		Where("site_account_id IN ? AND status = ? AND manual_override = ? AND group_multiplier >= 0", accountIDs, model.PriceQuoteStatusValid, false).
+		Order("observed_at DESC, id DESC").
+		Find(&quotes).Error; err != nil {
+		return result
+	}
+	for _, quote := range quotes {
+		if quote.SiteAccountID == nil || !validGroupMultiplier(quote.GroupMultiplier) {
+			continue
+		}
+		key := siteAccountGroupKey(*quote.SiteAccountID, quote.GroupKey)
+		if _, exists := result[key]; !exists {
+			result[key] = quote.GroupMultiplier
+		}
+	}
+	return result
+}
+
+func validGroupMultiplier(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func siteAccountGroupKey(accountID int, groupKey string) string {
+	return strconv.Itoa(accountID) + "\x00" + model.NormalizeSiteGroupKey(groupKey)
+}
+
+// accountBalanceMap 返回 site_account_id -> 余额。
+func accountBalanceMap(ctx context.Context, bindingMap map[int]model.SiteChannelBinding) map[int]float64 {
+	result := make(map[int]float64, len(bindingMap))
+	accountIDs := distinctSiteAccountIDs(bindingMap)
 	if len(accountIDs) == 0 {
 		return result
 	}

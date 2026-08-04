@@ -174,3 +174,31 @@ func TestParseGroupItemsPreservesScalarMapLabels(t *testing.T) {
 		t.Fatalf("expected nested group label, got %+v", groups)
 	}
 }
+
+func TestParseGroupItemsCapturesGroupMultiplierAliases(t *testing.T) {
+	groups := parseGroupItems(map[string]any{
+		"data": map[string]any{
+			"claude_code":   map[string]any{"name": "Claude Code", "ratio": 5.0},
+			"complimentary": map[string]any{"name": "Complimentary", "ratio": 0.0},
+			"11":            map[string]any{"id": 11.0, "name": "GPT", "rate_multiplier": 0.5},
+			"automatic":     map[string]any{"name": "Automatic", "ratio": "auto"},
+		},
+	})
+
+	byKey := make(map[string]model.SiteUserGroup, len(groups))
+	for _, group := range groups {
+		byKey[group.GroupKey] = group
+	}
+	if multiplier := byKey["claude_code"].Multiplier; multiplier == nil || *multiplier != 5 {
+		t.Fatalf("ratio multiplier was not captured: %+v", byKey["claude_code"])
+	}
+	if multiplier := byKey["complimentary"].Multiplier; multiplier == nil || *multiplier != 0 {
+		t.Fatalf("zero multiplier was not preserved: %+v", byKey["complimentary"])
+	}
+	if multiplier := byKey["11"].Multiplier; multiplier == nil || *multiplier != 0.5 {
+		t.Fatalf("rate_multiplier was not captured: %+v", byKey["11"])
+	}
+	if multiplier := byKey["automatic"].Multiplier; multiplier != nil {
+		t.Fatalf("non-numeric multiplier should remain unknown: %+v", byKey["automatic"])
+	}
+}

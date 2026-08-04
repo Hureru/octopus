@@ -21,12 +21,14 @@ import {
   type CheckinActiveFilterStatus,
   type CheckinFilterStatus,
 } from "./checkin-status";
+import type { BatchFailureCategory } from "./batch-failure";
 
 const FILTERS: Array<{
   key: CheckinFilterStatus;
   labelKey:
     | "filters.all"
     | "filters.success"
+    | "filters.partial"
     | "filters.failed"
     | "filters.idle"
     | "filters.disabled"
@@ -34,10 +36,25 @@ const FILTERS: Array<{
 }> = [
   { key: "all", labelKey: "filters.all" },
   { key: "success", labelKey: "filters.success" },
+  { key: "partial", labelKey: "filters.partial" },
   { key: "failed", labelKey: "filters.failed" },
   { key: "idle", labelKey: "filters.idle" },
   { key: "disabled", labelKey: "filters.disabled" },
   { key: "reserve", labelKey: "filters.reserve" },
+];
+
+const FAILURE_FILTERS: Array<{
+  key: BatchFailureCategory;
+  labelKey:
+    | "filters.failureCredential"
+    | "filters.failureRisk"
+    | "filters.failureTransient"
+    | "filters.failureOther";
+}> = [
+  { key: "credential", labelKey: "filters.failureCredential" },
+  { key: "risk", labelKey: "filters.failureRisk" },
+  { key: "transient", labelKey: "filters.failureTransient" },
+  { key: "other", labelKey: "filters.failureOther" },
 ];
 
 function filterTone(status: CheckinFilterStatus, active: boolean) {
@@ -45,6 +62,8 @@ function filterTone(status: CheckinFilterStatus, active: boolean) {
     switch (status) {
       case "success":
         return "border-emerald-500/30 bg-emerald-500 text-white";
+      case "partial":
+        return "border-amber-500/30 bg-amber-500 text-white";
       case "failed":
         return "border-destructive/30 bg-destructive text-white";
       case "idle":
@@ -62,6 +81,8 @@ function filterTone(status: CheckinFilterStatus, active: boolean) {
   switch (status) {
     case "success":
       return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "partial":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
     case "failed":
       return "border-destructive/20 bg-destructive/10 text-destructive";
     case "idle":
@@ -73,6 +94,32 @@ function filterTone(status: CheckinFilterStatus, active: boolean) {
     case "all":
     default:
       return "border-border bg-background text-foreground";
+  }
+}
+
+function failureFilterTone(category: BatchFailureCategory, active: boolean) {
+  if (active) {
+    switch (category) {
+      case "credential":
+        return "border-red-500/30 bg-red-500 text-white";
+      case "risk":
+        return "border-orange-500/30 bg-orange-500 text-white";
+      case "transient":
+        return "border-amber-500/30 bg-amber-500 text-white";
+      case "other":
+        return "border-slate-500/30 bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900";
+    }
+  }
+
+  switch (category) {
+    case "credential":
+      return "border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-300";
+    case "risk":
+      return "border-orange-500/20 bg-orange-500/10 text-orange-700 dark:text-orange-300";
+    case "transient":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    case "other":
+      return "border-slate-500/20 bg-slate-500/10 text-slate-700 dark:text-slate-300";
   }
 }
 
@@ -123,6 +170,9 @@ export function CheckinPanel({
   onClearFilters,
   activeFilterStatuses,
   onFilterChange,
+  failureFilterCounts,
+  activeFailureFilters,
+  onFailureFilterChange,
   allTags,
   activeTags,
   onTagFilterChange,
@@ -142,6 +192,9 @@ export function CheckinPanel({
   onClearFilters: () => void;
   activeFilterStatuses: CheckinActiveFilterStatus[];
   onFilterChange: (status: CheckinFilterStatus) => void;
+  failureFilterCounts: Record<BatchFailureCategory, number>;
+  activeFailureFilters: BatchFailureCategory[];
+  onFailureFilterChange: (category: BatchFailureCategory) => void;
   allTags: Array<{ tag: string; count: number }>;
   activeTags: string[];
   onTagFilterChange: (tag: string) => void;
@@ -234,19 +287,39 @@ export function CheckinPanel({
                 filter.key === "all" ? summary.total : summary[filter.key];
               const active =
                 filter.key === "all"
-                  ? activeFilterStatuses.length === 0
+                  ? activeFilterStatuses.length === 0 &&
+                    activeFailureFilters.length === 0
                   : activeFilterStatuses.includes(filter.key);
               return (
                 <button
                   key={filter.key}
                   type="button"
                   onClick={() => onFilterChange(filter.key)}
+                  aria-pressed={active}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     filterTone(filter.key, active),
                   )}
                 >
                   <span>{count}</span>
+                  <span>{t(filter.labelKey)}</span>
+                </button>
+              );
+            })}
+            {FAILURE_FILTERS.map((filter) => {
+              const active = activeFailureFilters.includes(filter.key);
+              return (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => onFailureFilterChange(filter.key)}
+                  aria-pressed={active}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                    failureFilterTone(filter.key, active),
+                  )}
+                >
+                  <span>{failureFilterCounts[filter.key]}</span>
                   <span>{t(filter.labelKey)}</span>
                 </button>
               );

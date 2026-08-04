@@ -51,8 +51,10 @@ type SiteFormState = {
     enabled: boolean;
     proxy_mode: Exclude<ProxyMode, 'inherit'>;
     proxy_config_id: number | null;
+    auto_proxy_recovery: boolean;
     external_checkin_url: string;
     is_pinned: boolean;
+    is_reserve: boolean;
     sort_order: number;
     global_weight: number;
     custom_header: CustomHeader[];
@@ -78,8 +80,8 @@ const DEFAULT_ROUTE_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }
     { value: 'gemini', label: 'Gemini' },
 ];
 
-const PLATFORM_LABELS: Record<SitePlatform, string> = {
-    [SitePlatform.API]: 'API 直连',
+const PLATFORM_LABELS: Record<SitePlatform, string | null> = {
+    [SitePlatform.API]: null,
     [SitePlatform.NewAPI]: 'New API',
     [SitePlatform.AnyRouter]: 'AnyRouter',
     [SitePlatform.OneAPI]: 'One API',
@@ -87,6 +89,11 @@ const PLATFORM_LABELS: Record<SitePlatform, string> = {
     [SitePlatform.DoneHub]: 'Done Hub',
     [SitePlatform.Sub2API]: 'Sub2API',
 };
+
+function getPlatformLabel(platform: SitePlatform, directApiLabel: string) {
+    if (platform === SitePlatform.API) return directApiLabel;
+    return PLATFORM_LABELS[platform] ?? platform;
+}
 
 function createEmptySiteForm(): SiteFormState {
     return {
@@ -96,8 +103,10 @@ function createEmptySiteForm(): SiteFormState {
         enabled: true,
         proxy_mode: 'direct',
         proxy_config_id: null,
+        auto_proxy_recovery: false,
         external_checkin_url: '',
         is_pinned: false,
+        is_reserve: false,
         sort_order: 0,
         global_weight: 1,
         custom_header: [{ header_key: '', header_value: '' }],
@@ -115,8 +124,10 @@ function createSiteForm(site: SiteRecord): SiteFormState {
         enabled: site.enabled,
         proxy_mode: site.proxy_mode ?? 'direct',
         proxy_config_id: site.proxy_config_id ?? null,
+        auto_proxy_recovery: site.auto_proxy_recovery ?? false,
         external_checkin_url: site.external_checkin_url ?? '',
         is_pinned: site.is_pinned,
+        is_reserve: site.is_reserve,
         sort_order: site.sort_order,
         global_weight: site.global_weight,
         custom_header: site.custom_header.length > 0
@@ -136,8 +147,10 @@ function normalizeSiteRecord(site: SiteRecord): SiteRecord {
         tags: site.tags ?? [],
         proxy_mode: site.proxy_mode ?? 'direct',
         proxy_config_id: site.proxy_config_id ?? null,
+        auto_proxy_recovery: site.auto_proxy_recovery ?? false,
         external_checkin_url: site.external_checkin_url ?? null,
         is_pinned: site.is_pinned ?? false,
+        is_reserve: site.is_reserve ?? false,
         sort_order: typeof site.sort_order === 'number' ? site.sort_order : 0,
         global_weight:
             typeof site.global_weight === 'number' && site.global_weight > 0
@@ -169,13 +182,13 @@ function trimRouteBaseURLs(items: SiteRouteBaseURL[]) {
         .filter((item) => item.route_type || item.base_url);
 }
 
-function getErrorMessage(error: unknown) {
+function getErrorMessage(error: unknown, fallback: string) {
     if (error instanceof Error) return error.message;
     if (typeof error === 'object' && error !== null && 'message' in error) {
         const message = (error as { message?: unknown }).message;
         if (typeof message === 'string') return message;
     }
-    return '操作失败';
+    return fallback;
 }
 
 interface SiteEditDialogProps {
@@ -193,7 +206,10 @@ interface SiteEditDialogProps {
  */
 export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }: SiteEditDialogProps) {
     const t = useTranslations();
+    const tForm = useTranslations('siteManagement.siteForm');
+    const tCommon = useTranslations('siteManagement.common');
     const tProxy = useTranslations('proxyPool');
+    const tRecovery = useTranslations('siteRecovery');
     const locale = useSettingStore((state) => state.locale);
     const createSite = useCreateSite();
     const updateSite = useUpdateSite();
@@ -207,11 +223,11 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
             event.preventDefault();
 
             if (!siteForm.name.trim()) {
-                toast.error('请输入站点名称');
+                toast.error(tForm('nameRequired'));
                 return;
             }
             if (!siteForm.base_url.trim()) {
-                toast.error('请输入站点地址');
+                toast.error(tForm('urlRequired'));
                 return;
             }
 
@@ -231,15 +247,17 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                         }));
                     }
                     toast.success(
-                        `自动检测到平台：${PLATFORM_LABELS[platform] ?? platform}`,
+                        tForm('detectedPlatform', {
+                            platform: getPlatformLabel(platform, tForm('platformApi')),
+                        }),
                     );
                 } catch {
-                    toast.error('无法自动检测平台类型，请手动选择');
+                    toast.error(tForm('detectFailed'));
                     return;
                 }
             }
             if (!platform) {
-                toast.error('请选择平台类型');
+                toast.error(tForm('platformRequired'));
                 return;
             }
 
@@ -248,7 +266,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 (item) => !item.header_key || !item.header_value,
             );
             if (invalidHeader) {
-                toast.error('自定义 Header 的键和值都不能为空');
+                toast.error(tForm('headerRequired'));
                 return;
             }
 
@@ -257,7 +275,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 (item) => !item.route_type || !item.base_url,
             );
             if (invalidRouteBaseURL) {
-                toast.error('协议路径覆盖的类型和地址都不能为空');
+                toast.error(tForm('routeRequired'));
                 return;
             }
             const routeTypeSet = new Set<string>();
@@ -267,7 +285,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 return false;
             });
             if (duplicateRoute) {
-                toast.error('同一协议的路径覆盖只能配置一条');
+                toast.error(tForm('duplicateRoute'));
                 return;
             }
 
@@ -284,8 +302,10 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 proxy_mode: siteForm.proxy_mode,
                 proxy_config_id:
                     siteForm.proxy_mode === 'pool' ? siteForm.proxy_config_id : null,
+                auto_proxy_recovery: siteForm.auto_proxy_recovery,
                 external_checkin_url: siteForm.external_checkin_url.trim() || null,
                 is_pinned: siteForm.is_pinned,
+                is_reserve: siteForm.is_reserve,
                 sort_order: siteForm.sort_order,
                 global_weight: siteForm.global_weight,
                 custom_header: customHeader,
@@ -298,19 +318,23 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
             try {
                 if (site) {
                     await updateSite.mutateAsync({ id: site.id, ...payload });
-                    toast.success('站点已更新');
+                    toast.success(tForm('updated'));
                     onOpenChange(false);
                 } else {
                     const createdSite = normalizeSiteRecord(
                         await createSite.mutateAsync(payload),
                     );
-                    toast.success('站点已创建');
+                    toast.success(tForm('created'));
                     onOpenChange(false);
                     onCreated?.(createdSite);
                 }
             } catch (submitError) {
                 toast.error(
-                    translateSiteMessage(locale, getErrorMessage(submitError), t),
+                    translateSiteMessage(
+                        locale,
+                        getErrorMessage(submitError, tCommon('operationFailed')),
+                        t,
+                    ),
                 );
             }
         },
@@ -325,6 +349,8 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
             onCreated,
             locale,
             t,
+            tForm,
+            tCommon,
         ],
     );
 
@@ -339,13 +365,13 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
                         <h2 className="text-2xl font-bold text-card-foreground truncate">
-                            {site ? '编辑站点' : '新增站点'}
+                            {site ? tForm('editTitle') : tForm('createTitle')}
                         </h2>
                     </div>
                     <button
                         type="button"
                         onClick={() => onOpenChange(false)}
-                        aria-label="关闭"
+                        aria-label={tCommon('close')}
                         className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                     >
                         <XIcon className="size-5" />
@@ -356,7 +382,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                     <div className="flex-1 min-h-0 space-y-5 overflow-y-auto px-1">
                         <div className="grid gap-4 md:grid-cols-2">
                             <label className="grid gap-2 text-sm">
-                                <span className="font-medium">站点名称</span>
+                                <span className="font-medium">{tForm('siteName')}</span>
                                 <Input
                                     value={siteForm.name}
                                     onChange={(event) =>
@@ -365,13 +391,13 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                             name: event.target.value,
                                         }))
                                     }
-                                    placeholder="例如：主站 OneAPI"
+                                    placeholder={tForm('siteNamePlaceholder')}
                                     className="rounded-xl"
                                 />
                             </label>
 
                             <label className="grid gap-2 text-sm">
-                                <span className="font-medium">平台类型</span>
+                                <span className="font-medium">{tForm('platform')}</span>
                                 <Select
                                     value={siteForm.platform || AUTO_DETECT_VALUE}
                                     onValueChange={(value) =>
@@ -385,15 +411,17 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                     }
                                 >
                                     <SelectTrigger className="w-full rounded-xl">
-                                        <SelectValue placeholder="自动检测" />
+                                        <SelectValue placeholder={tForm('autoDetect')} />
                                     </SelectTrigger>
                                     <SelectContent className="rounded-xl">
                                         {!site && (
-                                            <SelectItem className="rounded-xl" value={AUTO_DETECT_VALUE}>自动检测</SelectItem>
+                                            <SelectItem className="rounded-xl" value={AUTO_DETECT_VALUE}>
+                                                {tForm('autoDetect')}
+                                            </SelectItem>
                                         )}
                                         {Object.entries(PLATFORM_LABELS).map(([value, label]) => (
                                             <SelectItem className="rounded-xl" key={value} value={value}>
-                                                {label}
+                                                {label ?? tForm('platformApi')}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
@@ -402,7 +430,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                         </div>
 
                         <label className="grid gap-2 text-sm">
-                            <span className="font-medium">站点地址</span>
+                            <span className="font-medium">{tForm('siteUrl')}</span>
                             <Input
                                 value={siteForm.base_url}
                                 onChange={(event) =>
@@ -419,7 +447,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                         {siteForm.platform === SitePlatform.API && (
                             <div className="grid gap-2 text-sm">
                                 <div className="flex items-center gap-1.5">
-                                    <span className="font-medium">默认协议</span>
+                                    <span className="font-medium">{tForm('defaultProtocol')}</span>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <button
@@ -433,7 +461,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                             </button>
                                         </TooltipTrigger>
                                         <TooltipContent className="max-w-xs">
-                                            决定获取模型列表的请求格式，以及未手动指定路由类型的模型的默认端点格式
+                                            {tForm('defaultProtocolHint')}
                                         </TooltipContent>
                                     </Tooltip>
                                 </div>
@@ -461,7 +489,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                         )}
 
                         <label className="grid gap-2 text-sm">
-                            <span className="font-medium">手动签到 URL</span>
+                            <span className="font-medium">{tForm('manualCheckinUrl')}</span>
                             <Input
                                 value={siteForm.external_checkin_url}
                                 onChange={(event) =>
@@ -470,16 +498,16 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                         external_checkin_url: event.target.value,
                                     }))
                                 }
-                                placeholder="可选：例如 https://example.com/signin"
+                                placeholder={tForm('manualCheckinPlaceholder')}
                                 className="rounded-xl"
                             />
                             <span className="text-xs text-muted-foreground">
-                                配置后可在站点总览中一键打开此页面进行手动签到。
+                                {tForm('manualCheckinHint')}
                             </span>
                         </label>
 
                         <label className="grid gap-2 text-sm">
-                            <span className="font-medium">标签</span>
+                            <span className="font-medium">{tForm('tags')}</span>
                             <TagInput
                                 value={siteForm.tags}
                                 onChange={(tags) =>
@@ -488,7 +516,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                 suggestions={allTags}
                             />
                             <span className="text-xs text-muted-foreground">
-                                可选：为站点打标签，便于在列表中分类筛选。
+                                {tForm('tagsHint')}
                             </span>
                         </label>
 
@@ -501,11 +529,48 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                             }))}
                         />
 
+                        <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium">
+                                    {tRecovery('form.sitePolicy')}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    {tRecovery('form.sitePolicyHint')}
+                                </div>
+                            </div>
+                            <Switch
+                                checked={siteForm.auto_proxy_recovery}
+                                onCheckedChange={(checked) =>
+                                    setSiteForm((current) => ({
+                                        ...current,
+                                        auto_proxy_recovery: checked,
+                                    }))
+                                }
+                                aria-label={tRecovery('form.sitePolicy')}
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium">{tForm('relayPolicy')}</div>
+                                <div className="text-xs text-muted-foreground">
+                                    {tForm('relayPolicyHint')}
+                                </div>
+                            </div>
+                            <Switch
+                                checked={siteForm.is_reserve}
+                                onCheckedChange={(checked) =>
+                                    setSiteForm((current) => ({ ...current, is_reserve: checked }))
+                                }
+                                aria-label={tForm('relayPolicy')}
+                            />
+                        </div>
+
                         <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
                             <div>
-                                <div className="text-sm font-medium">启用站点</div>
+                                <div className="text-sm font-medium">{tForm('enabled')}</div>
                                 <div className="text-xs text-muted-foreground">
-                                    停用后不再投影托管渠道
+                                    {tForm('disabledHint')}
                                 </div>
                             </div>
                             <Switch
@@ -513,19 +578,22 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                 onCheckedChange={(checked) =>
                                     setSiteForm((current) => ({ ...current, enabled: checked }))
                                 }
+                                aria-label={tForm('enabled')}
                             />
                         </div>
 
                         <Accordion type="single" collapsible className="w-full rounded-xl border bg-card">
                             <AccordionItem value="advanced" className="border-none">
                                 <AccordionTrigger className="rounded-xl px-4 py-3 text-sm font-medium text-card-foreground transition-colors hover:bg-muted/30 hover:no-underline">
-                                    高级设置
+                                    {tForm('advancedSettings')}
                                 </AccordionTrigger>
                                 <AccordionContent className="space-y-4 border-t px-4 pb-4 pt-4">
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between">
                                             <label className="text-sm font-medium text-card-foreground">
-                                                自定义 Header {siteForm.custom_header.length > 0 ? `(${siteForm.custom_header.length})` : ''}
+                                                {tForm('customHeaders', {
+                                                    count: siteForm.custom_header.length,
+                                                })}
                                             </label>
                                             <Button
                                                 type="button"
@@ -543,7 +611,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                 className="h-6 px-2 text-xs text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
                                             >
                                                 <Plus className="mr-1 h-3 w-3" />
-                                                添加
+                                                {tCommon('add')}
                                             </Button>
                                         </div>
                                         <div className="space-y-2">
@@ -562,7 +630,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                                 ),
                                                             }))
                                                         }
-                                                        placeholder="Header Key"
+                                                        placeholder={tCommon('headerKey')}
                                                         className="flex-1 rounded-xl"
                                                     />
                                                     <Input
@@ -581,7 +649,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                                 ),
                                                             }))
                                                         }
-                                                        placeholder="Header Value"
+                                                        placeholder={tCommon('headerValue')}
                                                         className="flex-1 rounded-xl"
                                                     />
                                                     <Button
@@ -598,7 +666,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                         }
                                                         disabled={siteForm.custom_header.length <= 1}
                                                         className="h-8 w-8 rounded-xl p-0 text-muted-foreground hover:bg-transparent hover:text-destructive disabled:opacity-40"
-                                                        title="Remove"
+                                                        title={tCommon('remove')}
                                                     >
                                                         <X className="h-4 w-4" />
                                                     </Button>
@@ -609,7 +677,9 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                     <div className="space-y-2">
                                         <div className="flex items-center justify-between">
                                             <label className="text-sm font-medium text-card-foreground">
-                                                协议路径覆盖 {siteForm.route_base_urls.length > 0 ? `(${siteForm.route_base_urls.length})` : ''}
+                                                {tForm('protocolOverrides', {
+                                                    count: siteForm.route_base_urls.length,
+                                                })}
                                             </label>
                                             <Button
                                                 type="button"
@@ -627,11 +697,11 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                 className="h-6 px-2 text-xs text-muted-foreground/70 hover:bg-transparent hover:text-muted-foreground"
                                             >
                                                 <Plus className="mr-1 h-3 w-3" />
-                                                添加
+                                                {tCommon('add')}
                                             </Button>
                                         </div>
                                         <p className="text-xs text-muted-foreground/70">
-                                            按协议覆盖请求地址，例如 Anthropic 填 https://example.com/anthropic/v1，留空则用站点地址默认推断。
+                                            {tForm('protocolOverridesHint')}
                                         </p>
                                         <div className="space-y-2">
                                             {siteForm.route_base_urls.map((item, index) => (
@@ -651,7 +721,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                         }
                                                     >
                                                         <SelectTrigger className="w-40 rounded-xl">
-                                                            <SelectValue placeholder="协议类型" />
+                                                            <SelectValue placeholder={tForm('routeType')} />
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             {ROUTE_BASE_URL_OPTIONS.map((option) => (
@@ -690,7 +760,7 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                                                             }))
                                                         }
                                                         className="h-8 w-8 rounded-xl p-0 text-muted-foreground hover:bg-transparent hover:text-destructive disabled:opacity-40"
-                                                        title="Remove"
+                                                        title={tCommon('remove')}
                                                     >
                                                         <X className="h-4 w-4" />
                                                     </Button>
@@ -710,14 +780,18 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
                             className="h-12 w-full rounded-2xl sm:flex-1"
                             onClick={() => onOpenChange(false)}
                         >
-                            取消
+                            {tCommon('cancel')}
                         </Button>
                         <Button
                             type="submit"
                             className="h-12 w-full rounded-2xl sm:flex-1"
                             disabled={isPending}
                         >
-                            {isPending ? '保存中...' : site ? '保存修改' : '创建站点'}
+                            {isPending
+                                ? tCommon('saving')
+                                : site
+                                  ? tCommon('saveChanges')
+                                  : tForm('createSite')}
                         </Button>
                     </footer>
                 </form>

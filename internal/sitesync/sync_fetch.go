@@ -3,7 +3,9 @@ package sitesync
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/apperror"
@@ -127,6 +129,10 @@ func fetchSub2APIGroups(ctx context.Context, siteRecord *model.Site, account *mo
 		}
 		items := parseGroupItemsFromAny(data)
 		if len(items) > 0 {
+			rawPayload := marshalRawPayload(payload)
+			for index := range items {
+				items[index].RawPayload = rawPayload
+			}
 			return items, nil
 		}
 	}
@@ -191,13 +197,14 @@ func buildSub2APITokensFromItems(items []map[string]any) []model.SiteToken {
 			jsonString(item["tokenGroup"]),
 		))
 		tokens = append(tokens, model.SiteToken{
-			Name:      firstNonEmptyString(strings.TrimSpace(jsonString(item["name"])), fmt.Sprintf("token-%d", index+1)),
-			Token:     tokenValue,
-			GroupKey:  groupKey,
-			GroupName: groupName,
-			Enabled:   parseSub2APITokenEnabled(item),
-			Source:    "sync",
-			IsDefault: index == 0,
+			Name:            firstNonEmptyString(strings.TrimSpace(jsonString(item["name"])), fmt.Sprintf("token-%d", index+1)),
+			Token:           tokenValue,
+			GroupKey:        groupKey,
+			GroupName:       groupName,
+			GroupMultiplier: parseSub2APIKeyGroupMultiplier(item),
+			Enabled:         parseSub2APITokenEnabled(item),
+			Source:          "sync",
+			IsDefault:       index == 0,
 		})
 	}
 	return tokens
@@ -213,6 +220,19 @@ func parseSub2APITokenEnabled(item map[string]any) bool {
 		return !parseEnabledFlag(raw)
 	}
 	return true
+}
+
+func parseSub2APIKeyGroupMultiplier(item map[string]any) *float64 {
+	return parseOptionalSiteGroupMultiplier(
+		nestedValue(item, "group", "rate_multiplier"),
+		nestedValue(item, "group", "group_multiplier"),
+		nestedValue(item, "group", "multiplier"),
+		nestedValue(item, "group", "ratio"),
+		item["rate_multiplier"],
+		item["group_multiplier"],
+		item["multiplier"],
+		item["ratio"],
+	)
 }
 
 func inferSub2APIGroupsFromTokens(tokens []model.SiteToken) []model.SiteUserGroup {
@@ -803,10 +823,20 @@ func mergeSiteGroups(groups []model.SiteUserGroup, tokens []model.SiteToken) []m
 	}
 	for _, token := range tokens {
 		key := model.NormalizeSiteGroupKey(token.GroupKey)
-		if _, ok := merged[key]; ok {
+		if existing, ok := merged[key]; ok {
+			if existing.Multiplier == nil && token.GroupMultiplier != nil {
+				multiplier := *token.GroupMultiplier
+				existing.Multiplier = &multiplier
+				merged[key] = existing
+			}
 			continue
 		}
-		merged[key] = model.SiteUserGroup{GroupKey: key, Name: model.NormalizeSiteGroupName(key, token.GroupName)}
+		group := model.SiteUserGroup{GroupKey: key, Name: model.NormalizeSiteGroupName(key, token.GroupName)}
+		if token.GroupMultiplier != nil {
+			multiplier := *token.GroupMultiplier
+			group.Multiplier = &multiplier
+		}
+		merged[key] = group
 	}
 	if len(merged) == 0 {
 		merged[model.SiteDefaultGroupKey] = model.SiteUserGroup{GroupKey: model.SiteDefaultGroupKey, Name: model.SiteDefaultGroupName}
@@ -839,6 +869,32 @@ func jsonFloat(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+func parseOptionalSiteGroupMultiplier(values ...any) *float64 {
+	for _, value := range values {
+		var multiplier float64
+		var valid bool
+		switch typed := value.(type) {
+		case float64:
+			multiplier, valid = typed, true
+		case int:
+			multiplier, valid = float64(typed), true
+		case int64:
+			multiplier, valid = float64(typed), true
+		case string:
+			trimmed := strings.TrimSpace(typed)
+			if trimmed != "" {
+				var err error
+				multiplier, err = strconv.ParseFloat(trimmed, 64)
+				valid = err == nil
+			}
+		}
+		if valid && multiplier >= 0 && !math.IsNaN(multiplier) && !math.IsInf(multiplier, 0) {
+			return &multiplier
+		}
+	}
+	return nil
 }
 func pickModelToken(tokens []model.SiteToken) model.SiteToken {
 	for _, token := range tokens {

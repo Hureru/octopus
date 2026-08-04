@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -223,5 +224,40 @@ func TestSyncAnyRouterFallsBackToAccessTokenWhenTokenListIsEmpty(t *testing.T) {
 	}
 	if len(snapshot.models) != 2 {
 		t.Fatalf("expected session model fallback to populate models, got %+v", snapshot.models)
+	}
+}
+
+func TestSyncAnyRouterReturnsNoAvailableKeyError(t *testing.T) {
+	platformUserID := 11494
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/user/login":
+			_, _ = w.Write([]byte(`{"success":true,"data":"managed-session"}`))
+		case "/api/token/":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := syncAnyRouter(context.Background(), &model.Site{
+		BaseURL:  server.URL,
+		Platform: model.SitePlatformAnyRouter,
+	}, &model.SiteAccount{
+		CredentialType: model.SiteCredentialTypeUsernamePassword,
+		Username:       "managed-user",
+		Password:       "password",
+		PlatformUserID: &platformUserID,
+	})
+	if err == nil {
+		t.Fatalf("expected syncAnyRouter to fail when no usable key exists")
+	}
+	if got := apperror.Code(err); got != CodeSiteSyncNoAvailableKey {
+		t.Fatalf("expected error code %q, got %q", CodeSiteSyncNoAvailableKey, got)
+	}
+	if strings.Contains(err.Error(), model.SiteDefaultGroupKey) {
+		t.Fatalf("expected error not to invent a default group, got %v", err)
 	}
 }

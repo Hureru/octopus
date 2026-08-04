@@ -123,31 +123,33 @@ function MemberItem({
                 </span>
 
                 <div className="flex flex-col min-w-0 flex-1">
-                    <Tooltip side="top" sideOffset={10} align="start">
-                        <TooltipTrigger className={cn(
-                            'text-sm font-medium truncate leading-tight',
-                            isDisabled && 'text-muted-foreground'
-                        )}>
-                            {member.name}
-                        </TooltipTrigger>
-                        <TooltipContent key={member.name}>{member.name}</TooltipContent>
-                    </Tooltip>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                        <Tooltip side="top" sideOffset={10} align="start">
+                            <TooltipTrigger className={cn(
+                                'block min-w-0 flex-1 truncate text-left text-sm font-medium leading-tight',
+                                isDisabled && 'text-muted-foreground'
+                            )}>
+                                {member.name}
+                            </TooltipTrigger>
+                            <TooltipContent key={member.name}>{member.name}</TooltipContent>
+                        </Tooltip>
+                        {member.is_reserve && (
+                            <span className="ml-auto inline-flex shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-300">
+                                {t('member.reserveBadge')}
+                            </span>
+                        )}
+                    </div>
                     <span className="text-[10px] text-muted-foreground truncate leading-tight">{sourceLabel}</span>
-                    {(member.is_reserve || member.balance != null || member.multiplier != null) && (
+                    {(member.balance != null || member.group_multiplier != null) && (
                         <span className="flex items-center gap-1 mt-0.5">
-                            {member.is_reserve && (
-                                <span className="inline-flex rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-300">
-                                    {t('member.reserveBadge')}
-                                </span>
-                            )}
                             {member.balance != null && (
                                 <span className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px text-[9px] font-medium text-emerald-700 dark:text-emerald-300">
                                     {t('member.balanceLabel')} {formatBalance(member.balance)}
                                 </span>
                             )}
-                            {member.multiplier != null && (
+                            {member.group_multiplier != null && (
                                 <span className="inline-flex rounded-full border border-sky-500/30 bg-sky-500/10 px-1.5 py-px text-[9px] font-medium text-sky-700 dark:text-sky-300">
-                                    {t('member.multiplierLabel')} {formatMultiplier(member.multiplier)}
+                                    {t('member.multiplierLabel')} {formatMultiplier(member.group_multiplier)}
                                 </span>
                             )}
                         </span>

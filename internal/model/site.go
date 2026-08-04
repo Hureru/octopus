@@ -19,8 +19,8 @@ const (
 	SitePlatformOneAPI    SitePlatform = "one-api"
 	SitePlatformOneHub    SitePlatform = "one-hub"
 	SitePlatformDoneHub   SitePlatform = "done-hub"
-	SitePlatformSub2API SitePlatform = "sub2api"
-	SitePlatformAPI     SitePlatform = "api"
+	SitePlatformSub2API   SitePlatform = "sub2api"
+	SitePlatformAPI       SitePlatform = "api"
 )
 
 type SiteCredentialType string
@@ -157,28 +157,32 @@ func ValidateSiteRouteBaseURLs(items []SiteRouteBaseURL) error {
 }
 
 type Site struct {
-	ID                 int                `json:"id" gorm:"primaryKey"`
-	Name               string             `json:"name" gorm:"unique;not null"`
-	Platform           SitePlatform       `json:"platform" gorm:"type:varchar(32);not null"`
-	BaseURL            string             `json:"base_url" gorm:"not null"`
-	Enabled            bool               `json:"enabled" gorm:"default:true"`
-	EnabledSet         bool               `json:"-" gorm:"-"`
-	ProxyMode          ProxyUsageMode     `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'direct'"`
-	ProxyConfigID      *int               `json:"proxy_config_id"`
-	Proxy              bool               `json:"-" gorm:"default:false"`
-	SiteProxy          *string            `json:"-" gorm:"column:site_proxy"`
-	UseSystemProxy     bool               `json:"-" gorm:"default:false"`
-	ExternalCheckinURL *string            `json:"external_checkin_url"`
-	IsPinned           bool               `json:"is_pinned" gorm:"default:false"`
-	SortOrder          int                `json:"sort_order" gorm:"default:0"`
-	GlobalWeight       float64            `json:"global_weight" gorm:"default:1"`
-	CustomHeader       []CustomHeader     `json:"custom_header" gorm:"serializer:json"`
-	RouteBaseURLs      []SiteRouteBaseURL `json:"route_base_urls" gorm:"serializer:json"`
-	DefaultRouteType   SiteModelRouteType `json:"default_route_type" gorm:"type:varchar(32);not null;default:''"`
-	Tags               []string           `json:"tags" gorm:"serializer:json"`
-	Archived           bool               `json:"archived" gorm:"default:false;index"`
-	ArchivedAt         *time.Time         `json:"archived_at"`
-	Accounts           []SiteAccount      `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
+	ID                     int                `json:"id" gorm:"primaryKey"`
+	Name                   string             `json:"name" gorm:"unique;not null"`
+	Platform               SitePlatform       `json:"platform" gorm:"type:varchar(32);not null"`
+	BaseURL                string             `json:"base_url" gorm:"not null"`
+	Enabled                bool               `json:"enabled" gorm:"default:true"`
+	EnabledSet             bool               `json:"-" gorm:"-"`
+	ProxyMode              ProxyUsageMode     `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'direct'"`
+	ProxyConfigID          *int               `json:"proxy_config_id"`
+	AutoProxyRecovery      bool               `json:"auto_proxy_recovery" gorm:"not null;default:false"`
+	PreferredProxyConfigID *int               `json:"preferred_proxy_config_id,omitempty"`
+	PreferredClashNode     string             `json:"preferred_clash_node,omitempty" gorm:"size:191"`
+	Proxy                  bool               `json:"-" gorm:"default:false"`
+	SiteProxy              *string            `json:"-" gorm:"column:site_proxy"`
+	UseSystemProxy         bool               `json:"-" gorm:"default:false"`
+	ExternalCheckinURL     *string            `json:"external_checkin_url"`
+	IsPinned               bool               `json:"is_pinned" gorm:"default:false"`
+	IsReserve              bool               `json:"is_reserve" gorm:"default:false"`
+	SortOrder              int                `json:"sort_order" gorm:"default:0"`
+	GlobalWeight           float64            `json:"global_weight" gorm:"default:1"`
+	CustomHeader           []CustomHeader     `json:"custom_header" gorm:"serializer:json"`
+	RouteBaseURLs          []SiteRouteBaseURL `json:"route_base_urls" gorm:"serializer:json"`
+	DefaultRouteType       SiteModelRouteType `json:"default_route_type" gorm:"type:varchar(32);not null;default:''"`
+	Tags                   []string           `json:"tags" gorm:"serializer:json"`
+	Archived               bool               `json:"archived" gorm:"default:false;index"`
+	ArchivedAt             *time.Time         `json:"archived_at"`
+	Accounts               []SiteAccount      `json:"accounts,omitempty" gorm:"foreignKey:SiteID"`
 }
 
 func (s *Site) UnmarshalJSON(data []byte) error {
@@ -210,19 +214,30 @@ func (s *Site) UnmarshalJSON(data []byte) error {
 }
 
 type SiteAccount struct {
-	ID                         int                  `json:"id" gorm:"primaryKey"`
-	SiteID                     int                  `json:"site_id" gorm:"index;not null"`
-	Name                       string               `json:"name" gorm:"not null"`
-	CredentialType             SiteCredentialType   `json:"credential_type" gorm:"type:varchar(32);not null"`
-	Username                   string               `json:"username"`
-	Password                   string               `json:"password"`
-	AccessToken                string               `json:"access_token"`
-	APIKey                     string               `json:"api_key"`
-	RefreshToken               string               `json:"refresh_token"`
-	TokenExpiresAt             int64                `json:"token_expires_at" gorm:"default:0"`
-	PlatformUserID             *int                 `json:"platform_user_id"`
-	ProxyMode                  ProxyUsageMode       `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'inherit'"`
-	ProxyConfigID              *int                 `json:"proxy_config_id"`
+	ID                          int                `json:"id" gorm:"primaryKey"`
+	SiteID                      int                `json:"site_id" gorm:"index;not null"`
+	Name                        string             `json:"name" gorm:"not null"`
+	CredentialType              SiteCredentialType `json:"credential_type" gorm:"type:varchar(32);not null"`
+	Username                    string             `json:"username"`
+	Password                    string             `json:"password"`
+	AccessToken                 string             `json:"access_token"`
+	APIKey                      string             `json:"api_key"`
+	RefreshToken                string             `json:"refresh_token"`
+	TokenExpiresAt              int64              `json:"token_expires_at" gorm:"default:0"`
+	PlatformUserID              *int               `json:"platform_user_id"`
+	ProxyMode                   ProxyUsageMode     `json:"proxy_mode" gorm:"type:varchar(16);not null;default:'inherit'"`
+	ProxyConfigID               *int               `json:"proxy_config_id"`
+	AutoProxyRecovery           *bool              `json:"auto_proxy_recovery,omitempty"`
+	PreferredProxyConfigID      *int               `json:"preferred_proxy_config_id,omitempty"`
+	PreferredClashNode          string             `json:"preferred_clash_node,omitempty" gorm:"size:191"`
+	VerificationCookieEncrypted string             `json:"-" gorm:"type:text"`
+	// VerificationSessionFenceID is a monotonic high-water mark. It is retained
+	// when credentials are cleared so an older session cannot reinstall them.
+	VerificationSessionFenceID int64                `json:"-" gorm:"not null;default:0;index"`
+	VerificationUserAgent      string               `json:"verification_user_agent,omitempty" gorm:"type:text"`
+	VerificationProxyConfigID  *int                 `json:"verification_proxy_config_id,omitempty"`
+	VerificationClashNode      string               `json:"verification_clash_node,omitempty" gorm:"size:191"`
+	VerificationExpiresAt      *time.Time           `json:"verification_expires_at,omitempty"`
 	AccountProxy               *string              `json:"-" gorm:"column:account_proxy"`
 	Enabled                    bool                 `json:"enabled" gorm:"default:true"`
 	EnabledSet                 bool                 `json:"-" gorm:"-"`
@@ -287,10 +302,13 @@ type SiteToken struct {
 	ValueStatus   SiteTokenValueStatus `json:"value_status" gorm:"type:varchar(32);not null;default:'ready'"`
 	GroupKey      string               `json:"group_key" gorm:"size:128;index"`
 	GroupName     string               `json:"group_name"`
-	Enabled       bool                 `json:"enabled" gorm:"default:true"`
-	Source        string               `json:"source"`
-	IsDefault     bool                 `json:"is_default" gorm:"default:false"`
-	LastSyncAt    *time.Time           `json:"last_sync_at"`
+	// GroupMultiplier is transient sync metadata from APIs that embed the
+	// owning group in each key. The durable source remains SiteUserGroup.
+	GroupMultiplier *float64   `json:"-" gorm:"-"`
+	Enabled         bool       `json:"enabled" gorm:"default:true"`
+	Source          string     `json:"source"`
+	IsDefault       bool       `json:"is_default" gorm:"default:false"`
+	LastSyncAt      *time.Time `json:"last_sync_at"`
 }
 
 type SiteUserGroup struct {
@@ -298,6 +316,7 @@ type SiteUserGroup struct {
 	SiteAccountID           int                      `json:"site_account_id" gorm:"uniqueIndex:idx_site_account_group;not null"`
 	GroupKey                string                   `json:"group_key" gorm:"size:128;uniqueIndex:idx_site_account_group;not null"`
 	Name                    string                   `json:"name"`
+	Multiplier              *float64                 `json:"group_multiplier,omitempty"` // API Key 所属分组倍率，nil 表示站点未提供
 	RawPayload              string                   `json:"raw_payload"`
 	ProjectionDisabled      bool                     `json:"projection_disabled" gorm:"default:false"`
 	ProjectionSuspended     bool                     `json:"projection_suspended" gorm:"default:false;index"`
@@ -336,25 +355,30 @@ type SiteChannelBinding struct {
 }
 
 type SiteUpdateRequest struct {
-	ID                 int                 `json:"id" binding:"required"`
-	Name               *string             `json:"name,omitempty"`
-	Platform           *SitePlatform       `json:"platform,omitempty"`
-	BaseURL            *string             `json:"base_url,omitempty"`
-	Enabled            *bool               `json:"enabled,omitempty"`
-	ProxyMode          *ProxyUsageMode     `json:"proxy_mode,omitempty"`
-	ProxyConfigID      *int                `json:"proxy_config_id,omitempty"`
-	ProxyConfigIDSet   bool                `json:"-"`
-	Proxy              *bool               `json:"-"`
-	SiteProxy          *string             `json:"-"`
-	UseSystemProxy     *bool               `json:"-"`
-	ExternalCheckinURL *string             `json:"external_checkin_url,omitempty"`
-	ExternalCheckinSet bool                `json:"-"`
-	IsPinned           *bool               `json:"is_pinned,omitempty"`
-	SortOrder          *int                `json:"sort_order,omitempty"`
-	GlobalWeight       *float64            `json:"global_weight,omitempty"`
-	CustomHeader       *[]CustomHeader     `json:"custom_header,omitempty"`
-	RouteBaseURLs      *[]SiteRouteBaseURL `json:"route_base_urls,omitempty"`
-	Tags               *[]string           `json:"tags,omitempty"`
+	ID                        int                 `json:"id" binding:"required"`
+	Name                      *string             `json:"name,omitempty"`
+	Platform                  *SitePlatform       `json:"platform,omitempty"`
+	BaseURL                   *string             `json:"base_url,omitempty"`
+	Enabled                   *bool               `json:"enabled,omitempty"`
+	ProxyMode                 *ProxyUsageMode     `json:"proxy_mode,omitempty"`
+	ProxyConfigID             *int                `json:"proxy_config_id,omitempty"`
+	ProxyConfigIDSet          bool                `json:"-"`
+	AutoProxyRecovery         *bool               `json:"auto_proxy_recovery,omitempty"`
+	PreferredProxyConfigID    *int                `json:"preferred_proxy_config_id,omitempty"`
+	PreferredProxyConfigIDSet bool                `json:"-"`
+	PreferredClashNode        *string             `json:"preferred_clash_node,omitempty"`
+	Proxy                     *bool               `json:"-"`
+	SiteProxy                 *string             `json:"-"`
+	UseSystemProxy            *bool               `json:"-"`
+	ExternalCheckinURL        *string             `json:"external_checkin_url,omitempty"`
+	ExternalCheckinSet        bool                `json:"-"`
+	IsPinned                  *bool               `json:"is_pinned,omitempty"`
+	IsReserve                 *bool               `json:"is_reserve,omitempty"`
+	SortOrder                 *int                `json:"sort_order,omitempty"`
+	GlobalWeight              *float64            `json:"global_weight,omitempty"`
+	CustomHeader              *[]CustomHeader     `json:"custom_header,omitempty"`
+	RouteBaseURLs             *[]SiteRouteBaseURL `json:"route_base_urls,omitempty"`
+	Tags                      *[]string           `json:"tags,omitempty"`
 }
 
 func (r *SiteUpdateRequest) UnmarshalJSON(data []byte) error {
@@ -370,6 +394,7 @@ func (r *SiteUpdateRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	_, r.ProxyConfigIDSet = raw["proxy_config_id"]
+	_, r.PreferredProxyConfigIDSet = raw["preferred_proxy_config_id"]
 	_, r.ExternalCheckinSet = raw["external_checkin_url"]
 	return nil
 }
@@ -389,6 +414,11 @@ type SiteAccountUpdateRequest struct {
 	ProxyMode                  *ProxyUsageMode     `json:"proxy_mode,omitempty"`
 	ProxyConfigID              *int                `json:"proxy_config_id,omitempty"`
 	ProxyConfigIDSet           bool                `json:"-"`
+	AutoProxyRecovery          *bool               `json:"auto_proxy_recovery,omitempty"`
+	AutoProxyRecoverySet       bool                `json:"-"`
+	PreferredProxyConfigID     *int                `json:"preferred_proxy_config_id,omitempty"`
+	PreferredProxyConfigIDSet  bool                `json:"-"`
+	PreferredClashNode         *string             `json:"preferred_clash_node,omitempty"`
 	AccountProxy               *string             `json:"-"`
 	Enabled                    *bool               `json:"enabled,omitempty"`
 	AutoSync                   *bool               `json:"auto_sync,omitempty"`
@@ -412,6 +442,8 @@ func (r *SiteAccountUpdateRequest) UnmarshalJSON(data []byte) error {
 	}
 	_, r.PlatformUserIDSet = raw["platform_user_id"]
 	_, r.ProxyConfigIDSet = raw["proxy_config_id"]
+	_, r.AutoProxyRecoverySet = raw["auto_proxy_recovery"]
+	_, r.PreferredProxyConfigIDSet = raw["preferred_proxy_config_id"]
 	return nil
 }
 

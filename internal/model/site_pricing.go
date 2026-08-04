@@ -35,32 +35,33 @@ const (
 )
 
 type SiteModelPriceQuote struct {
-	ID                int              `json:"id" gorm:"primaryKey"`
-	IdentityKey       string           `json:"identity_key" gorm:"size:64;not null;default:''"`
-	RouteCandidateID  *int             `json:"route_candidate_id,omitempty" gorm:"index"`
-	SiteID            int              `json:"site_id" gorm:"not null;index"`
-	SiteAccountID     *int             `json:"site_account_id,omitempty" gorm:"index"`
-	GroupKey          string           `json:"group_key" gorm:"size:128"`
-	ModelName         string           `json:"model_name" gorm:"size:191;not null"`
-	Source            PriceQuoteSource `json:"source" gorm:"type:varchar(32);not null"`
-	Unit              PriceUnit        `json:"unit" gorm:"type:varchar(32);not null;default:'per_million_tokens'"`
-	Currency          string           `json:"currency" gorm:"size:16;not null;default:'USD'"`
-	Input             float64          `json:"input"`
-	Output            float64          `json:"output"`
-	CacheRead         float64          `json:"cache_read"`
-	CacheWrite        float64          `json:"cache_write"`
-	PerRequest        float64          `json:"per_request"`
-	ModelMultiplier   float64          `json:"model_multiplier" gorm:"not null;default:0"` // 模型倍率(如0.1x/1x)，0 表示未知
-	GroupMultiplier   float64          `json:"group_multiplier" gorm:"not null;default:1"`
-	ExchangeRateToUSD float64          `json:"exchange_rate_to_usd" gorm:"not null"`
-	RawPayload        string           `json:"raw_payload,omitempty" gorm:"type:text"`
-	ObservedAt        time.Time        `json:"observed_at" gorm:"index"`
-	ValidUntil        *time.Time       `json:"valid_until,omitempty"`
-	ManualOverride    bool             `json:"manual_override" gorm:"not null;default:false"`
-	Status            PriceQuoteStatus `json:"status" gorm:"type:varchar(16);not null;default:'valid';index"`
-	LastError         string           `json:"last_error,omitempty" gorm:"type:text"`
-	CreatedAt         time.Time        `json:"created_at"`
-	UpdatedAt         time.Time        `json:"updated_at"`
+	ID                   int              `json:"id" gorm:"primaryKey"`
+	IdentityKey          string           `json:"identity_key" gorm:"size:64;not null;default:''"`
+	RouteCandidateID     *int             `json:"route_candidate_id,omitempty" gorm:"index"`
+	SiteID               int              `json:"site_id" gorm:"not null;index"`
+	SiteAccountID        *int             `json:"site_account_id,omitempty" gorm:"index"`
+	GroupKey             string           `json:"group_key" gorm:"size:128"`
+	ModelName            string           `json:"model_name" gorm:"size:191;not null"`
+	Source               PriceQuoteSource `json:"source" gorm:"type:varchar(32);not null"`
+	Unit                 PriceUnit        `json:"unit" gorm:"type:varchar(32);not null;default:'per_million_tokens'"`
+	Currency             string           `json:"currency" gorm:"size:16;not null;default:'USD'"`
+	Input                float64          `json:"input"`
+	Output               float64          `json:"output"`
+	CacheRead            float64          `json:"cache_read"`
+	CacheWrite           float64          `json:"cache_write"`
+	PerRequest           float64          `json:"per_request"`
+	ModelMultiplier      float64          `json:"model_multiplier" gorm:"not null;default:0"` // 模型倍率(如0.1x/1x)，0 表示未知
+	GroupMultiplier      float64          `json:"group_multiplier" gorm:"not null;default:1"`
+	GroupMultiplierKnown bool             `json:"-" gorm:"-"`
+	ExchangeRateToUSD    float64          `json:"exchange_rate_to_usd" gorm:"not null"`
+	RawPayload           string           `json:"raw_payload,omitempty" gorm:"type:text"`
+	ObservedAt           time.Time        `json:"observed_at" gorm:"index"`
+	ValidUntil           *time.Time       `json:"valid_until,omitempty"`
+	ManualOverride       bool             `json:"manual_override" gorm:"not null;default:false"`
+	Status               PriceQuoteStatus `json:"status" gorm:"type:varchar(16);not null;default:'valid';index"`
+	LastError            string           `json:"last_error,omitempty" gorm:"type:text"`
+	CreatedAt            time.Time        `json:"created_at"`
+	UpdatedAt            time.Time        `json:"updated_at"`
 }
 
 func (q *SiteModelPriceQuote) RefreshIdentityKey() {

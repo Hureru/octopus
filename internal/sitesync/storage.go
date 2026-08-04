@@ -119,6 +119,10 @@ func persistSyncSnapshot(ctx context.Context, accountID int, snapshot *syncSnaps
 				itemCopy := item
 				existing = &itemCopy
 				snapshot.groups[i].ProjectionDisabled = item.ProjectionDisabled
+				if snapshot.groups[i].Multiplier == nil && item.Multiplier != nil {
+					multiplier := *item.Multiplier
+					snapshot.groups[i].Multiplier = &multiplier
+				}
 			}
 			if result, ok := groupResultMap[snapshot.groups[i].GroupKey]; ok {
 				applyPersistedGroupSyncState(&snapshot.groups[i], existing, result, now)

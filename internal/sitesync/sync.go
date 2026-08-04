@@ -99,7 +99,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		tokens = append(tokens, model.SiteToken{Name: "default", Token: strings.TrimSpace(account.APIKey), GroupKey: model.SiteDefaultGroupKey, GroupName: model.SiteDefaultGroupName, Enabled: true, Source: "fallback", IsDefault: true})
 	}
 	if len(tokens) == 0 {
-		return nil, newMissingGroupKeyError(model.SiteDefaultGroupKey)
+		return nil, newNoAvailableKeyError()
 	}
 
 	groups = mergeSiteGroups(groups, tokens)

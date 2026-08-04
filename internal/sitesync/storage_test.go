@@ -347,6 +347,41 @@ func TestPersistSyncSnapshotPreservesGroupProjectionDisabled(t *testing.T) {
 	}
 }
 
+func TestPersistSyncSnapshotPreservesGroupMultiplier(t *testing.T) {
+	ctx := setupProjectTestDB(t)
+	_, account := createProjectionFixture(t, ctx)
+	multiplier := 0.3
+	group := model.SiteUserGroup{
+		SiteAccountID: account.ID, GroupKey: "vip", Name: "VIP", Multiplier: &multiplier,
+	}
+	if err := dbpkg.GetDB().WithContext(ctx).Create(&group).Error; err != nil {
+		t.Fatalf("create vip group: %v", err)
+	}
+
+	snapshot := &syncSnapshot{
+		accessToken: account.AccessToken,
+		groups:      []model.SiteUserGroup{{GroupKey: "vip", Name: "VIP Renamed"}},
+		tokens: []model.SiteToken{
+			{Name: "vip", Token: "key-vip", GroupKey: "vip", GroupName: "VIP", Enabled: true, Source: "sync"},
+		},
+		status:  model.SiteExecutionStatusSuccess,
+		message: "ok",
+	}
+	if err := persistSyncSnapshot(ctx, account.ID, snapshot); err != nil {
+		t.Fatalf("persistSyncSnapshot: %v", err)
+	}
+
+	var reloaded model.SiteUserGroup
+	if err := dbpkg.GetDB().WithContext(ctx).
+		Where("site_account_id = ? AND group_key = ?", account.ID, "vip").
+		First(&reloaded).Error; err != nil {
+		t.Fatalf("load group: %v", err)
+	}
+	if reloaded.Multiplier == nil || *reloaded.Multiplier != multiplier {
+		t.Fatalf("group multiplier was not preserved: %+v", reloaded)
+	}
+}
+
 func TestPersistSyncSnapshotReplacesOnlyAuthoritativeGroups(t *testing.T) {
 	ctx := setupProjectTestDB(t)
 	_, account := createProjectionFixture(t, ctx)

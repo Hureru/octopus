@@ -15,6 +15,7 @@ import { getModelIcon } from '@/lib/model-icons';
 import type { GroupMode } from '@/api/endpoints/group';
 import type { SelectedMember } from './ItemList';
 import { MemberList } from './ItemList';
+import { sortGroupMembers } from './member-sort';
 import { matchesGroupName, memberKey, normalizeKey, MODE_LABELS } from './utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
 import { HelpCircle } from 'lucide-react';
@@ -378,23 +379,7 @@ export function GroupEditor({
     const handleAutoSort = useCallback(() => {
         setSelectedMembers((prev) => {
             if (prev.length === 0) return prev;
-            const sorted = [...prev].sort((a, b) => {
-                const tierA = a.is_reserve ? 1 : 0;
-                const tierB = b.is_reserve ? 1 : 0;
-                if (tierA !== tierB) return tierA - tierB;
-                const balanceA = a.balance ?? 0;
-                const balanceB = b.balance ?? 0;
-                const multiplierA = a.multiplier ?? Number.POSITIVE_INFINITY;
-                const multiplierB = b.multiplier ?? Number.POSITIVE_INFINITY;
-                if (tierA === 0) {
-                    if (balanceA !== balanceB) return balanceB - balanceA;
-                } else {
-                    if (multiplierA !== multiplierB) return multiplierA - multiplierB;
-                    if (balanceA !== balanceB) return balanceB - balanceA;
-                }
-                return 0;
-            });
-            return sorted;
+            return sortGroupMembers(prev);
         });
     }, []);
 

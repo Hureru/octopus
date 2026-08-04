@@ -623,7 +623,7 @@
       "confirmRemove": "確認移除 {name}",
       "reserveBadge": "中轉",
       "balanceLabel": "餘額",
-      "multiplierLabel": "倍率"
+      "multiplierLabel": "Key 倍率"
     },
     "detail": {
       "actions": {
@@ -1409,7 +1409,8 @@
   },
   "siteSync": {
     "errors": {
-      "missingGroupKey": "分組“{groupKey}”沒有可用的 Key。請先到站點建立這個分組的 Key，再重新同步。"
+      "missingGroupKey": "分組“{groupKey}”沒有可用的 Key。請先到站點建立這個分組的 Key，再重新同步。",
+      "noAvailableKey": "目前帳號沒有可用的 Key。請先在站點為實際分組建立 Key，再重新同步。"
     }
   },
   "errors": {
@@ -1478,6 +1479,7 @@
     },
     "site": {
       "sync": {
+        "no_available_key": "目前帳號沒有可用的 Key。請先在站點為實際分組建立 Key，再重新同步。",
         "missing_group_key": "分組「{groupKey}」沒有可用的 Key。請先到站點建立這個分組的 Key，再重新同步。",
         "group_models_unresolved": "無法確認分組「{groupKey}」的模型，請檢查分組模型配置或 Key 權限。",
         "no_group_result": "站點帳號同步失敗：沒有可用的分組同步結果。",
@@ -1725,6 +1727,12 @@
       "manualCheckinHint": "設定後可在站點總覽中一鍵開啟此頁面進行手動簽到。",
       "tags": "標籤",
       "tagsHint": "可選：為站點加上標籤，方便在列表中分類篩選。",
+      "relayPolicy": "中轉策略",
+      "relayPolicyHint": "開啟後，該站點作為中轉備用層，僅在公益站點不可用時參與故障轉移。",
+      "setRelay": "設為中轉站點",
+      "setPublic": "轉為公益站點",
+      "relayEnabled": "已設為中轉站點",
+      "relayDisabled": "已轉為公益站點",
       "enabled": "啟用站點",
       "disabledHint": "停用後不再投影託管渠道",
       "advancedSettings": "進階設定",
@@ -1806,7 +1814,12 @@
         "failed": "失敗",
         "idle": "未執行",
         "disabled": "停用",
-        "reserve": "中轉"
+        "reserve": "中轉",
+        "failureCredential": "憑證異常",
+        "failureRisk": "CF 風控",
+        "failureTransient": "上游故障",
+        "failureOther": "其他錯誤",
+        "partial": "部分成功"
       },
       "overview": "總覽",
       "currentResult": "目前結果",
@@ -1819,34 +1832,7 @@
       "clearFilters": "清除篩選",
       "openManualCheckin": "開啟手動簽到（{count}）",
       "removeTagFilter": "取消按「{tag}」篩選",
-      "addTagFilter": "按「{tag}」篩選",
-      "batchSummary": {
-        "title": "最近批次失敗明細",
-        "failedCount": "{count} 項失敗",
-        "finishedAt": "完成於",
-        "noFailures": "最近一次同步/簽到批次無失敗",
-        "phaseSync": "同步",
-        "phaseCheckin": "簽到",
-        "siteId": "站點 #{id}",
-        "reasons": {
-          "unauthorized": "憑證失效/未授權",
-          "login_failed": "登入失敗",
-          "access_token_required": "缺少存取權杖",
-          "direct_token_required": "缺少直連權杖",
-          "cloudflare_protection": "觸發 Cloudflare 風控",
-          "missing_group_key": "缺少 key 分組",
-          "upstream_http_error": "上游 HTTP 錯誤",
-          "upstream_decode_failed": "上游回應解析失敗",
-          "upstream_html_response": "上游返回 HTML 頁面",
-          "timeout": "逾時",
-          "unsupported_platform": "不支援的平台",
-          "context_deadline_exceeded": "批次逾時",
-          "database_error": "資料庫錯誤",
-          "internal_error": "內部錯誤",
-          "unknown": "未知原因",
-          "unsupported_checkin": "站點不支援簽到功能"
-        }
-      }
+      "addTagFilter": "按「{tag}」篩選"
     }
   },
   "siteRecovery": {

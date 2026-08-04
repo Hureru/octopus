@@ -813,10 +813,11 @@ func candidateMultiplierByCandidate(ctx context.Context, candidates []model.Rout
 		switch {
 		case best != nil && best.Unit != model.PriceUnitPerRequest && best.PerRequest == 0:
 			switch {
-			case best.ModelMultiplier > 0 && best.GroupMultiplier > 0:
+			case best.ModelMultiplier > 0 && validGroupMultiplier(best.GroupMultiplier):
 				result[candidate.ID] = best.ModelMultiplier * best.GroupMultiplier
-			case globalKnown && globalInput+globalOutput > 0:
-				result[candidate.ID] = (best.Input+best.Output)*best.ExchangeRateToUSD / (globalInput + globalOutput)
+			case globalKnown && globalInput+globalOutput > 0 && validGroupMultiplier(best.GroupMultiplier):
+				result[candidate.ID] = (best.Input + best.Output) * best.GroupMultiplier *
+					best.ExchangeRateToUSD / (globalInput + globalOutput)
 			default:
 				result[candidate.ID] = math.Inf(1)
 			}

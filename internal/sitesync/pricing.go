@@ -37,6 +37,12 @@ func refreshSitePricingQuotes(
 		}
 		return err
 	}
+	if err := op.SiteUserGroupMultipliersUpdate(ctx, account.ID, parseSitePricingGroupMultipliers(payload)); err != nil {
+		if markErr := op.SiteModelPriceQuoteMarkRefreshError(ctx, siteRecord.ID, account.ID, err); markErr != nil {
+			return fmt.Errorf("%w (record refresh error: %v)", err, markErr)
+		}
+		return err
+	}
 	quotes := parseSitePricingQuotes(siteRecord.ID, account.ID, payload)
 	if err := op.SiteModelPriceQuotesUpsert(ctx, quotes); err != nil {
 		if markErr := op.SiteModelPriceQuoteMarkRefreshError(ctx, siteRecord.ID, account.ID, err); markErr != nil {
@@ -55,10 +61,7 @@ func parseSitePricingQuotes(siteID, accountID int, payload map[string]any) []mod
 	if len(items) == 0 {
 		items = normalizeItemSlice(nestedValue(payload, "data", "items"))
 	}
-	groupRatios := parsePricingGroupRatios(payload["group_ratio"])
-	if len(groupRatios) == 0 {
-		groupRatios = parsePricingGroupRatios(nestedValue(payload, "data", "group_ratio"))
-	}
+	groupRatios := parseSitePricingGroupMultipliers(payload)
 	defaultCurrency := firstNonEmptyString(
 		jsonString(payload["currency"]),
 		jsonString(payload["price_currency"]),
@@ -142,8 +145,8 @@ func parseSitePricingQuotes(siteID, accountID int, payload map[string]any) []mod
 
 		for _, group := range groups {
 			groupKey := model.NormalizeSiteGroupKey(group)
-			groupMultiplier := groupRatios[groupKey]
-			if groupMultiplier == 0 {
+			groupMultiplier, groupMultiplierKnown := groupRatios[groupKey]
+			if !groupMultiplierKnown {
 				groupMultiplier = 1
 			}
 			source := model.PriceQuoteSourceSiteWide
@@ -151,17 +154,18 @@ func parseSitePricingQuotes(siteID, accountID int, payload map[string]any) []mod
 				source = model.PriceQuoteSourceSiteExact
 			}
 			quote := model.SiteModelPriceQuote{
-				SiteID:          siteID,
-				SiteAccountID:   intPointer(accountID),
-				GroupKey:        groupKey,
-				ModelName:       strings.TrimSpace(modelName),
-				Source:          source,
-				Unit:            unit,
-				Currency:        currency,
-				ModelMultiplier: modelRatio,
-				GroupMultiplier: groupMultiplier,
-				RawPayload:      string(raw),
-				ObservedAt:      now,
+				SiteID:               siteID,
+				SiteAccountID:        intPointer(accountID),
+				GroupKey:             groupKey,
+				ModelName:            strings.TrimSpace(modelName),
+				Source:               source,
+				Unit:                 unit,
+				Currency:             currency,
+				ModelMultiplier:      modelRatio,
+				GroupMultiplier:      groupMultiplier,
+				GroupMultiplierKnown: groupMultiplierKnown,
+				RawPayload:           string(raw),
+				ObservedAt:           now,
 			}
 			if currency == "USD" {
 				quote.ExchangeRateToUSD = 1
@@ -189,6 +193,17 @@ func parseSitePricingQuotes(siteID, accountID int, payload map[string]any) []mod
 	return result
 }
 
+func parseSitePricingGroupMultipliers(payload map[string]any) map[string]float64 {
+	if payload == nil {
+		return map[string]float64{}
+	}
+	result := parsePricingGroupRatios(payload["group_ratio"])
+	if len(result) == 0 {
+		result = parsePricingGroupRatios(nestedValue(payload, "data", "group_ratio"))
+	}
+	return result
+}
+
 func parsePricingGroupRatios(value any) map[string]float64 {
 	result := make(map[string]float64)
 	raw, ok := value.(map[string]any)
@@ -196,7 +211,9 @@ func parsePricingGroupRatios(value any) map[string]float64 {
 		return result
 	}
 	for key, item := range raw {
-		result[model.NormalizeSiteGroupKey(key)] = jsonFloat(item)
+		if multiplier := parseOptionalSiteGroupMultiplier(item); multiplier != nil {
+			result[model.NormalizeSiteGroupKey(key)] = *multiplier
+		}
 	}
 	return result
 }

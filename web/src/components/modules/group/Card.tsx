@@ -94,24 +94,34 @@ export function GroupCard({ group }: { group: Group }) {
         return map;
     }, [modelChannels]);
 
+    const modelChannelByChannelId = useMemo(() => {
+        const map = new Map<number, typeof modelChannels[number]>();
+        modelChannels.forEach((mc) => {
+            if (!map.has(mc.channel_id)) map.set(mc.channel_id, mc);
+        });
+        return map;
+    }, [modelChannels]);
+
     const displayMembers = useMemo((): SelectedMember[] =>
         [...(group.items || [])]
             .sort((a, b) => a.priority - b.priority)
             .map((item) => {
                 const key = modelChannelKey(item.channel_id, item.model_name);
-                const modelChannel = modelChannelByKey.get(key);
+                const exactModelChannel = modelChannelByKey.get(key);
+                const channelMetadata = exactModelChannel ?? modelChannelByChannelId.get(item.channel_id);
                 return {
-                    ...modelChannel,
+                    ...channelMetadata,
                     id: key,
                     name: item.model_name,
-                    enabled: modelChannel?.enabled ?? true,
+                    enabled: channelMetadata?.enabled ?? true,
                     channel_id: item.channel_id,
-                    channel_name: modelChannel?.channel_name ?? `Channel ${item.channel_id}`,
+                    channel_name: channelMetadata?.channel_name ?? `Channel ${item.channel_id}`,
+                    multiplier: exactModelChannel?.multiplier,
                     item_id: item.id,
                     weight: item.weight,
                 };
             }),
-        [group.items, modelChannelByKey]
+        [group.items, modelChannelByChannelId, modelChannelByKey]
     );
 
     const effectiveDisplayMembers = useMemo(

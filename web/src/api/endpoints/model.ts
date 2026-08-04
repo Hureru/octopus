@@ -37,6 +37,7 @@ export interface LLMChannel {
     is_reserve?: boolean;
     balance?: number | null;
     multiplier?: number | null;
+    group_multiplier?: number | null;
 }
 
 /**

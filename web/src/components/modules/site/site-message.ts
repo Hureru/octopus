@@ -11,6 +11,7 @@ const missingGroupKeyNoUsableKeyPattern = /^site sync requires a key for group "
 const missingGroupKeyFallbackPattern = /^site sync could not resolve models for group "([^"]+)"; create a key for that group on the site and sync again$/i;
 // Legacy compatibility for responses/log messages emitted before coded API errors were introduced.
 const exactSiteMessageKeys: Record<string, string> = {
+    'site sync requires at least one available key; create a key for an existing group on the site and sync again': 'siteSync.errors.noAvailableKey',
     'invalid json format': 'siteImport.errors.invalidJson',
     'site import invalid json': 'siteImport.errors.invalidJson',
     'site import empty payload': 'siteImport.errors.emptyPayload',
@@ -59,6 +60,16 @@ function interpolate(template: string, values?: Record<string, string | number>)
 
 function fallbackTranslate(locale: Locale, key: string, values?: Record<string, string | number>) {
     switch (key) {
+        case 'siteSync.errors.noAvailableKey':
+            switch (locale) {
+                case 'en':
+                    return 'This account has no available key. Create a key for one of its actual groups on the site and sync again.';
+                case 'zh_hant':
+                    return '目前帳號沒有可用的 Key。請先在站點為實際分組建立 Key，再重新同步。';
+                case 'zh_hans':
+                default:
+                    return '当前账号没有可用的 Key。请先在站点为实际分组创建 Key，再重新同步。';
+            }
         case 'siteSync.errors.missingGroupKey':
             switch (locale) {
                 case 'en':

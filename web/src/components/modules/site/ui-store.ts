@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import type { BatchFailureCategory } from './batch-failure';
 import type { CheckinActiveFilterStatus } from './checkin-status';
 
 type SiteUIHandlers = {
@@ -15,12 +16,18 @@ type CheckinFilterStatusesUpdate =
     | CheckinActiveFilterStatus[]
     | ((current: CheckinActiveFilterStatus[]) => CheckinActiveFilterStatus[]);
 
+type BatchFailureFiltersUpdate =
+    | BatchFailureCategory[]
+    | ((current: BatchFailureCategory[]) => BatchFailureCategory[]);
+
 type TagFiltersUpdate = string[] | ((current: string[]) => string[]);
 
 interface SiteUIState {
     handlers: SiteUIHandlers;
     checkinFilterStatuses: CheckinActiveFilterStatus[];
     setCheckinFilterStatuses: (value: CheckinFilterStatusesUpdate) => void;
+    batchFailureFilters: BatchFailureCategory[];
+    setBatchFailureFilters: (value: BatchFailureFiltersUpdate) => void;
     tagFilters: string[];
     setTagFilters: (value: TagFiltersUpdate) => void;
     setHandlers: (handlers: Partial<SiteUIHandlers>) => void;
@@ -49,6 +56,12 @@ export const useSiteUIStore = create<SiteUIState>((set, get) => ({
         set((state) => ({
             checkinFilterStatuses:
                 typeof value === 'function' ? value(state.checkinFilterStatuses) : value,
+        })),
+    batchFailureFilters: [],
+    setBatchFailureFilters: (value) =>
+        set((state) => ({
+            batchFailureFilters:
+                typeof value === 'function' ? value(state.batchFailureFilters) : value,
         })),
     tagFilters: [],
     setTagFilters: (value) =>

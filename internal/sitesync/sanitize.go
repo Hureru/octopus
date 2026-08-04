@@ -85,7 +85,7 @@ func siteBatchReason(err error) SiteBatchReason {
 		return SiteBatchReasonDirectTokenRequired
 	case CodeSiteSyncUnsupportedPlatform:
 		return SiteBatchReasonUnsupportedPlatform
-	case CodeSiteSyncMissingGroupKey:
+	case CodeSiteSyncMissingGroupKey, CodeSiteSyncNoAvailableKey:
 		return SiteBatchReasonMissingGroupKey
 	case CodeSiteUpstreamDecodeFailed:
 		return SiteBatchReasonUpstreamDecodeFailed

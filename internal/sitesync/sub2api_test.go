@@ -21,14 +21,14 @@ func TestSyncSub2APIUsesManagedKeyAndAPIModelEndpoint(t *testing.T) {
 				_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"code":0,"data":{"items":[{"id":11,"name":"managed-key","key":"sub2-user-key","group_id":7,"group_name":"VIP 7","enabled":true}]}}`))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"items":[{"id":11,"name":"managed-key","key":"sub2-user-key","group_id":7,"group_name":"VIP 7","group":{"id":7,"name":"vip","rate_multiplier":0.2},"enabled":true}]}}`))
 		case "/api/v1/groups/available":
 			if r.Header.Get("Authorization") != "Bearer sub2-session-token" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"code":0,"data":{"groups":[{"id":7,"name":"vip"}]}}`))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"groups":[{"id":7,"name":"vip","rate_multiplier":0.2}]}}`))
 		case "/v1/models":
 			http.NotFound(w, r)
 		case "/api/v1/models":
@@ -62,6 +62,9 @@ func TestSyncSub2APIUsesManagedKeyAndAPIModelEndpoint(t *testing.T) {
 	}
 	if len(snapshot.groups) != 1 || snapshot.groups[0].GroupKey != "7" || snapshot.groups[0].Name != "vip" {
 		t.Fatalf("expected parsed group 7/vip, got %+v", snapshot.groups)
+	}
+	if snapshot.groups[0].Multiplier == nil || *snapshot.groups[0].Multiplier != 0.2 {
+		t.Fatalf("expected key group multiplier 0.2, got %+v", snapshot.groups[0])
 	}
 	if len(snapshot.models) != 2 {
 		t.Fatalf("expected models discovered from /api/v1/models, got %+v", snapshot.models)
@@ -111,6 +114,33 @@ func TestFetchSub2APITokensReturnsEnvelopeError(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "expired") {
 		t.Fatalf("expected token expired error, got %v", err)
+	}
+}
+
+func TestBuildSub2APITokensCapturesNestedGroupMultiplier(t *testing.T) {
+	tokens := buildSub2APITokensFromItems([]map[string]any{
+		{
+			"id":       1.0,
+			"name":     "managed-key",
+			"key":      "sub2-user-key",
+			"group_id": 11.0,
+			"group": map[string]any{
+				"id":              11.0,
+				"name":            "GPT",
+				"rate_multiplier": 0.05,
+			},
+		},
+	})
+
+	if len(tokens) != 1 {
+		t.Fatalf("expected one token, got %+v", tokens)
+	}
+	if tokens[0].GroupMultiplier == nil || *tokens[0].GroupMultiplier != 0.05 {
+		t.Fatalf("nested key group multiplier was not captured: %+v", tokens[0])
+	}
+	groups := mergeSiteGroups(nil, tokens)
+	if len(groups) != 1 || groups[0].Multiplier == nil || *groups[0].Multiplier != 0.05 {
+		t.Fatalf("key multiplier was not projected to its group: %+v", groups)
 	}
 }
 

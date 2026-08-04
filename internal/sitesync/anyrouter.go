@@ -71,7 +71,7 @@ func syncAnyRouter(ctx context.Context, siteRecord *model.Site, account *model.S
 		})
 	}
 	if len(tokens) == 0 {
-		return nil, newMissingGroupKeyError(model.SiteDefaultGroupKey)
+		return nil, newNoAvailableKeyError()
 	}
 
 	groups, err := fetchAnyRouterManagementGroups(ctx, siteRecord, account, accessToken, userID)

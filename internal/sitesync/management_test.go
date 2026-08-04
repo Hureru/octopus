@@ -397,7 +397,7 @@ func TestSyncManagementPlatformPrefersStableGroupErrorOverHTMLSummary(t *testing
 	}
 }
 
-func TestSyncManagementPlatformReturnsStableMissingGroupKeyError(t *testing.T) {
+func TestSyncManagementPlatformReturnsNoAvailableKeyError(t *testing.T) {
 	platformUserID := 7788
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -428,14 +428,17 @@ func TestSyncManagementPlatformReturnsStableMissingGroupKeyError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected syncManagementPlatform to fail when no usable key exists")
 	}
-	if !strings.Contains(err.Error(), `site sync requires a key for group "default"; create a key for that group on the site and sync again`) {
-		t.Fatalf("expected stable missing-key error, got %v", err)
+	if !strings.Contains(err.Error(), `site sync requires at least one available key; create a key for an existing group on the site and sync again`) {
+		t.Fatalf("expected stable no-key error, got %v", err)
 	}
-	if got := apperror.Code(err); got != CodeSiteSyncMissingGroupKey {
-		t.Fatalf("expected error code %q, got %q", CodeSiteSyncMissingGroupKey, got)
+	if strings.Contains(err.Error(), model.SiteDefaultGroupKey) {
+		t.Fatalf("expected error not to invent a default group, got %v", err)
 	}
-	if got := apperror.Params(err)["groupKey"]; got != model.SiteDefaultGroupKey {
-		t.Fatalf("expected groupKey param %q, got %#v", model.SiteDefaultGroupKey, got)
+	if got := apperror.Code(err); got != CodeSiteSyncNoAvailableKey {
+		t.Fatalf("expected error code %q, got %q", CodeSiteSyncNoAvailableKey, got)
+	}
+	if _, ok := apperror.Params(err)["groupKey"]; ok {
+		t.Fatalf("expected no synthetic groupKey param, got %#v", apperror.Params(err))
 	}
 }
 

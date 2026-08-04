@@ -494,7 +494,13 @@ func parseGroupCandidate(candidate any) []model.SiteUserGroup {
 			} else if item, ok := raw.(map[string]any); ok {
 				name = firstNonEmptyString(jsonString(item["name"]), jsonString(item["group_name"]), jsonString(item["groupName"]), jsonString(item["title"]), jsonString(item["label"]), key)
 			}
-			items = append(items, model.SiteUserGroup{GroupKey: key, Name: name})
+			group := model.SiteUserGroup{GroupKey: key, Name: name}
+			if item, ok := raw.(map[string]any); ok {
+				group.Multiplier = parseOptionalSiteGroupMultiplier(
+					item["rate_multiplier"], item["group_multiplier"], item["multiplier"], item["ratio"], item["rate"],
+				)
+			}
+			items = append(items, group)
 		}
 	}
 	return items
@@ -524,7 +530,13 @@ func parseGroupObject(item map[string]any) (model.SiteUserGroup, bool) {
 	if strings.TrimSpace(groupKey) == "" {
 		return model.SiteUserGroup{}, false
 	}
-	return model.SiteUserGroup{GroupKey: strings.TrimSpace(groupKey), Name: strings.TrimSpace(groupName)}, true
+	return model.SiteUserGroup{
+		GroupKey: strings.TrimSpace(groupKey),
+		Name:     strings.TrimSpace(groupName),
+		Multiplier: parseOptionalSiteGroupMultiplier(
+			item["rate_multiplier"], item["group_multiplier"], item["multiplier"], item["ratio"], item["rate"],
+		),
+	}, true
 }
 
 func isIgnorableGroupMapKey(key string) bool {

@@ -7,6 +7,7 @@ import {
 export type CheckinFilterStatus =
   | "all"
   | "success"
+  | "partial"
   | "failed"
   | "idle"
   | "disabled"
@@ -21,6 +22,7 @@ export type DerivedCheckinStatus = Exclude<
 export type CheckinSummary = {
   total: number;
   success: number;
+  partial: number;
   failed: number;
   idle: number;
   disabled: number;
@@ -35,6 +37,7 @@ export function createEmptyCheckinSummary(): CheckinSummary {
   return {
     total: 0,
     success: 0,
+    partial: 0,
     failed: 0,
     idle: 0,
     disabled: 0,
@@ -85,12 +88,22 @@ export function deriveCheckinStatus(
   site: Pick<Site, "enabled" | "platform">,
   account: Pick<
     SiteAccount,
-    "enabled" | "auto_checkin" | "last_checkin_at" | "last_checkin_status"
+    | "enabled"
+    | "auto_checkin"
+    | "last_checkin_at"
+    | "last_checkin_status"
+    | "last_sync_status"
   >,
   now = new Date(),
 ): DerivedCheckinStatus | null {
   if (accountIsDisabled(site, account)) {
     return "disabled";
+  }
+
+  // 同步部分成功是正常状态（如部分分组缺 Key/模型），独立呈现，
+  // 不并入失败/未执行。仅按同步维度判断，签到维度保持不变。
+  if (normalizeExecutionStatus(account.last_sync_status) === "partial") {
+    return "partial";
   }
 
   if (!accountHasCheckinEnabled(account, site.platform)) {
@@ -116,7 +129,11 @@ export function accountMatchesCheckinFilters(
   site: Pick<Site, "enabled" | "platform" | "is_reserve">,
   account: Pick<
     SiteAccount,
-    "enabled" | "auto_checkin" | "last_checkin_at" | "last_checkin_status"
+    | "enabled"
+    | "auto_checkin"
+    | "last_checkin_at"
+    | "last_checkin_status"
+    | "last_sync_status"
   >,
   filterStatuses: CheckinActiveFilterStatus[],
   now = new Date(),
