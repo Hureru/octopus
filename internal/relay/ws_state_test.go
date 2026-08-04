@@ -102,21 +102,25 @@ func TestClassifyWSPublicErrorRecognizesNoAvailableAccount(t *testing.T) {
 
 func TestWSRelaySetupPublicErrorUsesTypedCauses(t *testing.T) {
 	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
-		wantCode   string
+		name        string
+		err         error
+		wantStatus  int
+		wantCode    string
+		wantMessage string
 	}{
 		{name: "model not found", err: errWSModelNotFound, wantStatus: http.StatusNotFound, wantCode: "model_not_found"},
 		{name: "model disabled", err: errWSModelDisabled, wantStatus: http.StatusServiceUnavailable, wantCode: "no_available_channel"},
 		{name: "no channel", err: errWSNoAvailableChannel, wantStatus: http.StatusServiceUnavailable, wantCode: "no_available_channel"},
-		{name: "route planning", err: fmt.Errorf("detail: %w", errWSRoutePlanning), wantStatus: http.StatusInternalServerError, wantCode: "route_planning_failed"},
+		{name: "route planning", err: fmt.Errorf("detail: %w", errWSRoutePlanning), wantStatus: http.StatusInternalServerError, wantCode: "route_planning_failed", wantMessage: "route planning failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := wsRelaySetupPublicError(tt.err)
 			if got.Status != tt.wantStatus || got.Code != tt.wantCode {
 				t.Fatalf("public error = %+v, want status=%d code=%q", got, tt.wantStatus, tt.wantCode)
+			}
+			if tt.wantMessage != "" && got.Message != tt.wantMessage {
+				t.Fatalf("public error message = %q, want %q", got.Message, tt.wantMessage)
 			}
 		})
 	}
