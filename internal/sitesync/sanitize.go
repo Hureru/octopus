@@ -109,7 +109,10 @@ func siteBatchReason(err error) SiteBatchReason {
 func classifySiteBatchMessage(msg string) SiteBatchReason {
 	lowered := strings.ToLower(msg)
 	switch {
-	case strings.Contains(lowered, "cloudflare") || strings.Contains(lowered, "just a moment") || strings.Contains(lowered, "turnstile"):
+	case strings.Contains(lowered, "cloudflare") ||
+		strings.Contains(lowered, "just a moment") ||
+		strings.Contains(lowered, "attention required") ||
+		strings.Contains(lowered, "turnstile"):
 		return SiteBatchReasonCloudflareProtection
 	case strings.Contains(lowered, "签到功能未启用") ||
 		(strings.Contains(lowered, "checkin") && strings.Contains(lowered, "enabled")) ||
@@ -125,11 +128,24 @@ func classifySiteBatchMessage(msg string) SiteBatchReason {
 		return SiteBatchReasonContextCanceled
 	case strings.Contains(lowered, "timeout") || strings.Contains(lowered, "timed out"):
 		return SiteBatchReasonTimeout
-	case isLikelyHTML(lowered):
-		return SiteBatchReasonUpstreamHTMLResponse
-	default:
-		return SiteBatchReasonUnknown
 	}
+
+	statusCode := statusCodeFromSiteMessage(msg)
+	switch statusCode {
+	case 401, 403:
+		return SiteBatchReasonUnauthorized
+	case 408:
+		return SiteBatchReasonTimeout
+	case 429:
+		return SiteBatchReasonUpstreamHTTPError
+	}
+	if statusCode >= 500 && statusCode <= 599 {
+		return SiteBatchReasonUpstreamHTTPError
+	}
+	if isLikelyHTML(lowered) {
+		return SiteBatchReasonUpstreamHTMLResponse
+	}
+	return SiteBatchReasonUnknown
 }
 
 func siteErrorStatusCode(err error) int {
@@ -149,13 +165,19 @@ func siteErrorStatusCode(err error) int {
 			}
 		}
 	}
-	if match := statusCodePattern.FindStringSubmatch(apperror.Message(err)); len(match) >= 2 {
-		var parsed int
-		if _, scanErr := fmt.Sscanf(match[1], "%d", &parsed); scanErr == nil {
-			return parsed
-		}
+	return statusCodeFromSiteMessage(apperror.Message(err))
+}
+
+func statusCodeFromSiteMessage(message string) int {
+	match := statusCodePattern.FindStringSubmatch(message)
+	if len(match) < 2 {
+		return 0
 	}
-	return 0
+	var parsed int
+	if _, err := fmt.Sscanf(match[1], "%d", &parsed); err != nil {
+		return 0
+	}
+	return parsed
 }
 
 func isLikelyHTML(text string) bool {

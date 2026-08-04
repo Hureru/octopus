@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLogs, useLogSiteActionTargets, type LogKeywordMode, type LogKeywordScope } from '@/api/endpoints/log';
 import type { UsageAnalyticsFilters, UsageBreakdownItem } from '@/api/endpoints/log-analytics';
@@ -15,7 +15,7 @@ import { useToolbarViewOptionsStore } from '@/components/modules/toolbar/view-op
 import { useLogUIStore } from './ui-store';
 import { useLogAnalyticsStore } from './analytics-store';
 import { UsageAnalytics } from './Analytics';
-import { LogControls } from './Controls';
+import { LogControls, type LogViewTabIds } from './Controls';
 
 type LogFilters = {
     keyword: string;
@@ -230,6 +230,7 @@ function LogDetailList() {
 
 export function Log() {
     const queryClient = useQueryClient();
+    const tabsId = useId();
     const view = useLogAnalyticsStore((state) => state.view);
     const scope = useLogAnalyticsStore((state) => state.scope);
     const dimension = useLogAnalyticsStore((state) => state.dimension);
@@ -254,6 +255,16 @@ export function Log() {
     const refreshRequestId = useLogUIStore((state) => state.refreshRequestId);
     const setRefreshing = useLogUIStore((state) => state.setRefreshing);
     const lastAnalyticsRefreshRef = useRef(refreshRequestId);
+    const tabIds = useMemo<LogViewTabIds>(() => ({
+        analytics: {
+            trigger: `${tabsId}-tab-analytics`,
+            panel: `${tabsId}-panel-analytics`,
+        },
+        detail: {
+            trigger: `${tabsId}-tab-detail`,
+            panel: `${tabsId}-panel-detail`,
+        },
+    }), [tabsId]);
 
     useEffect(() => {
         if (logDateRange.start || logDateRange.end) return;
@@ -335,12 +346,29 @@ export function Log() {
 
     return (
         <div className="flex h-full min-h-0 flex-col gap-3">
-            <LogControls />
-            {view === 'analytics' ? (
-                <UsageAnalytics filters={analyticsFilters} dimension={dimension} onDrilldown={handleDrilldown} />
-            ) : (
-                <LogDetailList />
-            )}
+            <LogControls tabIds={tabIds} />
+            <div
+                id={tabIds.analytics.panel}
+                role="tabpanel"
+                aria-labelledby={tabIds.analytics.trigger}
+                hidden={view !== 'analytics'}
+                tabIndex={view === 'analytics' ? 0 : -1}
+                className="min-h-0 flex-1"
+            >
+                {view === 'analytics' ? (
+                    <UsageAnalytics filters={analyticsFilters} dimension={dimension} onDrilldown={handleDrilldown} />
+                ) : null}
+            </div>
+            <div
+                id={tabIds.detail.panel}
+                role="tabpanel"
+                aria-labelledby={tabIds.detail.trigger}
+                hidden={view !== 'detail'}
+                tabIndex={view === 'detail' ? 0 : -1}
+                className="min-h-0 flex-1"
+            >
+                {view === 'detail' ? <LogDetailList /> : null}
+            </div>
         </div>
     );
 }

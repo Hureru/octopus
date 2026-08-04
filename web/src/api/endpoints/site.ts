@@ -3,6 +3,7 @@ import { apiClient, API_BASE_URL } from "../client";
 import { logger } from "@/lib/logger";
 import { useAuthStore } from "./user";
 import type { ProxyMode } from "./proxy-pool";
+import { SITE_INVALIDATION_QUERY_KEYS } from "./site-query-keys";
 
 export enum SitePlatform {
   NewAPI = "new-api",
@@ -230,6 +231,7 @@ export type SiteBatchFailureGroup = {
   failed: number;
   skipped: number;
   warnings: number;
+  account_ids?: number[];
 };
 
 export type SiteBatchSample = {
@@ -356,12 +358,9 @@ function normalizeSiteServerList(data: SiteServer[]): Site[] {
 }
 
 function invalidateSiteQueries(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: ["sites", "list"] });
-  queryClient.invalidateQueries({ queryKey: ["sites", "archived"] });
-  queryClient.invalidateQueries({ queryKey: ["site-channel", "list"] });
-  queryClient.invalidateQueries({ queryKey: ["channels", "list"] });
-  queryClient.invalidateQueries({ queryKey: ["models"] });
-  queryClient.invalidateQueries({ queryKey: ["proxy-pool"] });
+  for (const queryKey of SITE_INVALIDATION_QUERY_KEYS) {
+    queryClient.invalidateQueries({ queryKey });
+  }
 }
 
 function getAuthHeader() {

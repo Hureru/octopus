@@ -6,6 +6,7 @@ import { Plus, X, XIcon } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
+    DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -364,9 +365,9 @@ export function SiteEditDialog({ open, onOpenChange, site, onCreated, allTags }:
             >
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
-                        <h2 className="text-2xl font-bold text-card-foreground truncate">
+                        <DialogTitle className="text-2xl font-bold text-card-foreground truncate">
                             {site ? tForm('editTitle') : tForm('createTitle')}
-                        </h2>
+                        </DialogTitle>
                     </div>
                     <button
                         type="button"

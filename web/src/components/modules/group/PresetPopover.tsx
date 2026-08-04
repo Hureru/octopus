@@ -154,6 +154,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                 <PopoverTrigger asChild>
                     <button
                         type="button"
+                        aria-label={t('preset.title')}
                         className="p-1.5 rounded-lg transition-colors hover:bg-muted text-muted-foreground hover:text-foreground"
                     >
                         <Tooltip side="top" sideOffset={10} align="center">
@@ -214,6 +215,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                 <Button
                                     type="button"
                                     size="sm"
+                                    aria-label={t('preset.save')}
                                     onClick={handleCreateSubmit}
                                     disabled={!nameDraft.trim() || createPreset.isPending}
                                     className="h-8 rounded-lg shrink-0"
@@ -222,6 +224,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                 </Button>
                                 <button
                                     type="button"
+                                    aria-label={t('preset.close')}
                                     onClick={resetPending}
                                     className="p-1 rounded-lg hover:bg-muted text-muted-foreground shrink-0"
                                 >
@@ -264,6 +267,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                             </button>
                                             <button
                                                 type="button"
+                                                aria-label={t('preset.close')}
                                                 onClick={resetPending}
                                                 className="p-1 rounded-md hover:bg-muted text-muted-foreground shrink-0"
                                             >
@@ -327,6 +331,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                                 <TooltipTrigger asChild>
                                                     <button
                                                         type="button"
+                                                        aria-label={t('preset.clone')}
                                                         onClick={() => handleClone(preset)}
                                                         disabled={clonePreset.isPending}
                                                         className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50"
@@ -341,6 +346,7 @@ export function PresetPopover({ group }: PresetPopoverProps) {
                                                     <TooltipTrigger asChild>
                                                         <button
                                                             type="button"
+                                                            aria-label={t('preset.delete')}
                                                             onClick={() => setPending({ kind: 'delete', presetID: preset.id })}
                                                             className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                                                         >

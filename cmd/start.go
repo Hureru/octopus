@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"context"
-	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/conf"
@@ -81,7 +82,10 @@ func runService(cmd *cobra.Command, onReady func(addr string)) {
 		os.Exit(1)
 	}
 	if onReady != nil {
-		onReady(fmt.Sprintf("%s:%d", conf.AppConfig.Server.Host, conf.AppConfig.Server.Port))
+		onReady(net.JoinHostPort(
+			conf.AppConfig.Server.Host,
+			strconv.Itoa(conf.AppConfig.Server.Port),
+		))
 	}
 	shutdown.Register(server.Close)
 	shutdown.Register(func() error {

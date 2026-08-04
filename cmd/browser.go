@@ -1,9 +1,11 @@
 package cmd
 
 import (
-	"net/url"
+	"net"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 // openBrowser 在本地默认浏览器打开管理面板地址。
@@ -24,43 +26,24 @@ func openBrowser(addr string) {
 	}
 }
 
-// normalizeAddrPort 把 "127.0.0.1:8080" / "[::1]:8080" 归一为 "[:8080]" 形式，
-// 供拼接 URL 使用。
+// normalizeAddrPort extracts the port from a listen address for a loopback URL.
 func normalizeAddrPort(addr string) string {
-	if len(addr) > 0 && addr[0] == '[' {
-		if end := indexByte(addr, ']'); end >= 0 {
-			return addr[end:]
+	addr = strings.TrimSpace(addr)
+	_, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		return ":" + port
+	}
+	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
+		return ":" + addr
+	}
+	if separator := strings.LastIndexByte(addr, ':'); separator >= 0 {
+		port := addr[separator+1:]
+		if _, err := strconv.ParseUint(port, 10, 16); err == nil {
+			return ":" + port
 		}
 	}
-	if colon := lastIndexByte(addr, ':'); colon >= 0 {
-		return addr[colon:]
+	if strings.HasPrefix(addr, ":") {
+		return addr
 	}
 	return addr
-}
-
-// 内联小工具避免引入额外依赖
-func indexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
-}
-
-func lastIndexByte(s string, b byte) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
-}
-
-// ensureURL 校验并修正 URL（预留，便于后续扩展）
-func ensureURL(target string) string {
-	if parsed, err := url.Parse(target); err == nil && parsed.Scheme != "" {
-		return parsed.String()
-	}
-	return target
 }

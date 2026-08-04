@@ -70,7 +70,7 @@ import { cn } from "@/lib/utils";
 import { useSettingStore } from "@/stores/setting";
 import { CheckinPanel } from "./CheckinPanel";
 import {
-  buildBatchFailureSiteIds,
+  buildBatchFailureAccountIds,
   type BatchFailureCategory,
 } from "./batch-failure";
 import { SiteEditDialog } from "./SiteEditDialog";
@@ -804,18 +804,18 @@ export function Site() {
     return Array.from(tags);
   }, [sites, selectedSiteIds]);
 
-  const batchFailureSiteIds = useMemo(
-    () => buildBatchFailureSiteIds([syncBatchSummary, checkinBatchSummary]),
+  const batchFailureAccountIds = useMemo(
+    () => buildBatchFailureAccountIds([syncBatchSummary, checkinBatchSummary]),
     [syncBatchSummary, checkinBatchSummary],
   );
   const batchFailureFilterCounts = useMemo(
     () => ({
-      credential: batchFailureSiteIds.credential.size,
-      risk: batchFailureSiteIds.risk.size,
-      transient: batchFailureSiteIds.transient.size,
-      other: batchFailureSiteIds.other.size,
+      credential: batchFailureAccountIds.credential.size,
+      risk: batchFailureAccountIds.risk.size,
+      transient: batchFailureAccountIds.transient.size,
+      other: batchFailureAccountIds.other.size,
     }),
-    [batchFailureSiteIds],
+    [batchFailureAccountIds],
   );
 
   const visibleSites = useMemo<VisibleSite[]>(() => {
@@ -830,16 +830,6 @@ export function Site() {
         tagFilters.length > 0 &&
         !isForcedTarget &&
         !site.tags.some((tag) => tagFilters.includes(tag))
-      ) {
-        return [];
-      }
-
-      if (
-        hasBatchFailureFilters &&
-        !isForcedTarget &&
-        !batchFailureFilters.some((category) =>
-          batchFailureSiteIds[category].has(site.id),
-        )
       ) {
         return [];
       }
@@ -869,6 +859,14 @@ export function Site() {
         );
       }
 
+      if (hasBatchFailureFilters && !isForcedTarget) {
+        visibleAccounts = visibleAccounts.filter((account) =>
+          batchFailureFilters.some((category) =>
+            batchFailureAccountIds[category].has(account.id),
+          ),
+        );
+      }
+
       if (hasSearch && !siteMatchesQuery && !isForcedTarget) {
         visibleAccounts = visibleAccounts.filter(accountMatchesQuery);
         forceExpanded = visibleAccounts.length > 0 || forceExpanded;
@@ -881,7 +879,7 @@ export function Site() {
       const visible =
         isForcedTarget
           ? true
-          : hasCheckinFilters
+          : hasCheckinFilters || hasBatchFailureFilters
             ? visibleAccounts.length > 0
             : !hasSearch || siteMatchesQuery || matchedAccountsBySearch.length > 0;
 
@@ -927,7 +925,7 @@ export function Site() {
     normalizedQuery,
     checkinFilterStatuses,
     batchFailureFilters,
-    batchFailureSiteIds,
+    batchFailureAccountIds,
     tagFilters,
     forcedSiteId,
     siteSortField,
@@ -1436,15 +1434,7 @@ export function Site() {
             <div className="flex items-start gap-3">
               <div
                 className="min-w-0 flex-1 cursor-pointer text-left"
-                role="button"
-                tabIndex={0}
                 onClick={() => toggleSiteExpanded(site.id, forceExpanded)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    toggleSiteExpanded(site.id, forceExpanded);
-                  }
-                }}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-lg font-semibold">{site.name}</h2>
@@ -1463,6 +1453,24 @@ export function Site() {
                   >
                     {summary.healthLabel}
                   </Badge>
+                  <button
+                    type="button"
+                    className="rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50"
+                    aria-label={`${isExpanded ? "收起" : "展开"}站点 ${site.name}`}
+                    aria-expanded={isExpanded}
+                    disabled={forceExpanded}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleSiteExpanded(site.id, forceExpanded);
+                    }}
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "size-4 transition-transform",
+                        isExpanded && "rotate-180",
+                      )}
+                    />
+                  </button>
                 </div>
 
                 <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
@@ -1559,6 +1567,7 @@ export function Site() {
                           <Switch
                             checked={site.accounts[0].auto_sync}
                             disabled={updateSiteAccount.isPending}
+                            aria-label={`${site.accounts[0].name} 自动同步`}
                             onCheckedChange={() =>
                               handleToggleAutoSync(site.accounts[0])
                             }
@@ -1835,6 +1844,7 @@ export function Site() {
                                           <Switch
                                             checked={account.enabled}
                                             disabled={enableSiteAccount.isPending}
+                                            aria-label={`${account.name} 启用账号`}
                                             onCheckedChange={() =>
                                               handleToggleAccount(account)
                                             }
@@ -1852,6 +1862,7 @@ export function Site() {
                                           <Switch
                                             checked={account.auto_sync}
                                             disabled={updateSiteAccount.isPending}
+                                            aria-label={`${account.name} 自动同步`}
                                             onCheckedChange={() =>
                                               handleToggleAutoSync(account)
                                             }

@@ -31,7 +31,9 @@ const dimensions: UsageDimension[] = [
     'canonical_model',
 ];
 
-export function LogControls() {
+export type LogViewTabIds = Record<LogView, { trigger: string; panel: string }>;
+
+export function LogControls({ tabIds }: { tabIds: LogViewTabIds }) {
     const t = useTranslations('log.analytics');
     const { data: sites } = useSiteList();
     const view = useLogAnalyticsStore((state) => state.view);
@@ -117,8 +119,20 @@ export function LogControls() {
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <Tabs value={view} onValueChange={(value) => setView(value as LogView)}>
                     <TabsList>
-                        <TabsTrigger value="analytics">{t('view.analytics')}</TabsTrigger>
-                        <TabsTrigger value="detail">{t('view.detail')}</TabsTrigger>
+                        <TabsTrigger
+                            value="analytics"
+                            id={tabIds.analytics.trigger}
+                            panelId={tabIds.analytics.panel}
+                        >
+                            {t('view.analytics')}
+                        </TabsTrigger>
+                        <TabsTrigger
+                            value="detail"
+                            id={tabIds.detail.trigger}
+                            panelId={tabIds.detail.panel}
+                        >
+                            {t('view.detail')}
+                        </TabsTrigger>
                     </TabsList>
                 </Tabs>
                 <div className="flex flex-wrap items-center gap-1">

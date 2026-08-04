@@ -432,6 +432,8 @@
       "forceRefresh": "Force Refresh",
       "newVersionAvailable": "New version available",
       "newVersionAvailableHint": "Please backup your data first, then update the system",
+      "manualUpdateHint": "This distribution cannot update itself safely. Download the latest installer or binary from this repository.",
+      "downloadRelease": "Download Release",
       "updateNow": "Update Now",
       "updating": "Updating...",
       "updateSuccess": "Update successful, service will restart shortly",

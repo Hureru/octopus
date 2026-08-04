@@ -234,9 +234,8 @@ func TestSiteUserGroupMultipliersUpdatePersistsZero(t *testing.T) {
 	}
 }
 
-func TestChannelLLMListFallsBackToSiblingQuoteGroupMultiplier(t *testing.T) {
+func TestChannelLLMListDoesNotInferUnknownGroupMultiplierFromQuote(t *testing.T) {
 	ctx := setupCatalogProvisionTest(t)
-	const expectedMultiplier = 0.0
 	site := model.Site{
 		Name: "quote-group-multiplier-site", Platform: model.SitePlatformNewAPI,
 		BaseURL: "https://quote-group-multiplier.example.com", Enabled: true,
@@ -264,7 +263,7 @@ func TestChannelLLMListFallsBackToSiblingQuoteGroupMultiplier(t *testing.T) {
 		SiteID: site.ID, SiteAccountID: &account.ID, GroupKey: "vip",
 		ModelName: "quoted-model", Source: model.PriceQuoteSourceSiteExact,
 		Unit: model.PriceUnitPerMillionTokens, Currency: "USD", Input: 1, Output: 2,
-		GroupMultiplier: expectedMultiplier, GroupMultiplierKnown: true,
+		GroupMultiplier: 0, GroupMultiplierKnown: false,
 		ExchangeRateToUSD: 1, ObservedAt: time.Now(),
 	}
 	if err := SiteModelPriceQuotesUpsert(ctx, []model.SiteModelPriceQuote{quote}); err != nil {
@@ -281,8 +280,8 @@ func TestChannelLLMListFallsBackToSiblingQuoteGroupMultiplier(t *testing.T) {
 			continue
 		}
 		seen++
-		if item.GroupMultiplier == nil || *item.GroupMultiplier != expectedMultiplier {
-			t.Fatalf("sibling quote multiplier missing from model %q: %+v", item.Name, item)
+		if item.GroupMultiplier != nil {
+			t.Fatalf("unknown quote multiplier was exposed as %gx for model %q: %+v", *item.GroupMultiplier, item.Name, item)
 		}
 	}
 	if seen != 2 {

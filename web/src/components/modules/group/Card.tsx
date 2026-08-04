@@ -404,6 +404,7 @@ export function GroupCard({ group }: { group: Group }) {
                             <button
                                 type="button"
                                 disabled={togglePin.isPending || !group.id}
+                                aria-label={group.pinned ? t('pin.unpin') : t('pin.pin')}
                                 onClick={() => {
                                     if (!group.id || togglePin.isPending) return;
                                     togglePin.mutate(
@@ -430,6 +431,7 @@ export function GroupCard({ group }: { group: Group }) {
                             <motion.button
                                 layoutId={`delete-btn-group-${group.id}`}
                                 type="button"
+                                aria-label={t('detail.actions.delete')}
                                 onClick={() => setConfirmDelete(true)}
                                 className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                             >
@@ -450,6 +452,7 @@ export function GroupCard({ group }: { group: Group }) {
                     >
                         <button
                             type="button"
+                            aria-label={t('detail.actions.cancel')}
                             onClick={() => setConfirmDelete(false)}
                             className="flex h-7 w-7 items-center justify-center rounded-lg bg-destructive-foreground/20 text-destructive-foreground transition-all hover:bg-destructive-foreground/30 active:scale-95"
                         >

@@ -15,6 +15,7 @@ import { AnimatePresence, motion, type Transition } from 'motion/react';
 import {
     Dialog,
     DialogContent,
+    DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -426,6 +427,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
         return (
             <Dialog open={open} onOpenChange={onOpenChange}>
                 <DialogContent className="max-w-md rounded-3xl">
+                    <DialogTitle className="sr-only">{tForm('editTitle')}</DialogTitle>
                     <p className="text-sm text-muted-foreground">{tForm('contextMissing')}</p>
                 </DialogContent>
             </Dialog>
@@ -440,9 +442,9 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
             >
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
-                        <h2 className="text-2xl font-bold text-card-foreground truncate">
+                        <DialogTitle className="text-2xl font-bold text-card-foreground truncate">
                             {account ? tForm('editTitle') : tForm('createTitle')}
-                        </h2>
+                        </DialogTitle>
                     </div>
                     <button
                         type="button"

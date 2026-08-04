@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -269,8 +270,8 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 
 	proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, account)
 	var (
-		firstErr error
-		models   []string
+		bestErr error
+		models  []string
 	)
 
 	for _, baseURL := range buildModelFetchBaseURLs(siteRecord) {
@@ -279,26 +280,23 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		if err == nil && len(fetched) > 0 {
 			return normalizeModelNames(fetched), nil
 		}
-		if err != nil && firstErr == nil {
-			firstErr = err
+		if err != nil {
+			bestErr = preferredModelFetchError(bestErr, err)
 		}
 		if len(fetched) > 0 {
 			models = fetched
 		}
 	}
 	if siteRecord.Platform != model.SitePlatformOneHub && siteRecord.Platform != model.SitePlatformDoneHub {
-		if firstErr != nil {
-			return nil, firstErr
+		if bestErr != nil {
+			return nil, bestErr
 		}
 		return normalizeModelNames(models), nil
 	}
 
 	payload, fallbackErr := requestJSON(ctx, siteRecord, "GET", buildSiteURL(siteRecord.BaseURL, "/api/available_model"), nil, map[string]string{"Authorization": "Bearer " + tokenValue}, account)
 	if fallbackErr != nil {
-		if firstErr != nil {
-			return nil, firstErr
-		}
-		return nil, fallbackErr
+		return nil, preferredModelFetchError(bestErr, fallbackErr)
 	}
 
 	modelSet := make(map[string]struct{})
@@ -311,8 +309,8 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		}
 	}
 	if len(modelSet) == 0 {
-		if firstErr != nil {
-			return nil, firstErr
+		if bestErr != nil {
+			return nil, bestErr
 		}
 		return normalizeModelNames(models), nil
 	}
@@ -321,6 +319,33 @@ func fetchModelsForSiteToken(ctx context.Context, siteRecord *model.Site, accoun
 		names = append(names, name)
 	}
 	return normalizeModelNames(names), nil
+}
+
+func preferredModelFetchError(current, candidate error) error {
+	if current == nil || modelFetchErrorPriority(candidate) > modelFetchErrorPriority(current) {
+		return candidate
+	}
+	return current
+}
+
+func modelFetchErrorPriority(err error) int {
+	if err == nil {
+		return 0
+	}
+	switch classifySiteBatchMessage(err.Error()) {
+	case SiteBatchReasonCloudflareProtection:
+		return 5
+	case SiteBatchReasonUnauthorized:
+		return 4
+	case SiteBatchReasonTimeout, SiteBatchReasonContextCanceled, SiteBatchReasonContextDeadlineExceeded,
+		SiteBatchReasonUpstreamHTTPError, SiteBatchReasonUpstreamDecodeFailed, SiteBatchReasonUpstreamHTMLResponse:
+		return 3
+	default:
+		if statusCodeFromSiteMessage(err.Error()) == http.StatusNotFound {
+			return 1
+		}
+		return 2
+	}
 }
 
 func fetchManagementModels(

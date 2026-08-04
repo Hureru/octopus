@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import { Plus, X, XIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -154,9 +154,9 @@ export function BatchEditDialog({
             >
                 <header className="mb-4 flex items-start justify-between gap-4 shrink-0">
                     <div className="min-w-0 flex-1">
-                        <h2 className="text-2xl font-bold text-card-foreground truncate">
+                        <DialogTitle className="text-2xl font-bold text-card-foreground truncate">
                             {t('title')}
-                        </h2>
+                        </DialogTitle>
                         <p className="mt-1 text-sm text-muted-foreground">
                             {t('description', { count: selectedSiteIds.length })}
                         </p>

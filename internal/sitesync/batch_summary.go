@@ -82,13 +82,14 @@ type SiteBatchSummary struct {
 }
 
 type SiteBatchOutcomeGroup struct {
-	SiteID   int                `json:"site_id"`
-	Platform model.SitePlatform `json:"platform"`
-	Reason   SiteBatchReason    `json:"reason"`
-	Count    int                `json:"count"`
-	Failed   int                `json:"failed"`
-	Skipped  int                `json:"skipped"`
-	Warnings int                `json:"warnings"`
+	SiteID     int                `json:"site_id"`
+	Platform   model.SitePlatform `json:"platform"`
+	Reason     SiteBatchReason    `json:"reason"`
+	Count      int                `json:"count"`
+	Failed     int                `json:"failed"`
+	Skipped    int                `json:"skipped"`
+	Warnings   int                `json:"warnings"`
+	AccountIDs []int              `json:"account_ids,omitempty"`
 }
 
 type SiteBatchFailureSample struct {
@@ -171,7 +172,8 @@ func (s *SiteBatchSummary) markCanceled(ctxErr error) {
 }
 
 func (s *SiteBatchSummary) addFailure(siteID int, platform model.SitePlatform, accountID int, reason SiteBatchReason, message string) {
-	s.addGroup(s.failureGroups, siteID, platform, reason, func(g *SiteBatchOutcomeGroup) { g.Failed++ })
+	group := s.addGroup(s.failureGroups, siteID, platform, reason, func(g *SiteBatchOutcomeGroup) { g.Failed++ })
+	addSiteBatchAccountID(group, accountID)
 	s.addSample(siteID, platform, accountID, reason, message)
 }
 
@@ -184,11 +186,11 @@ func (s *SiteBatchSummary) addWarning(siteID int, platform model.SitePlatform, a
 	s.addSample(siteID, platform, accountID, reason, sanitizeSiteStatusText(message))
 }
 
-func (s *SiteBatchSummary) addGroup(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, update func(*SiteBatchOutcomeGroup)) {
-	s.addGroupN(groups, siteID, platform, reason, 1, func(g *SiteBatchOutcomeGroup, _ int) { update(g) })
+func (s *SiteBatchSummary) addGroup(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, update func(*SiteBatchOutcomeGroup)) *SiteBatchOutcomeGroup {
+	return s.addGroupN(groups, siteID, platform, reason, 1, func(g *SiteBatchOutcomeGroup, _ int) { update(g) })
 }
 
-func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, n int, update func(*SiteBatchOutcomeGroup, int)) {
+func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutcomeGroup, siteID int, platform model.SitePlatform, reason SiteBatchReason, n int, update func(*SiteBatchOutcomeGroup, int)) *SiteBatchOutcomeGroup {
 	if reason == "" {
 		reason = SiteBatchReasonUnknown
 	}
@@ -200,6 +202,20 @@ func (s *SiteBatchSummary) addGroupN(groups map[siteBatchGroupKey]*SiteBatchOutc
 	}
 	group.Count += n
 	update(group, n)
+	return group
+}
+
+func addSiteBatchAccountID(group *SiteBatchOutcomeGroup, accountID int) {
+	if group == nil || accountID <= 0 {
+		return
+	}
+	index := sort.SearchInts(group.AccountIDs, accountID)
+	if index < len(group.AccountIDs) && group.AccountIDs[index] == accountID {
+		return
+	}
+	group.AccountIDs = append(group.AccountIDs, 0)
+	copy(group.AccountIDs[index+1:], group.AccountIDs[index:])
+	group.AccountIDs[index] = accountID
 }
 
 func (s *SiteBatchSummary) addSample(siteID int, platform model.SitePlatform, accountID int, reason SiteBatchReason, message string) {

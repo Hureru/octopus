@@ -6,8 +6,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/getlantern/systray"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/shutdown"
+	"github.com/getlantern/systray"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -43,8 +44,9 @@ func runTray(addr string) {
 				case <-mAutoStart.ClickedCh:
 					toggleAutoStart(mAutoStart)
 				case <-mQuit.ClickedCh:
+					shutdown.Request()
 					systray.Quit()
-					os.Exit(0)
+					return
 				}
 			}
 		}()

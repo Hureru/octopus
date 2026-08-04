@@ -629,11 +629,6 @@ func channelGroupMultiplierMap(
 	}
 
 	values := persistedSiteGroupMultiplierMap(ctx, accountIDs)
-	for key, value := range quotedSiteGroupMultiplierMap(ctx, accountIDs) {
-		if _, exists := values[key]; !exists {
-			values[key] = value
-		}
-	}
 	for channelID, binding := range bindingMap {
 		groupKey, _ := model.ParseSiteChannelBindingKey(binding.GroupKey)
 		if value, ok := values[siteAccountGroupKey(binding.SiteAccountID, groupKey)]; ok {
@@ -685,28 +680,6 @@ func persistedSiteGroupMultiplierMap(ctx context.Context, accountIDs []int) map[
 	for _, group := range rawGroups {
 		if multiplier, ok := storedSiteGroupMultiplier(group.RawPayload, group.GroupKey); ok {
 			result[siteAccountGroupKey(group.SiteAccountID, group.GroupKey)] = multiplier
-		}
-	}
-	return result
-}
-
-func quotedSiteGroupMultiplierMap(ctx context.Context, accountIDs []int) map[string]float64 {
-	result := make(map[string]float64)
-	var quotes []model.SiteModelPriceQuote
-	if err := db.GetDB().WithContext(ctx).
-		Select("id, site_account_id, group_key, group_multiplier, observed_at").
-		Where("site_account_id IN ? AND status = ? AND manual_override = ? AND group_multiplier >= 0", accountIDs, model.PriceQuoteStatusValid, false).
-		Order("observed_at DESC, id DESC").
-		Find(&quotes).Error; err != nil {
-		return result
-	}
-	for _, quote := range quotes {
-		if quote.SiteAccountID == nil || !validGroupMultiplier(quote.GroupMultiplier) {
-			continue
-		}
-		key := siteAccountGroupKey(*quote.SiteAccountID, quote.GroupKey)
-		if _, exists := result[key]; !exists {
-			result[key] = quote.GroupMultiplier
 		}
 	}
 	return result

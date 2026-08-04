@@ -6,7 +6,7 @@ export type BatchFailureCategory =
   | "transient"
   | "other";
 
-export type BatchFailureSiteIds = Record<
+export type BatchFailureAccountIds = Record<
   BatchFailureCategory,
   Set<number>
 >;
@@ -33,7 +33,7 @@ const FAILURE_CATEGORIES: Record<string, BatchFailureCategory | null> = {
   unknown: "other",
 };
 
-function createEmptyFailureSiteIds(): BatchFailureSiteIds {
+function createEmptyFailureAccountIds(): BatchFailureAccountIds {
   return {
     credential: new Set(),
     risk: new Set(),
@@ -49,16 +49,20 @@ export function getBatchFailureCategory(
   return category === undefined ? "other" : category;
 }
 
-export function buildBatchFailureSiteIds(
+export function buildBatchFailureAccountIds(
   summaries: Array<SiteBatchSummary | null | undefined>,
-): BatchFailureSiteIds {
-  const result = createEmptyFailureSiteIds();
+): BatchFailureAccountIds {
+  const result = createEmptyFailureAccountIds();
 
   for (const summary of summaries) {
     for (const group of summary?.failure_groups ?? []) {
       if (group.failed <= 0) continue;
       const category = getBatchFailureCategory(group.reason);
-      if (category) result[category].add(group.site_id);
+      if (!category) continue;
+
+      for (const accountId of group.account_ids ?? []) {
+        if (accountId > 0) result[category].add(accountId);
+      }
     }
   }
 
