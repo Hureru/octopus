@@ -3,7 +3,34 @@ package openai
 import (
 	"encoding/json"
 	"testing"
+
+	outboundopenai "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 )
+
+func TestConvertToInternalRequestPreservesExpandedReasoningEfforts(t *testing.T) {
+	for _, effort := range []string{"none", "xhigh", "max", "ultra"} {
+		t.Run(effort, func(t *testing.T) {
+			req := &ResponsesRequest{
+				Model:     "gpt-5",
+				Input:     ResponsesInput{Text: stringPtr("hello")},
+				Reasoning: &ResponsesReasoning{Effort: effort},
+			}
+
+			internalReq, err := convertToInternalRequest(req)
+			if err != nil {
+				t.Fatalf("convertToInternalRequest failed: %v", err)
+			}
+			if internalReq.ReasoningEffort != effort {
+				t.Fatalf("expected reasoning effort %q, got %q", effort, internalReq.ReasoningEffort)
+			}
+
+			outboundReq := outboundopenai.ConvertToResponsesRequest(internalReq)
+			if outboundReq.Reasoning == nil || outboundReq.Reasoning.Effort != effort {
+				t.Fatalf("expected outbound reasoning effort %q, got %#v", effort, outboundReq.Reasoning)
+			}
+		})
+	}
+}
 
 func TestConvertToInternalRequestPreservesRawInputItems(t *testing.T) {
 	req := &ResponsesRequest{

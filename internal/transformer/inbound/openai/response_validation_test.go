@@ -4,15 +4,18 @@ import "testing"
 
 func TestValidateReasoningEffort(t *testing.T) {
 	cases := map[string]string{
-		"minimal":     "minimal",
-		"low":         "low",
-		"medium":      "medium",
-		"high":        "high",
-		"":            "",
-		"turbo":       "",
-		"ultra":       "",
-		"MEDIUM":      "", // case-sensitive whitelist
-		" low":        "",
+		"none":    "none",
+		"minimal": "minimal",
+		"low":     "low",
+		"medium":  "medium",
+		"high":    "high",
+		"xhigh":   "xhigh",
+		"max":     "max",
+		"ultra":   "ultra",
+		"":        "",
+		"turbo":   "",
+		"MEDIUM":  "", // case-sensitive whitelist
+		" low":    "",
 	}
 	for in, want := range cases {
 		if got := validateReasoningEffort(in); got != want {
@@ -40,9 +43,9 @@ func TestValidateReasoningSummary(t *testing.T) {
 
 func TestResponsesTerminalEvent(t *testing.T) {
 	cases := []struct {
-		finish      string
-		wantEvent   string
-		wantStatus  string
+		finish     string
+		wantEvent  string
+		wantStatus string
 	}{
 		{"stop", "response.completed", "completed"},
 		{"tool_calls", "response.completed", "completed"},

@@ -1781,12 +1781,11 @@ func generateItemID() string {
 }
 
 // validateReasoningEffort whitelists the values OpenAI's Responses API
-// accepts for `reasoning.effort`. Unknown inputs are dropped (empty
-// return) so the upstream schema validator never sees garbage; callers
-// fall back to the provider default.
+// and compatible clients accept for `reasoning.effort`. Unknown inputs are
+// dropped so the upstream schema validator never sees arbitrary values.
 func validateReasoningEffort(effort string) string {
 	switch effort {
-	case "minimal", "low", "medium", "high":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
 		return effort
 	case "":
 		return ""
