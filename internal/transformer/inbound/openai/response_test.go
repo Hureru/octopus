@@ -30,6 +30,27 @@ func TestConvertToInternalRequestPreservesExpandedReasoningEfforts(t *testing.T)
 			}
 		})
 	}
+
+	t.Run("unknown", func(t *testing.T) {
+		req := &ResponsesRequest{
+			Model:     "gpt-5",
+			Input:     ResponsesInput{Text: stringPtr("hello")},
+			Reasoning: &ResponsesReasoning{Effort: "turbo"},
+		}
+
+		internalReq, err := convertToInternalRequest(req)
+		if err != nil {
+			t.Fatalf("convertToInternalRequest failed: %v", err)
+		}
+		if internalReq.ReasoningEffort != "" {
+			t.Fatalf("expected unknown reasoning effort to be dropped, got %q", internalReq.ReasoningEffort)
+		}
+
+		outboundReq := outboundopenai.ConvertToResponsesRequest(internalReq)
+		if outboundReq.Reasoning != nil {
+			t.Fatalf("expected outbound reasoning to be omitted, got %#v", outboundReq.Reasoning)
+		}
+	})
 }
 
 func TestConvertToInternalRequestPreservesRawInputItems(t *testing.T) {
