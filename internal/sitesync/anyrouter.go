@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
+	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 )
 
@@ -148,6 +151,7 @@ func checkinAnyRouter(ctx context.Context, siteRecord *model.Site, account *mode
 	if alternateUserID > 0 {
 		result, message = anyRouterTryCheckinWithCookies(ctx, siteRecord, account, accessToken, alternateUserID)
 		if result != nil {
+			anyRouterRememberUserID(ctx, account, alternateUserID)
 			return result, accessToken, nil
 		}
 	}
@@ -404,7 +408,13 @@ func anyRouterShouldFallbackToCookieCheckin(message string) bool {
 		strings.Contains(text, "未提供")
 }
 
-func anyRouterDiscoverUserID(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) (int, error) {
+func anyRouterDiscoverUserID(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string) (userID int, err error) {
+	// 探测用户 ID 最多要发几十个请求，会触发 ESA 的 403 限频：已知就直接用，探到就落库
+	if stored := firstManagedPlatformUserID(account); stored > 0 {
+		return stored, nil
+	}
+	defer func() { anyRouterRememberUserID(ctx, account, userID) }()
+
 	if jwtID := anyRouterTryDecodeJWTUserID(accessToken); jwtID > 0 {
 		if ok, _ := anyRouterTestBearerUserID(ctx, siteRecord, account, accessToken, jwtID); ok {
 			return jwtID, nil
@@ -443,6 +453,16 @@ func anyRouterDiscoverUserID(ctx context.Context, siteRecord *model.Site, accoun
 	}
 
 	return 0, nil
+}
+
+func anyRouterRememberUserID(ctx context.Context, account *model.SiteAccount, userID int) {
+	if account == nil || userID <= 0 {
+		return
+	}
+	rememberManagedPlatformUserID(userID, account)
+	if account.ID > 0 && db.GetDB() != nil {
+		db.GetDB().WithContext(ctx).Model(&model.SiteAccount{}).Where("id = ?", account.ID).Update("platform_user_id", userID)
+	}
 }
 
 func anyRouterTestBearerUserID(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, userID int) (bool, error) {
@@ -786,6 +806,12 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 
 	cookieHeader := firstNonEmptyString(mergedHeaders["Cookie"], mergedHeaders["cookie"])
 	delete(mergedHeaders, "cookie")
+	shieldKey := anyRouterShieldCacheKey(siteRecord, requestURL, accounts...)
+	if cached, ok := anyRouterShieldCookies.Load(shieldKey); ok {
+		for name, value := range cached.(map[string]string) {
+			cookieHeader = anyRouterUpsertCookie(cookieHeader, name, value)
+		}
+	}
 	if cookieHeader != "" {
 		mergedHeaders["Cookie"] = cookieHeader
 	}
@@ -831,6 +857,7 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 				if acwScV2 != "" {
 					cookieHeader = anyRouterUpsertCookie(cookieHeader, "acw_sc__v2", acwScV2)
 					mergedHeaders["Cookie"] = cookieHeader
+					anyRouterShieldCookies.Store(shieldKey, anyRouterShieldCookieSubset(cookieHeader))
 					continue
 				}
 			}
@@ -841,6 +868,34 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 	}
 
 	return nil, cookieHeader, nil
+}
+
+// 已通过挑战的盾 cookie，按 站点主机+出口代理 复用（cookie 绑定出口 IP）。
+// 否则每次调用都要先吃一次挑战再重发，请求量翻倍，容易触发 ESA 的 403 限频。
+var anyRouterShieldCookies sync.Map // key -> map[string]string
+
+func anyRouterShieldCacheKey(siteRecord *model.Site, requestURL string, accounts ...*model.SiteAccount) string {
+	host := requestURL
+	if parsed, err := url.Parse(requestURL); err == nil {
+		host = parsed.Host
+	}
+	proxyMode, proxyConfigID := resolveSiteAccountProxy(siteRecord, accounts...)
+	proxyID := 0
+	if proxyConfigID != nil {
+		proxyID = *proxyConfigID
+	}
+	return fmt.Sprintf("%s|%s|%d", host, proxyMode, proxyID)
+}
+
+func anyRouterShieldCookieSubset(cookieHeader string) map[string]string {
+	subset := make(map[string]string, 3)
+	for _, part := range strings.Split(cookieHeader, ";") {
+		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && (name == "acw_tc" || name == "cdn_sec_tc" || name == "acw_sc__v2") {
+			subset[name] = value
+		}
+	}
+	return subset
 }
 
 func anyRouterParseJSONObject(body []byte) (map[string]any, bool) {
