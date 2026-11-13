@@ -1107,7 +1107,29 @@ func (ra *relayAttempt) handleStreamResponseV2(ctx context.Context, response *ht
 		}
 	}
 
+	// 客户端收到结束事件后会立即断连而不等上游 EOF；响应已完整时不算失败（issue #116）
+	if err != nil && isClientCancellation(ctx, err) && ra.streamPayloadWritten.Load() {
+		ra.collectResponse()
+		if streamResponseComplete(ra.metrics.InternalResponse) {
+			log.Debugf("client disconnected after complete stream response, treating as success")
+			return nil
+		}
+	}
+
 	return err
+}
+
+// streamResponseComplete 报告聚合后的流式响应是否已完整：至少一个 choice，且每个都有 finish_reason。
+func streamResponseComplete(resp *model.InternalLLMResponse) bool {
+	if resp == nil || len(resp.Choices) == 0 {
+		return false
+	}
+	for _, choice := range resp.Choices {
+		if choice.FinishReason == nil || strings.TrimSpace(*choice.FinishReason) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // handleStreamResponsePassthroughV2 uses StreamProcessor for unified passthrough handling.
