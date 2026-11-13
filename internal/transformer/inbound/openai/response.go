@@ -909,6 +909,8 @@ type ResponsesRequest struct {
 type ResponsesInput struct {
 	Text  *string
 	Items []ResponsesItem
+	// raw 保留客户端原始的数组 JSON，透传时不丢失本结构体未建模的字段
+	raw json.RawMessage
 }
 
 func (i ResponsesInput) MarshalJSON() ([]byte, error) {
@@ -927,9 +929,30 @@ func (i *ResponsesInput) UnmarshalJSON(data []byte) error {
 	var items []ResponsesItem
 	if err := json.Unmarshal(data, &items); err == nil {
 		i.Items = items
+		i.raw = append(json.RawMessage(nil), data...)
 		return nil
 	}
 	return fmt.Errorf("invalid input format")
+}
+
+// UnmarshalJSON 容忍非字符串的 arguments：codex 的 tool_search_call 等条目把 arguments 发成对象，
+// 按字符串解析会让整个请求解码失败（issue #115）。非字符串时保留其 JSON 文本。
+func (item *ResponsesItem) UnmarshalJSON(data []byte) error {
+	type alias ResponsesItem
+	aux := struct {
+		*alias
+		Arguments json.RawMessage `json:"arguments"`
+	}{alias: (*alias)(item)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	item.Arguments = ""
+	if len(aux.Arguments) > 0 && string(aux.Arguments) != "null" {
+		if err := json.Unmarshal(aux.Arguments, &item.Arguments); err != nil {
+			item.Arguments = string(aux.Arguments)
+		}
+	}
+	return nil
 }
 
 type ResponsesItem struct {
@@ -1168,7 +1191,9 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 
 	if req.Input.Text == nil && len(req.Input.Items) > 0 {
 		chatReq.TransformOptions.ArrayInputs = lo.ToPtr(true)
-		if rawItems, marshalErr := json.Marshal(req.Input.Items); marshalErr == nil {
+		if len(req.Input.raw) > 0 {
+			chatReq.SetOpenAIRawInputItems(req.Input.raw)
+		} else if rawItems, marshalErr := json.Marshal(req.Input.Items); marshalErr == nil {
 			chatReq.SetOpenAIRawInputItems(rawItems)
 		}
 	}

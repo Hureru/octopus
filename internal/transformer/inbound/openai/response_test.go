@@ -142,3 +142,38 @@ func TestConvertToInternalRequestNormalizesTopLevelInputFile(t *testing.T) {
 func stringPtr(value string) *string {
 	return &value
 }
+
+// 回归 issue #115：codex 的 tool_search_call 把 arguments 发成对象，不能让整个请求解码失败，
+// 且透传给上游的原始条目不能丢字段。
+func TestTransformRequestAcceptsObjectArgumentsAndKeepsRawItems(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},
+		{"type":"function_call","call_id":"call_fn","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"},
+		{"type":"tool_search_call","call_id":"call_search","status":"completed","execution":"client","arguments":{"query":"q","limit":5}}
+	]}`)
+
+	internalReq, err := (&ResponseInbound{}).TransformRequest(t.Context(), body)
+	if err != nil {
+		t.Fatalf("TransformRequest failed: %v", err)
+	}
+	if !internalReq.HasOpenAIResponsesPassthrough() {
+		t.Fatalf("expected unsupported tool_search_call item to require passthrough")
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(internalReq.RawInputItems, &items); err != nil {
+		t.Fatalf("unmarshal raw input items failed: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected 3 raw input items, got %d", len(items))
+	}
+	if items[1]["arguments"] != `{"cmd":"ls"}` {
+		t.Fatalf("string arguments should stay a string, got %#v", items[1]["arguments"])
+	}
+	if items[2]["execution"] != "client" {
+		t.Fatalf("unmodelled field should survive passthrough, got %#v", items[2])
+	}
+	if args, ok := items[2]["arguments"].(map[string]any); !ok || args["query"] != "q" {
+		t.Fatalf("object arguments should stay an object, got %#v", items[2]["arguments"])
+	}
+}
