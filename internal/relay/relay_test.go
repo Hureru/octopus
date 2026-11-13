@@ -1853,3 +1853,69 @@ func setupRelayTestDB(t *testing.T) context.Context {
 
 	return context.Background()
 }
+
+func newOpenAIChatStreamAttempt(writer StreamWriter) *relayAttempt {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	internalReq := &transformerModel.InternalLLMRequest{Model: "gpt-4o", Stream: boolPtr(true)}
+	return &relayAttempt{
+		relayRequest: &relayRequest{
+			c:               c,
+			inAdapter:       inbound.Get(inbound.InboundTypeOpenAIChat),
+			internalRequest: internalReq,
+			metrics:         NewRelayMetrics(1, internalReq.Model, nil, internalReq),
+			apiKeyID:        1,
+			requestModel:    internalReq.Model,
+			streamWriter:    writer,
+		},
+		outAdapter: outbound.Get(outbound.OutboundTypeOpenAIChat),
+		channel:    &model.Channel{Type: outbound.OutboundTypeOpenAIChat},
+	}
+}
+
+const chatStreamDeltaChunk = `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"}}]}`
+
+// 回归 issue #116：客户端收到带 finish_reason 的结束块后立即断连，上游 EOF 未到。
+// 响应已完整，应记为成功；中途断连仍是取消。
+func TestHandleStreamResponseChatClientCancelAfterFinishReason(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lines       []string
+		cancelOn    string
+		wantSuccess bool
+	}{
+		"after finish_reason": {
+			lines:       []string{chatStreamDeltaChunk, "", `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, "", ""},
+			cancelOn:    `"finish_reason":"stop"`,
+			wantSuccess: true,
+		},
+		"mid stream": {
+			lines:    []string{chatStreamDeltaChunk, "", ""},
+			cancelOn: `"content":"hello"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writer := &notifyStreamWriter{header: http.Header{}}
+			writer.onWrite = func(p []byte) {
+				if bytes.Contains(p, []byte(tc.cancelOn)) {
+					cancel()
+				}
+			}
+			ra := newOpenAIChatStreamAttempt(writer)
+			response := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       &stallUntilCancelBody{ctx: ctx, data: []byte(strings.Join(tc.lines, "\n"))},
+			}
+			err := ra.handleStreamResponseV2(ctx, response)
+			if tc.wantSuccess && err != nil {
+				t.Fatalf("complete stream followed by client disconnect should succeed, got: %v", err)
+			}
+			if !tc.wantSuccess && !errors.Is(err, context.Canceled) {
+				t.Fatalf("mid-stream disconnect should stay context.Canceled, got: %v", err)
+			}
+		})
+	}
+}
