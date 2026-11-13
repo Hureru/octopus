@@ -1309,6 +1309,11 @@ func (ra *relayAttempt) handleResponse(ctx context.Context, response *http.Respo
 		log.Warnf("failed to transform response: %v", err)
 		return fmt.Errorf("failed to transform outbound response: %w", err)
 	}
+	// 上游 200 但没有任何内容（如 {} 或不认识的结构）：算失败以便重试/换渠道，
+	// 否则客户端会收到 {"id":"","object":"chat.completion","created":0,"model":""}（issue #100）
+	if internalResponse == nil || (len(internalResponse.Choices) == 0 && len(internalResponse.EmbeddingData) == 0 && internalResponse.Error == nil) {
+		return errEmptyUpstreamResponse
+	}
 
 	inResponse, err := ra.inAdapter.TransformResponse(ctx, internalResponse)
 	if err != nil {
