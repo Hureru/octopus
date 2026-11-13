@@ -151,6 +151,7 @@ def main():
     raw_price = fetch_price_data()
     
     entries = []
+    seen = set()  # 多个 provider 可能提供同名模型，Go map 不允许重复 key；按 PROVIDERS 顺序先到先得
     model_count = 0
     
     for provider in PROVIDERS:
@@ -165,10 +166,11 @@ def main():
             model_id = model_data.get("id", "").lower()
             cost = model_data.get("cost", {})
             
-            if not model_id:
+            if not model_id or model_id in seen:
                 continue
             
             # 添加原始模型
+            seen.add(model_id)
             entries.append(generate_entry(model_id, cost))
             provider_count += 1
             
@@ -183,8 +185,9 @@ def main():
                 aliases.extend(MODEL_ALIASES[model_id])
             
             # 添加别名 (去重)
-            for alias in set(aliases):
-                entries.append(generate_entry(alias.lower(), cost))
+            for alias in sorted(set(alias.lower() for alias in aliases) - seen):
+                seen.add(alias)
+                entries.append(generate_entry(alias, cost))
                 provider_count += 1
             
         print(f"  {provider}: {provider_count} models")
