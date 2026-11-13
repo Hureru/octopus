@@ -130,18 +130,31 @@ func StatsSiteModelHourlySaveDB(ctx context.Context) error {
 		Columns: []clause.Column{
 			{Name: "hour"}, {Name: "site_account_id"}, {Name: "group_key"}, {Name: "model_name"},
 		},
-		DoUpdates: clause.Assignments(map[string]interface{}{
-			"date":            clause.Column{Name: "date"},
-			"input_token":     gorm.Expr("stats_site_model_hourlies.input_token + EXCLUDED.input_token"),
-			"output_token":    gorm.Expr("stats_site_model_hourlies.output_token + EXCLUDED.output_token"),
-			"input_cost":      gorm.Expr("stats_site_model_hourlies.input_cost + EXCLUDED.input_cost"),
-			"output_cost":     gorm.Expr("stats_site_model_hourlies.output_cost + EXCLUDED.output_cost"),
-			"wait_time":       gorm.Expr("stats_site_model_hourlies.wait_time + EXCLUDED.wait_time"),
-			"request_success": gorm.Expr("stats_site_model_hourlies.request_success + EXCLUDED.request_success"),
-			"request_failed":  gorm.Expr("stats_site_model_hourlies.request_failed + EXCLUDED.request_failed"),
-			"last_request_at": gorm.Expr("MAX(stats_site_model_hourlies.last_request_at, EXCLUDED.last_request_at)"),
-		}),
+		DoUpdates: clause.Assignments(siteModelHourlyUpsertAssignments(dbConn.Dialector.Name())),
 	}).Create(&rows).Error
+}
+
+// siteModelHourlyUpsertAssignments 生成累加式 upsert 的 SET 子句。
+// 三种数据库引用"待插入行"和取两值较大者的写法不同：
+// 不带限定的列名在 PostgreSQL 里有歧义，MySQL 没有 EXCLUDED，PostgreSQL 的 MAX 只能作聚合。
+func siteModelHourlyUpsertAssignments(dialect string) map[string]interface{} {
+	const table = "stats_site_model_hourlies."
+	incoming := func(column string) string { return "EXCLUDED." + column }
+	greatest := "GREATEST"
+	switch dialect {
+	case "mysql":
+		incoming = func(column string) string { return "VALUES(" + column + ")" }
+	case "sqlite":
+		greatest = "MAX"
+	}
+	assignments := map[string]interface{}{
+		"date":            gorm.Expr(incoming("date")),
+		"last_request_at": gorm.Expr(greatest + "(" + table + "last_request_at, " + incoming("last_request_at") + ")"),
+	}
+	for _, column := range []string{"input_token", "output_token", "input_cost", "output_cost", "wait_time", "request_success", "request_failed"} {
+		assignments[column] = gorm.Expr(table + column + " + " + incoming(column))
+	}
+	return assignments
 }
 
 const siteChannelModelHistoryWindow = 90 * 24 * time.Hour
