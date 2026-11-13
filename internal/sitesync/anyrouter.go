@@ -864,6 +864,8 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 			return nil, cookieHeader, nil
 		}
 
+		// 被盾拒绝（非 JSON 的非 2xx）时丢弃缓存，避免坏 cookie 一直复用到进程重启
+		anyRouterShieldCookies.Delete(shieldKey)
 		return nil, cookieHeader, anyRouterFormatHTTPError(resp.StatusCode, resp.Header, text)
 	}
 
