@@ -225,3 +225,52 @@ func TestSyncAnyRouterFallsBackToAccessTokenWhenTokenListIsEmpty(t *testing.T) {
 		t.Fatalf("expected session model fallback to populate models, got %+v", snapshot.models)
 	}
 }
+
+// 回归：签到 403 的根因是请求量触发 ESA 限频。盾 cookie 必须跨调用复用，已存的用户 ID 不能再探测。
+func TestCheckinAnyRouterReusesShieldCookieAndStoredUserID(t *testing.T) {
+	var challenges, selfProbes, total int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		total++
+		cookieHeader := r.Header.Get("Cookie")
+		if !strings.Contains(cookieHeader, "acw_sc__v2="+anyRouterChallengeACW) {
+			challenges++
+			w.Header().Add("Set-Cookie", "cdn_sec_tc="+anyRouterChallengeCookie+"; Path=/; HttpOnly")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(anyRouterChallengeHTML))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/user/self":
+			selfProbes++
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+		case r.URL.Path == "/api/user/sign_in" && strings.Contains(cookieHeader, "session=tok"):
+			_, _ = w.Write([]byte(`{"success":true,"message":"ok"}`))
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+		}
+	}))
+	defer server.Close()
+
+	userID := 123456
+	siteRecord := &model.Site{BaseURL: server.URL, Platform: model.SitePlatformAnyRouter}
+	account := &model.SiteAccount{CredentialType: model.SiteCredentialTypeAccessToken, AccessToken: "session=tok", PlatformUserID: &userID}
+
+	for round := 0; round < 2; round++ {
+		result, _, err := checkinAnyRouter(context.Background(), siteRecord, account)
+		if err != nil || result == nil || result.Status != model.SiteExecutionStatusSuccess {
+			t.Fatalf("round %d: checkin failed: result=%+v err=%v", round, result, err)
+		}
+	}
+	if challenges != 1 {
+		t.Fatalf("shield challenge should be solved once and reused, got %d challenges", challenges)
+	}
+	if selfProbes != 0 {
+		t.Fatalf("stored platform user id should skip user id probing, got %d /api/user/self calls", selfProbes)
+	}
+	if total > 6 {
+		t.Fatalf("two checkins should need at most 6 upstream requests, got %d", total)
+	}
+}
