@@ -8,6 +8,7 @@ import (
 var (
 	errLocalRelayBudgetExceeded = errors.New("local relay budget exceeded")
 	errFirstTokenTimeout        = errors.New("first token timeout")
+	errEmptyUpstreamResponse    = errors.New("upstream returned an empty response")
 )
 
 func contextError(ctx context.Context) error {
