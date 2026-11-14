@@ -37,9 +37,6 @@ type RelayMetrics struct {
 	WSRecovery  *model.RelayLogWSRecovery
 
 	TransportInputTokens *int
-	BillInputTokens      *int
-	CacheReadTokens      *int
-	CacheWriteTokens     *int
 }
 
 func NewRelayMetrics(apiKeyID int, requestModel string, rawBody []byte, req *transformerModel.InternalLLMRequest) *RelayMetrics {
@@ -99,12 +96,12 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 		cacheReadTokens := usage.BillableCacheReadInput()
 		cacheWriteTokens := usage.BillableCacheWriteInput()
 
-		m.BillInputTokens = intPtr(int(nonCachedInput))
-		m.CacheReadTokens = intPtr(int(cacheReadTokens))
-		m.CacheWriteTokens = intPtr(int(cacheWriteTokens))
-		m.Stats.InputToken = usage.PromptTokens
+		// 归一化：总输入 = 非缓存 + 缓存读 + 缓存写，缓存是子集，命中率不会超过 100%。
+		m.Stats.InputToken = nonCachedInput + cacheReadTokens + cacheWriteTokens
+		m.Stats.CacheReadToken = cacheReadTokens
+		m.Stats.CacheWriteToken = cacheWriteTokens
 		m.Stats.OutputToken = usage.CompletionTokens
-		inputReported = usage.EffectiveInputTokens() > 0
+		inputReported = m.Stats.InputToken > 0
 
 		if modelPrice := resolveModelPrice(actualModel); modelPrice != nil {
 			m.Stats.InputCost = (float64(cacheReadTokens)*modelPrice.CacheRead +
@@ -120,7 +117,6 @@ func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMRes
 	if !inputReported && m.TransportInputTokens != nil && *m.TransportInputTokens > 0 {
 		estimated := int64(*m.TransportInputTokens)
 		m.Stats.InputToken = estimated
-		m.BillInputTokens = intPtr(int(estimated))
 		if modelPrice := resolveModelPrice(actualModel); modelPrice != nil {
 			m.Stats.InputCost = float64(estimated) * modelPrice.Input * 1e-6
 		}
@@ -134,13 +130,8 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 func (m *RelayMetrics) SaveWithChannelStats(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt, updateChannelStats bool) {
 	duration := time.Since(m.StartTime)
 
-	globalStats := model.StatsMetrics{
-		WaitTime:    duration.Milliseconds(),
-		InputToken:  m.Stats.InputToken,
-		OutputToken: m.Stats.OutputToken,
-		InputCost:   m.Stats.InputCost,
-		OutputCost:  m.Stats.OutputCost,
-	}
+	globalStats := m.Stats // 只含 token 与费用
+	globalStats.WaitTime = duration.Milliseconds()
 	if success {
 		globalStats.RequestSuccess = 1
 	} else {
@@ -250,9 +241,9 @@ func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, dur
 	relayLog.OutputTokens = int(m.Stats.OutputToken)
 	relayLog.Cost = m.Stats.InputCost + m.Stats.OutputCost
 	relayLog.TransportInputTokens = m.TransportInputTokens
-	relayLog.BillInputTokens = m.BillInputTokens
-	relayLog.CacheReadTokens = m.CacheReadTokens
-	relayLog.CacheWriteTokens = m.CacheWriteTokens
+	relayLog.BillInputTokens = intPtr(int(m.Stats.InputToken - m.Stats.CacheReadToken - m.Stats.CacheWriteToken))
+	relayLog.CacheReadTokens = intPtr(int(m.Stats.CacheReadToken))
+	relayLog.CacheWriteTokens = intPtr(int(m.Stats.CacheWriteToken))
 	relayLog.WSMode = m.WSMode
 	relayLog.WSExecMode = m.WSExecMode
 	relayLog.WSRecovery = m.WSRecovery
@@ -289,13 +280,9 @@ func updateFinalChannelUsageStats(channelID int, metrics model.StatsMetrics) {
 	if channelID == 0 {
 		return
 	}
-	usageStats := model.StatsMetrics{
-		InputToken:  metrics.InputToken,
-		OutputToken: metrics.OutputToken,
-		InputCost:   metrics.InputCost,
-		OutputCost:  metrics.OutputCost,
-	}
-	if usageStats.InputToken == 0 && usageStats.OutputToken == 0 && usageStats.InputCost == 0 && usageStats.OutputCost == 0 {
+	usageStats := metrics
+	usageStats.WaitTime, usageStats.RequestSuccess, usageStats.RequestFailed = 0, 0, 0
+	if usageStats == (model.StatsMetrics{}) {
 		return
 	}
 	op.StatsChannelUpdate(channelID, usageStats)

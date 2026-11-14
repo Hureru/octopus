@@ -151,7 +151,7 @@ func siteModelHourlyUpsertAssignments(dialect string) map[string]interface{} {
 		"date":            gorm.Expr(incoming("date")),
 		"last_request_at": gorm.Expr(greatest + "(" + table + "last_request_at, " + incoming("last_request_at") + ")"),
 	}
-	for _, column := range []string{"input_token", "output_token", "input_cost", "output_cost", "wait_time", "request_success", "request_failed"} {
+	for _, column := range []string{"input_token", "cache_read_token", "cache_write_token", "output_token", "input_cost", "output_cost", "wait_time", "request_success", "request_failed"} {
 		assignments[column] = gorm.Expr(table + column + " + " + incoming(column))
 	}
 	return assignments

@@ -1,6 +1,6 @@
 'use client';
 
-import { useStatsDaily, useStatsHourly, useStatsTotal } from '@/api/endpoints/stats';
+import { useStatsDaily, useStatsHourly, useStatsTotal, type StatsMetricsFormatted } from '@/api/endpoints/stats';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { useMemo } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -13,11 +13,10 @@ import { useHomeViewStore, type ChartPeriod } from '@/components/modules/home/st
 
 type Formatted = { value: string; unit: string };
 
-type MetricsRow = {
-    requests: Formatted;
-    tokens: Formatted;
-    waitTime: Formatted;
-};
+// 顺序兼顾 2 / 4 / 7 列三种折行：相邻两项、前四后三都是成组的
+const METRIC_KEYS = ['requests', 'tokens', 'inputTokens', 'outputTokens', 'cacheHit', 'cacheHitRate', 'waitTime'] as const;
+
+type MetricsRow = Record<(typeof METRIC_KEYS)[number], Formatted | undefined>;
 
 type HeroValue = {
     value: string | undefined;
@@ -53,105 +52,43 @@ export function StatsChart() {
         metrics: MetricsRow;
         chartData: ChartPoint[];
     }>(() => {
-        const emptyMetrics: MetricsRow = {
-            requests: formatCount(0).formatted,
-            tokens: formatCount(0).formatted,
-            waitTime: formatTime(0).formatted,
-        };
-        const emptyHero: HeroValue = { value: undefined, unit: '' };
-
-        if (period === 'all') {
-            // 累计档：优先使用 statsTotal；否则 fallback 到 statsDaily 全量聚合
-            const points: ChartPoint[] = sortedDaily.map((stat) => ({
-                date: dayjs(stat.date).format('MM/DD'),
-                total_cost: stat.total_cost.raw,
-            }));
-
-            if (statsTotal) {
-                return {
-                    hero: {
-                        value: statsTotal.total_cost.formatted.value,
-                        unit: statsTotal.total_cost.formatted.unit,
-                    },
-                    metrics: {
-                        requests: statsTotal.request_count.formatted,
-                        tokens: statsTotal.total_token.formatted,
-                        waitTime: statsTotal.wait_time.formatted,
-                    },
-                    chartData: points,
-                };
-            }
-
-            if (sortedDaily.length === 0) {
-                return { hero: emptyHero, metrics: emptyMetrics, chartData: [] };
-            }
-
-            const cost = sortedDaily.reduce((acc, s) => acc + s.total_cost.raw, 0);
-            const requests = sortedDaily.reduce((acc, s) => acc + s.request_count.raw, 0);
-            const tokens = sortedDaily.reduce((acc, s) => acc + s.total_token.raw, 0);
-            const wait = sortedDaily.reduce((acc, s) => acc + s.wait_time.raw, 0);
-            const costFmt = formatMoney(cost).formatted;
-            return {
-                hero: { value: costFmt.value, unit: costFmt.unit },
-                metrics: {
-                    requests: formatCount(requests).formatted,
-                    tokens: formatCount(tokens).formatted,
-                    waitTime: formatTime(wait).formatted,
-                },
-                chartData: points,
-            };
-        }
-
+        // rows：当前时间档要求和的统计行；undefined 表示还没有数据，hero 显示「—」。
+        let rows: StatsMetricsFormatted[] | undefined;
+        let chartData: ChartPoint[];
         if (period === '1') {
             // 今日档：聚合 statsHourly
-            if (!statsHourly) {
-                return { hero: emptyHero, metrics: emptyMetrics, chartData: [] };
-            }
-            const points: ChartPoint[] = statsHourly.map((stat) => ({
+            rows = statsHourly;
+            chartData = (statsHourly ?? []).map((stat) => ({
                 date: `${stat.hour}:00`,
                 total_cost: stat.total_cost.raw,
             }));
-            const cost = statsHourly.reduce((acc, s) => acc + s.total_cost.raw, 0);
-            const requests = statsHourly.reduce((acc, s) => acc + s.request_count.raw, 0);
-            const tokens = statsHourly.reduce((acc, s) => acc + s.total_token.raw, 0);
-            const wait = statsHourly.reduce((acc, s) => acc + s.wait_time.raw, 0);
-            const costFmt = formatMoney(cost).formatted;
-            return {
-                hero: { value: costFmt.value, unit: costFmt.unit },
-                metrics: {
-                    requests: formatCount(requests).formatted,
-                    tokens: formatCount(tokens).formatted,
-                    waitTime: formatTime(wait).formatted,
-                },
-                chartData: points,
-            };
+        } else {
+            // 7 / 30 天聚合 statsDaily；累计档优先用 statsTotal，否则 fallback 到 statsDaily 全量
+            const daily = period === 'all' ? sortedDaily : sortedDaily.slice(-Number(period));
+            chartData = daily.map((stat) => ({
+                date: dayjs(stat.date).format('MM/DD'),
+                total_cost: stat.total_cost.raw,
+            }));
+            if (period === 'all' && statsTotal) rows = [statsTotal];
+            else if (daily.length > 0) rows = daily;
         }
 
-        // 7 / 30 天：聚合 statsDaily
-        const days = Number(period);
-        const recent = sortedDaily.slice(-days);
-        const points: ChartPoint[] = recent.map((stat) => ({
-            date: dayjs(stat.date).format('MM/DD'),
-            total_cost: stat.total_cost.raw,
-        }));
-
-        if (recent.length === 0) {
-            return { hero: emptyHero, metrics: emptyMetrics, chartData: [] };
-        }
-
-        const cost = recent.reduce((acc, s) => acc + s.total_cost.raw, 0);
-        const requests = recent.reduce((acc, s) => acc + s.request_count.raw, 0);
-        const tokens = recent.reduce((acc, s) => acc + s.total_token.raw, 0);
-        const wait = recent.reduce((acc, s) => acc + s.wait_time.raw, 0);
-        const costFmt = formatMoney(cost).formatted;
+        const sum = (key: keyof StatsMetricsFormatted) => (rows ?? []).reduce((acc, r) => acc + r[key].raw, 0);
+        const input = sum('input_token');
+        const cacheRead = sum('cache_read_token');
         return {
-            hero: { value: costFmt.value, unit: costFmt.unit },
+            hero: rows ? formatMoney(sum('total_cost')).formatted : { value: undefined, unit: '' },
             metrics: {
-                requests: formatCount(requests).formatted,
-                tokens: formatCount(tokens).formatted,
-                waitTime: formatTime(wait).formatted,
+                requests: formatCount(sum('request_count')).formatted,
+                inputTokens: formatCount(input).formatted,
+                outputTokens: formatCount(sum('output_token')).formatted,
+                cacheHit: formatCount(cacheRead).formatted,
+                // 命中率必须用求和后的值算，不能对各行的比率取平均
+                cacheHitRate: input > 0 ? { value: ((cacheRead / input) * 100).toFixed(2), unit: '%' } : undefined,
+                tokens: formatCount(sum('total_token')).formatted,
+                waitTime: formatTime(sum('wait_time')).formatted,
             },
-            chartData: points,
+            chartData,
         };
     }, [period, statsTotal, statsHourly, sortedDaily]);
 
@@ -201,13 +138,14 @@ export function StatsChart() {
                 </Tabs>
             </header>
 
-            {/* Metrics row */}
-            <div className="mx-5 flex items-baseline gap-6 border-t border-border/60 py-3 text-sm tabular-nums">
-                <StatItem label={t('metrics.requests')} value={metrics.requests} />
-                <span className="h-4 w-px bg-border/60" />
-                <StatItem label={t('metrics.tokens')} value={metrics.tokens} />
-                <span className="h-4 w-px bg-border/60" />
-                <StatItem label={t('metrics.waitTime')} value={metrics.waitTime} />
+            {/* Metrics：等宽网格，标签在上、数值在下。列数跟卡片宽度走（容器查询），
+                不跟窗口宽度走：侧边栏占掉一截后，窗口断点会在卡片还很宽时就折行。 */}
+            <div className="@container mx-5 border-t border-border/60 py-3">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 tabular-nums @md:grid-cols-4 @3xl:grid-cols-7">
+                    {METRIC_KEYS.map((key) => (
+                        <StatItem key={key} label={t(`metrics.${key}`)} value={metrics[key]} />
+                    ))}
+                </div>
             </div>
 
             {/* Area chart — only total_cost */}
@@ -244,9 +182,9 @@ export function StatsChart() {
 
 function StatItem({ label, value }: { label: string; value: Formatted | undefined }) {
     return (
-        <div className="flex items-baseline gap-1.5">
+        <div className="flex flex-col gap-0.5">
             <span className="text-xs text-muted-foreground">{label}</span>
-            <span className="font-medium">
+            <span className="text-base font-medium">
                 {value ? (
                     <>
                         <AnimatedNumber value={value.value} />

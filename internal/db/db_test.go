@@ -134,3 +134,30 @@ func TestEnsureRelayLogColumnsSQLite_NoopOnCurrentSchema(t *testing.T) {
 		}
 	}
 }
+
+// 升级路径：旧库的统计表没有缓存列，AutoMigrate 补列后旧行必须读得出来（新列为 0 而不是 NULL）。
+func TestAutoMigrateAddsStatsCacheColumnsToExistingRows(t *testing.T) {
+	gormDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE stats_totals (id integer PRIMARY KEY, input_token bigint, output_token bigint, input_cost real, output_cost real, wait_time bigint, request_success bigint, request_failed bigint)",
+		"INSERT INTO stats_totals (id, input_token, output_token) VALUES (1, 100, 20)",
+	} {
+		if err := gormDB.Exec(sql).Error; err != nil {
+			t.Fatalf("seed legacy table: %v", err)
+		}
+	}
+
+	if err := gormDB.AutoMigrate(&model.StatsTotal{}); err != nil {
+		t.Fatalf("AutoMigrate: %v", err)
+	}
+	var got model.StatsTotal
+	if err := gormDB.First(&got, 1).Error; err != nil {
+		t.Fatalf("read legacy row: %v", err)
+	}
+	if got.InputToken != 100 || got.OutputToken != 20 || got.CacheReadToken != 0 || got.CacheWriteToken != 0 {
+		t.Fatalf("unexpected legacy row after migrate: %+v", got.StatsMetrics)
+	}
+}

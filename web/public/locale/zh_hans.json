@@ -131,7 +131,11 @@
             },
             "metrics": {
                 "requests": "请求",
-                "tokens": "Token",
+                "inputTokens": "输入 Token",
+                "outputTokens": "输出 Token",
+                "cacheHit": "缓存命中",
+                "cacheHitRate": "缓存命中率",
+                "tokens": "总 Token",
                 "waitTime": "耗时"
             }
         },

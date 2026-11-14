@@ -14,9 +14,6 @@ func TestSetInternalResponseFallbackWhenUsageMissing(t *testing.T) {
 	if m.Stats.InputToken != 123 {
 		t.Fatalf("input token: got %d want 123 (fallback)", m.Stats.InputToken)
 	}
-	if m.BillInputTokens == nil || *m.BillInputTokens != 123 {
-		t.Fatalf("bill input tokens: got %v want 123", m.BillInputTokens)
-	}
 	if m.Stats.OutputToken != 0 {
 		t.Fatalf("output token: got %d want 0", m.Stats.OutputToken)
 	}
@@ -59,7 +56,7 @@ func TestSetInternalResponseNoFallbackWhenCacheOnly(t *testing.T) {
 		Usage: &transformerModel.Usage{PromptTokens: 0, CacheReadInputTokens: 40, CompletionTokens: 5},
 	}, "test-model")
 
-	if m.Stats.InputToken != 0 {
-		t.Fatalf("input token: got %d want 0 (cache-only is reported input)", m.Stats.InputToken)
+	if m.Stats.InputToken != 40 || m.Stats.CacheReadToken != 40 {
+		t.Fatalf("got input=%d cache_read=%d, want 40/40 (cache-only is reported input)", m.Stats.InputToken, m.Stats.CacheReadToken)
 	}
 }
