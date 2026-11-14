@@ -1,13 +1,17 @@
 package model
 
+// StatsMetrics 的 token 口径与上游无关：InputToken 是总输入，
+// CacheReadToken / CacheWriteToken 是它的子集（Anthropic 的 input 不含缓存，写入前已归一化）。
 type StatsMetrics struct {
-	InputToken     int64   `json:"input_token" gorm:"bigint"`
-	OutputToken    int64   `json:"output_token" gorm:"bigint"`
-	InputCost      float64 `json:"input_cost" gorm:"type:real"`
-	OutputCost     float64 `json:"output_cost" gorm:"type:real"`
-	WaitTime       int64   `json:"wait_time" gorm:"bigint"`
-	RequestSuccess int64   `json:"request_success" gorm:"bigint"`
-	RequestFailed  int64   `json:"request_failed" gorm:"bigint"`
+	InputToken      int64   `json:"input_token" gorm:"bigint"`
+	CacheReadToken  int64   `json:"cache_read_token" gorm:"not null;default:0"`
+	CacheWriteToken int64   `json:"cache_write_token" gorm:"not null;default:0"`
+	OutputToken     int64   `json:"output_token" gorm:"bigint"`
+	InputCost       float64 `json:"input_cost" gorm:"type:real"`
+	OutputCost      float64 `json:"output_cost" gorm:"type:real"`
+	WaitTime        int64   `json:"wait_time" gorm:"bigint"`
+	RequestSuccess  int64   `json:"request_success" gorm:"bigint"`
+	RequestFailed   int64   `json:"request_failed" gorm:"bigint"`
 }
 
 type StatsTotal struct {
@@ -58,6 +62,8 @@ type StatsSiteModelHourly struct {
 // Add aggregates another StatsMetrics into the current one.
 func (s *StatsMetrics) Add(delta StatsMetrics) {
 	s.InputToken += delta.InputToken
+	s.CacheReadToken += delta.CacheReadToken
+	s.CacheWriteToken += delta.CacheWriteToken
 	s.OutputToken += delta.OutputToken
 	s.InputCost += delta.InputCost
 	s.OutputCost += delta.OutputCost

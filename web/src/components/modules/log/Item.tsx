@@ -146,25 +146,10 @@ function hasCacheTokens(log: RelayLog) {
         || (log.cache_write_tokens != null && log.cache_write_tokens > 0);
 }
 
-// 投影渠道命名 "站点/账号/分组-端点后缀"，Anthropic 端点后缀为 -Anthropic。
-// 仅 Anthropic 端点的 input_tokens 不含 cache_read（Anthropic 原生语义），不应做减法；
-// OpenAI/Gemini 等的 input_tokens 已含 cache_read。见 SiteModelRouteType 后缀映射。
-function isAnthropicChannel(channelName: string): boolean {
-    if (!channelName) return false;
-    return /-Anthropic$/.test(channelName);
-}
-
+// 新输入 = 非缓存输入 + 缓存写入。bill_input_tokens 是后端按上游语义归一化好的非缓存输入，
+// 不必再从 input_tokens 反推；该列为空的老日志没有缓存明细，直接用 input_tokens。
 function getHeadlineInputTokens(log: RelayLog) {
-    if (!hasCacheTokens(log)) return log.input_tokens;
-    const cacheRead = log.cache_read_tokens ?? 0;
-    const cacheWrite = log.cache_write_tokens ?? 0;
-    // OpenAI 等语义：input 已含 cache_read（必然 input ≥ cache_read），减去命中得新输入；
-    // Anthropic：input 不含 cache_read，绝不减（含恢复对话等 input ≥ cache_read 的情况）；
-    // 数值兜底：input < cache_read 时即便误判为含缓存语义也不减，避免畸形上游归零。
-    const dedupedInput = !isAnthropicChannel(log.channel_name) && log.input_tokens >= cacheRead
-        ? log.input_tokens - cacheRead
-        : log.input_tokens;
-    return Math.max(0, dedupedInput + cacheWrite);
+    return (log.bill_input_tokens ?? log.input_tokens) + (log.cache_write_tokens ?? 0);
 }
 
 function getWSBadgeMeta(mode: RelayLogWSMode | null | undefined, usedWS: boolean | undefined, t: ReturnType<typeof useTranslations<'log.card'>>) {

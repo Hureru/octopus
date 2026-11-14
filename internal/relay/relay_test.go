@@ -952,14 +952,9 @@ func TestRelayMetricsCapturesOpenAICompatibleInputBreakdown(t *testing.T) {
 	if metrics.TransportInputTokens == nil || *metrics.TransportInputTokens != tokenizer.CountTokens(string(payload), "gpt-4o-mini") {
 		t.Fatalf("expected transport input tokens to be estimated from payload, got %#v", metrics.TransportInputTokens)
 	}
-	if metrics.BillInputTokens == nil || *metrics.BillInputTokens != 300 {
-		t.Fatalf("expected billed input tokens to exclude cache read tokens, got %#v", metrics.BillInputTokens)
-	}
-	if metrics.CacheReadTokens == nil || *metrics.CacheReadTokens != 900 {
-		t.Fatalf("expected cache read tokens to be captured, got %#v", metrics.CacheReadTokens)
-	}
-	if metrics.CacheWriteTokens == nil || *metrics.CacheWriteTokens != 0 {
-		t.Fatalf("expected cache write tokens to default to zero, got %#v", metrics.CacheWriteTokens)
+	// OpenAI 口径：prompt 已含缓存读取，总输入不重复累加。
+	if s := metrics.Stats; s.InputToken != 1200 || s.CacheReadToken != 900 || s.CacheWriteToken != 0 {
+		t.Fatalf("expected input=1200 cache_read=900 cache_write=0, got %+v", s)
 	}
 }
 
@@ -978,14 +973,9 @@ func TestRelayMetricsCapturesAnthropicInputBreakdown(t *testing.T) {
 		},
 	}, "claude-sonnet-4-5")
 
-	if metrics.BillInputTokens == nil || *metrics.BillInputTokens != 400 {
-		t.Fatalf("expected anthropic billed input tokens to keep prompt tokens as-is, got %#v", metrics.BillInputTokens)
-	}
-	if metrics.CacheReadTokens == nil || *metrics.CacheReadTokens != 1200 {
-		t.Fatalf("expected anthropic cache read tokens to be captured, got %#v", metrics.CacheReadTokens)
-	}
-	if metrics.CacheWriteTokens == nil || *metrics.CacheWriteTokens != 250 {
-		t.Fatalf("expected anthropic cache write tokens to be captured, got %#v", metrics.CacheWriteTokens)
+	// Anthropic 口径：prompt 不含缓存，总输入 = 400 + 1200 + 250。
+	if s := metrics.Stats; s.InputToken != 1850 || s.CacheReadToken != 1200 || s.CacheWriteToken != 250 {
+		t.Fatalf("expected input=1850 cache_read=1200 cache_write=250, got %+v", s)
 	}
 }
 
