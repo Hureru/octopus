@@ -51,6 +51,12 @@ func newAgentRouterServer(t *testing.T, checkedIn *bool, logins *int, wrongUserI
 			_, _ = w.Write([]byte(`{"data":[{"id":"default","name":"default"}]}`))
 		case "/api/user/self":
 			_, _ = w.Write([]byte(`{"success":true,"data":{"id":4242,"quota":12500000,"used_quota":500000}}`))
+		case "/api/log/self":
+			if r.URL.Query().Get("type") == "4" {
+				_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"quota":12500000}],"total":1}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[],"total":0}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -132,11 +138,34 @@ func TestSyncAgentRouterWithPasswordUsesSessionCookieAndLoginUserID(t *testing.T
 	if snapshot.balance != 25 || snapshot.balanceUsed != 1 {
 		t.Fatalf("unexpected balance: balance=%v used=%v", snapshot.balance, snapshot.balanceUsed)
 	}
+	if snapshot.todayIncome != 25 {
+		t.Fatalf("income logs must be fetched with the session cookie, got today income %v", snapshot.todayIncome)
+	}
 	if logins != 1 {
 		t.Fatalf("expected exactly one login per sync, got %d", logins)
 	}
 	if len(wrongUserIDs) != 0 {
 		t.Fatalf("user id must come from the login response, not probing; got requests %v", wrongUserIDs)
+	}
+}
+
+// 余额接口被拒时不探测用户 ID：这个 ID 来自登录响应或已在本次同步里用过，换 ID 救不回来，只会多发几十个请求。
+func TestAgentRouterBalanceFailureDoesNotProbeUserIDs(t *testing.T) {
+	var probedUserIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if userID := r.Header.Get("New-API-User"); userID != "4242" {
+			probedUserIDs = append(probedUserIDs, userID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"success":false,"message":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	site := &model.Site{BaseURL: server.URL, Platform: model.SitePlatformAgentRouter}
+	fetchSiteAccountBalance(context.Background(), site, &model.SiteAccount{}, agentRouterSessionCookie, 4242)
+	if len(probedUserIDs) != 0 {
+		t.Fatalf("expected no user id probing, got %v", probedUserIDs)
 	}
 }
 
