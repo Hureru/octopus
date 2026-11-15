@@ -19,6 +19,26 @@ type Iterator struct {
 	// 内嵌追踪
 	attempts []model.ChannelAttempt
 	count    int
+	current  *AttemptSpan // 正在进行的尝试
+
+	// OnChange 在一次尝试开始或失败时被调用，参数是尝试记录的快照，
+	// 正在进行的那次排在最后、状态为 AttemptRunning。
+	OnChange func([]model.ChannelAttempt)
+}
+
+func (it *Iterator) notifyChange() {
+	if it.OnChange == nil {
+		return
+	}
+	snapshot := make([]model.ChannelAttempt, len(it.attempts), len(it.attempts)+1)
+	copy(snapshot, it.attempts)
+	if span := it.current; span != nil {
+		running := span.attempt
+		running.Status = model.AttemptRunning
+		running.Duration = int(time.Since(span.startTime).Milliseconds())
+		snapshot = append(snapshot, running)
+	}
+	it.OnChange(snapshot)
 }
 
 // NewIterator 创建负载均衡迭代器
@@ -153,7 +173,7 @@ func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName st
 // StartAttempt 开始一次真实转发尝试，返回 Span 用于记录结果
 func (it *Iterator) StartAttempt(channelID, channelKeyID int, channelName string) *AttemptSpan {
 	it.count++
-	return &AttemptSpan{
+	span := &AttemptSpan{
 		attempt: model.ChannelAttempt{
 			ChannelID:    channelID,
 			ChannelKeyID: channelKeyID,
@@ -165,6 +185,9 @@ func (it *Iterator) StartAttempt(channelID, channelKeyID int, channelName string
 		startTime: time.Now(),
 		iter:      it,
 	}
+	it.current = span
+	it.notifyChange()
+	return span
 }
 
 // Attempts 返回所有决策记录（交给日志模块持久化）
@@ -190,6 +213,13 @@ func (s *AttemptSpan) End(status model.AttemptStatus, statusCode int, msg string
 	s.attempt.Duration = int(time.Since(s.startTime).Milliseconds())
 	s.attempt.Msg = msg
 	s.iter.attempts = append(s.iter.attempts, s.attempt)
+	if s.iter.current == s {
+		s.iter.current = nil
+	}
+	// 成功后最终日志马上就到，不需要再推一次进度
+	if status != model.AttemptSuccess {
+		s.iter.notifyChange()
+	}
 }
 
 // Duration 返回从开始到现在的耗时

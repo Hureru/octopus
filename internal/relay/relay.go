@@ -136,6 +136,8 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 
 	// 初始化 Metrics
 	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, internalRequest)
+	iter.OnChange = metrics.PublishProgress
+	defer metrics.DropLive()
 	// 如果触发了 HTTP replay，记录 ws_mode=replay 和 ws_recovery=replay
 	if responsesReplayState != nil {
 		metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)

@@ -3,6 +3,8 @@ package relay
 import (
 	"testing"
 
+	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/op"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
@@ -58,5 +60,44 @@ func TestSetInternalResponseNoFallbackWhenCacheOnly(t *testing.T) {
 
 	if m.Stats.InputToken != 40 || m.Stats.CacheReadToken != 40 {
 		t.Fatalf("got input=%d cache_read=%d, want 40/40 (cache-only is reported input)", m.Stats.InputToken, m.Stats.CacheReadToken)
+	}
+}
+
+func TestPublishProgressOnlyAfterAFailedAttempt(t *testing.T) {
+	sub := op.RelayLogSubscribe()
+	defer op.RelayLogUnsubscribe(sub)
+	m := NewRelayMetrics(0, "gpt-4o-mini", nil, nil)
+	defer m.DropLive()
+
+	running := model.ChannelAttempt{ChannelID: 2, ChannelName: "b", ModelName: "m2", Status: model.AttemptRunning}
+	skipped := model.ChannelAttempt{ChannelID: 1, ChannelName: "a", Status: model.AttemptSkipped}
+	failed := model.ChannelAttempt{ChannelID: 1, ChannelName: "a", ModelName: "m1", Status: model.AttemptFailed}
+
+	// 没失败过的请求不露面：一次成功的请求不应该先闪一张进行中的卡片
+	m.PublishProgress([]model.ChannelAttempt{skipped, running})
+	if m.logID != 0 || len(sub) != 0 {
+		t.Fatalf("request without a failed attempt must not be published (logID=%d, events=%d)", m.logID, len(sub))
+	}
+
+	m.PublishProgress([]model.ChannelAttempt{failed})
+	first := <-sub
+	if !first.Pending || first.ID == 0 || first.ID != m.logID || first.RequestModelName != "gpt-4o-mini" {
+		t.Fatalf("unexpected first snapshot: %+v", first)
+	}
+
+	m.PublishProgress([]model.ChannelAttempt{failed, running})
+	second := <-sub
+	if second.ID != first.ID {
+		t.Fatalf("snapshots of one request must share an id: %d vs %d", first.ID, second.ID)
+	}
+	if second.ChannelName != "b" || second.ActualModelName != "m2" || second.TotalAttempts != 2 {
+		t.Fatalf("snapshot should describe the attempt in flight, got %+v", second)
+	}
+
+	m.DropLive()
+	for _, entry := range op.RelayLogLiveSnapshot() {
+		if entry.ID == first.ID {
+			t.Fatalf("DropLive should remove the live entry")
+		}
 	}
 }

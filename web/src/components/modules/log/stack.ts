@@ -7,7 +7,7 @@ export interface LogRow {
 }
 
 // 熔断 / 全部跳过导致的失败没有 error 文本，只能靠 success 判断；旧版本后端没有这个字段时退回 error。
-const isFailed = (log: RelayLog) => log.success === false || !!log.error;
+const isFailed = (log: RelayLog) => !log.pending && (log.success === false || !!log.error);
 
 /**
  * 把相邻、都失败、请求模型与 API Key 都相同的日志折成一叠。

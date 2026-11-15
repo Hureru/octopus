@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/conf"
@@ -11,6 +12,7 @@ import (
 	"github.com/bestruirui/octopus/internal/price"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/snowflake"
 	"github.com/bestruirui/octopus/internal/utils/tokenizer"
 )
 
@@ -37,6 +39,8 @@ type RelayMetrics struct {
 	WSRecovery  *model.RelayLogWSRecovery
 
 	TransportInputTokens *int
+
+	logID int64 // 进行中时提前分配的日志 ID；0 表示还没在日志页露过面
 }
 
 func NewRelayMetrics(apiKeyID int, requestModel string, rawBody []byte, req *transformerModel.InternalLLMRequest) *RelayMetrics {
@@ -80,6 +84,45 @@ func (m *RelayMetrics) SetWSRecovery(recovery model.RelayLogWSRecovery) {
 		return
 	}
 	m.WSRecovery = wsRecoveryPtr(recovery)
+}
+
+// PublishProgress 把重试中的请求推给日志页，用作 balancer.Iterator.OnChange。
+// 只有已经失败过的请求才会露面：一次就成功的请求仍然只在结束时产生一条日志。
+func (m *RelayMetrics) PublishProgress(attempts []model.ChannelAttempt) {
+	if len(attempts) == 0 {
+		return
+	}
+	if m.logID == 0 {
+		if !slices.ContainsFunc(attempts, func(a model.ChannelAttempt) bool { return a.Status == model.AttemptFailed }) {
+			return
+		}
+		m.logID = snowflake.GenerateID()
+	}
+	last := attempts[len(attempts)-1]
+	relayLog := model.RelayLog{
+		ID:               m.logID,
+		Time:             m.StartTime.Unix(),
+		RequestModelName: m.RequestModel,
+		ChannelId:        last.ChannelID,
+		ChannelName:      last.ChannelName,
+		ActualModelName:  last.ModelName,
+		UseTime:          int(time.Since(m.StartTime).Milliseconds()),
+		Attempts:         attempts,
+		TotalAttempts:    len(attempts),
+		UsedWS:           m.UsedWS,
+	}
+	if apiKey, err := op.APIKeyGet(m.APIKeyID, context.Background()); err == nil {
+		relayLog.RequestAPIKeyName = apiKey.Name
+	}
+	op.RelayLogLiveUpdate(relayLog)
+}
+
+// DropLive 在请求退出时兜底清理：正常路径 saveLog 已经清掉了，这里防的是 panic，
+// 否则这条记录会一直留在内存里，每个新打开的日志页都会收到一张永远转圈的卡片。
+func (m *RelayMetrics) DropLive() {
+	if m.logID != 0 {
+		op.RelayLogLiveDelete(m.logID)
+	}
 }
 
 func (m *RelayMetrics) SetInternalResponse(resp *transformerModel.InternalLLMResponse, actualModel string) {
@@ -215,6 +258,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, dur
 	}
 
 	relayLog := model.RelayLog{
+		ID:               m.logID,
 		Time:             m.StartTime.Unix(),
 		RequestModelName: m.RequestModel,
 		ChannelName:      channelName,

@@ -759,6 +759,8 @@
             "firstTokenTime": "首字時間",
             "tokens": "tokens",
             "retryDetails": "重試詳情",
+            "running": "請求中",
+            "retrying": "已失敗 {count} 次，重試中",
             "attempts": "次嘗試",
             "success": "成功",
             "failed": "失敗",
