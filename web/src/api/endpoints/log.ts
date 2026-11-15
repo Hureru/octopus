@@ -72,6 +72,7 @@ export interface RelayLog {
     request_content: string;     // 请求内容
     response_content: string;    // 响应内容
     error: string;               // 错误信息
+    success?: boolean;           // 是否成功；熔断 / 全部跳过导致的失败 error 为空，只能看这个
     attempts?: ChannelAttempt[]; // 所有尝试记录
     total_attempts?: number;     // 总尝试次数
     used_ws?: boolean;           // 是否使用了上游WebSocket
