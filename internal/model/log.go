@@ -8,6 +8,7 @@ const (
 	AttemptFailed       AttemptStatus = "failed"        // 转发失败
 	AttemptCircuitBreak AttemptStatus = "circuit_break" // 熔断跳过
 	AttemptSkipped      AttemptStatus = "skipped"       // 其他原因跳过（禁用、无Key、类型不兼容等）
+	AttemptRunning      AttemptStatus = "running"       // 正在转发；只出现在进行中请求的实时快照里，不落库
 )
 
 // ChannelAttempt 记录单次渠道尝试的决策和结果
@@ -76,4 +77,5 @@ type RelayLog struct {
 	WSMode               *RelayLogWSMode     `json:"ws_mode,omitempty"`                        // 上游 WebSocket 会话模式
 	WSExecMode           *RelayLogWSExecMode `json:"ws_exec_mode,omitempty"`                   // 上游 WebSocket 事件处理方式
 	WSRecovery           *RelayLogWSRecovery `json:"ws_recovery,omitempty"`                    // 本次请求触发的恢复动作
+	Pending              bool                `json:"pending,omitempty" gorm:"-"`               // 请求仍在重试中；只出现在实时推送里，不落库
 }

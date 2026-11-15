@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/server/resp"
@@ -288,6 +289,21 @@ func streamLog(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	write := func(log model.RelayLog) {
+		data, err := json.Marshal(log)
+		if err != nil {
+			return
+		}
+		c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
+		c.Writer.Flush()
+	}
+
+	// 先补发正在重试的请求：一次慢尝试可能持续一两分钟，不能等下一次推送才显示。
+	// 必须在订阅之后取快照，否则两者之间结束的请求会留下一张永远转圈的卡片。
+	for _, log := range op.RelayLogLiveSnapshot() {
+		write(log)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -296,12 +312,7 @@ func streamLog(c *gin.Context) {
 			if !ok {
 				return
 			}
-			data, err := json.Marshal(log)
-			if err != nil {
-				continue
-			}
-			c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
-			c.Writer.Flush()
+			write(log)
 		}
 	}
 }

@@ -245,6 +245,13 @@ function getAttemptStatusMeta(status: AttemptStatus, t: ReturnType<typeof useTra
                 containerClassName: 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10',
                 messageClassName: 'text-amber-700 dark:text-amber-300 border-amber-500/30',
             };
+        case 'running':
+            return {
+                label: t('running'),
+                badgeClassName: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+                containerClassName: 'bg-sky-500/5 border-sky-500/20 hover:bg-sky-500/10',
+                messageClassName: 'text-sky-700 dark:text-sky-300 border-sky-500/30',
+            };
         case 'failed':
         default:
             return {
@@ -260,9 +267,20 @@ interface RetryBadgeWithTooltipProps {
     channelName: string;
     brandColor: string;
     attempts: ChannelAttempt[];
+    pending?: boolean;
 }
 
-function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadgeWithTooltipProps) {
+// 进行中的请求：以收到快照时服务端给的耗时为基准，本地每秒往上加，不依赖两端时钟一致
+function LiveDuration({ log }: { log: RelayLog }) {
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+    return <>{formatDurationCompact(log.use_time + Math.max(0, now - (log.received_at ?? now)))}</>;
+}
+
+function RetryBadgeWithTooltip({ channelName, brandColor, attempts, pending }: RetryBadgeWithTooltipProps) {
     const t = useTranslations('log.card');
     const merged = useMemo(() => mergeAdjacentAttempts(attempts), [attempts]);
 
@@ -274,7 +292,11 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                     className="shrink-0 text-xs px-1.5 py-0 cursor-help"
                     style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
                 >
-                    <RotateCw className="size-3 mr-1 opacity-80" />
+                    {pending ? (
+                        <Loader2 className="size-3 mr-1 opacity-80 animate-spin" />
+                    ) : (
+                        <RotateCw className="size-3 mr-1 opacity-80" />
+                    )}
                     {channelName}
                 </Badge>
             </TooltipTrigger>
@@ -298,7 +320,7 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts }: RetryBadge
                                         {attempt.channel_name}
                                     </span>
                                     <span className="text-[10px] text-muted-foreground">
-                                        {attempt.model_name} • {formatDuration(attempt.totalDuration)}
+                                        {attempt.model_name}{attempt.status === 'running' ? null : ` • ${formatDuration(attempt.totalDuration)}`}
                                     </span>
                                 </div>
                                 {attempt.repeat > 1 ? (
@@ -520,8 +542,10 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     const disableMutation = useUpdateSiteChannelModelDisabled();
 
     const hasError = !!log.error;
+    const isPending = !!log.pending;
+    const failedAttempts = isPending ? (log.attempts ?? []).filter((attempt) => attempt.status === 'failed') : [];
     const hasAttempts = (log.attempts?.length ?? 0) > 0;
-    const hasMultipleAttempts = (log.attempts?.length ?? 0) > 1;
+    const hasMultipleAttempts = (log.attempts?.length ?? 0) > 1 || isPending;
     const [isDiagnosticExpanded, setIsDiagnosticExpanded] = useState(false);
     const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
     const [activeDisableTarget, setActiveDisableTarget] = useState<LogSiteActionTarget | null>(null);
@@ -539,7 +563,8 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
     const displayLog = detailLog ?? log;
 
     useEffect(() => {
-        if (detailRequestID === 0 || detailLog) return;
+        // 进行中的请求还没有可查的详情，等它结束（pending 消失）再拉
+        if (detailRequestID === 0 || detailLog || log.pending) return;
         let cancelled = false;
         getLogDetail(log.id)
             .then((item) => {
@@ -556,7 +581,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
         return () => {
             cancelled = true;
         };
-    }, [detailLog, detailRequestID, log.id]);
+    }, [detailLog, detailRequestID, log.id, log.pending]);
 
     const openDisableDialog = (target: LogSiteActionTarget) => {
         if (!target.can_disable_model || target.model_disabled) return;
@@ -624,10 +649,10 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                     }}
                     className={cn(
                         'rounded-3xl border bg-card w-full text-left',
-                        hasError ? 'border-destructive/40' : 'border-border',
+                        hasError ? 'border-destructive/40' : isPending ? 'border-sky-500/40' : 'border-border',
                     )}
                 >
-                    <div className={cn('p-4 grid grid-cols-[auto_1fr] gap-4', hasError ? 'items-start' : 'items-center')}>
+                    <div className={cn('p-4 grid grid-cols-[auto_1fr] gap-4', hasError || isPending ? 'items-start' : 'items-center')}>
                         <ModelAvatar size={40} />
                         <div className="min-w-0 flex flex-col gap-3">
                             <div className="flex items-start gap-3 min-w-0">
@@ -640,7 +665,8 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                         <RetryBadgeWithTooltip
                                             channelName={log.channel_name}
                                             brandColor={brandColor}
-                                            attempts={log.attempts!}
+                                            attempts={log.attempts ?? []}
+                                            pending={isPending}
                                         />
                                     ) : (
                                         <Badge
@@ -675,34 +701,49 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                 ) : null}
                                 <div className="flex items-center gap-1.5">
                                     <Zap className="size-3.5 shrink-0 text-amber-500" />
-                                    <span>{t('duration')} {formatDurationCompact(log.ftut)} / {formatDurationCompact(log.use_time)}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                    <ArrowDownToLine className={cn('size-3.5 shrink-0', hasCacheTokens(log) ? 'text-sky-500' : 'text-green-500')} />
-                                    <span className="flex items-center gap-1">
-                                        {t('input')}
-                                        <span className="tabular-nums">{getHeadlineInputTokens(log).toLocaleString()}</span>
-                                        {hasCacheTokens(log) && log.cache_read_tokens != null && log.cache_read_tokens > 0 ? (
-                                            <Badge
-                                                variant="secondary"
-                                                className="shrink-0 px-1.5 py-0 text-[11px] bg-sky-500/15 text-sky-600 dark:text-sky-400"
-                                            >
-                                                {formatCompactTokenCount(log.cache_read_tokens)}
-                                            </Badge>
-                                        ) : null}
+                                    <span>
+                                        {t('duration')}{' '}
+                                        {isPending ? <LiveDuration log={log} /> : `${formatDurationCompact(log.ftut)} / ${formatDurationCompact(log.use_time)}`}
                                     </span>
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                    <ArrowUpFromLine className="size-3.5 shrink-0 text-purple-500" />
-                                    <span>{t('output')} {log.output_tokens.toLocaleString()}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                    <DollarSign className="size-3.5 shrink-0 text-emerald-500" />
-                                    <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                                        {t('cost')} {Number(log.cost).toFixed(6)}
-                                    </span>
-                                </div>
+                                {isPending ? null : (
+                                    <>
+                                        <div className="flex items-center gap-1.5">
+                                            <ArrowDownToLine className={cn('size-3.5 shrink-0', hasCacheTokens(log) ? 'text-sky-500' : 'text-green-500')} />
+                                            <span className="flex items-center gap-1">
+                                                {t('input')}
+                                                <span className="tabular-nums">{getHeadlineInputTokens(log).toLocaleString()}</span>
+                                                {hasCacheTokens(log) && log.cache_read_tokens != null && log.cache_read_tokens > 0 ? (
+                                                    <Badge
+                                                        variant="secondary"
+                                                        className="shrink-0 px-1.5 py-0 text-[11px] bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                                                    >
+                                                        {formatCompactTokenCount(log.cache_read_tokens)}
+                                                    </Badge>
+                                                ) : null}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <ArrowUpFromLine className="size-3.5 shrink-0 text-purple-500" />
+                                            <span>{t('output')} {log.output_tokens.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <DollarSign className="size-3.5 shrink-0 text-emerald-500" />
+                                            <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                                                {t('cost')} {Number(log.cost).toFixed(6)}
+                                            </span>
+                                        </div>
+                                    </>
+                                )}
                             </div>
+                            {isPending ? (
+                                <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 overflow-hidden">
+                                    <p className="text-xs text-sky-700 dark:text-sky-300 line-clamp-2">
+                                        <span className="font-medium">{failedAttempts.length > 0 ? t('retrying', { count: failedAttempts.length }) : t('running')}</span>
+                                        {failedAttempts.length > 0 ? ` · ${sanitizeErrorMessage(failedAttempts[failedAttempts.length - 1].msg)}` : null}
+                                    </p>
+                                </div>
+                            ) : null}
                             {hasError ? (
                                 <div className="p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 overflow-hidden">
                                     <p className="text-xs text-destructive line-clamp-2">{sanitizeErrorMessage(log.error)}</p>
@@ -724,7 +765,8 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     <RetryBadgeWithTooltip
                                         channelName={log.channel_name}
                                         brandColor={brandColor}
-                                        attempts={log.attempts!}
+                                        attempts={log.attempts ?? []}
+                                        pending={isPending}
                                     />
                                 ) : (
                                     <Badge
@@ -894,7 +936,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                                                                     </div>
                                                                                     <div className="ml-auto flex items-center gap-2 shrink-0">
                                                                                         <span className="text-muted-foreground tabular-nums font-mono">
-                                                                                            {formatDuration(attempt.totalDuration)}
+                                                                                            {attempt.status === 'running' ? null : formatDuration(attempt.totalDuration)}
                                                                                         </span>
                                                                                         {canDisableAttempt ? (
                                                                                             <AttemptDisableButton

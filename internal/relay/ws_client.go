@@ -233,6 +233,7 @@ func processWSResponseCreate(
 		writeWSError(ctx, conn, status, code, err.Error())
 		return conversationState
 	}
+	defer func() { req.metrics.DropLive() }() // 闭包：req 可能被下面的 replay 请求替换
 
 	autoRestart := conversationState != nil && continuationRequested && conversationState.CanAutoRestart(originalRequest)
 	failedPreviousResponseID := currentPreviousResponseID(originalRequest)
@@ -260,6 +261,8 @@ func processWSResponseCreate(
 		if replayErr == nil {
 			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 			replayReq.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
+			// 被替换的请求不会再 Save；沿用它的日志 ID，日志页上那张进行中的卡片才有人收尾
+			replayReq.metrics.logID = req.metrics.logID
 			req = replayReq
 			group = replayGroup
 			result = runWSRelay(ctx, req, group)
@@ -427,12 +430,15 @@ func newWSRelayRequest(
 		return nil, nil, fmt.Errorf("no available channel")
 	}
 
+	metrics := NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest)
+	iter.OnChange = metrics.PublishProgress
+
 	return &relayRequest{
 		c:               nil,
 		ctx:             ctx,
 		inAdapter:       inAdapter,
 		internalRequest: executionRequest,
-		metrics:         NewRelayMetrics(apiKeyID, requestModel, rawBody, metricsRequest),
+		metrics:         metrics,
 		apiKeyID:        apiKeyID,
 		requestModel:    requestModel,
 		groupID:         group.ID,

@@ -85,7 +85,8 @@ export function Log() {
     const loadMore = liveLogsQuery.loadMore;
     const warning = liveLogsQuery.warning;
 
-    const logIDs = useMemo(() => logs.map((log) => log.id), [logs]);
+    // 进行中的请求还没落库，查不到站点操作目标；结束后 ID 集合变化会重新查询
+    const logIDs = useMemo(() => logs.filter((log) => !log.pending).map((log) => log.id), [logs]);
     const siteActionTargetsQuery = useLogSiteActionTargets(logIDs, logs.length > 0);
     const siteActionTargets = useMemo(() => {
         const next = new Map<number, LogSiteActionTargets>();

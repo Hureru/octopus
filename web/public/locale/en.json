@@ -759,6 +759,8 @@
             "firstTokenTime": "First Token Time",
             "tokens": "tokens",
             "retryDetails": "Retry Details",
+            "running": "Running",
+            "retrying": "{count} failed, retrying",
             "attempts": "attempts",
             "success": "Success",
             "failed": "Failed",

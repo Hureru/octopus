@@ -88,6 +88,8 @@ func HandleResponsesCompact(c *gin.Context) {
 
 	metricsReq := &transformerModel.InternalLLMRequest{Model: requestModel, RawRequest: body}
 	metrics := NewRelayMetrics(apiKeyID, requestModel, body, metricsReq)
+	iter.OnChange = metrics.PublishProgress
+	defer metrics.DropLive()
 
 	var lastErr error
 	var lastStatusCode int

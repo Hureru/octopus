@@ -222,3 +222,37 @@ func TestRelayLogFlushPendingPersistsQueuedLogs(t *testing.T) {
 		t.Fatalf("expected 3 persisted logs, got %d", dbCount)
 	}
 }
+
+func TestRelayLogLiveIsReplacedByFinalLogWithSameID(t *testing.T) {
+	ctx := setupSiteOpTestDB(t)
+	if err := settingRefreshCache(ctx); err != nil {
+		t.Fatalf("settingRefreshCache failed: %v", err)
+	}
+	resetRelayLogStateForTest()
+	sub := RelayLogSubscribe()
+	defer RelayLogUnsubscribe(sub)
+
+	const id = int64(4242)
+	RelayLogLiveUpdate(model.RelayLog{ID: id, Time: time.Now().Unix() - 3, RequestModelName: "gpt-4o-mini"})
+
+	if got := <-sub; got.ID != id || !got.Pending {
+		t.Fatalf("subscriber should receive the pending snapshot, got id=%d pending=%t", got.ID, got.Pending)
+	}
+	snapshot := RelayLogLiveSnapshot()
+	if len(snapshot) != 1 || snapshot[0].ID != id || !snapshot[0].Pending {
+		t.Fatalf("snapshot should hold the pending log, got %+v", snapshot)
+	}
+	if snapshot[0].UseTime < 2000 {
+		t.Fatalf("snapshot should recompute elapsed time, got %dms", snapshot[0].UseTime)
+	}
+
+	if err := RelayLogAdd(ctx, model.RelayLog{ID: id, Time: time.Now().Unix(), RequestModelName: "gpt-4o-mini"}); err != nil {
+		t.Fatalf("RelayLogAdd failed: %v", err)
+	}
+	if got := <-sub; got.ID != id || got.Pending {
+		t.Fatalf("final log should reuse the id and not be pending, got id=%d pending=%t", got.ID, got.Pending)
+	}
+	if left := RelayLogLiveSnapshot(); len(left) != 0 {
+		t.Fatalf("final log should clear the live entry, got %+v", left)
+	}
+}

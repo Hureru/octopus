@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /**
  * 尝试状态
  */
-export type AttemptStatus = 'success' | 'failed' | 'circuit_break' | 'skipped';
+export type AttemptStatus = 'success' | 'failed' | 'circuit_break' | 'skipped' | 'running';
 
 export type RelayLogWSMode = 'fresh' | 'continuation' | 'replay';
 
@@ -79,6 +79,8 @@ export interface RelayLog {
     ws_mode?: RelayLogWSMode | null; // 上游 WebSocket 会话模式
     ws_exec_mode?: RelayLogWSExecMode | null; // 上游 WebSocket 事件处理方式
     ws_recovery?: RelayLogWSRecovery | null; // 本次请求触发的恢复动作
+    pending?: boolean;           // 请求仍在重试中（只来自 SSE，结束后会被同 ID 的最终日志替换）
+    received_at?: number;        // 前端收到该快照的本地时间(毫秒)，用于让耗时继续走
 }
 
 export type LogStatusFilter = 'all' | 'success' | 'error';
@@ -262,6 +264,8 @@ export function useLogs(options: UseLogsOptions = {}) {
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<Error | null>(null);
     const eventSourceRef = useRef<EventSource | null>(null);
+    // 进行中的请求单独存放，不进 React Query 缓存：那里会被分页截断、被 refetch 覆盖
+    const [liveLogs, setLiveLogs] = useState<ReadonlyMap<number, RelayLog>>(new Map());
 
     const queryClient = useQueryClient();
 
@@ -314,9 +318,15 @@ export function useLogs(options: UseLogsOptions = {}) {
             }
         }
 
-        merged.sort((a, b) => b.time - a.time);
+        // 已加载列表里有同 ID 的就是最终结果，进行中的那份让位
+        for (const log of liveLogs.values()) {
+            if (!seen.has(log.id)) merged.push(log);
+        }
+
+        // 同一秒内按 ID 排，和后端一致；否则进行中的卡片变成最终结果时会在同秒的日志间跳位置
+        merged.sort((a, b) => b.time - a.time || b.id - a.id);
         return merged;
-    }, [logsQuery.data]);
+    }, [logsQuery.data, liveLogs]);
 
     const loadMore = useCallback(async () => {
         if (!logsQuery.hasNextPage) return;
@@ -370,6 +380,16 @@ export function useLogs(options: UseLogsOptions = {}) {
                 eventSource.onmessage = (event) => {
                     try {
                         const log: RelayLog = JSON.parse(event.data);
+                        if (log.pending) {
+                            setLiveLogs((prev) => new Map(prev).set(log.id, { ...log, received_at: Date.now() }));
+                            return;
+                        }
+                        setLiveLogs((prev) => {
+                            if (!prev.has(log.id)) return prev;
+                            const next = new Map(prev);
+                            next.delete(log.id);
+                            return next;
+                        });
                         queryClient.setQueryData(
                             logsInfiniteQueryKey(pageSize, filters),
                             (old: InfiniteData<CursorPage, LogCursor | null> | undefined) => {
@@ -397,6 +417,7 @@ export function useLogs(options: UseLogsOptions = {}) {
                 eventSource.onerror = () => {
                     setIsConnected(false);
                     setError(new Error('SSE 连接断开'));
+                    setLiveLogs(new Map()); // 重连后服务端会重发当前进行中的请求
                     eventSource.close();
                     eventSourceRef.current = null;
                     scheduleReconnect();
@@ -417,6 +438,7 @@ export function useLogs(options: UseLogsOptions = {}) {
             eventSourceRef.current?.close();
             eventSourceRef.current = null;
             setIsConnected(false);
+            setLiveLogs(new Map());
         };
     }, [pageSize, filters, queryClient, streamEnabled]);
 

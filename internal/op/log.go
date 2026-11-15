@@ -39,6 +39,10 @@ var relayLogFlushSignal = make(chan struct{}, 1)
 var relayLogDroppedTotal atomic.Uint64
 var relayLogLastDropWarn atomic.Int64
 
+// 已失败过、仍在重试的请求，只存在内存里，供日志页实时显示。
+var relayLogLive = make(map[int64]model.RelayLog)
+var relayLogLiveLock sync.Mutex
+
 var relayLogSubscribers = make(map[chan model.RelayLog]struct{})
 var relayLogSubscribersLock sync.RWMutex
 
@@ -73,7 +77,8 @@ func RelayLogStreamTokenRevoke(token string) {
 }
 
 func RelayLogSubscribe() chan model.RelayLog {
-	ch := make(chan model.RelayLog, 10)
+	// 通道满了会直接丢消息；进行中的请求每次尝试都会推一条，缓冲给大一些
+	ch := make(chan model.RelayLog, 64)
 	relayLogSubscribersLock.Lock()
 	relayLogSubscribers[ch] = struct{}{}
 	relayLogSubscribersLock.Unlock()
@@ -97,6 +102,34 @@ func notifySubscribers(relayLog model.RelayLog) {
 		default:
 		}
 	}
+}
+
+// RelayLogLiveUpdate 推送一条进行中请求的快照。请求结束时 RelayLogAdd 会用同一个 ID 把它替换掉。
+func RelayLogLiveUpdate(relayLog model.RelayLog) {
+	relayLog.Pending = true
+	relayLogLiveLock.Lock()
+	relayLogLive[relayLog.ID] = relayLog
+	relayLogLiveLock.Unlock()
+	notifySubscribers(relayLog)
+}
+
+func RelayLogLiveDelete(id int64) {
+	relayLogLiveLock.Lock()
+	delete(relayLogLive, id)
+	relayLogLiveLock.Unlock()
+}
+
+// RelayLogLiveSnapshot 返回当前所有进行中的请求，新订阅者靠它立刻看到现状。
+func RelayLogLiveSnapshot() []model.RelayLog {
+	nowMs := time.Now().UnixMilli()
+	relayLogLiveLock.Lock()
+	defer relayLogLiveLock.Unlock()
+	result := make([]model.RelayLog, 0, len(relayLogLive))
+	for _, entry := range relayLogLive {
+		entry.UseTime = int(nowMs - entry.Time*1000) // Time 只到秒，误差不超过 1 秒
+		result = append(result, entry)
+	}
+	return result
 }
 
 // RelayLogWriterRun flushes persisted relay logs from the in-memory queue in
@@ -297,11 +330,16 @@ func RelayLogFlushPending(ctx context.Context) error {
 }
 
 func RelayLogAdd(ctx context.Context, relayLog model.RelayLog) error {
+	// 进行中时已经分配过 ID 的请求沿用它，前端按 ID 把进行中的卡片换成最终结果
+	if relayLog.ID == 0 {
+		relayLog.ID = snowflake.GenerateID()
+	} else {
+		RelayLogLiveDelete(relayLog.ID)
+	}
 	enabled, err := SettingGetBool(model.SettingKeyRelayLogKeepEnabled)
 	if err != nil {
 		return err
 	}
-	relayLog.ID = snowflake.GenerateID()
 	notifySubscribers(relayLog)
 	appendRelayLogRecent(relayLog)
 
