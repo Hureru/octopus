@@ -160,6 +160,7 @@ docker compose up -d
 |------|------|
 | **New API** | 最常见的中转站类型（New API / 各类二开） |
 | **AnyRouter** | L 站登录的 any 类站点（凭据填 cookie，见下） |
+| **AgentRouter** | agentrouter.org（New API 二开）：同步同 New API，区别是签到靠"重新登录"触发 |
 | **One API / One Hub / Done Hub** | 对应同名开源面板 |
 | **Sub2API** | sub2api 类站点 |
 | **API 直连** | 官方或直连类供应商（OpenAI / Claude / Gemini），需要额外选择**默认协议**（见下方说明） |
@@ -178,6 +179,7 @@ docker compose up -d
 |------|---------|----------------------|---------|
 | **New API 类** | Access Token | 站点的**「系统访问令牌」**（不是登录密码！） | 必填 **Platform User ID**（站点里的用户 ID） |
 | **AnyRouter（any）** | Access Token | **cookie**，格式 `session=MTc1234567890` | — |
+| **AgentRouter** | Access Token | 同 New API：站点的**「系统访问令牌」** | 必填 **Platform User ID**；要自动签到还需填**用户名和密码**（站点没有签到接口，重新登录才发放签到额度） |
 | **Sub2API** | Access Token | 站点的 access token | 建议同时填 `refresh_token` 与 `token_expires_at`（F12 拿，401 会自动续期）|
 | **OpenAI/Claude/Gemini（API 直连）** | API Key | 对应的密钥 | — |
 

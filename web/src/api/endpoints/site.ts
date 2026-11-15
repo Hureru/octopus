@@ -7,6 +7,7 @@ import type { ProxyMode } from "./proxy-pool";
 export enum SitePlatform {
   NewAPI = "new-api",
   AnyRouter = "anyrouter",
+  AgentRouter = "agentrouter",
   OneAPI = "one-api",
   OneHub = "one-hub",
   DoneHub = "done-hub",

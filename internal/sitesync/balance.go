@@ -34,6 +34,7 @@ func fetchSiteAccountBalance(ctx context.Context, siteRecord *model.Site, accoun
 		return fetchManagementQuotaBalance(ctx, siteRecord, account, accessToken, userID, false)
 	case model.SitePlatformNewAPI,
 		model.SitePlatformAnyRouter,
+		model.SitePlatformAgentRouter,
 		model.SitePlatformDoneHub:
 		return fetchManagementQuotaBalance(ctx, siteRecord, account, accessToken, userID, true)
 	case model.SitePlatformSub2API:
@@ -137,6 +138,7 @@ func supportsTodayIncomeLogFallback(platform model.SitePlatform) bool {
 	switch platform {
 	case model.SitePlatformNewAPI,
 		model.SitePlatformAnyRouter,
+		model.SitePlatformAgentRouter,
 		model.SitePlatformOneAPI:
 		return true
 	default:

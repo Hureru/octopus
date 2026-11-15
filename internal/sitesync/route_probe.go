@@ -75,7 +75,7 @@ func detectSiteModelRoutes(
 	}
 
 	switch siteRecord.Platform {
-	case model.SitePlatformNewAPI, model.SitePlatformOneAPI:
+	case model.SitePlatformNewAPI, model.SitePlatformAgentRouter, model.SitePlatformOneAPI:
 		return detectManagedPricingRoutes(ctx, siteRecord, account, accessToken, modelToken, modelFilter)
 	case model.SitePlatformOneHub, model.SitePlatformDoneHub:
 		detections := detectManagedPricingRoutes(ctx, siteRecord, account, accessToken, modelToken, modelFilter)

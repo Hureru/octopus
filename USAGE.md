@@ -160,6 +160,7 @@ Supported **Platform Types**:
 |----------|-------------|
 | **New API** | The most common relay site type (New API / various forks) |
 | **AnyRouter** | LinuxDO-based "any" sites (credentials use cookies, see below) |
+| **AgentRouter** | agentrouter.org (a New API fork): syncs like New API, but check-in is triggered by logging in again |
 | **One API / One Hub / Done Hub** | Corresponding open-source panels |
 | **Sub2API** | sub2api sites |
 | **API Direct** | Official or direct providers (OpenAI / Claude / Gemini). Requires selecting a **default protocol** (see note below) |
@@ -178,6 +179,7 @@ The way to fill in Access Token varies by platform — this is the biggest pitfa
 |----------|----------------------|---------------------------|--------------|
 | **New API** | Access Token | The site's **"System Access Token"** (not the login password!) | Must fill **Platform User ID** (user ID on the relay site) |
 | **AnyRouter (any)** | Access Token | **Cookie**, format: `session=MTc1234567890` | — |
+| **AgentRouter** | Access Token | Same as New API: the site's **"System Access Token"** | Must fill **Platform User ID**; for auto check-in also fill **username and password** (the site has no check-in endpoint — the bonus is granted on login) |
 | **Sub2API** | Access Token | The site's access token | Recommended to also fill `refresh_token` and `token_expires_at` (get via F12, auto-refreshes on 401) |
 | **OpenAI/Claude/Gemini (API Direct)** | API Key or Access Token | The corresponding key | — |
 

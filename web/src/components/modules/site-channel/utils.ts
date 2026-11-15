@@ -119,6 +119,8 @@ export function platformLabel(platform: SiteChannelCard['platform']) {
             return 'New API';
         case 'anyrouter':
             return 'AnyRouter';
+        case 'agentrouter':
+            return 'AgentRouter';
         case 'one-api':
             return 'One API';
         case 'one-hub':
@@ -232,7 +234,7 @@ export function buildSiteTokenManagementUrl(baseUrl: string, platform: SiteChann
     if (!trimmed) return '';
 
     const normalizedBase = trimmed.replace(/\/+$/, '');
-    if (platform !== 'new-api') return normalizedBase;
+    if (platform !== 'new-api' && platform !== 'agentrouter') return normalizedBase;
     return `${normalizedBase}/console/token`;
 }
 
