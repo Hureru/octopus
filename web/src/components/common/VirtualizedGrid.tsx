@@ -4,6 +4,7 @@ import {
     type ReactNode,
     useCallback,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -35,6 +36,8 @@ interface VirtualizedGridProps<T> {
     onReachEnd?: () => void;
     reachEndEnabled?: boolean;
     reachEndOffset?: number;
+    /** 不在顶部时，上方插入 / 变高不推动当前看到的内容（日志流用） */
+    anchorScroll?: boolean;
     onScroll?: (info: { scrollTop: number; scrollHeight: number; clientHeight: number }) => void;
 }
 
@@ -64,6 +67,7 @@ export function VirtualizedGrid<T>({
     onReachEnd,
     reachEndEnabled = false,
     reachEndOffset = 1,
+    anchorScroll = false,
     onScroll,
 }: VirtualizedGridProps<T>) {
     'use no memo';
@@ -148,6 +152,35 @@ export function VirtualizedGrid<T>({
 
     const virtualRows = rowVirtualizer.getVirtualItems();
 
+    // 滚动锚定：记住视口里第一行的位置，每次提交后把它放回原处。
+    // 虚拟列表自带的修正只管"行变高"，不管插入，而且行 key 一变就会误判，所以开启时由这里统一接管。
+    if (anchorScroll) rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
+    const anchorRef = useRef<{ key: string; top: number; scrollTop: number } | null>(null);
+    const recordAnchor = useCallback(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const containerTop = el.getBoundingClientRect().top;
+        anchorRef.current = null;
+        for (const row of el.querySelectorAll<HTMLElement>('[data-row-key]')) {
+            const rect = row.getBoundingClientRect();
+            if (rect.bottom <= containerTop) continue;
+            anchorRef.current = { key: row.dataset.rowKey!, top: rect.top, scrollTop: el.scrollTop };
+            break;
+        }
+    }, []);
+    useLayoutEffect(() => {
+        if (!anchorScroll) return;
+        const el = containerRef.current;
+        const anchor = anchorRef.current;
+        // scrollTop 对不上说明记录之后用户滚动过，那次位移不是布局造成的，不能抵消
+        if (el && anchor && el.scrollTop > 0 && el.scrollTop === anchor.scrollTop) {
+            const row = el.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(anchor.key)}"]`);
+            const delta = row ? row.getBoundingClientRect().top - anchor.top : 0;
+            if (Math.abs(delta) >= 1) el.scrollTop += delta;
+        }
+        recordAnchor();
+    });
+
     useEffect(() => {
         if (!onReachEnd || !reachEndEnabled || itemRowCount === 0) return;
         const el = containerRef.current;
@@ -174,14 +207,15 @@ export function VirtualizedGrid<T>({
         <div className="relative h-full min-h-0 w-full">
             <div
                 ref={containerRef}
-                onScroll={onScroll ? (event) => {
+                onScroll={(event) => {
+                    if (anchorScroll) recordAnchor();
                     const target = event.currentTarget;
-                    onScroll({
+                    onScroll?.({
                         scrollTop: target.scrollTop,
                         scrollHeight: target.scrollHeight,
                         clientHeight: target.clientHeight,
                     });
-                } : undefined}
+                }}
                 className="relative h-full w-full overflow-y-auto overscroll-contain rounded-t-3xl"
             >
                 {rowCount === 0 ? null : (
@@ -230,6 +264,7 @@ export function VirtualizedGrid<T>({
                                 <div
                                     key={virtualRow.key}
                                     data-index={virtualRow.index}
+                                    data-row-key={virtualRow.key}
                                     ref={rowVirtualizer.measureElement}
                                     className="absolute left-0 w-full"
                                     style={{

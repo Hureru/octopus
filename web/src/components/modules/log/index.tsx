@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLogs, useLogSiteActionTargets, type LogKeywordMode, type LogKeywordScope } from '@/api/endpoints/log';
 import { LogCard, type LogSiteActionTargets } from './Item';
-import { Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Layers, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { motion } from 'motion/react';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
 import { useSearchStore } from '@/components/modules/toolbar';
 import { useToolbarViewOptionsStore } from '@/components/modules/toolbar/view-options-store';
 import { useLogUIStore } from './ui-store';
+import { groupLogRows } from './stack';
+import { cn } from '@/lib/utils';
 
 type LogFilters = {
     keyword: string;
@@ -93,6 +96,19 @@ export function Log() {
         return next;
     }, [siteActionTargetsQuery.data]);
 
+    const [expandedIds, setExpandedIds] = useState<ReadonlySet<number>>(new Set());
+    const toggleStack = useCallback((ids: number[], expand: boolean) => {
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            for (const id of ids) {
+                if (expand) next.add(id);
+                else next.delete(id);
+            }
+            return next;
+        });
+    }, []);
+    const rows = useMemo(() => groupLogRows(logs, expandedIds), [logs, expandedIds]);
+
     const canLoadMore = hasMore && !isLoading && !isLoadingMore && logs.length > 0;
     const handleReachEnd = useCallback(() => {
         if (!canLoadMore) return;
@@ -149,13 +165,63 @@ export function Log() {
             ) : null}
             <div className="relative min-h-0 flex-1">
                 <VirtualizedGrid
-                    items={logs}
+                    items={rows}
                     layout="list"
                     columns={{ default: 1 }}
                     estimateItemHeight={80}
                     overscan={8}
-                    getItemKey={(log) => `log-${log.id}`}
-                    renderItem={(log) => <LogCard log={log} siteTargets={siteActionTargets.get(log.id) ?? null} />}
+                    anchorScroll
+                    // 折叠的一叠用最老成员当 key：新失败并入时行身份和已测高度都不变，列表不会跳
+                    getItemKey={(row) => `log-${row.stack && !row.stack.expanded ? row.stack.ids[row.stack.ids.length - 1] : row.log.id}`}
+                    renderItem={({ log, stack }) => {
+                        const collapsed = !!stack && !stack.expanded;
+                        // 刚到的日志淡入，免得在其它卡片还在让位时突然盖上来
+                        const fresh = Date.now() / 1000 - log.time < 3;
+                        const label = stack ? t('list.stackedFailures', { count: stack.ids.length }) : '';
+                        // 三种状态共用同一棵结构，卡片始终在同一个位置，切换时不会被重新挂载。
+                        // 卡片本身带 layoutId（详情弹窗用），行位置一变它就会滑过去；
+                        // 叠层的装饰必须同样是 layout 元素才会跟着滑，否则会先瞬移到位、卡片再追上来。
+                        return (
+                            <div className={cn(stack?.expanded && 'flex flex-col gap-2 pl-4', fresh && 'animate-in fade-in duration-300')}>
+                                {stack?.expanded && stack.head ? (
+                                    <motion.button
+                                        layout="position"
+                                        type="button"
+                                        onClick={() => toggleStack(stack.ids, false)}
+                                        className="flex items-center gap-1.5 self-start text-xs text-muted-foreground transition-colors hover:text-foreground"
+                                    >
+                                        <Layers className="size-3.5" />
+                                        <span className="tabular-nums">{label} · {t('list.collapse')}</span>
+                                        <ChevronUp className="size-3.5" />
+                                    </motion.button>
+                                ) : null}
+                                <div className={cn('relative', collapsed && 'z-20')}>
+                                    {stack?.expanded ? (
+                                        // 竖线和卡片同框，位移才会和卡片完全一致
+                                        <motion.div layout="position" aria-hidden className="absolute inset-y-0 -left-2.5 w-0.5 rounded-full bg-destructive/30" />
+                                    ) : null}
+                                    {/* key：一叠的头换成新失败时重新挂载，卡片内部状态（详情、弹窗）不会串到另一条日志上 */}
+                                    <LogCard key={log.id} log={log} siteTargets={siteActionTargets.get(log.id) ?? null} />
+                                </div>
+                                {collapsed ? (
+                                    // 卡片下方露出两层卡片边，第一层兼作展开按钮
+                                    <>
+                                        <motion.button
+                                            layout="position"
+                                            type="button"
+                                            onClick={() => toggleStack(stack.ids, true)}
+                                            className="relative z-10 mx-3 -mt-6 flex w-[calc(100%-1.5rem)] items-center justify-center gap-1.5 rounded-b-3xl border border-destructive/30 bg-card pt-7 pb-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                                        >
+                                            <Layers className="size-3.5" />
+                                            <span className="tabular-nums">{label} · {t('list.expand')}</span>
+                                            <ChevronDown className="size-3.5" />
+                                        </motion.button>
+                                        <motion.div layout="position" aria-hidden className="mx-6 -mt-5 h-7 rounded-b-3xl border border-destructive/20 bg-card" />
+                                    </>
+                                ) : null}
+                            </div>
+                        );
+                    }}
                     footer={footer}
                     onReachEnd={handleReachEnd}
                     reachEndEnabled={canLoadMore}

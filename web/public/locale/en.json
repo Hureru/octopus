@@ -738,7 +738,10 @@
     },
     "log": {
         "list": {
-            "noMore": "No more logs"
+            "noMore": "No more logs",
+            "stackedFailures": "{count} consecutive failures",
+            "expand": "Expand",
+            "collapse": "Collapse"
         },
         "card": {
             "error": "Error",
