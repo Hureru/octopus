@@ -108,6 +108,11 @@ export function Log() {
         });
     }, []);
     const rows = useMemo(() => groupLogRows(logs, expandedIds), [logs, expandedIds]);
+    // 并入展开叠层的新成员也记为已展开，否则原成员被分页挤出后整叠会自己收起
+    useEffect(() => {
+        const missing = rows.flatMap((row) => (row.stack?.expanded && row.stack.head ? row.stack.ids : [])).filter((id) => !expandedIds.has(id));
+        if (missing.length > 0) toggleStack(missing, true);
+    }, [rows, expandedIds, toggleStack]);
 
     const canLoadMore = hasMore && !isLoading && !isLoadingMore && logs.length > 0;
     const handleReachEnd = useCallback(() => {
