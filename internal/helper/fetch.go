@@ -20,7 +20,7 @@ import (
 const modelFetchUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
 
 // A "/v<digit>" path segment; the leading [^/] keeps a "//v1.example.com" host from matching.
-var modelAPIVersionSegment = regexp.MustCompile(`(?i)[^/]/v\d`)
+var apiVersionSegment = regexp.MustCompile(`(?i)[^/]/v\d`)
 
 // modelFetcher lists the models served at one endpoint, speaking one upstream protocol.
 type modelFetcher func(client *http.Client, ctx context.Context, request model.Channel, endpoint string) ([]string, error)
@@ -67,7 +67,7 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 func probeModelEndpoints(client *http.Client, ctx context.Context, request model.Channel, fetchers []modelFetcher) ([]string, error) {
 	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
 	endpoints := []string{baseURL + "/models"}
-	if !modelAPIVersionSegment.MatchString(baseURL) {
+	if !apiVersionSegment.MatchString(baseURL) {
 		endpoints = append(endpoints, baseURL+"/v1/models", baseURL+"/api/v1/models", baseURL+"/v1beta/models")
 	}
 	var firstErr error

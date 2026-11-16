@@ -1025,7 +1025,7 @@ func (ra *relayAttempt) sendRequest(req *http.Request) (*http.Response, error) {
 
 	req = ra.attachFirstTokenBudget(req)
 
-	response, err := httpClient.Do(req)
+	response, err := helper.DoUpstreamRequest(httpClient, req, ra.channel.GetBaseUrl())
 	if err != nil {
 		if timeoutErr := ra.firstTokenTimeoutIfNeeded(req.Context(), err); timeoutErr != nil {
 			ra.closeFirstTokenBudget()

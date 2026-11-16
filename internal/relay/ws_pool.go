@@ -598,7 +598,10 @@ func buildWSURL(baseUrl string) (string, error) {
 		parsed.Scheme = "wss"
 	}
 
-	parsed.Path = parsed.Path + "/responses"
+	// shortcut: the dial reuses the prefix an HTTP request learned and never probes itself, so a
+	// site-root channel's first dial fails and it is served over HTTP until the pool retries WS;
+	// add a dial fallback if such channels must open on WS at once.
+	parsed.Path = parsed.Path + helper.LearnedAPIPrefix(baseUrl) + "/responses"
 	return parsed.String(), nil
 }
 

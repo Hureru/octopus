@@ -552,32 +552,40 @@ func imagesAttempt(
 
 	var bodyReader io.Reader
 	var contentType string
+	var getBody func() (io.ReadCloser, error)
 
 	if isMultipart {
-		pr, pw := io.Pipe()
-		mw := multipart.NewWriter(pw)
-		contentType = mw.FormDataContentType()
-		bodyReader = pr
+		// The body is rebuilt each time the request is sent again (API-prefix fallback), while the
+		// Content-Type header is written once, so every rebuild has to use the same boundary.
+		header := multipart.NewWriter(io.Discard)
+		contentType = header.FormDataContentType()
+		getBody = func() (io.ReadCloser, error) {
+			pr, pw := io.Pipe()
+			mw := multipart.NewWriter(pw)
+			_ = mw.SetBoundary(header.Boundary())
 
-		go func() {
-			src, err := bc.NewReader()
-			if err != nil {
-				_ = pw.CloseWithError(err)
-				return
-			}
-			defer src.Close()
+			go func() {
+				src, err := bc.NewReader()
+				if err != nil {
+					_ = pw.CloseWithError(err)
+					return
+				}
+				defer src.Close()
 
-			if err := copyMultipartReplaceModel(src, boundary, mw, actualModel); err != nil {
-				_ = pw.CloseWithError(err)
-				return
-			}
-			// 先关闭 multipart.Writer 写入结束 boundary，再关闭 pipe writer
-			if err := mw.Close(); err != nil {
-				_ = pw.CloseWithError(err)
-				return
-			}
-			_ = pw.Close()
-		}()
+				if err := copyMultipartReplaceModel(src, boundary, mw, actualModel); err != nil {
+					_ = pw.CloseWithError(err)
+					return
+				}
+				// 先关闭 multipart.Writer 写入结束 boundary，再关闭 pipe writer
+				if err := mw.Close(); err != nil {
+					_ = pw.CloseWithError(err)
+					return
+				}
+				_ = pw.Close()
+			}()
+			return pr, nil
+		}
+		bodyReader, _ = getBody()
 	} else {
 		// JSON：仅改写 model 字段，其余保持不变
 		// 注意：每次尝试都重新 marshal 生成 body，确保可重试重建
@@ -599,6 +607,9 @@ func imagesAttempt(
 	}
 	req.URL = parsedURL
 	req.Method = http.MethodPost
+	if getBody != nil {
+		req.GetBody = getBody
+	}
 
 	// Header 透传：复制下游 header，过滤 hop-by-hop 与鉴权相关
 	copyHeadersToUpstream(req, c, channel, channelKey, contentType, stream)
@@ -609,7 +620,7 @@ func imagesAttempt(
 		return 0, false, nil, "", err
 	}
 
-	respUp, err := httpClient.Do(req)
+	respUp, err := helper.DoUpstreamRequest(httpClient, req, baseURL)
 	if err != nil {
 		return 0, false, nil, "", fmt.Errorf("failed to send request: %w", err)
 	}

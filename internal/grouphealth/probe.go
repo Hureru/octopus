@@ -69,7 +69,7 @@ func (p *Prober) RunCandidate(ctx context.Context, channel model.Channel, usedKe
 		return result
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := helper.DoUpstreamRequest(httpClient, request, channel.GetBaseUrl())
 	if err != nil {
 		result.ErrorMessage = err.Error()
 		result.DurationMS = time.Since(startedAt).Milliseconds()
