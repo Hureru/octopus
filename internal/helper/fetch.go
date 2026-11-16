@@ -1,11 +1,15 @@
 package helper
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -15,20 +19,26 @@ import (
 
 const modelFetchUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
 
+// A "/v<digit>" path segment; the leading [^/] keeps a "//v1.example.com" host from matching.
+var modelAPIVersionSegment = regexp.MustCompile(`(?i)[^/]/v\d`)
+
+// modelFetcher lists the models served at one endpoint, speaking one upstream protocol.
+type modelFetcher func(client *http.Client, ctx context.Context, request model.Channel, endpoint string) ([]string, error)
+
 func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 	client, err := ChannelHTTPClientWithContext(ctx, &request)
 	if err != nil {
 		return nil, err
 	}
-	fetchModel := make([]string, 0)
+	// Relay stations often list models only in the OpenAI format, so native protocols fall back to it.
+	fetchers := []modelFetcher{fetchOpenAIModels}
 	switch request.Type {
 	case outbound.OutboundTypeAnthropic:
-		fetchModel, err = fetchAnthropicModels(client, ctx, request)
+		fetchers = []modelFetcher{fetchAnthropicModels, fetchOpenAIModels}
 	case outbound.OutboundTypeGemini:
-		fetchModel, err = fetchGeminiModels(client, ctx, request)
-	default:
-		fetchModel, err = fetchOpenAIModels(client, ctx, request)
+		fetchers = []modelFetcher{fetchGeminiModels, fetchOpenAIModels}
 	}
+	fetchModel, err := probeModelEndpoints(client, ctx, request, fetchers)
 	if err != nil {
 		return nil, err
 	}
@@ -52,12 +62,42 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 	return fetchModel, nil
 }
 
+// probeModelEndpoints returns the first non-empty model list. It asks the configured base URL
+// first and, when that carries no API version (e.g. a site root), guesses the common prefixes.
+func probeModelEndpoints(client *http.Client, ctx context.Context, request model.Channel, fetchers []modelFetcher) ([]string, error) {
+	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
+	endpoints := []string{baseURL + "/models"}
+	if !modelAPIVersionSegment.MatchString(baseURL) {
+		endpoints = append(endpoints, baseURL+"/v1/models", baseURL+"/api/v1/models", baseURL+"/v1beta/models")
+	}
+	var firstErr error
+	for _, fetch := range fetchers {
+		for i, endpoint := range endpoints {
+			models, err := fetch(client, ctx, request, endpoint)
+			if len(models) > 0 {
+				return models, nil
+			}
+			if errors.As(err, new(*url.Error)) {
+				// No HTTP response at all: other paths on the same host will not fare better.
+				return nil, cmp.Or(firstErr, err)
+			}
+			if i == 0 && firstErr == nil {
+				// Only the configured endpoint reports errors: a guessed path failing says nothing about the channel.
+				firstErr = err
+			}
+		}
+	}
+	// A guess or fallback counts only when it returns models. Turning the configured endpoint's
+	// error into an empty success would make auto-sync delete every model of the channel.
+	return []string{}, firstErr
+}
+
 // refer: https://platform.openai.com/docs/api-reference/models/list
-func fetchOpenAIModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
+func fetchOpenAIModels(client *http.Client, ctx context.Context, request model.Channel, endpoint string) ([]string, error) {
 	req, _ := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		request.GetBaseUrl()+"/models",
+		endpoint,
 		nil,
 	)
 	applyDefaultModelRequestHeaders(req, request)
@@ -82,7 +122,7 @@ func fetchOpenAIModels(client *http.Client, ctx context.Context, request model.C
 }
 
 // refer: https://ai.google.dev/api/models
-func fetchGeminiModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
+func fetchGeminiModels(client *http.Client, ctx context.Context, request model.Channel, endpoint string) ([]string, error) {
 	var allModels []string
 	pageToken := ""
 
@@ -90,7 +130,7 @@ func fetchGeminiModels(client *http.Client, ctx context.Context, request model.C
 		req, _ := http.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
-			request.GetBaseUrl()+"/models",
+			endpoint,
 			nil,
 		)
 		applyDefaultModelRequestHeaders(req, request)
@@ -123,21 +163,18 @@ func fetchGeminiModels(client *http.Client, ctx context.Context, request model.C
 		}
 		pageToken = result.NextPageToken
 	}
-	if len(allModels) == 0 {
-		return fetchOpenAIModels(client, ctx, request)
-	}
 	return allModels, nil
 }
 
 // refer: https://platform.claude.com/docs
-func fetchAnthropicModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
+func fetchAnthropicModels(client *http.Client, ctx context.Context, request model.Channel, endpoint string) ([]string, error) {
 	var allModels []string
 	var afterID string
 	for {
 		req, _ := http.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
-			request.GetBaseUrl()+"/models",
+			endpoint,
 			nil,
 		)
 		applyDefaultModelRequestHeaders(req, request)
@@ -170,9 +207,6 @@ func fetchAnthropicModels(client *http.Client, ctx context.Context, request mode
 		}
 
 		afterID = result.LastID
-	}
-	if len(allModels) == 0 {
-		return fetchOpenAIModels(client, ctx, request)
 	}
 	return allModels, nil
 }
