@@ -34,6 +34,7 @@ func fetchSiteAccountBalance(ctx context.Context, siteRecord *model.Site, accoun
 		return fetchManagementQuotaBalance(ctx, siteRecord, account, accessToken, userID, false)
 	case model.SitePlatformNewAPI,
 		model.SitePlatformAnyRouter,
+		model.SitePlatformAgentRouter,
 		model.SitePlatformDoneHub:
 		return fetchManagementQuotaBalance(ctx, siteRecord, account, accessToken, userID, true)
 	case model.SitePlatformSub2API:
@@ -70,11 +71,13 @@ func fetchManagementQuotaBalance(ctx context.Context, siteRecord *model.Site, ac
 		if isValidUserSelfPayload(cookiePayload, cookieErr) {
 			payload = cookiePayload
 			err = nil
-		} else if userID > 0 {
+		} else if userID > 0 && siteRecord.Platform != model.SitePlatformAgentRouter {
 			// Attempt 3: probe for an alternate userID (e.g., the real gob-encoded user inside the
 			// session cookie) when the passed-in userID doesn't match reality. Safe for multi-account:
 			// anyRouterProbeAlternateUserIDByCookie returns 0 when the probed ID matches the current
 			// one, and it only returns IDs that genuinely validate against the session.
+			// AgentRouter skips it: the userID comes from the login response or already worked for the
+			// token list in this sync, so the probe's dozens of requests cannot find a better one.
 			if alt, _ := anyRouterProbeAlternateUserIDByCookie(ctx, siteRecord, account, accessToken, userID); alt > 0 {
 				altPayload, _, altErr := anyRouterRequestJSONWithCookies(ctx, siteRecord, http.MethodGet, requestURL, nil,
 					anyRouterAuthHeaders(accessToken, alt), account)
@@ -137,6 +140,7 @@ func supportsTodayIncomeLogFallback(platform model.SitePlatform) bool {
 	switch platform {
 	case model.SitePlatformNewAPI,
 		model.SitePlatformAnyRouter,
+		model.SitePlatformAgentRouter,
 		model.SitePlatformOneAPI:
 		return true
 	default:
@@ -157,6 +161,10 @@ func fetchTodayIncomeFromLogs(ctx context.Context, siteRecord *model.Site, accou
 
 	baseURL := buildSiteURL(siteRecord.BaseURL, "/api/log/self")
 	headers := anyRouterAuthHeaders(accessToken, userID)
+	if siteRecord.Platform == model.SitePlatformAgentRouter && looksLikeCookieToken(accessToken) {
+		// username/password accounts hold a session cookie, which the site rejects as a Bearer token
+		headers["Cookie"] = strings.TrimSpace(accessToken)
+	}
 
 	var total float64
 	anyResponse := false

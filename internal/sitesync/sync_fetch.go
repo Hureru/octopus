@@ -315,7 +315,7 @@ func fetchManagementModels(
 	if len(models) > 0 {
 		return siteModelFetchResult{names: models, source: siteModelSourceSync, authoritative: true, message: fmt.Sprintf("同步到 %d 个模型", len(models))}, nil
 	}
-	if siteRecord.Platform != model.SitePlatformNewAPI {
+	if siteRecord.Platform != model.SitePlatformNewAPI && siteRecord.Platform != model.SitePlatformAgentRouter {
 		return siteModelFetchResult{source: siteModelSourceSync, authoritative: err == nil, message: "上游当前没有返回可用模型"}, err
 	}
 

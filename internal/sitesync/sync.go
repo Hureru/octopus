@@ -32,7 +32,7 @@ func syncAccountState(ctx context.Context, siteRecord *model.Site, account *mode
 	switch siteRecord.Platform {
 	case model.SitePlatformAnyRouter:
 		return syncAnyRouter(ctx, siteRecord, account)
-	case model.SitePlatformNewAPI, model.SitePlatformOneAPI, model.SitePlatformOneHub, model.SitePlatformDoneHub:
+	case model.SitePlatformNewAPI, model.SitePlatformAgentRouter, model.SitePlatformOneAPI, model.SitePlatformOneHub, model.SitePlatformDoneHub:
 		return syncManagementPlatform(ctx, siteRecord, account)
 	case model.SitePlatformSub2API:
 		return syncSub2API(ctx, siteRecord, account)
@@ -53,6 +53,8 @@ func checkinAccountState(ctx context.Context, siteRecord *model.Site, account *m
 		return &model.SiteCheckinResult{Status: model.SiteExecutionStatusSkipped, Message: "checkin is not supported by this platform"}, "", nil
 	case model.SitePlatformAnyRouter:
 		return checkinAnyRouter(ctx, siteRecord, account)
+	case model.SitePlatformAgentRouter:
+		return checkinAgentRouter(ctx, siteRecord, account)
 	case model.SitePlatformNewAPI, model.SitePlatformOneAPI, model.SitePlatformOneHub:
 		accessToken, err := resolveManagedAccessToken(ctx, siteRecord, account)
 		if err != nil {
@@ -148,7 +150,7 @@ func syncManagementPlatform(ctx context.Context, siteRecord *model.Site, account
 		firstManagedPlatformUserID(account),
 		siteModelSourceSync,
 		func(token model.SiteToken, allowGlobalFallback bool) (siteModelFetchResult, error) {
-			if siteRecord.Platform == model.SitePlatformNewAPI {
+			if siteRecord.Platform == model.SitePlatformNewAPI || siteRecord.Platform == model.SitePlatformAgentRouter {
 				return fetchManagementModels(ctx, siteRecord, account, accessToken, token, sessionFallbackFetcher)
 			}
 			models, err := fetchModelsForSiteToken(ctx, siteRecord, account, token)
@@ -314,6 +316,12 @@ func resolveManagedAccessToken(ctx context.Context, siteRecord *model.Site, acco
 	}
 	if account.CredentialType != model.SiteCredentialTypeUsernamePassword {
 		return "", fmt.Errorf("managed access token is not available for credential type %s", account.CredentialType)
+	}
+	if siteRecord.Platform == model.SitePlatformAgentRouter {
+		// new-api 登录只下发 session cookie、不返回 token；New-Api-User 直接取登录响应里的 id，不去探测
+		payload, sessionCookie, err := anyRouterLogin(ctx, siteRecord, account)
+		rememberManagedPlatformUserID(anyRouterExtractUserID(payload), account)
+		return sessionCookie, err
 	}
 
 	payload, err := requestJSON(ctx, siteRecord, http.MethodPost, buildSiteURL(siteRecord.BaseURL, "/api/user/login"), map[string]any{"username": account.Username, "password": account.Password}, nil, account)

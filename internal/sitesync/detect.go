@@ -28,6 +28,7 @@ var titlePlatformHints = []struct {
 	platform model.SitePlatform
 }{
 	{"anyrouter", model.SitePlatformAnyRouter},
+	{"agent router", model.SitePlatformAgentRouter},
 	{"done hub", model.SitePlatformDoneHub},
 	{"donehub", model.SitePlatformDoneHub},
 	{"one hub", model.SitePlatformOneHub},

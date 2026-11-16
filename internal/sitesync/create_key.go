@@ -28,7 +28,7 @@ func CreateAccountToken(ctx context.Context, accountID int, req model.SiteChanne
 		if err := createAnyRouterToken(ctx, siteRecord, account, groupKey, name); err != nil {
 			return nil, err
 		}
-	case model.SitePlatformNewAPI, model.SitePlatformOneAPI, model.SitePlatformOneHub, model.SitePlatformDoneHub:
+	case model.SitePlatformNewAPI, model.SitePlatformAgentRouter, model.SitePlatformOneAPI, model.SitePlatformOneHub, model.SitePlatformDoneHub:
 		if err := createManagementPlatformToken(ctx, siteRecord, account, groupKey, name); err != nil {
 			return nil, err
 		}

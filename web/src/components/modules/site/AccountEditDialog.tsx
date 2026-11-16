@@ -113,6 +113,11 @@ function defaultCredentialType(): SiteCredentialType {
     return SiteCredentialType.AccessToken;
 }
 
+// AgentRouter 是 new-api 二开：Access Token 凭据同样要带 Platform User ID
+function usesPlatformUserID(platform: SitePlatform) {
+    return platform === SitePlatform.NewAPI || platform === SitePlatform.AgentRouter;
+}
+
 function credentialOptions(platform: SitePlatform) {
     switch (platform) {
         case SitePlatform.Sub2API:
@@ -287,7 +292,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
             }
 
             const shouldIncludePlatformUserID =
-                currentPlatform === SitePlatform.NewAPI &&
+                usesPlatformUserID(currentPlatform) &&
                 accountForm.credential_type === SiteCredentialType.AccessToken;
             const platformUserIDInput = shouldIncludePlatformUserID
                 ? accountForm.platform_user_id.trim()
@@ -329,6 +334,10 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 accountForm.credential_type === SiteCredentialType.UsernamePassword;
             const isAccessToken =
                 accountForm.credential_type === SiteCredentialType.AccessToken;
+            // AgentRouter 靠重新登录签到：Access Token 账号的用户名密码也要存下来
+            const keepsLoginCredentials =
+                isUsernamePassword ||
+                (isAccessToken && currentPlatform === SitePlatform.AgentRouter);
 
             if (accountForm.proxy_mode === 'pool' && !accountForm.proxy_config_id) {
                 toast.error(tProxy('selectRequired'));
@@ -339,8 +348,8 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                 site_id: accountForm.site_id,
                 name: accountForm.name.trim(),
                 credential_type: accountForm.credential_type,
-                username: isUsernamePassword ? accountForm.username.trim() : '',
-                password: isUsernamePassword ? accountForm.password.trim() : '',
+                username: keepsLoginCredentials ? accountForm.username.trim() : '',
+                password: keepsLoginCredentials ? accountForm.password.trim() : '',
                 access_token: trimmedAccessToken,
                 api_key: trimmedAPIKey,
                 refresh_token: isAccessToken ? accountForm.refresh_token.trim() : '',
@@ -401,6 +410,40 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
             </Dialog>
         );
     }
+
+    // 用户名密码凭据，以及 AgentRouter 的 Access Token 账号（签到登录用）共用这组输入
+    const loginFields = (
+        <div className="grid gap-4 md:grid-cols-2">
+            <label className="grid gap-2 text-sm">
+                <span className="font-medium">用户名</span>
+                <Input
+                    value={accountForm.username}
+                    onChange={(event) =>
+                        setAccountForm((current) =>
+                            current ? { ...current, username: event.target.value } : current,
+                        )
+                    }
+                    placeholder="请输入用户名"
+                    className="rounded-xl"
+                />
+            </label>
+
+            <label className="grid gap-2 text-sm">
+                <span className="font-medium">密码</span>
+                <Input
+                    type="password"
+                    value={accountForm.password}
+                    onChange={(event) =>
+                        setAccountForm((current) =>
+                            current ? { ...current, password: event.target.value } : current,
+                        )
+                    }
+                    placeholder="请输入密码"
+                    className="rounded-xl"
+                />
+            </label>
+        </div>
+    );
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -464,7 +507,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                         : '',
                                                 platform_user_id:
                                                     nextType === SiteCredentialType.AccessToken &&
-                                                    currentPlatform === SitePlatform.NewAPI
+                                                    usesPlatformUserID(currentPlatform)
                                                         ? current.platform_user_id
                                                         : '',
                                             };
@@ -495,40 +538,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                         exit={{ opacity: 0, y: -6 }}
                                         transition={FORM_SECTION_TRANSITION}
                                     >
-                                        <div className="grid gap-4 md:grid-cols-2">
-                                            <label className="grid gap-2 text-sm">
-                                                <span className="font-medium">用户名</span>
-                                                <Input
-                                                    value={accountForm.username}
-                                                    onChange={(event) =>
-                                                        setAccountForm((current) =>
-                                                            current
-                                                                ? { ...current, username: event.target.value }
-                                                                : current,
-                                                        )
-                                                    }
-                                                    placeholder="请输入用户名"
-                                                    className="rounded-xl"
-                                                />
-                                            </label>
-
-                                            <label className="grid gap-2 text-sm">
-                                                <span className="font-medium">密码</span>
-                                                <Input
-                                                    type="password"
-                                                    value={accountForm.password}
-                                                    onChange={(event) =>
-                                                        setAccountForm((current) =>
-                                                            current
-                                                                ? { ...current, password: event.target.value }
-                                                                : current,
-                                                        )
-                                                    }
-                                                    placeholder="请输入密码"
-                                                    className="rounded-xl"
-                                                />
-                                            </label>
-                                        </div>
+                                        {loginFields}
                                     </motion.div>
                                 ) : accountForm.credential_type === SiteCredentialType.AccessToken ? (
                                     <motion.div
@@ -604,7 +614,7 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                 </div>
                                             ) : null}
 
-                                            {currentPlatform === SitePlatform.NewAPI ? (
+                                            {usesPlatformUserID(currentPlatform) ? (
                                                 <label className="grid gap-2 text-sm">
                                                     <span className="font-medium">Platform User ID</span>
                                                     <Input
@@ -628,6 +638,16 @@ export function AccountEditDialog({ open, onOpenChange, site, account }: Account
                                                         ID。导入数据会尽量自动填充该值。
                                                     </span>
                                                 </label>
+                                            ) : null}
+
+                                            {currentPlatform === SitePlatform.AgentRouter ? (
+                                                <div className="grid gap-2">
+                                                    {loginFields}
+                                                    <span className="text-xs text-muted-foreground">
+                                                        AgentRouter 没有签到接口，重新登录才会发放签到额度。填写用户名和密码后才能自动签到（仅用于签到登录，同步仍使用
+                                                        Access Token）。
+                                                    </span>
+                                                </div>
                                             ) : null}
                                         </div>
                                     </motion.div>

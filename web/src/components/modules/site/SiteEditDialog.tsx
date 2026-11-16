@@ -82,6 +82,7 @@ const PLATFORM_LABELS: Record<SitePlatform, string> = {
     [SitePlatform.API]: 'API 直连',
     [SitePlatform.NewAPI]: 'New API',
     [SitePlatform.AnyRouter]: 'AnyRouter',
+    [SitePlatform.AgentRouter]: 'AgentRouter',
     [SitePlatform.OneAPI]: 'One API',
     [SitePlatform.OneHub]: 'One Hub',
     [SitePlatform.DoneHub]: 'Done Hub',

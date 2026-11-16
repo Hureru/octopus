@@ -173,7 +173,13 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 	if account.CredentialType != model.SiteCredentialTypeUsernamePassword {
 		return "", fmt.Errorf("managed access token is not available for credential type %s", account.CredentialType)
 	}
+	_, token, err := anyRouterLogin(ctx, siteRecord, account)
+	return token, err
+}
 
+// anyRouterLogin 用账号密码登录，payload 非 nil 即登录成功。第二个返回值可当 access token 用
+// （响应里的 token，没有则是 session cookie），登录成功但两者都没有时返回 token missing 错误。
+func anyRouterLogin(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount) (map[string]any, string, error) {
 	payload, cookieHeader, err := anyRouterRequestJSONWithCookies(
 		ctx,
 		siteRecord,
@@ -184,13 +190,13 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 		account,
 	)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if payload == nil {
-		return "", fmt.Errorf("shield challenge blocked login")
+		return nil, "", fmt.Errorf("shield challenge blocked login")
 	}
 	if !jsonBool(payload["success"]) {
-		return "", newSiteLoginFailedError(firstNonEmptyString(anyRouterExtractResponseMessage(payload), "login failed"))
+		return nil, "", newSiteLoginFailedError(firstNonEmptyString(anyRouterExtractResponseMessage(payload), "login failed"))
 	}
 
 	for _, candidate := range []string{
@@ -203,13 +209,13 @@ func resolveAnyRouterManagedAccessToken(ctx context.Context, siteRecord *model.S
 		jsonString(nestedValue(payload, "data", "accessToken")),
 	} {
 		if strings.TrimSpace(candidate) != "" {
-			return strings.TrimSpace(candidate), nil
+			return payload, strings.TrimSpace(candidate), nil
 		}
 	}
 	if anyRouterHasUsableSessionCookie(cookieHeader) {
-		return cookieHeader, nil
+		return payload, cookieHeader, nil
 	}
-	return "", newSiteLoginTokenMissingError()
+	return payload, "", newSiteLoginTokenMissingError()
 }
 
 func fetchAnyRouterManagementTokens(ctx context.Context, siteRecord *model.Site, account *model.SiteAccount, accessToken string, userID int) ([]model.SiteToken, error) {
