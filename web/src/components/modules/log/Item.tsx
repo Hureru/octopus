@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Link } from 'lucide-react';
+import { Clock, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Link, Brain } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -342,6 +342,25 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts, pending }: R
     );
 }
 
+function ReasoningEffortBadge({ effort }: { effort?: string }) {
+    const t = useTranslations('log.card');
+    if (!effort) return null;
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Badge
+                    variant="secondary"
+                    className="max-w-32 shrink-0 gap-1 bg-violet-500/10 px-1.5 py-0 text-xs text-violet-700 dark:text-violet-300"
+                >
+                    <Brain className="size-3.5 shrink-0" />
+                    <span className="truncate">{effort}</span>
+                </Badge>
+            </TooltipTrigger>
+            <TooltipContent>{t('reasoningEffort')}</TooltipContent>
+        </Tooltip>
+    );
+}
+
 function WSModeBadge({ log }: { log: RelayLog }) {
     const t = useTranslations('log.card');
     const modeMeta = getWSBadgeMeta(log.ws_mode, log.used_ws, t);
@@ -660,6 +679,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                                     <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
                                         {log.request_model_name}
                                     </span>
+                                    <ReasoningEffortBadge effort={log.reasoning_effort} />
                                     <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
                                     {hasMultipleAttempts ? (
                                         <RetryBadgeWithTooltip
@@ -760,6 +780,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                             <div className="flex min-w-0 flex-1 items-center gap-2">
                                 <ModelAvatar size={28} />
                                 <span className="font-semibold text-card-foreground truncate">{log.request_model_name}</span>
+                                <ReasoningEffortBadge effort={log.reasoning_effort} />
                                 <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
                                 {hasMultipleAttempts ? (
                                     <RetryBadgeWithTooltip

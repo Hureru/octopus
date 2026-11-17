@@ -749,6 +749,7 @@
             "firstToken": "首字",
             "totalTime": "總耗時",
             "duration": "耗時",
+            "reasoningEffort": "思考等級",
             "input": "輸入",
             "output": "輸出",
             "cost": "費用",

@@ -60,6 +60,7 @@ export interface RelayLog {
     channel: number;             // 实际使用的渠道ID
     channel_name: string;        // 渠道名称
     actual_model_name: string;   // 实际使用模型名称
+    reasoning_effort?: string;   // 客户端请求的思考等级，未指定时没有
     input_tokens: number;        // 输入Token
     transport_input_tokens?: number | null; // 实际发送到上游请求体的 Token 估算
     bill_input_tokens?: number | null; // 按常规输入价格计费的 Token

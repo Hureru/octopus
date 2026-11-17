@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"slices"
@@ -41,6 +42,9 @@ type RelayMetrics struct {
 	TransportInputTokens *int
 
 	logID int64 // 进行中时提前分配的日志 ID；0 表示还没在日志页露过面
+
+	effort         string // reasoningEffort 的结果缓存
+	effortResolved bool
 }
 
 func NewRelayMetrics(apiKeyID int, requestModel string, rawBody []byte, req *transformerModel.InternalLLMRequest) *RelayMetrics {
@@ -51,6 +55,35 @@ func NewRelayMetrics(apiKeyID int, requestModel string, rawBody []byte, req *tra
 		RawRequest:      rawBody,
 		InternalRequest: req,
 	}
+}
+
+// reasoningEffort 返回客户端请求的思考等级，未指定时为空。
+// 入站转换把各协议归一到 InternalRequest.ReasoningEffort，但 Responses 入站只保留白名单内的值
+// （xhigh、none 会被清空），而透传时原值照样发给了上游；归一字段为空时再读一次原始请求体，
+// 日志才和实际发出去的一致。
+func (m *RelayMetrics) reasoningEffort() string {
+	if m.effortResolved {
+		return m.effort
+	}
+	m.effortResolved = true
+	if m.InternalRequest != nil {
+		m.effort = m.InternalRequest.ReasoningEffort
+	}
+	if m.effort == "" && len(m.RawRequest) > 0 {
+		var raw struct {
+			ReasoningEffort string `json:"reasoning_effort"` // OpenAI Chat
+			Reasoning       struct {
+				Effort string `json:"effort"`
+			} `json:"reasoning"` // OpenAI Responses
+			OutputConfig struct {
+				Effort string `json:"effort"`
+			} `json:"output_config"` // Anthropic Messages
+		}
+		// 字段类型对不上时只是那一项读不到，其余照常，所以不看错误。
+		_ = json.Unmarshal(m.RawRequest, &raw)
+		m.effort = cmp.Or(raw.ReasoningEffort, raw.Reasoning.Effort, raw.OutputConfig.Effort)
+	}
+	return m.effort
 }
 
 func (m *RelayMetrics) SetFirstTokenTime(t time.Time) {
@@ -106,6 +139,7 @@ func (m *RelayMetrics) PublishProgress(attempts []model.ChannelAttempt) {
 		ChannelId:        last.ChannelID,
 		ChannelName:      last.ChannelName,
 		ActualModelName:  last.ModelName,
+		ReasoningEffort:  m.reasoningEffort(),
 		UseTime:          int(time.Since(m.StartTime).Milliseconds()),
 		Attempts:         attempts,
 		TotalAttempts:    len(attempts),
@@ -264,6 +298,7 @@ func (m *RelayMetrics) saveLog(ctx context.Context, success bool, err error, dur
 		ChannelName:      channelName,
 		ChannelId:        channelID,
 		ActualModelName:  actualModel,
+		ReasoningEffort:  m.reasoningEffort(),
 		UseTime:          int(duration.Milliseconds()),
 		Attempts:         attempts,
 		TotalAttempts:    len(attempts),

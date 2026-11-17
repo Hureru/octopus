@@ -749,6 +749,7 @@
             "firstToken": "TTFT",
             "totalTime": "Total",
             "duration": "Latency",
+            "reasoningEffort": "Reasoning effort",
             "input": "Input",
             "output": "Output",
             "cost": "Cost",

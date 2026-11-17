@@ -58,6 +58,7 @@ type RelayLog struct {
 	ChannelId            int                 `json:"channel" gorm:"index"`                     // 实际使用的渠道ID
 	ChannelName          string              `json:"channel_name"`                             // 渠道名称
 	ActualModelName      string              `json:"actual_model_name"`                        // 实际使用模型名称
+	ReasoningEffort      string              `json:"reasoning_effort,omitempty"`               // 客户端请求的思考等级，未指定时为空
 	InputTokens          int                 `json:"input_tokens"`                             // 输入Token
 	TransportInputTokens *int                `json:"transport_input_tokens,omitempty"`         // 实际发送到上游请求体的 Token 估算
 	BillInputTokens      *int                `json:"bill_input_tokens,omitempty"`              // 按常规输入价格计费的 Token

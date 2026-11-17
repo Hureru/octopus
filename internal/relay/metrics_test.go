@@ -101,3 +101,32 @@ func TestPublishProgressOnlyAfterAFailedAttempt(t *testing.T) {
 		}
 	}
 }
+
+func TestReasoningEffort(t *testing.T) {
+	cases := []struct {
+		name     string
+		internal string
+		raw      string
+		want     string
+	}{
+		{"normalized field wins", "high", `{"reasoning":{"effort":"xhigh"}}`, "high"},
+		// Responses 入站白名单会清掉 xhigh，但透传时它确实发给了上游。
+		{"responses value dropped by the inbound whitelist", "", `{"model":"gpt-5","reasoning":{"effort":"xhigh"}}`, "xhigh"},
+		{"chat body", "", `{"reasoning_effort":"none"}`, "none"},
+		{"anthropic effort without thinking", "", `{"output_config":{"effort":"max"}}`, "max"},
+		{"wrong field type is ignored", "", `{"reasoning":"on","reasoning_effort":"low"}`, "low"},
+		{"not requested", "", `{"model":"gpt-5"}`, ""},
+		{"body is not json", "", `not json`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewRelayMetrics(0, "m", []byte(tc.raw), &transformerModel.InternalLLMRequest{ReasoningEffort: tc.internal})
+			if got := m.reasoningEffort(); got != tc.want {
+				t.Fatalf("reasoningEffort() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := (&RelayMetrics{}).reasoningEffort(); got != "" {
+		t.Fatalf("no request at all: got %q, want empty", got)
+	}
+}
