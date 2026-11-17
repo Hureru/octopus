@@ -94,6 +94,8 @@ After first launch, visit http://localhost:8080 and log in to the management pan
 - **Password**: `admin`
 
 > ⚠️ **Security Notice**: Please change the default password immediately after first login.
+>
+> Forgot the password? Run `./octopus passwd <new-password>` (add `--config path` if you use a custom config file), then restart the server.
 
 ### 📝 Configuration File
 
