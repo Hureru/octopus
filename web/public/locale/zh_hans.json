@@ -876,6 +876,7 @@
             "customHeaderKey": "Header Key",
             "customHeaderValue": "Header Value",
             "customHeaderAdd": "添加 Header",
+            "customHeaderHint": "值里可以引用客户端请求头，例如",
             "channelProxy": "渠道代理",
             "channelProxyPlaceholder": "可选：仅对该渠道生效（覆盖全局代理）",
             "paramOverride": "参数覆盖",

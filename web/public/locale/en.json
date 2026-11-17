@@ -876,6 +876,7 @@
             "customHeaderKey": "Header Key",
             "customHeaderValue": "Header Value",
             "customHeaderAdd": "Add Header",
+            "customHeaderHint": "A value can reference a header from the client request, e.g.",
             "channelProxy": "Channel Proxy",
             "channelProxyPlaceholder": "Optional: proxy for this channel (overrides global proxy)",
             "paramOverride": "Param Override",

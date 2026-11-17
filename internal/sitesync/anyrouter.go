@@ -800,8 +800,8 @@ func anyRouterRequestJSONWithCookies(ctx context.Context, siteRecord *model.Site
 		mergedHeaders["Content-Type"] = "application/json"
 	}
 	for _, item := range siteRecord.CustomHeader {
-		if strings.TrimSpace(item.HeaderKey) != "" {
-			mergedHeaders[strings.TrimSpace(item.HeaderKey)] = item.HeaderValue
+		if value, ok := item.ResolveValue(nil); ok && strings.TrimSpace(item.HeaderKey) != "" {
+			mergedHeaders[strings.TrimSpace(item.HeaderKey)] = value
 		}
 	}
 	for key, value := range headers {

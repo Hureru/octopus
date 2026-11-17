@@ -876,6 +876,7 @@
             "customHeaderKey": "Header Key",
             "customHeaderValue": "Header Value",
             "customHeaderAdd": "新增 Header",
+            "customHeaderHint": "值裡可以引用用戶端請求標頭，例如",
             "channelProxy": "供應源代理",
             "channelProxyPlaceholder": "可選：僅對該供應源生效（覆蓋全域代理）",
             "paramOverride": "參數覆蓋",

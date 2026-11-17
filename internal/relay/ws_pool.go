@@ -467,7 +467,9 @@ func buildUpstreamWSHeaders(clientHeaders http.Header, channel *dbmodel.Channel,
 			if strings.TrimSpace(header.HeaderKey) == "" {
 				continue
 			}
-			headers.Set(header.HeaderKey, header.HeaderValue)
+			if value, ok := header.ResolveValue(headers); ok {
+				headers.Set(header.HeaderKey, value)
+			}
 		}
 	}
 	headers.Set("Authorization", "Bearer "+key)

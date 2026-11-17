@@ -2,6 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -117,6 +119,26 @@ type BaseUrl struct {
 type CustomHeader struct {
 	HeaderKey   string `json:"header_key"`
 	HeaderValue string `json:"header_value"`
+}
+
+// clientHeaderPlaceholder 匹配 Header 值里引用客户端请求头的 {client_header:名称} 片段。
+var clientHeaderPlaceholder = regexp.MustCompile(`\{client_header:([^}]+)\}`)
+
+// ResolveValue 把值里的 {client_header:名称} 换成 client 中同名请求头的值；没有占位符的值原样返回。
+// 第二个返回值为 false 表示这个头不该发出去：没有客户端请求可取（client 为 nil，如拉模型列表、
+// 健康探测），或者替换后整个值为空。
+func (h CustomHeader) ResolveValue(client http.Header) (string, bool) {
+	if !clientHeaderPlaceholder.MatchString(h.HeaderValue) {
+		return h.HeaderValue, true
+	}
+	if client == nil {
+		return "", false
+	}
+	value := clientHeaderPlaceholder.ReplaceAllStringFunc(h.HeaderValue, func(placeholder string) string {
+		name := placeholder[len("{client_header:") : len(placeholder)-1]
+		return client.Get(strings.TrimSpace(name))
+	})
+	return value, value != ""
 }
 
 type ChannelKey struct {

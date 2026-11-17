@@ -519,6 +519,9 @@ export function ChannelForm({
                                     {t('customHeaderAdd')}
                                 </Button>
                             </div>
+                            <p className="text-xs text-muted-foreground/70">
+                                {t('customHeaderHint')} <code className="font-mono">{'{client_header:User-Agent}'}</code>
+                            </p>
                             <div className="space-y-2">
                                 {(formData.custom_header ?? []).map((h, idx) => (
                                     <div key={`hdr-${idx}`} className="flex items-center gap-2">

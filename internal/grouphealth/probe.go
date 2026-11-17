@@ -183,6 +183,9 @@ func applyCustomHeaders(request *http.Request, headers []model.CustomHeader) {
 		if key == "" {
 			continue
 		}
-		request.Header.Set(key, header.HeaderValue)
+		// 探测没有客户端请求，引用 {client_header:x} 的头直接跳过。
+		if value, ok := header.ResolveValue(nil); ok {
+			request.Header.Set(key, value)
+		}
 	}
 }
