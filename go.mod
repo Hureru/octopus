@@ -1,6 +1,6 @@
 module github.com/bestruirui/octopus
 
-go 1.25.0
+go 1.26.11
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0

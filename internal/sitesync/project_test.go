@@ -1097,7 +1097,7 @@ func assertProjectedChannel(t *testing.T, channelsByGroup map[string]model.Chann
 		t.Fatalf("expected projected channel for group key %q, got %#v", groupKey, channelsByGroup)
 	}
 	if channel.Type != expectedType {
-		t.Fatalf("expected channel %q type %q, got %q", groupKey, expectedType, channel.Type)
+		t.Fatalf("expected channel %q type %d, got %d", groupKey, expectedType, channel.Type)
 	}
 	if channel.Model != expectedModel {
 		t.Fatalf("expected channel %q model %q, got %q", groupKey, expectedModel, channel.Model)
