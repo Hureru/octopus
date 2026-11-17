@@ -251,6 +251,8 @@ The program automatically appends API paths based on channel type. You only need
 | Gemini | `/models/:model:generateContent` | `https://generativelanguage.googleapis.com/v1beta` | `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent` |
 
 > 💡 **Tip**: No need to include specific API endpoint paths in the Base URL - the program handles this automatically.
+>
+> A relay station's site root (e.g. `https://example.com`) also works as the Base URL. When the Base URL has no version segment and the upstream answers 404, 405 or an HTML page, the program retries the request under `/v1` and then `/api/v1`. For each endpoint (`/chat/completions`, `/responses`, …), the location that succeeds first is used for all later requests until restart, with no further retries. A Base URL that includes the version skips this detour.
 
 ---
 

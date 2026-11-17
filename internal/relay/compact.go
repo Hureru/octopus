@@ -329,7 +329,7 @@ func sendCompactRequest(channel *dbmodel.Channel, req *http.Request) (*http.Resp
 	if err != nil {
 		return nil, err
 	}
-	return httpClient.Do(req)
+	return helper.DoUpstreamRequest(httpClient, req, channel.GetBaseUrl())
 }
 
 func compactResponseToInternalResponse(resp *responsesCompactResponse) *transformerModel.InternalLLMResponse {

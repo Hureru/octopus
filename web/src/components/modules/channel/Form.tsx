@@ -1,4 +1,5 @@
 import { ChannelType, type AutoGroupType, type Channel, type ChannelWSMode, useFetchModel } from '@/api/endpoints/channel';
+import type { ApiError } from '@/api/types';
 import { ProxySelector } from '@/components/modules/proxy-pool/ProxySelector';
 import {
     Select,
@@ -138,8 +139,9 @@ export function ChannelForm({
                     }
                 },
                 onError: (error) => {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    toast.error(t('modelRefreshFailed'), { description: errorMessage });
+                    // The API client throws a plain ApiError, not an Error. rawMessage is the upstream's
+                    // reason; message is only the translated error code, which repeats the title.
+                    toast.error(t('modelRefreshFailed'), { description: (error as Partial<ApiError>).rawMessage || error.message });
                 },
             }
         );

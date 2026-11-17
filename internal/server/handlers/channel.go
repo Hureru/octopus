@@ -197,7 +197,8 @@ func fetchModel(c *gin.Context) {
 	}
 	models, err := helper.FetchModels(c.Request.Context(), request)
 	if err != nil {
-		resp.ErrorWithAppError(c, http.StatusInternalServerError, channelError(codeChannelFetchModelsFailed, "channel fetch models failed", err))
+		// The upstream's reason is the only actionable part, so it is the message the client gets.
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, channelError(codeChannelFetchModelsFailed, err.Error(), err))
 		return
 	}
 	resp.Success(c, models)

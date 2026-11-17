@@ -252,6 +252,8 @@ http://localhost:3000
 | Gemini | `/models/:model:generateContent` | `https://generativelanguage.googleapis.com/v1beta` | `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent` |
 
 > 💡 **提示**：填写 Base URL 时无需包含具体的 API 端点路径，程序会自动处理。
+>
+> Base URL 也可以填中转站的站点根路径（如 `https://example.com`）。Base URL 不带版本号、且上游返回 404、405 或 HTML 页面时，程序会依次改用 `/v1`、`/api/v1` 前缀重试。每个端点（`/chat/completions`、`/responses` 等）最先成功的地址会一直沿用到重启，之后不再重试。Base URL 带版本号时不做这一步。
 
 ---
 
