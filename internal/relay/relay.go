@@ -990,8 +990,7 @@ func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
 	}
 	if len(ra.channel.CustomHeader) > 0 {
 		for _, header := range ra.channel.CustomHeader {
-			// {client_header:x} 从出站头里取：此时里面是滤掉 hopByHopHeaders 的客户端头，取不到网关自己的凭据。
-			if value, ok := header.ResolveValue(outboundRequest.Header); ok {
+			if value, ok := header.ResolveValue(clientHeaderLookup(outboundRequest.Header)); ok {
 				outboundRequest.Header.Set(header.HeaderKey, value)
 			}
 		}

@@ -7,8 +7,9 @@ import (
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 )
 
-// 占位符只能取到会被转发的客户端头：网关自己的凭据在 hopByHopHeaders 里，引用它的头必须被丢弃。
-func TestCustomHeaderPlaceholderCannotReachGatewayCredentials(t *testing.T) {
+// 占位符只能取到会被转发的客户端头：凭据类的头在 hopByHopHeaders 里，引用它的头必须被丢弃——
+// 既不能是网关自己的 Key，也不能是出站头里已经写好的上游渠道 Key。
+func TestCustomHeaderPlaceholderCannotReachCredentials(t *testing.T) {
 	client := http.Header{}
 	client.Set("Authorization", "Bearer sk-octopus-secret")
 	client.Set("X-Api-Key", "sk-octopus-secret")
@@ -19,7 +20,8 @@ func TestCustomHeaderPlaceholderCannotReachGatewayCredentials(t *testing.T) {
 		{HeaderKey: "X-Leak-Key", HeaderValue: "{client_header:X-Api-Key}"},
 	}}
 
-	proxied := http.Header{}
+	// 主转发路径上，出站头在拷贝客户端头之前就带着上游凭据。
+	proxied := http.Header{"Authorization": {"Bearer upstream-key"}}
 	copyProxyHeaders(client, channel, proxied)
 	ws := buildUpstreamWSHeaders(client, channel, "upstream-key")
 

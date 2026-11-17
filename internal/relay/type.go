@@ -61,6 +61,18 @@ var hopByHopHeaders = map[string]bool{
 	"x-cluster-client-ip": true,
 }
 
+// clientHeaderLookup 给自定义 Header 的 {client_header:x} 占位符取值。outbound 是已经拷入客户端头的出站头；
+// hopByHopHeaders 里的头（网关凭据、客户端 IP 等）一律当作不存在——它们本来就不转发，
+// 而且出站头里的同名项可能已经是上游渠道自己的凭据。
+func clientHeaderLookup(outbound http.Header) func(name string) string {
+	return func(name string) string {
+		if hopByHopHeaders[strings.ToLower(name)] {
+			return ""
+		}
+		return outbound.Get(name)
+	}
+}
+
 // StreamWriter abstracts writing responses to the client (HTTP SSE or WebSocket).
 type StreamWriter interface {
 	Write(data []byte) (int, error)

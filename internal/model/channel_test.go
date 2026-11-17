@@ -71,7 +71,11 @@ func TestCustomHeaderResolveValue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := CustomHeader{HeaderKey: "X-Test", HeaderValue: tc.value}.ResolveValue(tc.client)
+			var lookup func(string) string
+			if tc.client != nil {
+				lookup = tc.client.Get
+			}
+			got, ok := CustomHeader{HeaderKey: "X-Test", HeaderValue: tc.value}.ResolveValue(lookup)
 			if got != tc.want || ok != tc.wantOK {
 				t.Fatalf("ResolveValue(%q) = %q, %v; want %q, %v", tc.value, got, ok, tc.want, tc.wantOK)
 			}
