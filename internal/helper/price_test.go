@@ -18,8 +18,12 @@ func TestLLMPriceRebuild(t *testing.T) {
 	if err := dbpkg.InitDB("sqlite", filepath.Join(t.TempDir(), "price-rebuild.db"), false); err != nil {
 		t.Fatalf("InitDB failed: %v", err)
 	}
-	t.Cleanup(func() { _ = dbpkg.Close() })
 	ctx := context.Background()
+	// 价格缓存是进程级的，不清掉的话 -count=2 第二轮建行会撞上"已存在"
+	t.Cleanup(func() {
+		_ = op.LLMBatchDelete([]string{"gpt-4o", "gpt-4o-mini", "my-private-model"}, ctx)
+		_ = dbpkg.Close()
+	})
 
 	preset := price.GetPresetPrice("gpt-4o")
 	if preset == nil {

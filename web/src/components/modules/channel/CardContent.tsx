@@ -90,7 +90,10 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
         stage.appendChild(clone);
         document.body.appendChild(stage);
         try {
-            setShareImage(await captureShareImage(stage));
+            const image = await captureShareImage(stage);
+            // 截图期间弹窗被关掉的话没人再释放这个 URL
+            if (statsRef.current) setShareImage(image);
+            else URL.revokeObjectURL(image.url);
         } catch {
             toast.error(tShare('failed'));
         } finally {

@@ -300,11 +300,12 @@ func copyProxyHeaders(src http.Header, channel *dbmodel.Channel, dst http.Header
 			dst.Add(key, value)
 		}
 	}
+	clientHeader := clientHeaderLookup(dst)
 	for _, header := range channel.CustomHeader {
 		if strings.EqualFold(header.HeaderKey, "Content-Type") {
 			continue
 		}
-		if value, ok := header.ResolveValue(clientHeaderLookup(dst)); ok {
+		if value, ok := header.ResolveValue(clientHeader); ok {
 			dst.Set(header.HeaderKey, value)
 		}
 	}

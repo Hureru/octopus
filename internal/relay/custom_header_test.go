@@ -36,3 +36,26 @@ func TestCustomHeaderPlaceholderCannotReachCredentials(t *testing.T) {
 		}
 	}
 }
+
+// 前面的自定义 Header 覆盖了同名的客户端头，后面的占位符仍然要读到客户端原值。
+func TestCustomHeaderPlaceholderReadsClientValueAfterOverride(t *testing.T) {
+	client := http.Header{}
+	client.Set("X-Session", "client-value")
+	channel := &dbmodel.Channel{CustomHeader: []dbmodel.CustomHeader{
+		{HeaderKey: "X-Session", HeaderValue: "fixed"},
+		{HeaderKey: "X-Copy", HeaderValue: "{client_header:X-Session}"},
+	}}
+
+	proxied := http.Header{}
+	copyProxyHeaders(client, channel, proxied)
+	ws := buildUpstreamWSHeaders(client, channel, "upstream-key")
+
+	for name, headers := range map[string]http.Header{"compact": proxied, "ws": ws} {
+		if got := headers.Get("X-Session"); got != "fixed" {
+			t.Errorf("%s: X-Session = %q, want fixed", name, got)
+		}
+		if got := headers.Get("X-Copy"); got != "client-value" {
+			t.Errorf("%s: X-Copy = %q, want client-value", name, got)
+		}
+	}
+}

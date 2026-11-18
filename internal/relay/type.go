@@ -64,7 +64,9 @@ var hopByHopHeaders = map[string]bool{
 // clientHeaderLookup 给自定义 Header 的 {client_header:x} 占位符取值。outbound 是已经拷入客户端头的出站头；
 // hopByHopHeaders 里的头（网关凭据、客户端 IP 等）一律当作不存在——它们本来就不转发，
 // 而且出站头里的同名项可能已经是上游渠道自己的凭据。
+// 取值用的是调用时的快照：前面的自定义 Header 覆盖了同名头，后面的占位符读到的仍是客户端原值。
 func clientHeaderLookup(outbound http.Header) func(name string) string {
+	outbound = outbound.Clone()
 	return func(name string) string {
 		if hopByHopHeaders[strings.ToLower(name)] {
 			return ""

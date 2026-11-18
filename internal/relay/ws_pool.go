@@ -463,11 +463,12 @@ func buildUpstreamWSHeaders(clientHeaders http.Header, channel *dbmodel.Channel,
 		headers["User-Agent"] = values[:1]
 	}
 	if channel != nil {
+		clientHeader := clientHeaderLookup(headers)
 		for _, header := range channel.CustomHeader {
 			if strings.TrimSpace(header.HeaderKey) == "" {
 				continue
 			}
-			if value, ok := header.ResolveValue(clientHeaderLookup(headers)); ok {
+			if value, ok := header.ResolveValue(clientHeader); ok {
 				headers.Set(header.HeaderKey, value)
 			}
 		}
