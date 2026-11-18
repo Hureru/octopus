@@ -302,20 +302,21 @@ function LogMetrics({ log, brandColor, variant }: { log: RelayLog; brandColor: s
         ? `${Math.round((log.cache_read_tokens / log.input_tokens) * 100)}%`
         : '-';
 
-    // cell 是窄屏下的分组占位：2 / 3 / 4 / 2 四行，对应三组指标（请求与耗时占前两行）。
+    // cell 只管窄容器（手机）的 3 行：时间·Key·费用 / 首字·总耗时·速度·输出 / 输入·缓存读·缓存率·缓存写；时间让出一点宽度给 Key 名。
+    // 中等宽度是 6 列 2 行、最宽是一行 11 列，都按下面的书写顺序排，所以 order 到 @lg 就复位。
     const metrics = [
-        { key: 'time', label: t('time'), Icon: Clock, iconStyle: { color: brandColor }, value: formatTime(log.time), cell: 'col-span-6' },
-        { key: 'apiKey', label: t('apiKey'), Icon: KeyRound, iconClassName: 'text-orange-500', value: apiKeyName || '-', cell: 'col-span-6' },
-        { key: 'firstToken', label: t('firstToken'), Icon: Zap, iconClassName: 'text-amber-500', value: !pending && log.ftut > 0 ? formatDurationCompact(log.ftut) : '-', cell: 'col-span-4' },
-        { key: 'totalTime', label: t('totalTime'), Icon: Timer, iconClassName: 'text-blue-500', value: pending ? <LiveDuration log={log} /> : formatDurationCompact(log.use_time), cell: 'col-span-4' },
-        { key: 'tokenSpeed', label: t('tokenSpeed'), Icon: Gauge, iconClassName: 'text-sky-500', value: speed, cell: 'col-span-4' },
+        { key: 'time', label: t('time'), Icon: Clock, iconStyle: { color: brandColor }, value: formatTime(log.time), valueClassName: 'whitespace-nowrap', cell: 'col-span-5 @lg:col-span-2 @4xl:col-span-1' },
+        { key: 'apiKey', label: t('apiKey'), Icon: KeyRound, iconClassName: 'text-orange-500', value: apiKeyName || '-', cell: 'col-span-4' },
+        { key: 'firstToken', label: t('firstToken'), Icon: Zap, iconClassName: 'text-amber-500', value: !pending && log.ftut > 0 ? formatDurationCompact(log.ftut) : '-', cell: 'order-2 @lg:order-none' },
+        { key: 'totalTime', label: t('totalTime'), Icon: Timer, iconClassName: 'text-blue-500', value: pending ? <LiveDuration log={log} /> : formatDurationCompact(log.use_time), cell: 'order-2 @lg:order-none' },
+        { key: 'tokenSpeed', label: t('tokenSpeed'), Icon: Gauge, iconClassName: 'text-sky-500', value: speed, cell: 'order-2 @lg:order-none' },
         // 缓存读写各有一格，这里只算非缓存输入，三者相加才是总输入。
-        { key: 'input', label: t('input'), Icon: ArrowDownToLine, iconClassName: 'text-green-500', value: tokens(log.bill_input_tokens ?? log.input_tokens), cell: 'col-span-3' },
-        { key: 'cacheRead', label: t('cacheRead'), Icon: Database, iconClassName: 'text-cyan-500', value: tokens(log.cache_read_tokens), cell: 'col-span-3' },
-        { key: 'cacheRate', label: t('cacheRate'), Icon: Percent, iconClassName: 'text-teal-500', value: cacheRate, cell: 'col-span-3' },
-        { key: 'cacheWrite', label: t('cacheWrite'), Icon: DatabaseZap, iconClassName: 'text-orange-500', value: tokens(log.cache_write_tokens), cell: 'col-span-3' },
-        { key: 'output', label: t('output'), Icon: ArrowUpFromLine, iconClassName: 'text-purple-500', value: tokens(log.output_tokens), cell: 'col-span-6' },
-        { key: 'cost', label: t('cost'), Icon: DollarSign, iconClassName: 'text-emerald-500', value: pending ? '-' : Number(log.cost).toFixed(6), valueClassName: 'font-medium text-emerald-600 dark:text-emerald-400', cell: 'col-span-6' },
+        { key: 'input', label: t('input'), Icon: ArrowDownToLine, iconClassName: 'text-green-500', value: tokens(log.bill_input_tokens ?? log.input_tokens), cell: 'order-3 @lg:order-none' },
+        { key: 'cacheRead', label: t('cacheRead'), Icon: Database, iconClassName: 'text-cyan-500', value: tokens(log.cache_read_tokens), cell: 'order-3 @lg:order-none' },
+        { key: 'cacheRate', label: t('cacheRate'), Icon: Percent, iconClassName: 'text-teal-500', value: cacheRate, cell: 'order-3 @lg:order-none' },
+        { key: 'cacheWrite', label: t('cacheWrite'), Icon: DatabaseZap, iconClassName: 'text-orange-500', value: tokens(log.cache_write_tokens), cell: 'order-3 @lg:order-none' },
+        { key: 'output', label: t('output'), Icon: ArrowUpFromLine, iconClassName: 'text-purple-500', value: tokens(log.output_tokens), cell: 'order-2 @lg:order-none' },
+        { key: 'cost', label: t('cost'), Icon: DollarSign, iconClassName: 'text-emerald-500', value: pending ? '-' : Number(log.cost).toFixed(6), valueClassName: 'whitespace-nowrap font-medium text-emerald-600 dark:text-emerald-400', cell: 'order-1 @lg:order-none' },
     ];
 
     return metrics
@@ -325,11 +326,11 @@ function LogMetrics({ log, brandColor, variant }: { log: RelayLog; brandColor: s
             <div
                 key={metric.key}
                 title={metric.key === 'apiKey' && apiKeyName ? `${metric.label}: ${apiKeyName}` : metric.label}
-                className={cn('flex min-w-0 items-center gap-1.5', variant === 'card' && metric.cell, variant === 'card' && 'xl:col-span-1')}
+                className={cn('flex min-w-0 items-center gap-1.5', variant === 'card' && cn('col-span-3 @lg:col-span-1', metric.cell))}
             >
                 <metric.Icon className={cn('size-3.5 shrink-0', metric.iconClassName)} style={metric.iconStyle} />
                 {variant === 'footer' && metric.key !== 'time' && metric.key !== 'apiKey' ? <span>{metric.label}</span> : null}
-                <span className={cn('truncate', metric.valueClassName)}>{metric.value}</span>
+                <span className={metric.valueClassName ?? 'truncate'}>{metric.value}</span>
             </div>
         ));
 }
@@ -725,41 +726,45 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                     )}
                 >
                     <div className={cn('p-4 grid grid-cols-[auto_1fr] gap-4', hasError || isPending ? 'items-start' : 'items-center')}>
-                        <ModelAvatar size={40} />
-                        <div className="min-w-0 flex flex-col gap-3">
+                        <div className="hidden md:block"><ModelAvatar size={40} /></div>
+                        <div className="@container min-w-0 flex flex-col gap-3 col-span-2 md:col-span-1">
                             <div className="flex items-start gap-3 min-w-0">
-                                <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                                    <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
-                                        {log.request_model_name}
+                                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm md:flex-nowrap">
+                                    <span className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+                                        <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
+                                            {log.request_model_name}
+                                        </span>
+                                        <ReasoningEffortBadge effort={log.reasoning_effort} />
+                                        <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
                                     </span>
-                                    <ReasoningEffortBadge effort={log.reasoning_effort} />
-                                    <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
-                                    {hasMultipleAttempts ? (
-                                        <RetryBadgeWithTooltip
-                                            channelName={log.channel_name}
-                                            brandColor={brandColor}
-                                            attempts={log.attempts ?? []}
-                                            pending={isPending}
-                                        />
-                                    ) : (
-                                        <Badge
-                                            variant="secondary"
-                                            className="shrink-0 text-xs px-1.5 py-0"
-                                            style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
-                                        >
-                                            {log.channel_name}
-                                        </Badge>
-                                    )}
-                                    <span className="text-muted-foreground truncate" title={displayActualModelName}>
-                                        {displayActualModelName}
+                                    <span className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+                                        {hasMultipleAttempts ? (
+                                            <RetryBadgeWithTooltip
+                                                channelName={log.channel_name}
+                                                brandColor={brandColor}
+                                                attempts={log.attempts ?? []}
+                                                pending={isPending}
+                                            />
+                                        ) : (
+                                            <Badge
+                                                variant="secondary"
+                                                className="shrink-0 text-xs px-1.5 py-0"
+                                                style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                                            >
+                                                {log.channel_name}
+                                            </Badge>
+                                        )}
+                                        <span className="text-muted-foreground truncate" title={displayActualModelName}>
+                                            {displayActualModelName}
+                                        </span>
+                                        {log.attempts?.some((attempt) => attempt.sticky) ? (
+                                            <Pin className="size-3.5 shrink-0 text-amber-500" />
+                                        ) : null}
                                     </span>
-                                    {log.attempts?.some((attempt) => attempt.sticky) ? (
-                                        <Pin className="size-3.5 shrink-0 text-amber-500" />
-                                    ) : null}
                                 </div>
                                 <WSModeBadge log={log} />
                             </div>
-                            <div className="grid grid-cols-12 gap-x-3 gap-y-2 text-xs tabular-nums text-muted-foreground xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1.3fr)_repeat(8,minmax(0,1fr))_minmax(0,1.2fr)]">
+                            <div className="grid grid-cols-12 gap-x-3 gap-y-2 text-xs tabular-nums text-muted-foreground @lg:grid-cols-6 @4xl:grid-cols-[minmax(max-content,1.7fr)_minmax(0,1.3fr)_repeat(8,minmax(0,1fr))_minmax(max-content,1.2fr)]">
                                 <LogMetrics log={log} brandColor={brandColor} variant="card" />
                             </div>
                             {isPending ? (
