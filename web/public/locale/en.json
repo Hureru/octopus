@@ -106,6 +106,14 @@
             "success": "Copied",
             "failed": "Copy failed",
             "noContent": "Nothing to copy"
+        },
+        "share": {
+            "share": "Share as image",
+            "hideChannelName": "Blur channel names",
+            "copy": "Copy image",
+            "download": "Download image",
+            "close": "Close",
+            "failed": "Failed to generate the image"
         }
     },
     "home": {

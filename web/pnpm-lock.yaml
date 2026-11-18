@@ -62,6 +62,9 @@ importers:
       '@uiw/react-json-view':
         specifier: 2.0.0-alpha.39
         version: 2.0.0-alpha.39(@babel/runtime@7.28.4)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
+      '@zumer/snapdom':
+        specifier: 2.24.15
+        version: 2.24.15
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1835,6 +1838,9 @@ packages:
     resolution: {integrity: sha512-Yy19y6O2GJq8f7CHf7L0nxL8bf4PZCPaVOCgJrusOeFHY1LvHgYXnmnXg6N5iwAnbgbZCDjo60SiM6IPJi9C5g==}
     peerDependencies:
       react: '>= 16.8.0'
+
+  '@zumer/snapdom@2.24.15':
+    resolution: {integrity: sha512-4YE+3ekbBFEAxMyHr++wxOSGt/k+n721eeNT9N9Map27A+ra5sBut3qkYyheYlRj9dJ3HtZaUN1/yrh/aCiuKw==}
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -6625,6 +6631,8 @@ snapshots:
     dependencies:
       '@use-gesture/core': 10.3.1
       react: 19.2.1
+
+  '@zumer/snapdom@2.24.15': {}
 
   acorn-jsx@5.3.2(acorn@8.15.0):
     dependencies:

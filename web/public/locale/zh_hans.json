@@ -106,6 +106,14 @@
             "success": "复制成功",
             "failed": "复制失败",
             "noContent": "无可复制内容"
+        },
+        "share": {
+            "share": "分享图片",
+            "hideChannelName": "模糊渠道名称",
+            "copy": "复制图片",
+            "download": "下载图片",
+            "close": "关闭",
+            "failed": "生成图片失败"
         }
     },
     "home": {

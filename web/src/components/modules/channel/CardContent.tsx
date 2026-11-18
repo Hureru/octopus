@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
     Trash2,
     CheckCircle2,
@@ -9,7 +9,11 @@ import {
     Activity,
     TrendingUp,
     Globe,
-    Key
+    Key,
+    Eye,
+    EyeOff,
+    Share2,
+    Loader2
 } from 'lucide-react';
 import { useUpdateChannel, useDeleteChannel, type Channel, type UpdateChannelRequest } from '@/api/endpoints/channel';
 import {
@@ -28,6 +32,7 @@ import { formatMoney } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useJumpStore } from '@/stores/jump';
+import { ShareImagePreview, captureShareImage, type ShareImage } from '@/components/common/ShareImagePreview';
 
 export function CardContent({ channel, stats }: { channel: Channel; stats: StatsMetricsFormatted }) {
     const { setIsOpen } = useMorphingDialog();
@@ -65,6 +70,34 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
     });
     const t = useTranslations('channel.detail');
     const tProxy = useTranslations('proxyPool');
+    const tShare = useTranslations('common.share');
+    const [isNameHidden, setIsNameHidden] = useState(false);
+    const [isSharing, setIsSharing] = useState(false);
+    const [shareImage, setShareImage] = useState<ShareImage | null>(null);
+    const statsRef = useRef<HTMLDivElement>(null);
+
+    // 把统计区克隆到屏幕外的定宽容器里再截图，图片不受当前窗口宽度和滚动位置影响
+    const handleShare = async () => {
+        if (!statsRef.current) return;
+        setIsSharing(true);
+        const stage = document.createElement('div');
+        stage.className = 'rounded-3xl bg-card px-4 py-4 text-card-foreground';
+        Object.assign(stage.style, { position: 'fixed', top: '0', left: '-10000px', width: '768px' });
+        const clone = statsRef.current.cloneNode(true) as HTMLElement;
+        Object.assign(clone.style, { maxHeight: 'none', overflow: 'visible' });
+        // 先从克隆里删掉地址和 Key：snapdom 的 exclude 只是兜底，而且会留下它们占的高度
+        clone.querySelectorAll('[data-share-exclude]').forEach((el) => el.remove());
+        stage.appendChild(clone);
+        document.body.appendChild(stage);
+        try {
+            setShareImage(await captureShareImage(stage));
+        } catch {
+            toast.error(tShare('failed'));
+        } finally {
+            stage.remove();
+            setIsSharing(false);
+        }
+    };
 
     const currentView = isEditing ? 'editing' : 'viewing';
 
@@ -200,14 +233,44 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                             站点投影
                         </Badge>
                     ) : null}
-                    <MorphingDialogClose
-                        className="relative top-0 right-0"
-                        variants={{
-                            initial: { opacity: 0, scale: 0.8 },
-                            animate: { opacity: 1, scale: 1 },
-                            exit: { opacity: 0, scale: 0.8 }
-                        }}
-                    />
+                    <div className="ml-auto flex items-center gap-1">
+                        {!isEditing && (
+                            <>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
+                                    onClick={() => setIsNameHidden(!isNameHidden)}
+                                    aria-pressed={isNameHidden}
+                                    aria-label={tShare('hideChannelName')}
+                                    title={tShare('hideChannelName')}
+                                >
+                                    {isNameHidden ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
+                                    onClick={handleShare}
+                                    disabled={isSharing}
+                                    aria-label={tShare('share')}
+                                    title={tShare('share')}
+                                >
+                                    {isSharing ? <Loader2 className="size-4 animate-spin" /> : <Share2 className="size-4" />}
+                                </Button>
+                            </>
+                        )}
+                        <MorphingDialogClose
+                            className="relative top-0 right-0"
+                            variants={{
+                                initial: { opacity: 0, scale: 0.8 },
+                                animate: { opacity: 1, scale: 1 },
+                                exit: { opacity: 0, scale: 0.8 }
+                            }}
+                        />
+                    </div>
                 </header>
             </MorphingDialogTitle>
 
@@ -215,9 +278,12 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                 <Tabs value={currentView}>
                     <TabsContents>
                         <TabsContent value="viewing" >
-                            <div className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5">
+                            <div ref={statsRef} className="max-h-[60vh] overflow-y-auto space-y-4 sm:space-y-5">
+                                <h3 className={cn('truncate text-sm font-semibold text-muted-foreground', isNameHidden && 'select-none blur-[3px]')}>
+                                    {channel.name}
+                                </h3>
                                 {channel.managed ? (
-                                    <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+                                    <section data-share-exclude className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
                                         <div>
                                             这是站点账号自动投影生成的托管 channel。请到站点管理中修改账号、分组、模型、代理或启停状态；该页面不再允许直接编辑、删除或启停，避免被后续投影覆盖。
                                         </div>
@@ -373,8 +439,8 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                                     </dl>
                                 </section>
 
-                                {/* Base URLs */}
-                                <section className="space-y-3">
+                                {/* Base URLs：地址不进分享图 */}
+                                <section data-share-exclude className="space-y-3">
                                     <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <Globe className="size-3.5" />
                                         {t('sections.baseUrls')}
@@ -406,8 +472,8 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                                     </div>
                                 </section>
 
-                                {/* Keys */}
-                                <section className="space-y-3">
+                                {/* Keys：密钥片段不进分享图 */}
+                                <section data-share-exclude className="space-y-3">
                                     <h4 className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                         <Key className="size-3.5" />
                                         {t('sections.keys')}
@@ -524,6 +590,7 @@ export function CardContent({ channel, stats }: { channel: Channel; stats: Stats
                     </TabsContents>
                 </Tabs>
             </MorphingDialogDescription>
+            <ShareImagePreview image={shareImage} onClose={() => setShareImage(null)} />
         </>
     );
 }

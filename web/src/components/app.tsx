@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from "motion/react"
 import { useAuth } from '@/api/endpoints/user';
 import { LoginForm } from '@/components/modules/login';
@@ -18,6 +18,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CONTENT_MAP } from '@/route';
 import { apiClient } from '@/api/client';
 import { logger } from '@/lib/logger';
+
+// 和首页同一个懒加载分包，不把图表和截图库拖进首屏
+const HomeActions = lazy(() => import('@/components/modules/home').then((m) => ({ default: m.HomeActions })));
 
 const RETURNING_USER_KEY = 'octopus_visited';
 const RETURNING_LOGO_MS = 300;
@@ -242,6 +245,7 @@ export function AppContainer() {
                         </AnimatePresence>
                     </div>
                     <div className="ml-auto flex items-center gap-3 relative min-h-[36px]">
+                        {activeItem === 'home' && <Suspense fallback={null}><HomeActions /></Suspense>}
                         <Toolbar />
                     </div>
                     <ProxyPoolDialog />
