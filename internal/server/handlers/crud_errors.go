@@ -39,9 +39,10 @@ const (
 	codeGroupPresetDeleteFailed      = "group.preset.delete_failed"
 	codeGroupPresetActivateFailed    = "group.preset.activate_failed"
 
-	codeModelPriceUpdateFailed = "model.price_update_failed"
-	codeModelPriceDeleteFailed = "model.price_delete_failed"
-	codeModelCreateFailed      = "model.create_failed"
-	codeModelUpdateFailed      = "model.update_failed"
-	codeModelDeleteFailed      = "model.delete_failed"
+	codeModelPriceUpdateFailed  = "model.price_update_failed"
+	codeModelPriceRebuildFailed = "model.price_rebuild_failed"
+	codeModelPriceDeleteFailed  = "model.price_delete_failed"
+	codeModelCreateFailed       = "model.create_failed"
+	codeModelUpdateFailed       = "model.update_failed"
+	codeModelDeleteFailed       = "model.delete_failed"
 )

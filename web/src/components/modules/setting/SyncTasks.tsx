@@ -1,12 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CalendarCheck2, CalendarSync, DollarSign, Globe2, RefreshCw, type LucideIcon } from 'lucide-react';
+import { CalendarCheck2, CalendarSync, DollarSign, Globe2, RefreshCw, RotateCcw, type LucideIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { SettingKey } from '@/api/endpoints/setting';
 import { useLastSyncTime, useSyncChannel } from '@/api/endpoints/channel';
-import { useLastUpdateTime, useUpdateModelPrice } from '@/api/endpoints/model';
+import { useLastUpdateTime, useRebuildModelPrice, useUpdateModelPrice } from '@/api/endpoints/model';
 import { useCheckinAllSites, useSiteLastCheckinTime, useSiteLastSyncTime, useSyncAllSites } from '@/api/endpoints/site';
 import { toast } from '@/components/common/Toast';
 import { useSettingStore } from '@/stores/setting';
@@ -71,6 +72,47 @@ function TaskRow({ icon: Icon, label, settingKey, last, running, runLabel, pendi
     );
 }
 
+// 重建价格会覆盖手动改过的价格，所以要点两次才执行
+function RebuildPriceRow() {
+    const t = useTranslations('setting');
+    const rebuildPrice = useRebuildModelPrice();
+    const [confirming, setConfirming] = useState(false);
+
+    const run = () => rebuildPrice.mutate(undefined, {
+        onSuccess: ({ count }) => toast.success(t('syncTasks.llmPrice.rebuild.success', { count })),
+        onError: (error) => toast.error(getErrorMessage(error, t('syncTasks.llmPrice.rebuild.failed'))),
+        onSettled: () => setConfirming(false),
+    });
+
+    return (
+        <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 flex-col gap-1">
+                <div className="flex items-center gap-3">
+                    <RotateCcw className="h-5 w-5 shrink-0 text-muted-foreground" />
+                    <span className="text-sm font-medium">{t('syncTasks.llmPrice.rebuild.label')}</span>
+                </div>
+                <span className="ml-8 text-xs text-muted-foreground">{t('syncTasks.llmPrice.rebuild.description')}</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+                {confirming ? (
+                    <>
+                        <Button variant="outline" size="sm" onClick={() => setConfirming(false)} disabled={rebuildPrice.isPending} className="rounded-xl">
+                            {t('syncTasks.llmPrice.rebuild.cancel')}
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={run} disabled={rebuildPrice.isPending} className="rounded-xl">
+                            {rebuildPrice.isPending ? t('syncTasks.llmPrice.rebuild.pending') : t('syncTasks.llmPrice.rebuild.confirm')}
+                        </Button>
+                    </>
+                ) : (
+                    <Button variant="outline" size="sm" onClick={() => setConfirming(true)} className="rounded-xl">
+                        {t('syncTasks.llmPrice.rebuild.button')}
+                    </Button>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export function SettingSyncTasks() {
     const t = useTranslations('setting');
     const tAll = useTranslations();
@@ -124,6 +166,8 @@ export function SettingSyncTasks() {
                     onError: () => toast.error(t('syncTasks.llmPrice.failed')),
                 })}
             />
+
+            <RebuildPriceRow />
 
             {/* 站点全量同步 */}
             <TaskRow

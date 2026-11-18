@@ -446,7 +446,17 @@
                 "button": "Update Now",
                 "pending": "Updating...",
                 "success": "Price updated successfully",
-                "failed": "Failed to update price"
+                "failed": "Failed to update price",
+                "rebuild": {
+                    "label": "Rebuild price data",
+                    "description": "Models found in the preset price table are reset to the preset price, including ones you edited by hand. Models without a preset keep their price. No rows are deleted.",
+                    "button": "Rebuild",
+                    "confirm": "Confirm rebuild",
+                    "cancel": "Cancel",
+                    "pending": "Rebuilding...",
+                    "success": "Rebuilt prices for {count} models",
+                    "failed": "Failed to rebuild prices"
+                }
             },
             "siteSync": {
                 "label": "Site full sync",
@@ -1013,6 +1023,7 @@
         },
         "model": {
             "price_update_failed": "Failed to update model prices.",
+            "price_rebuild_failed": "Failed to rebuild model prices.",
             "price_delete_failed": "Failed to delete model prices.",
             "create_failed": "Failed to create the model.",
             "update_failed": "Failed to update the model.",

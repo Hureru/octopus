@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bestruirui/octopus/internal/helper"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/price"
@@ -41,6 +42,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/update-price", http.MethodPost).
 				Handle(updateLLMPrice),
+		).
+		AddRoute(
+			router.NewRoute("/rebuild-price", http.MethodPost).
+				Handle(rebuildLLMPrice),
 		).
 		AddRoute(
 			router.NewRoute("/last-update-time", http.MethodGet).
@@ -178,6 +183,15 @@ func updateLLMPrice(c *gin.Context) {
 		return
 	}
 	resp.Success(c, nil)
+}
+
+func rebuildLLMPrice(c *gin.Context) {
+	count, err := helper.LLMPriceRebuild(c.Request.Context())
+	if err != nil {
+		resp.ErrorWithAppError(c, http.StatusInternalServerError, modelError(codeModelPriceRebuildFailed, "model price rebuild failed", err))
+		return
+	}
+	resp.Success(c, gin.H{"count": count})
 }
 
 func getLastUpdateTime(c *gin.Context) {
