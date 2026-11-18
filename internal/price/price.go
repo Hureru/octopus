@@ -84,15 +84,21 @@ func GetLastUpdateTime() time.Time {
 	return lastUpdateTime
 }
 
+// GetLLMPrice 返回模型的生效价格：数据库里有这一行就用它（可能是手动改过的），否则用预设表。
 func GetLLMPrice(modelName string) *model.LLMPrice {
 	modelName = strings.ToLower(modelName)
 	price, err := op.LLMGet(modelName)
 	if err == nil {
 		return &price
 	}
+	return GetPresetPrice(modelName)
+}
+
+// GetPresetPrice 只查预设表（内置 + models.dev 同步来的），不看数据库；预设表里没有时返回 nil。
+func GetPresetPrice(modelName string) *model.LLMPrice {
 	llmPriceLock.RLock()
 	defer llmPriceLock.RUnlock()
-	price, ok := llmPrice[modelName]
+	price, ok := llmPrice[strings.ToLower(modelName)]
 	if !ok {
 		return nil
 	}

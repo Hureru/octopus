@@ -106,6 +106,14 @@
             "success": "Copied",
             "failed": "Copy failed",
             "noContent": "Nothing to copy"
+        },
+        "share": {
+            "share": "Share as image",
+            "hideChannelName": "Blur channel names",
+            "copy": "Copy image",
+            "download": "Download image",
+            "close": "Close",
+            "failed": "Failed to generate the image"
         }
     },
     "home": {
@@ -446,7 +454,17 @@
                 "button": "Update Now",
                 "pending": "Updating...",
                 "success": "Price updated successfully",
-                "failed": "Failed to update price"
+                "failed": "Failed to update price",
+                "rebuild": {
+                    "label": "Rebuild price data",
+                    "description": "Models found in the preset price table are reset to the preset price, including ones you edited by hand. Models without a preset keep their price. No rows are deleted.",
+                    "button": "Rebuild",
+                    "confirm": "Confirm rebuild",
+                    "cancel": "Cancel",
+                    "pending": "Rebuilding...",
+                    "success": "Rebuilt prices for {count} models",
+                    "failed": "Failed to rebuild prices"
+                }
             },
             "siteSync": {
                 "label": "Site full sync",
@@ -748,7 +766,12 @@
             "errorInfo": "Error Info",
             "firstToken": "TTFT",
             "totalTime": "Total",
+            "time": "Time",
+            "apiKey": "API Key",
+            "tokenSpeed": "Speed",
+            "cacheRate": "Cache rate",
             "duration": "Latency",
+            "reasoningEffort": "Reasoning effort",
             "input": "Input",
             "output": "Output",
             "cost": "Cost",
@@ -876,6 +899,7 @@
             "customHeaderKey": "Header Key",
             "customHeaderValue": "Header Value",
             "customHeaderAdd": "Add Header",
+            "customHeaderHint": "A value can reference a header from the client request, e.g.",
             "channelProxy": "Channel Proxy",
             "channelProxyPlaceholder": "Optional: proxy for this channel (overrides global proxy)",
             "paramOverride": "Param Override",
@@ -1007,6 +1031,7 @@
         },
         "model": {
             "price_update_failed": "Failed to update model prices.",
+            "price_rebuild_failed": "Failed to rebuild model prices.",
             "price_delete_failed": "Failed to delete model prices.",
             "create_failed": "Failed to create the model.",
             "update_failed": "Failed to update the model.",

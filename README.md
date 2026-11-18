@@ -94,6 +94,8 @@ After first launch, visit http://localhost:8080 and log in to the management pan
 - **Password**: `admin`
 
 > ⚠️ **Security Notice**: Please change the default password immediately after first login.
+>
+> Forgot the password? Run `./octopus passwd <new-password>` (add `--config path` if you use a custom config file), then restart the server.
 
 ### 📝 Configuration File
 
@@ -287,6 +289,7 @@ Manage model pricing information in the system.
 - The system periodically syncs model pricing data from [models.dev](https://github.com/sst/models.dev)
 - When creating a channel, if the channel contains models not in models.dev, the system automatically creates pricing information for those models on this page, so this page displays models that haven't had their prices fetched from upstream, allowing users to set prices manually
 - Manual creation of models that exist in models.dev is also supported for custom pricing
+- **Rebuild price data** (Settings → scheduled tasks) resets every model that has a preset price back to that price, including ones edited by hand; models without a preset keep their price and no rows are deleted
 
 **Price Priority:**
 

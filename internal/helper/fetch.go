@@ -225,8 +225,9 @@ func applyDefaultModelRequestHeaders(req *http.Request, request model.Channel) {
 		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	}
 	for _, header := range request.CustomHeader {
-		if header.HeaderKey != "" {
-			req.Header.Set(header.HeaderKey, header.HeaderValue)
+		// 这里没有客户端请求，引用 {client_header:x} 的头直接跳过，不把占位符原文发给上游。
+		if value, ok := header.ResolveValue(nil); ok && header.HeaderKey != "" {
+			req.Header.Set(header.HeaderKey, value)
 		}
 	}
 }

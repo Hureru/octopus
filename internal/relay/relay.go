@@ -989,8 +989,11 @@ func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
 		outboundRequest.Header.Set("User-Agent", "")
 	}
 	if len(ra.channel.CustomHeader) > 0 {
+		clientHeader := clientHeaderLookup(outboundRequest.Header)
 		for _, header := range ra.channel.CustomHeader {
-			outboundRequest.Header.Set(header.HeaderKey, header.HeaderValue)
+			if value, ok := header.ResolveValue(clientHeader); ok {
+				outboundRequest.Header.Set(header.HeaderKey, value)
+			}
 		}
 	}
 }

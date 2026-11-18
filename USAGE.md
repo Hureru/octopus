@@ -124,7 +124,7 @@ Open `http://your-IP:8080` in a browser. Default credentials:
 - Password: `admin`
 
 > ⚠️ **Login says wrong password?** Most likely you previously installed the upstream version and the `data` directory has leftover data (the old credentials were preserved).
-> Solution: Use the old password if you remember it; otherwise **clear the data directory and redeploy**. See [FAQ Q1](#q1-default-adminadmin-login-fails).
+> Solution: Use the old password if you remember it; otherwise **reset it with `octopus passwd <new-password>`**. See [FAQ Q1](#q1-default-adminadmin-login-fails).
 
 ### 4.3 Change Password Immediately
 
@@ -490,7 +490,14 @@ In Settings you can enable a **Proxy Pool** to centrally manage reusable proxy c
 > Common usage questions collected here.
 
 ### Q1. Default admin/admin login fails?
-Most likely you **previously installed the upstream version and the `data` directory has leftover data** — the old credentials were preserved. Use the old password if you remember it; otherwise **clear the data directory and redeploy**. In a clean environment, admin/admin always works.
+Most likely you **previously installed the upstream version and the `data` directory has leftover data** — the old credentials were preserved. Use the old password if you remember it; otherwise reset it from the command line and restart the server:
+
+```bash
+./octopus passwd <new-password>                 # binary
+docker exec -w /app <container> ./octopus passwd <new-password>   # Docker
+```
+
+Add `--config path` if you start the server with a custom config file. In a clean environment, admin/admin always works.
 
 ### Q2. Models exist, but creating a Key says no available models?
 Because **you haven't created a group yet**. In Octopus, "group name = available model name". **Go to the Groups page and create a group first**, then you'll be able to select models when creating a Key.

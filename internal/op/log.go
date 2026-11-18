@@ -731,6 +731,7 @@ func selectRelayLogListFields(query *gorm.DB, includeContent bool) *gorm.DB {
 		"channel_id",
 		"channel_name",
 		"actual_model_name",
+		"reasoning_effort",
 		"input_tokens",
 		"transport_input_tokens",
 		"bill_input_tokens",

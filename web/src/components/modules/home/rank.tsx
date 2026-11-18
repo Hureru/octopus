@@ -14,6 +14,7 @@ export function Rank() {
     const t = useTranslations('home.rank');
     const rankSortMode = useHomeViewStore((state) => state.rankSortMode);
     const setRankSortMode = useHomeViewStore((state) => state.setRankSortMode);
+    const isChannelNameHidden = useHomeViewStore((state) => state.isChannelNameHidden);
 
     const rankedByCost = useMemo<ChannelData[]>(() => {
         if (!channelData) return [];
@@ -64,7 +65,7 @@ export function Rank() {
                             </div>
 
                             <div className="flex-1 min-w-0">
-                                <p className="font-medium text-sm truncate">{channel.raw.name}</p>
+                                <p className={`font-medium text-sm truncate ${isChannelNameHidden ? 'select-none blur-[3px]' : ''}`}>{channel.raw.name}</p>
                                 {mode === 'count' && (() => {
                                     const successCount = channel.formatted.request_success.raw;
                                     const failedCount = channel.formatted.request_failed.raw;

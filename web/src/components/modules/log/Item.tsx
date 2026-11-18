@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Clock, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Link } from 'lucide-react';
+import { Clock, Zap, AlertCircle, ArrowDownToLine, ArrowUpFromLine, DollarSign, ArrowRight, ArrowDown, Send, MessageSquare, Loader2, RotateCw, ChevronDown, ChevronUp, Pin, KeyRound, CircleOff, Link, Brain, Timer, Gauge, Database, DatabaseZap, Percent } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { motion, AnimatePresence } from 'motion/react';
 import JsonView from '@uiw/react-json-view';
@@ -141,11 +141,6 @@ function formatCompactTokenCount(value: number): string {
     return `${trunc(value / 1000000, 2)}M`;
 }
 
-function hasCacheTokens(log: RelayLog) {
-    return (log.cache_read_tokens != null && log.cache_read_tokens > 0)
-        || (log.cache_write_tokens != null && log.cache_write_tokens > 0);
-}
-
 // 新输入 = 非缓存输入 + 缓存写入。bill_input_tokens 是后端按上游语义归一化好的非缓存输入，
 // 不必再从 input_tokens 反推；该列为空的老日志没有缓存明细，直接用 input_tokens。
 function getHeadlineInputTokens(log: RelayLog) {
@@ -280,6 +275,66 @@ function LiveDuration({ log }: { log: RelayLog }) {
     return <>{formatDurationCompact(log.use_time + Math.max(0, now - (log.received_at ?? now)))}</>;
 }
 
+// 卡片里词元数最多 6 个字符，11 列才排得下；完整数值在详情底部。
+function formatCardTokens(value: number): string {
+    return value < 100000 ? value.toLocaleString() : formatCompactTokenCount(value);
+}
+
+// LogMetrics 渲染日志的 11 项指标，按含义分三组：请求与耗时、输入与缓存、输出与费用。
+// card：只有图标和数值，各卡片的列要对齐，所以没有数据的格子也占位显示 "-"；
+// footer：带文字标签，兼作图标的图例。
+function LogMetrics({ log, brandColor, variant }: { log: RelayLog; brandColor: string; variant: 'card' | 'footer' }) {
+    const t = useTranslations('log.card');
+    const pending = !!log.pending;
+    const apiKeyName = log.request_api_key_name?.trim() ?? '';
+    // 进行中的请求还没有用量；缓存明细为空的老日志也没有这几项。
+    const tokens = (value: number | null | undefined) => {
+        if (pending || value == null) return '-';
+        return variant === 'card' ? formatCardTokens(value) : value.toLocaleString();
+    };
+    // 首字之后才是流式输出阶段。非流式和 WS 透传不记首字时间，算不出速度。
+    const streamMs = log.ftut > 0 ? log.use_time - log.ftut : 0;
+    const speed = !pending && streamMs > 0 && log.output_tokens > 0
+        ? `${Math.round(log.output_tokens / (streamMs / 1000))} t/s`
+        : '-';
+    // input_tokens 已含缓存读写，所以缓存率不会超过 100%。
+    const cacheRate = !pending && log.cache_read_tokens != null && log.input_tokens > 0
+        ? `${Math.round((log.cache_read_tokens / log.input_tokens) * 100)}%`
+        : '-';
+
+    // cell 只管窄容器（手机）的 3 行：时间·Key·费用 / 首字·总耗时·速度·输出 / 输入·缓存读·缓存率·缓存写；时间让出一点宽度给 Key 名。
+    // 中等宽度是 6 列 2 行、最宽是一行 11 列，都按下面的书写顺序排，所以 order 到 @lg 就复位。
+    const metrics = [
+        { key: 'time', label: t('time'), Icon: Clock, iconStyle: { color: brandColor }, value: formatTime(log.time), valueClassName: 'whitespace-nowrap', cell: 'col-span-5 @lg:col-span-2 @4xl:col-span-1' },
+        { key: 'apiKey', label: t('apiKey'), Icon: KeyRound, iconClassName: 'text-orange-500', value: apiKeyName || '-', cell: 'col-span-4' },
+        { key: 'firstToken', label: t('firstToken'), Icon: Zap, iconClassName: 'text-amber-500', value: !pending && log.ftut > 0 ? formatDurationCompact(log.ftut) : '-', cell: 'order-2 @lg:order-none' },
+        { key: 'totalTime', label: t('totalTime'), Icon: Timer, iconClassName: 'text-blue-500', value: pending ? <LiveDuration log={log} /> : formatDurationCompact(log.use_time), cell: 'order-2 @lg:order-none' },
+        { key: 'tokenSpeed', label: t('tokenSpeed'), Icon: Gauge, iconClassName: 'text-sky-500', value: speed, cell: 'order-2 @lg:order-none' },
+        // 缓存读写各有一格，这里只算非缓存输入，三者相加才是总输入。
+        { key: 'input', label: t('input'), Icon: ArrowDownToLine, iconClassName: 'text-green-500', value: tokens(log.bill_input_tokens ?? log.input_tokens), cell: 'order-3 @lg:order-none' },
+        { key: 'cacheRead', label: t('cacheRead'), Icon: Database, iconClassName: 'text-cyan-500', value: tokens(log.cache_read_tokens), cell: 'order-3 @lg:order-none' },
+        { key: 'cacheRate', label: t('cacheRate'), Icon: Percent, iconClassName: 'text-teal-500', value: cacheRate, cell: 'order-3 @lg:order-none' },
+        { key: 'cacheWrite', label: t('cacheWrite'), Icon: DatabaseZap, iconClassName: 'text-orange-500', value: tokens(log.cache_write_tokens), cell: 'order-3 @lg:order-none' },
+        { key: 'output', label: t('output'), Icon: ArrowUpFromLine, iconClassName: 'text-purple-500', value: tokens(log.output_tokens), cell: 'order-2 @lg:order-none' },
+        { key: 'cost', label: t('cost'), Icon: DollarSign, iconClassName: 'text-emerald-500', value: pending ? '-' : Number(log.cost).toFixed(6), valueClassName: 'whitespace-nowrap font-medium text-emerald-600 dark:text-emerald-400', cell: 'order-1 @lg:order-none' },
+    ];
+
+    return metrics
+        // 详情底部不用对齐列，没有 Key 名就不占位。
+        .filter((metric) => variant === 'card' || metric.key !== 'apiKey' || apiKeyName)
+        .map((metric) => (
+            <div
+                key={metric.key}
+                title={metric.key === 'apiKey' && apiKeyName ? `${metric.label}: ${apiKeyName}` : metric.label}
+                className={cn('flex min-w-0 items-center gap-1.5', variant === 'card' && cn('col-span-3 @lg:col-span-1', metric.cell))}
+            >
+                <metric.Icon className={cn('size-3.5 shrink-0', metric.iconClassName)} style={metric.iconStyle} />
+                {variant === 'footer' && metric.key !== 'time' && metric.key !== 'apiKey' ? <span>{metric.label}</span> : null}
+                <span className={metric.valueClassName ?? 'truncate'}>{metric.value}</span>
+            </div>
+        ));
+}
+
 function RetryBadgeWithTooltip({ channelName, brandColor, attempts, pending }: RetryBadgeWithTooltipProps) {
     const t = useTranslations('log.card');
     const merged = useMemo(() => mergeAdjacentAttempts(attempts), [attempts]);
@@ -338,6 +393,25 @@ function RetryBadgeWithTooltip({ channelName, brandColor, attempts, pending }: R
                     );
                 })}
             </TooltipContent>
+        </Tooltip>
+    );
+}
+
+function ReasoningEffortBadge({ effort }: { effort?: string }) {
+    const t = useTranslations('log.card');
+    if (!effort) return null;
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Badge
+                    variant="secondary"
+                    className="max-w-32 shrink-0 gap-1 bg-violet-500/10 px-1.5 py-0 text-xs text-violet-700 dark:text-violet-300"
+                >
+                    <Brain className="size-3.5 shrink-0" />
+                    <span className="truncate">{effort}</span>
+                </Badge>
+            </TooltipTrigger>
+            <TooltipContent>{t('reasoningEffort')}</TooltipContent>
         </Tooltip>
     );
 }
@@ -538,7 +612,6 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
         () => getModelIcon(displayActualModelName),
         [displayActualModelName]
     );
-    const requestAPIKeyName = useMemo(() => log.request_api_key_name?.trim() ?? '', [log.request_api_key_name]);
     const disableMutation = useUpdateSiteChannelModelDisabled();
 
     const hasError = !!log.error;
@@ -653,88 +726,46 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                     )}
                 >
                     <div className={cn('p-4 grid grid-cols-[auto_1fr] gap-4', hasError || isPending ? 'items-start' : 'items-center')}>
-                        <ModelAvatar size={40} />
-                        <div className="min-w-0 flex flex-col gap-3">
+                        <div className="hidden md:block"><ModelAvatar size={40} /></div>
+                        <div className="@container min-w-0 flex flex-col gap-3 col-span-2 md:col-span-1">
                             <div className="flex items-start gap-3 min-w-0">
-                                <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                                    <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
-                                        {log.request_model_name}
+                                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm md:flex-nowrap">
+                                    <span className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+                                        <span className="font-semibold text-card-foreground truncate" title={log.request_model_name}>
+                                            {log.request_model_name}
+                                        </span>
+                                        <ReasoningEffortBadge effort={log.reasoning_effort} />
+                                        <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
                                     </span>
-                                    <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
-                                    {hasMultipleAttempts ? (
-                                        <RetryBadgeWithTooltip
-                                            channelName={log.channel_name}
-                                            brandColor={brandColor}
-                                            attempts={log.attempts ?? []}
-                                            pending={isPending}
-                                        />
-                                    ) : (
-                                        <Badge
-                                            variant="secondary"
-                                            className="shrink-0 text-xs px-1.5 py-0"
-                                            style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
-                                        >
-                                            {log.channel_name}
-                                        </Badge>
-                                    )}
-                                    <span className="text-muted-foreground truncate" title={displayActualModelName}>
-                                        {displayActualModelName}
+                                    <span className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+                                        {hasMultipleAttempts ? (
+                                            <RetryBadgeWithTooltip
+                                                channelName={log.channel_name}
+                                                brandColor={brandColor}
+                                                attempts={log.attempts ?? []}
+                                                pending={isPending}
+                                            />
+                                        ) : (
+                                            <Badge
+                                                variant="secondary"
+                                                className="shrink-0 text-xs px-1.5 py-0"
+                                                style={{ backgroundColor: `${brandColor}15`, color: brandColor }}
+                                            >
+                                                {log.channel_name}
+                                            </Badge>
+                                        )}
+                                        <span className="text-muted-foreground truncate" title={displayActualModelName}>
+                                            {displayActualModelName}
+                                        </span>
+                                        {log.attempts?.some((attempt) => attempt.sticky) ? (
+                                            <Pin className="size-3.5 shrink-0 text-amber-500" />
+                                        ) : null}
                                     </span>
-                                    {log.attempts?.some((attempt) => attempt.sticky) ? (
-                                        <Pin className="size-3.5 shrink-0 text-amber-500" />
-                                    ) : null}
                                 </div>
                                 <WSModeBadge log={log} />
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs tabular-nums text-muted-foreground">
-                                <div className="flex items-center gap-1.5">
-                                    <Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />
-                                    <span>{formatTime(log.time)}</span>
-                                </div>
-                                {requestAPIKeyName ? (
-                                    <div className="flex items-center gap-1.5">
-                                        <KeyRound className="size-3.5 shrink-0 text-orange-500" />
-                                        <span className="truncate" title={requestAPIKeyName}>
-                                            {requestAPIKeyName}
-                                        </span>
-                                    </div>
-                                ) : null}
-                                <div className="flex items-center gap-1.5">
-                                    <Zap className="size-3.5 shrink-0 text-amber-500" />
-                                    <span>
-                                        {t('duration')}{' '}
-                                        {isPending ? <LiveDuration log={log} /> : `${formatDurationCompact(log.ftut)} / ${formatDurationCompact(log.use_time)}`}
-                                    </span>
-                                </div>
-                                {isPending ? null : (
-                                    <>
-                                        <div className="flex items-center gap-1.5">
-                                            <ArrowDownToLine className={cn('size-3.5 shrink-0', hasCacheTokens(log) ? 'text-sky-500' : 'text-green-500')} />
-                                            <span className="flex items-center gap-1">
-                                                {t('input')}
-                                                <span className="tabular-nums">{getHeadlineInputTokens(log).toLocaleString()}</span>
-                                                {hasCacheTokens(log) && log.cache_read_tokens != null && log.cache_read_tokens > 0 ? (
-                                                    <Badge
-                                                        variant="secondary"
-                                                        className="shrink-0 px-1.5 py-0 text-[11px] bg-sky-500/15 text-sky-600 dark:text-sky-400"
-                                                    >
-                                                        {formatCompactTokenCount(log.cache_read_tokens)}
-                                                    </Badge>
-                                                ) : null}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
-                                            <ArrowUpFromLine className="size-3.5 shrink-0 text-purple-500" />
-                                            <span>{t('output')} {log.output_tokens.toLocaleString()}</span>
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
-                                            <DollarSign className="size-3.5 shrink-0 text-emerald-500" />
-                                            <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                                                {t('cost')} {Number(log.cost).toFixed(6)}
-                                            </span>
-                                        </div>
-                                    </>
-                                )}
+                            <div className="grid grid-cols-12 gap-x-3 gap-y-2 text-xs tabular-nums text-muted-foreground @lg:grid-cols-6 @4xl:grid-cols-[minmax(max-content,1.7fr)_minmax(0,1.3fr)_repeat(8,minmax(0,1fr))_minmax(max-content,1.2fr)]">
+                                <LogMetrics log={log} brandColor={brandColor} variant="card" />
                             </div>
                             {isPending ? (
                                 <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 overflow-hidden">
@@ -760,6 +791,7 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                             <div className="flex min-w-0 flex-1 items-center gap-2">
                                 <ModelAvatar size={28} />
                                 <span className="font-semibold text-card-foreground truncate">{log.request_model_name}</span>
+                                <ReasoningEffortBadge effort={log.reasoning_effort} />
                                 <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/50" />
                                 {hasMultipleAttempts ? (
                                     <RetryBadgeWithTooltip
@@ -996,29 +1028,8 @@ export function LogCard({ log, siteTargets }: { log: RelayLog; siteTargets: LogS
                             </div>
                         </MorphingDialogDescription>
 
-                        <div className="flex flex-wrap items-center gap-3 md:gap-4 pt-4 mt-auto text-xs text-muted-foreground shrink-0">
-                            <div className="flex items-center gap-1.5">
-                                <Clock className="size-3.5" style={{ color: brandColor }} />
-                                <span className="tabular-nums">{formatTime(log.time)}</span>
-                            </div>
-                            {requestAPIKeyName ? (
-                                <div className="flex min-w-0 items-center gap-1.5">
-                                    <KeyRound className="size-3.5 shrink-0 text-orange-500" />
-                                    <span className="truncate" title={requestAPIKeyName}>
-                                        {requestAPIKeyName}
-                                    </span>
-                                </div>
-                            ) : null}
-                            <div className="flex items-center gap-1.5">
-                                <Zap className="size-3.5 text-amber-500" />
-                                <span>{t('duration')}: {formatDurationCompact(log.ftut)} / {formatDurationCompact(log.use_time)}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                                <DollarSign className="size-3.5 text-emerald-500" />
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                                    {t('cost')}: {Number(log.cost).toFixed(6)}
-                                </span>
-                            </div>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-4 mt-auto text-xs tabular-nums text-muted-foreground shrink-0">
+                            <LogMetrics log={log} brandColor={brandColor} variant="footer" />
                         </div>
                     </MorphingDialogContent>
                 </MorphingDialogContainer>

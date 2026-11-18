@@ -73,8 +73,9 @@ func requestJSON(ctx context.Context, siteRecord *model.Site, method string, req
 	}
 	applyDefaultSiteRequestHeaders(req, body != nil)
 	for _, item := range siteRecord.CustomHeader {
-		if strings.TrimSpace(item.HeaderKey) != "" {
-			req.Header.Set(strings.TrimSpace(item.HeaderKey), item.HeaderValue)
+		// 站点同步没有客户端请求，引用 {client_header:x} 的头只在投影出的渠道转发时生效。
+		if value, ok := item.ResolveValue(nil); ok && strings.TrimSpace(item.HeaderKey) != "" {
+			req.Header.Set(strings.TrimSpace(item.HeaderKey), value)
 		}
 	}
 	for key, value := range headers {

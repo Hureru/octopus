@@ -106,6 +106,14 @@
             "success": "复制成功",
             "failed": "复制失败",
             "noContent": "无可复制内容"
+        },
+        "share": {
+            "share": "分享图片",
+            "hideChannelName": "模糊渠道名称",
+            "copy": "复制图片",
+            "download": "下载图片",
+            "close": "关闭",
+            "failed": "生成图片失败"
         }
     },
     "home": {
@@ -446,7 +454,17 @@
                 "button": "立即更新",
                 "pending": "更新中...",
                 "success": "价格更新成功",
-                "failed": "价格更新失败"
+                "failed": "价格更新失败",
+                "rebuild": {
+                    "label": "重建价格数据",
+                    "description": "预设价格表里有的模型会改回预设价（包括手动改过的），没有预设价的模型保持原价，不删除任何模型。",
+                    "button": "重建",
+                    "confirm": "确认重建",
+                    "cancel": "取消",
+                    "pending": "重建中...",
+                    "success": "已重建 {count} 个模型的价格",
+                    "failed": "价格重建失败"
+                }
             },
             "siteSync": {
                 "label": "站点全量同步",
@@ -748,7 +766,12 @@
             "errorInfo": "错误信息",
             "firstToken": "首字",
             "totalTime": "总耗时",
+            "time": "时间",
+            "apiKey": "API Key",
+            "tokenSpeed": "速度",
+            "cacheRate": "缓存率",
             "duration": "耗时",
+            "reasoningEffort": "思考等级",
             "input": "输入",
             "output": "输出",
             "cost": "费用",
@@ -876,6 +899,7 @@
             "customHeaderKey": "Header Key",
             "customHeaderValue": "Header Value",
             "customHeaderAdd": "添加 Header",
+            "customHeaderHint": "值里可以引用客户端请求头，例如",
             "channelProxy": "渠道代理",
             "channelProxyPlaceholder": "可选：仅对该渠道生效（覆盖全局代理）",
             "paramOverride": "参数覆盖",
@@ -1007,6 +1031,7 @@
         },
         "model": {
             "price_update_failed": "更新模型价格失败。",
+            "price_rebuild_failed": "重建模型价格失败。",
             "price_delete_failed": "删除模型价格失败。",
             "create_failed": "创建模型失败。",
             "update_failed": "更新模型失败。",

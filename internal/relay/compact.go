@@ -300,11 +300,14 @@ func copyProxyHeaders(src http.Header, channel *dbmodel.Channel, dst http.Header
 			dst.Add(key, value)
 		}
 	}
+	clientHeader := clientHeaderLookup(dst)
 	for _, header := range channel.CustomHeader {
 		if strings.EqualFold(header.HeaderKey, "Content-Type") {
 			continue
 		}
-		dst.Set(header.HeaderKey, header.HeaderValue)
+		if value, ok := header.ResolveValue(clientHeader); ok {
+			dst.Set(header.HeaderKey, value)
+		}
 	}
 	// 防止 Go 默认 User-Agent 泄露到上游
 	if dst.Get("User-Agent") == "" {
