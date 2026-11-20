@@ -14,20 +14,12 @@ import (
 )
 
 type wsConversationState struct {
-	DownstreamSessionID string
-	RequestModel        string
-	ChannelID           int
-	ChannelKeyID        int
-	LastResponseID      string
-	ReplayWindowItems   json.RawMessage
-	Transcript          []transformerModel.Message
-}
-
-func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
-	if s == nil {
-		return false
-	}
-	return strings.TrimSpace(s.RequestModel) == strings.TrimSpace(requestModel)
+	RequestModel      string
+	ChannelID         int
+	ChannelKeyID      int
+	LastResponseID    string
+	ReplayWindowItems json.RawMessage
+	Transcript        []transformerModel.Message
 }
 
 // BuildReplayRequest transforms a continuation request into a self-contained replay request
@@ -94,13 +86,12 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 		return nil
 	}
 	return &wsConversationState{
-		DownstreamSessionID: strings.TrimSpace(state.DownstreamSessionID),
-		RequestModel:        strings.TrimSpace(state.RequestModel),
-		ChannelID:           state.ChannelID,
-		ChannelKeyID:        state.ChannelKeyID,
-		LastResponseID:      strings.TrimSpace(state.LastResponseID),
-		ReplayWindowItems:   append(json.RawMessage(nil), state.ReplayWindowItems...),
-		Transcript:          cloneMessages(state.Transcript),
+		RequestModel:      strings.TrimSpace(state.RequestModel),
+		ChannelID:         state.ChannelID,
+		ChannelKeyID:      state.ChannelKeyID,
+		LastResponseID:    strings.TrimSpace(state.LastResponseID),
+		ReplayWindowItems: append(json.RawMessage(nil), state.ReplayWindowItems...),
+		Transcript:        cloneMessages(state.Transcript),
 	}
 }
 

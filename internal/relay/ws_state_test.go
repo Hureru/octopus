@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	dbmodel "github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/relay/balancer"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
@@ -450,6 +452,41 @@ func TestCollectRawResponsesOutputItems(t *testing.T) {
 		if got := string(collectRawResponsesOutputItems([]byte(tc.stream))); got != tc.want {
 			t.Errorf("%s: got %s, want %s", name, got, tc.want)
 		}
+	}
+}
+
+func TestNewIteratorWithPreferenceMovesPreferredChannelFirst(t *testing.T) {
+	group := dbmodel.Group{
+		Items: []dbmodel.GroupItem{
+			{ChannelID: 1, ModelName: "gpt-5.4", Priority: 1},
+			{ChannelID: 2, ModelName: "gpt-5.4", Priority: 2},
+		},
+	}
+
+	iter := balancer.NewIteratorWithPreference(group, 1, "gpt-5.4", &balancer.SessionEntry{ChannelID: 2, ChannelKeyID: 20})
+	if !iter.Next() {
+		t.Fatalf("expected iterator to have candidates")
+	}
+	if first := iter.Item(); first.ChannelID != 2 {
+		t.Fatalf("expected preferred channel first, got %#v", first)
+	}
+	if !iter.IsSticky() || iter.StickyKeyID() != 20 {
+		t.Fatalf("expected preferred channel to be treated as sticky")
+	}
+}
+
+func TestFinalChannelKey(t *testing.T) {
+	channelID, keyID := finalChannelKey([]dbmodel.ChannelAttempt{
+		{ChannelID: 1, ChannelKeyID: 2, Status: dbmodel.AttemptFailed},
+		{ChannelID: 3, ChannelKeyID: 4, Status: dbmodel.AttemptSuccess},
+	})
+	if channelID != 3 || keyID != 4 {
+		t.Fatalf("expected success attempt to win, got channel=%d key=%d", channelID, keyID)
+	}
+
+	channelID, keyID = finalChannelKey([]dbmodel.ChannelAttempt{{ChannelID: 8, ChannelKeyID: 6, Status: dbmodel.AttemptFailed}})
+	if channelID != 8 || keyID != 6 {
+		t.Fatalf("expected last failed attempt when no success, got channel=%d key=%d", channelID, keyID)
 	}
 }
 

@@ -299,6 +299,30 @@ func TestWSIngressFullRequestIsNotMergedWithStoredTurns(t *testing.T) {
 	}
 }
 
+// 存档是每个模型一份：一条连接上换了模型再换回来，原来那个模型的对话还接得上。
+func TestWSIngressKeepsOneConversationPerModel(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	other := &model.Group{Name: "ws-ingress-other-model", Mode: model.GroupModeFailover}
+	if err := op.GroupCreate(other, env.ctx); err != nil {
+		t.Fatalf("GroupCreate failed: %v", err)
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: other.ID, ChannelID: env.channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, env.ctx); err != nil {
+		t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+
+	firstID := env.mustComplete(wsIngressCreate("", wsIngressUserItem("first")))
+	env.mustComplete(strings.Replace(wsIngressCreate("", wsIngressUserItem("other")), wsIngressModel, other.Name, 1))
+	env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, firstID), wsIngressUserItem("second")))
+
+	requests := env.upstreamRequests()
+	if len(requests) != 3 {
+		t.Fatalf("expected one upstream request per turn, got %d requests", len(requests))
+	}
+	if got, want := strings.Join(wsIngressInputTexts(t, requests[2]), " | "), "message:first | message:answer 1 | message:second"; got != want {
+		t.Fatalf("continued request input = %q, want %q", got, want)
+	}
+}
+
 func TestWSIngressUnknownPreviousResponseIDIsReported(t *testing.T) {
 	for name, tc := range map[string]struct {
 		extra            string
