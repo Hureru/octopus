@@ -56,9 +56,6 @@ type ResponseInbound struct {
 	toolCallItemStarted map[int]bool
 	toolCallOutputIndex map[int]int
 
-	// Usage tracking
-	usage *model.Usage
-
 	// completedOutputItems buffers every ResponsesItem emitted during streaming
 	// (message / reasoning / function_call) so the terminal response.completed
 	// event can echo the full output array. Upstream Responses clients treat
@@ -110,7 +107,7 @@ func (i *ResponseInbound) TransformResponse(ctx context.Context, response *model
 func (i *ResponseInbound) TransformStream(ctx context.Context, stream *model.InternalLLMResponse) ([]byte, error) {
 	// Handle [DONE] marker
 	if stream.Object == "[DONE]" {
-		return []byte("data: [DONE]\n\n"), nil
+		return i.processStreamEvents(ctx, model.StreamEventsFromInternalResponse(stream), false)
 	}
 
 	// Preserve the original chunk for aggregation; the stream-event view is a
@@ -223,30 +220,14 @@ func (i *ResponseInbound) processStreamEvents(ctx context.Context, events []mode
 
 		case model.StreamEventKindUsageDelta:
 			if event.Usage != nil && i.hasFinished && !i.responseCompleted {
-				i.responseCompleted = true
-				i.usage = event.Usage
-				eventType, status := responsesTerminalEvent(i.finalFinishReason)
-				output := i.finalOutputItems()
-				if event.ProviderExtensions != nil && event.ProviderExtensions.OpenAI != nil && len(event.ProviderExtensions.OpenAI.RawResponseItems) > 0 {
-					var items []ResponsesItem
-					if err := json.Unmarshal(event.ProviderExtensions.OpenAI.RawResponseItems, &items); err == nil {
-						output = items
-					}
-				}
-				response := &ResponsesResponse{
-					Object:     "response",
-					ID:         i.responseID,
-					Model:      i.model,
-					CreatedAt:  i.createdAt,
-					Status:     &status,
-					Truncation: i.truncation,
-					Output:     output,
-					Usage:      convertUsageToResponses(i.usage),
-				}
-				out = append(out, i.enqueueEvent(&ResponsesStreamEvent{Type: eventType, Response: response}))
+				out = append(out, i.terminalEvent(event.Usage, event.ProviderExtensions))
 			}
 
 		case model.StreamEventKindDone:
+			// 结束事件平时等用量到了再发。上游没发用量就结束时不能再等，否则客户端收不到结束事件
+			if i.hasFinished && !i.responseCompleted {
+				out = append(out, i.terminalEvent(nil, nil))
+			}
 			if len(out) == 0 {
 				return []byte("data: [DONE]\n\n"), nil
 			}
@@ -282,6 +263,30 @@ func (i *ResponseInbound) processStreamEvents(ctx context.Context, events []mode
 		}
 	}
 	return result, nil
+}
+
+// terminalEvent 生成回复的结束事件（response.completed / incomplete / failed），一个回复只发一次。
+func (i *ResponseInbound) terminalEvent(usage *model.Usage, extensions *model.ProviderExtensions) []byte {
+	i.responseCompleted = true
+	eventType, status := responsesTerminalEvent(i.finalFinishReason)
+	output := i.finalOutputItems()
+	if extensions != nil && extensions.OpenAI != nil && len(extensions.OpenAI.RawResponseItems) > 0 {
+		var items []ResponsesItem
+		if err := json.Unmarshal(extensions.OpenAI.RawResponseItems, &items); err == nil {
+			output = items
+		}
+	}
+	response := &ResponsesResponse{
+		Object:     "response",
+		ID:         i.responseID,
+		Model:      i.model,
+		CreatedAt:  i.createdAt,
+		Status:     &status,
+		Truncation: i.truncation,
+		Output:     output,
+		Usage:      convertUsageToResponses(usage),
+	}
+	return i.enqueueEvent(&ResponsesStreamEvent{Type: eventType, Response: response})
 }
 
 func (i *ResponseInbound) enqueueEvent(ev *ResponsesStreamEvent) []byte {

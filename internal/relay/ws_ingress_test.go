@@ -327,18 +327,28 @@ func TestWSIngressUnknownPreviousResponseIDIsReported(t *testing.T) {
 }
 
 // wsIngressChatUpstream 是 Chat Completions 上游：第 n 个回复的内容是 "answer n"。
-func wsIngressChatUpstream(n int, _ []byte, w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-%d\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"answer %d\"},\"finish_reason\":null}]}\n\n", n, n)
-	fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-%d\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n", n)
-	fmt.Fprint(w, "data: [DONE]\n\n")
+// usage 为空时模仿不理会 include_usage 的上游：结束之后直接发 [DONE]。
+func wsIngressChatUpstream(usage string) wsIngressUpstream {
+	return func(n int, _ []byte, w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-%d\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"answer %d\"},\"finish_reason\":null}]}\n\n", n, n)
+		fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-%d\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]%s}\n\n", n, usage)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}
 }
 
 // 非 Responses 渠道从 Messages 生成请求：续传回合也要带上完整对话，WS 和 HTTP 入站都一样。
+// 上游发不发用量，回合都要以 response.completed 结束。
 func TestContinuationOnChatChannelCarriesConversation(t *testing.T) {
-	for _, ingress := range []string{"ws", "http"} {
-		t.Run(ingress, func(t *testing.T) {
-			env := newWSIngressEnv(t, wsIngressChatUpstream)
+	for _, tc := range []struct{ ingress, usage string }{
+		{"ws", `,"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}`},
+		{"http", `,"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}`},
+		{"ws", ""},
+		{"http", ""},
+	} {
+		ingress := tc.ingress
+		t.Run(fmt.Sprintf("%s，上游发用量=%t", ingress, tc.usage != ""), func(t *testing.T) {
+			env := newWSIngressEnv(t, wsIngressChatUpstream(tc.usage))
 			chatType := outbound.OutboundTypeOpenAIChat
 			if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: env.channel.ID, Type: &chatType}, env.ctx); err != nil {
 				t.Fatalf("ChannelUpdate failed: %v", err)
@@ -352,8 +362,8 @@ func TestContinuationOnChatChannelCarriesConversation(t *testing.T) {
 				payload := wsIngressCreate(extra, wsIngressUserItem(text))
 				if ingress == "ws" {
 					env.mustComplete(payload)
-				} else if recorder := env.post(payload); recorder.Code != http.StatusOK {
-					t.Fatalf("turn %d status = %d, body %s", n+1, recorder.Code, recorder.Body.String())
+				} else if recorder := env.post(payload); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"type":"response.completed"`) {
+					t.Fatalf("turn %d status = %d, want 200 and a response.completed event; body %s", n+1, recorder.Code, recorder.Body.String())
 				}
 			}
 
