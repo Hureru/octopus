@@ -277,11 +277,9 @@ func buildRequestInputItems(currentRawInputItems json.RawMessage, currentMessage
 	if len(currentRawInputItems) > 0 {
 		return append(json.RawMessage(nil), currentRawInputItems...), true
 	}
+	// 没有新输入不算失败：预热之后的第一个请求只带预热 ID，输入是空的。
 	currentItems, err := openaiOutbound.MarshalResponsesInputItems(currentMessages)
-	if err != nil || len(currentItems) == 0 {
-		return nil, false
-	}
-	return currentItems, true
+	return currentItems, err == nil
 }
 
 func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.InternalLLMRequest, resp *transformerModel.InternalLLMResponse) (json.RawMessage, bool) {
