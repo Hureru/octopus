@@ -24,6 +24,16 @@ const wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
 // 是变量，测试里要改短
 var wsClientMaxAge = 60 * time.Minute
 
+// wsClientSession 是一条客户端 WS 连接自己的东西，连接关闭时一起释放。
+type wsClientSession struct {
+	conn            *websocket.Conn
+	apiKeyID        int
+	supportedModels string
+	// 每个模型一份对话存档。
+	// shortcut: 存档大小没有上限，随对话变长，连接关闭（最长 60 分钟）才释放；有人拿它占内存时再加上限。
+	states map[string]*wsConversationState
+}
+
 type wsRelayResult struct {
 	Success           bool
 	ResponseID        string
@@ -51,12 +61,14 @@ func HandleWSResponse(c *gin.Context) {
 	defer cancel()
 
 	apiKeyID := c.GetInt("api_key_id")
-	supportedModels := c.GetString("supported_models")
+	session := &wsClientSession{
+		conn:            conn,
+		apiKeyID:        apiKeyID,
+		supportedModels: c.GetString("supported_models"),
+		states:          map[string]*wsConversationState{},
+	}
 
 	log.Debugf("ws client connected (apikey=%d)", apiKeyID)
-
-	downstreamSessionID := fmt.Sprintf("ws_%d", time.Now().UnixNano())
-	var conversationState *wsConversationState
 
 	// 连接到了时限：先告诉客户端，再正常关闭。进行中的回合由 ctx 取消。
 	stop := context.AfterFunc(ctx, func() {
@@ -100,23 +112,16 @@ func HandleWSResponse(c *gin.Context) {
 			continue
 		}
 
-		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, downstreamSessionID, conversationState)
+		session.processWSResponseCreate(ctx, data)
 	}
 }
 
-func processWSResponseCreate(
-	ctx context.Context,
-	conn *websocket.Conn,
-	data []byte,
-	apiKeyID int,
-	supportedModels string,
-	downstreamSessionID string,
-	conversationState *wsConversationState,
-) *wsConversationState {
+func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []byte) {
+	conn, apiKeyID := s.conn, s.apiKeyID
 	var reqBody map[string]json.RawMessage
 	if err := json.Unmarshal(data, &reqBody); err != nil {
 		writeWSError(ctx, conn, 400, "invalid_request", "Failed to parse request body")
-		return conversationState
+		return
 	}
 
 	// Remove WS-only fields
@@ -128,14 +133,14 @@ func processWSResponseCreate(
 		_ = json.Unmarshal(raw, &requestedPreviousResponseID)
 		requestedPreviousResponseID = strings.TrimSpace(requestedPreviousResponseID)
 	}
-	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, continuationRequested, downstreamSessionID)
+	stateKey := requestModel
 	// 只有接得上存档最后一个回复的请求才用存档拼成完整请求。
 	// 其余情况存档对这个请求来说不完整，绝不拿来回放。
-	replayState := conversationState
+	replayState := s.states[stateKey]
 	if replayState != nil && (requestedPreviousResponseID == "" || requestedPreviousResponseID != strings.TrimSpace(replayState.LastResponseID)) {
 		replayState = nil
 	}
-	preferredSticky := wsConversationStateToSticky(replayState)
+	preferredSticky := responsesReplayStateToSticky(replayState)
 	if preferredSticky == nil && requestedPreviousResponseID != "" {
 		if group, err := op.GroupGetEnabledMap(requestModel, ctx); err == nil {
 			scope := wsAffinityScope{APIKeyID: apiKeyID, GroupID: group.ID, RequestModel: requestModel, ResponseID: requestedPreviousResponseID}
@@ -158,7 +163,7 @@ func processWSResponseCreate(
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		writeWSError(ctx, conn, 500, "server_error", "Failed to build request")
-		return conversationState
+		return
 	}
 
 	// Parse request
@@ -166,7 +171,7 @@ func processWSResponseCreate(
 	internalRequest, err := inAdapter.TransformRequest(ctx, bodyBytes)
 	if err != nil {
 		writeWSError(ctx, conn, 400, "invalid_request", err.Error())
-		return conversationState
+		return
 	}
 	originalRequest := cloneInternalRequest(internalRequest)
 	// 续传只发一次：直接把“存档 + 新输入”拼成不带 previous_response_id 的完整请求。
@@ -183,8 +188,8 @@ func processWSResponseCreate(
 	}
 
 	// Check supported models
-	if supportedModels != "" {
-		supportedModelsArray := strings.Split(supportedModels, ",")
+	if s.supportedModels != "" {
+		supportedModelsArray := strings.Split(s.supportedModels, ",")
 		found := false
 		for _, m := range supportedModelsArray {
 			if m == executionRequest.Model {
@@ -194,45 +199,44 @@ func processWSResponseCreate(
 		}
 		if !found {
 			writeWSError(ctx, conn, 400, "invalid_request", "model not supported")
-			return conversationState
+			return
 		}
 	}
 
 	requestModel = executionRequest.Model
 	// 存档只在两种成功之后更新：完整请求（从它重新开始）和接上了存档的请求（追加）。
 	// 原样转发的续传，历史在上游那里，本地记不全，所以不记。
-	remember := func(resp *transformerModel.InternalLLMResponse, attempts []dbmodel.ChannelAttempt, sessionKeepTime int) *wsConversationState {
+	remember := func(resp *transformerModel.InternalLLMResponse, attempts []dbmodel.ChannelAttempt) {
 		if replayState == nil && continuationRequested {
-			return conversationState
+			return
 		}
 		if replayState == nil {
 			replayState = &wsConversationState{}
 		}
-		replayState.DownstreamSessionID = downstreamSessionID
 		if channelID, keyID := finalChannelKey(attempts); channelID > 0 {
 			replayState.ChannelID = channelID
 			replayState.ChannelKeyID = keyID
 		}
 		replayState.ApplySuccessfulTurn(originalRequest, resp)
-		storeWSConversationState(apiKeyID, requestModel, replayState, wsConversationStateTTL(sessionKeepTime))
+		s.states[stateKey] = replayState
 		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, last_response_id=%s, channel=%d, key=%d)",
 			apiKeyID, requestModel, strings.TrimSpace(replayState.LastResponseID), replayState.ChannelID, replayState.ChannelKeyID)
-		return replayState
 	}
 	if prewarm {
 		if replayState == nil && requestedPreviousResponseID != "" {
 			// 接不上存档的预热不能在本地应答：下一轮会带着预热 ID 来，而它前面的历史本地没有。
 			writeWSError(ctx, conn, 409, "previous_response_not_found",
 				fmt.Sprintf("Previous response with id '%s' not found.", requestedPreviousResponseID))
-			return conversationState
+			return
 		}
 		// 在本地应答，不占用上游。输入记进存档：下一轮带着预热 ID 来时，拼成完整请求发给上游。
 		prewarmID, err := writeWSPrewarmAck(ctx, conn, requestModel)
 		if err != nil {
 			log.Debugf("ws prewarm ack write failed (apikey=%d): %v", apiKeyID, err)
-			return conversationState
+			return
 		}
-		return remember(&transformerModel.InternalLLMResponse{ID: prewarmID}, nil, 0)
+		remember(&transformerModel.InternalLLMResponse{ID: prewarmID}, nil)
+		return
 	}
 
 	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky, bodyBytes)
@@ -244,7 +248,7 @@ func processWSResponseCreate(
 			code = "no_available_channel"
 		}
 		writeWSError(ctx, conn, status, code, err.Error())
-		return conversationState
+		return
 	}
 	defer req.metrics.DropLive()
 	req.rawBody = relayBody
@@ -256,16 +260,12 @@ func processWSResponseCreate(
 
 	result := finalizeWSRelay(ctx, conn, req, runWSRelay(ctx, req, group))
 	if result.Success {
-		return remember(req.metrics.InternalResponse, req.iter.Attempts(), group.SessionKeepTime)
-	}
-	if result.ResetConversation {
+		remember(req.metrics.InternalResponse, req.iter.Attempts())
+	} else if result.ResetConversation {
 		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
-		deleteWSConversationState(apiKeyID, requestModel, downstreamSessionID)
-		return nil
+		delete(s.states, stateKey)
 	}
-
 	// 其余情况不动存档：它只会被 previous_response_id 对得上的请求用到。
-	return conversationState
 }
 
 func extractWSRequestModel(reqBody map[string]json.RawMessage) string {

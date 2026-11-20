@@ -1820,7 +1820,6 @@ func setupRelayTestDB(t *testing.T) context.Context {
 		_ = dbpkg.Close()
 	}
 	balancer.Reset()
-	resetWSConversationStateStore()
 	resetWSResponseConnStateForTest()
 	resetWSAffinityStoreForTest()
 	resetWSUpstreamPool()
@@ -1834,7 +1833,6 @@ func setupRelayTestDB(t *testing.T) context.Context {
 	}
 	t.Cleanup(func() {
 		balancer.Reset()
-		resetWSConversationStateStore()
 		resetWSResponseConnStateForTest()
 		resetWSAffinityStoreForTest()
 		resetWSUpstreamPool()

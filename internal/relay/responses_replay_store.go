@@ -198,7 +198,7 @@ func estimateStateSize(state *wsConversationState) int {
 		return 0
 	}
 	size := 256
-	size += len(state.DownstreamSessionID) + len(state.RequestModel) + len(state.LastResponseID)
+	size += len(state.RequestModel) + len(state.LastResponseID)
 	size += len(state.ReplayWindowItems)
 	for _, msg := range state.Transcript {
 		size += estimateMessageSize(msg)
@@ -262,6 +262,17 @@ func responsesReplayStateToSticky(state *wsConversationState) *balancer.SessionE
 		ChannelKeyID: state.ChannelKeyID,
 		Timestamp:    time.Now(),
 	}
+}
+
+func wsConversationStateTTL(sessionKeepTimeSec int) time.Duration {
+	if sessionKeepTimeSec <= 0 {
+		return wsClientMaxAge
+	}
+	ttl := time.Duration(sessionKeepTimeSec) * time.Second
+	if ttl > wsClientMaxAge {
+		return wsClientMaxAge
+	}
+	return ttl
 }
 
 func resetResponsesReplayStore() {
