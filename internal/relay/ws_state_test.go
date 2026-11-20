@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
@@ -196,8 +197,8 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	if replayed.Conversation != nil {
 		t.Fatalf("expected replay request to clear conversation state")
 	}
-	if len(replayed.Messages) != 0 {
-		t.Fatalf("expected replay request to rely on raw item window instead of transcript messages, got %d messages", len(replayed.Messages))
+	if len(replayed.Messages) != 2 || replayed.Messages[0].Role != "assistant" || replayed.Messages[1].Role != "tool" {
+		t.Fatalf("expected replay messages to carry the stored turn and the new input, got %#v", replayed.Messages)
 	}
 	if replayed.TransformOptions.ArrayInputs == nil || !*replayed.TransformOptions.ArrayInputs {
 		t.Fatalf("expected replay request to force array input semantics")
@@ -274,8 +275,8 @@ func TestWSConversationStateBuildReplayRequestForToolOutput(t *testing.T) {
 	if replayed.PreviousResponseID != nil {
 		t.Fatalf("expected replay request to clear previous_response_id")
 	}
-	if len(replayed.Messages) != 0 {
-		t.Fatalf("expected replay request to avoid transcript messages once replay window exists, got %d", len(replayed.Messages))
+	if len(replayed.Messages) != 2 || replayed.Messages[0].Role != "assistant" || replayed.Messages[1].Role != "tool" {
+		t.Fatalf("expected replay messages to carry the stored turn and the new input, got %#v", replayed.Messages)
 	}
 	if replayed.TransformerMetadata[transformerModel.TransformerMetadataWSExecutionMode] != transformerModel.TransformerMetadataWSExecutionModeReplayExact {
 		t.Fatalf("expected replay-pending request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
@@ -296,8 +297,10 @@ func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 		Choices: []transformerModel.Choice{{
 			Index: 0,
 			Message: &transformerModel.Message{
-				Role:    "assistant",
-				Content: transformerModel.MessageContent{Content: stringPtr("hi")},
+				Role:               "assistant",
+				Content:            transformerModel.MessageContent{Content: stringPtr("hi")},
+				ReasoningContent:   stringPtr("thinking"),
+				ReasoningSignature: stringPtr("signature of another provider"),
 			},
 		}},
 	}
@@ -314,6 +317,14 @@ func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 	}
 	if len(state.Transcript) != 2 {
 		t.Fatalf("expected transcript to contain request and response, got %d messages", len(state.Transcript))
+	}
+	// 这个回复没有原始输出条目（非 Responses 上游）：回放窗口里也要有模型的回复，但不带别家的推理签名
+	var windowItems []map[string]any
+	if err := json.Unmarshal(state.ReplayWindowItems, &windowItems); err != nil || len(windowItems) != 2 || windowItems[1]["role"] != "assistant" {
+		t.Fatalf("expected the replay window to hold the input and the reply without reasoning, got %s", state.ReplayWindowItems)
+	}
+	if state.Transcript[1].ReasoningContent == nil {
+		t.Fatalf("expected the transcript to keep the reasoning for channels of the same provider")
 	}
 }
 
@@ -389,30 +400,33 @@ func TestWSConversationStateApplySuccessfulStreamTurnBuildsReplayWindow(t *testi
 	}
 }
 
-func TestBuildReplayRequestRetainsInstructionMessages(t *testing.T) {
+// 非 Responses 渠道从 Messages 生成请求：回放请求的 Messages 是这一轮的说明加完整对话。
+func TestBuildReplayRequestMessagesCarryConversation(t *testing.T) {
+	text := func(role, content string) transformerModel.Message {
+		return transformerModel.Message{Role: role, Content: transformerModel.MessageContent{Content: stringPtr(content)}}
+	}
 	state := &wsConversationState{
 		LastResponseID:    "resp_prev",
 		ReplayWindowItems: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`),
+		Transcript:        []transformerModel.Message{text("system", "old instructions"), text("user", "hello"), text("assistant", "hi")},
 	}
 	req := &transformerModel.InternalLLMRequest{
 		Model:              "gpt-4o",
 		PreviousResponseID: stringPtr("resp_prev"),
-		Messages: []transformerModel.Message{
-			{Role: "system", Content: transformerModel.MessageContent{Content: stringPtr("keep system")}},
-			{Role: "developer", Content: transformerModel.MessageContent{Content: stringPtr("keep developer")}},
-			{Role: "user", Content: transformerModel.MessageContent{Content: stringPtr("drop from messages")}},
-		},
+		Messages:           []transformerModel.Message{text("system", "new instructions"), text("developer", "keep developer"), text("user", "again")},
 	}
 
 	replayed := state.BuildReplayRequest(req)
 	if replayed == nil {
 		t.Fatalf("expected replay request to be built")
 	}
-	if len(replayed.Messages) != 2 {
-		t.Fatalf("expected replay request to retain only instruction messages, got %#v", replayed.Messages)
+	var got []string
+	for _, msg := range replayed.Messages {
+		got = append(got, msg.Role+":"+*msg.Content.Content)
 	}
-	if replayed.Messages[0].Role != "system" || replayed.Messages[1].Role != "developer" {
-		t.Fatalf("expected replay instruction ordering to be preserved, got %#v", replayed.Messages)
+	want := "system:new instructions | developer:keep developer | user:hello | assistant:hi | user:again"
+	if strings.Join(got, " | ") != want {
+		t.Fatalf("replay messages = %q, want %q", strings.Join(got, " | "), want)
 	}
 }
 

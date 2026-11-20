@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/url"
+	"slices"
 	"strings"
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
@@ -43,7 +44,13 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	responsesOptions.RawInputItems = nil
 	replayed.SetOpenAIResponsesOptions(responsesOptions)
 	replayed.SetOpenAIRawInputItems(nil)
-	replayed.Messages = retainInstructionMessages(req.Messages)
+	// Responses 渠道用下面合并好的原始条目；其他渠道从 Messages 生成请求，所以 Messages 也要是完整对话。
+	// 说明性消息只用这一轮的（上一轮的 instructions 不会带到下一轮），放在最前面。
+	replayed.Messages = slices.Concat(
+		pickMessages(req.Messages, true),
+		pickMessages(s.Transcript, false),
+		pickMessages(req.Messages, false),
+	)
 
 	// Merge historical replay window and current request into raw input items
 	mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.OpenAIRawInputItems(), req.Messages)
@@ -68,6 +75,10 @@ func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.Internal
 	s.RequestModel = strings.TrimSpace(req.Model)
 	if replayWindowItems, ok := buildNextReplayWindow(s.ReplayWindowItems, req, resp); ok {
 		s.ReplayWindowItems = replayWindowItems
+	}
+	if req.IsOpenAIExactReplayRequest() {
+		// 回放请求（HTTP 入站传进来的是它）的 Messages 已经是完整对话，不能再接在旧记录后面
+		s.Transcript = nil
 	}
 	s.Transcript = append(s.Transcript, cloneMessages(req.Messages)...)
 	s.Transcript = append(s.Transcript, assistantMessagesFromResponse(resp)...)
@@ -224,17 +235,15 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-func retainInstructionMessages(messages []transformerModel.Message) []transformerModel.Message {
-	if len(messages) == 0 {
-		return nil
-	}
-	kept := make([]transformerModel.Message, 0, len(messages))
+// pickMessages 返回说明性消息（system / developer），或者除它们以外的消息，都是副本。
+func pickMessages(messages []transformerModel.Message, instructions bool) []transformerModel.Message {
+	var picked []transformerModel.Message
 	for _, msg := range messages {
-		if msg.Role == "system" || msg.Role == "developer" {
-			kept = append(kept, cloneMessage(msg))
+		if (msg.Role == "system" || msg.Role == "developer") == instructions {
+			picked = append(picked, cloneMessage(msg))
 		}
 	}
-	return kept
+	return picked
 }
 
 func buildReplayRawInputItems(
@@ -296,10 +305,20 @@ func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.Inter
 	if len(base) == 0 {
 		return nil, false
 	}
-	if len(resp.RawResponsesOutputItems) == 0 {
+	outputItems := resp.RawResponsesOutputItems
+	if len(outputItems) == 0 {
+		// 非 Responses 上游没有原始输出条目：用回复内容生成，否则下一轮的历史里没有模型的回复。
+		// 推理内容不带：别家的推理签名发给 Responses 上游会被拒绝。
+		replies := assistantMessagesFromResponse(resp)
+		for i := range replies {
+			replies[i].ReasoningContent = nil
+		}
+		outputItems, _ = openaiOutbound.MarshalResponsesInputItems(replies)
+	}
+	if len(outputItems) == 0 {
 		return base, true
 	}
-	return mergeRawJSONArray(base, resp.RawResponsesOutputItems)
+	return mergeRawJSONArray(base, outputItems)
 }
 
 func mergeRawJSONArray(parts ...json.RawMessage) (json.RawMessage, bool) {

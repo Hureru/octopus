@@ -14,6 +14,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -26,8 +27,10 @@ type wsIngressUpstream func(n int, body []byte, w http.ResponseWriter, r *http.R
 // wsIngressEnv 把假的 HTTP 上游、真实的 HandleWSResponse 和一个 WS 客户端接在一起，
 // 端到端测试 WS 入站。
 type wsIngressEnv struct {
-	t      *testing.T
-	client *websocket.Conn
+	t       *testing.T
+	ctx     context.Context
+	channel *model.Channel
+	client  *websocket.Conn
 
 	mu       sync.Mutex
 	requests [][]byte
@@ -37,7 +40,7 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
-	env := &wsIngressEnv{t: t}
+	env := &wsIngressEnv{t: t, ctx: ctx}
 
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -60,6 +63,7 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	if err := op.ChannelCreate(channel, ctx); err != nil {
 		t.Fatalf("ChannelCreate failed: %v", err)
 	}
+	env.channel = channel
 	group := &model.Group{Name: wsIngressModel, Mode: model.GroupModeFailover, SessionKeepTime: 60}
 	if err := op.GroupCreate(group, ctx); err != nil {
 		t.Fatalf("GroupCreate failed: %v", err)
@@ -128,6 +132,17 @@ func (e *wsIngressEnv) mustComplete(payload string) string {
 		e.t.Fatalf("response.completed carries no response id: %v", last)
 	}
 	return id
+}
+
+// post 走 HTTP 入站发一个 Responses 请求，用的是同一个渠道和上游。
+func (e *wsIngressEnv) post(body string) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("api_key_id", 77)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	Handler(inbound.InboundTypeOpenAIResponse, c)
+	return recorder
 }
 
 // upstreamRequests 返回上游收到的请求体，按到达顺序。
@@ -272,5 +287,56 @@ func TestWSIngressUnknownPreviousResponseIDIsReported(t *testing.T) {
 	}
 	if requests := env.upstreamRequests(); len(requests) != 1 {
 		t.Fatalf("expected the request to be forwarded once, got %d requests", len(requests))
+	}
+}
+
+// wsIngressChatUpstream 是 Chat Completions 上游：第 n 个回复的内容是 "answer n"。
+func wsIngressChatUpstream(n int, _ []byte, w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-%d\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"answer %d\"},\"finish_reason\":null}]}\n\n", n, n)
+	fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-%d\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n", n)
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// 非 Responses 渠道从 Messages 生成请求：续传回合也要带上完整对话，WS 和 HTTP 入站都一样。
+func TestContinuationOnChatChannelCarriesConversation(t *testing.T) {
+	for _, ingress := range []string{"ws", "http"} {
+		t.Run(ingress, func(t *testing.T) {
+			env := newWSIngressEnv(t, wsIngressChatUpstream)
+			chatType := outbound.OutboundTypeOpenAIChat
+			if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: env.channel.ID, Type: &chatType}, env.ctx); err != nil {
+				t.Fatalf("ChannelUpdate failed: %v", err)
+			}
+
+			for n, text := range []string{"first", "second", "third"} {
+				extra := `"stream":true,"instructions":"be brief",`
+				if n > 0 {
+					extra += fmt.Sprintf(`"previous_response_id":"chatcmpl-%d",`, n)
+				}
+				payload := wsIngressCreate(extra, wsIngressUserItem(text))
+				if ingress == "ws" {
+					env.mustComplete(payload)
+				} else if recorder := env.post(payload); recorder.Code != http.StatusOK {
+					t.Fatalf("turn %d status = %d, body %s", n+1, recorder.Code, recorder.Body.String())
+				}
+			}
+
+			requests := env.upstreamRequests()
+			if len(requests) != 3 {
+				t.Fatalf("expected one upstream request per turn, got %d requests", len(requests))
+			}
+			var messages []struct{ Role, Content string }
+			if err := json.Unmarshal(requests[2]["messages"], &messages); err != nil {
+				t.Fatalf("upstream messages are not role/text pairs: %s", requests[2]["messages"])
+			}
+			var got []string
+			for _, message := range messages {
+				got = append(got, message.Role+":"+message.Content)
+			}
+			want := "system:be brief | user:first | assistant:answer 1 | user:second | assistant:answer 2 | user:third"
+			if strings.Join(got, " | ") != want {
+				t.Fatalf("third turn messages = %q, want %q", strings.Join(got, " | "), want)
+			}
+		})
 	}
 }
