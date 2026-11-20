@@ -144,22 +144,10 @@ func processWSResponseCreate(
 		}
 	}
 
-	// Check for generate: false (warmup). Codex-style clients use this as a
-	// prewarm probe and do not expect a synthetic completed response turn.
-	// Acknowledging it locally caused some clients to wait forever for a normal
-	// response lifecycle. Prime the upstream pool best-effort, then stay silent.
-	if genRaw, ok := reqBody["generate"]; ok {
-		var generate bool
-		if json.Unmarshal(genRaw, &generate) == nil && !generate {
-			if err := bestEffortWarmupUpstreamWS(ctx, apiKeyID, supportedModels, reqBody); err != nil {
-				log.Warnf("ws warmup failed (apikey=%d): %v", apiKeyID, err)
-			} else {
-				log.Debugf("ws warmup ready (apikey=%d)", apiKeyID)
-			}
-			return conversationState
-		}
-		delete(reqBody, "generate")
-	}
+	// 预热（generate:false）：Codex 连上后先发它，等到 response.completed 才发真正的请求。
+	// 这个字段只有 WS 上有，不发给上游。
+	prewarm := string(reqBody["generate"]) == "false"
+	delete(reqBody, "generate")
 
 	// Force stream mode
 	reqBody["stream"] = json.RawMessage("true")
@@ -208,6 +196,36 @@ func processWSResponseCreate(
 	}
 
 	requestModel = executionRequest.Model
+	// 存档只在两种成功之后更新：完整请求（从它重新开始）和接上了存档的请求（追加）。
+	// 原样转发的续传，历史在上游那里，本地记不全，所以不记。
+	remember := func(resp *transformerModel.InternalLLMResponse, attempts []dbmodel.ChannelAttempt, sessionKeepTime int) *wsConversationState {
+		if replayState == nil && continuationRequested {
+			return conversationState
+		}
+		if replayState == nil {
+			replayState = &wsConversationState{}
+		}
+		replayState.DownstreamSessionID = downstreamSessionID
+		if channelID, keyID := finalChannelKey(attempts); channelID > 0 {
+			replayState.ChannelID = channelID
+			replayState.ChannelKeyID = keyID
+		}
+		replayState.ApplySuccessfulTurn(originalRequest, resp)
+		storeWSConversationState(apiKeyID, requestModel, replayState, wsConversationStateTTL(sessionKeepTime))
+		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, last_response_id=%s, channel=%d, key=%d)",
+			apiKeyID, requestModel, strings.TrimSpace(replayState.LastResponseID), replayState.ChannelID, replayState.ChannelKeyID)
+		return replayState
+	}
+	if prewarm {
+		// 在本地应答，不占用上游。输入记进存档：下一轮带着预热 ID 来时，拼成完整请求发给上游。
+		prewarmID, err := writeWSPrewarmAck(ctx, conn, requestModel)
+		if err != nil {
+			log.Debugf("ws prewarm ack write failed (apikey=%d): %v", apiKeyID, err)
+			return conversationState
+		}
+		return remember(&transformerModel.InternalLLMResponse{ID: prewarmID}, nil, 0)
+	}
+
 	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky, bodyBytes)
 	if err != nil {
 		status := 404
@@ -228,22 +246,8 @@ func processWSResponseCreate(
 		apiKeyID, requestModel, requestedPreviousResponseID, replayState != nil)
 
 	result := finalizeWSRelay(ctx, conn, req, runWSRelay(ctx, req, group))
-	// 存档只在两种成功之后更新：完整请求（从它重新开始）和接上了存档的请求（追加）。
-	// 原样转发的续传，历史在上游那里，本地记不全，所以不记。
-	if result.Success && (replayState != nil || !continuationRequested) {
-		if replayState == nil {
-			replayState = &wsConversationState{}
-		}
-		replayState.DownstreamSessionID = downstreamSessionID
-		if channelID, keyID := finalChannelKey(req.iter.Attempts()); channelID > 0 {
-			replayState.ChannelID = channelID
-			replayState.ChannelKeyID = keyID
-		}
-		replayState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
-		storeWSConversationState(apiKeyID, requestModel, replayState, wsConversationStateTTL(group.SessionKeepTime))
-		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, last_response_id=%s, channel=%d, key=%d)",
-			apiKeyID, requestModel, strings.TrimSpace(replayState.LastResponseID), replayState.ChannelID, replayState.ChannelKeyID)
-		return replayState
+	if result.Success {
+		return remember(req.metrics.InternalResponse, req.iter.Attempts(), group.SessionKeepTime)
 	}
 	if result.ResetConversation {
 		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
@@ -253,86 +257,6 @@ func processWSResponseCreate(
 
 	// 其余情况不动存档：它只会被 previous_response_id 对得上的请求用到。
 	return conversationState
-}
-
-func bestEffortWarmupUpstreamWS(
-	ctx context.Context,
-	apiKeyID int,
-	supportedModels string,
-	reqBody map[string]json.RawMessage,
-) error {
-	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
-	if requestModel == "" {
-		return fmt.Errorf("warmup request missing model")
-	}
-
-	if supportedModels != "" {
-		supportedModelsArray := strings.Split(supportedModels, ",")
-		found := false
-		for _, modelName := range supportedModelsArray {
-			if modelName == requestModel {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("model not supported")
-		}
-	}
-
-	group, err := op.GroupGetEnabledMap(requestModel, ctx)
-	if err != nil {
-		return fmt.Errorf("model not found")
-	}
-
-	iter := balancer.NewIterator(group, apiKeyID, requestModel)
-	if iter.Len() == 0 {
-		return fmt.Errorf("no available channel")
-	}
-
-	var lastErr error
-	for iter.Next() {
-		item := iter.Item()
-
-		channel, err := op.ChannelGet(item.ChannelID, ctx)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if !channel.Enabled || channel.Type != outbound.OutboundTypeOpenAIResponse {
-			continue
-		}
-
-		selectOpts := dbmodel.ChannelKeySelectOptions{
-			ExcludeKeyIDs:  make(map[int]struct{}),
-			PreferredKeyID: iter.StickyKeyID(),
-		}
-
-		for {
-			usedKey := channel.GetChannelKey(selectOpts)
-			if usedKey.ChannelKey == "" {
-				break
-			}
-			if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
-				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
-				continue
-			}
-
-			if err := warmupUpstreamWSConnection(ctx, channel, usedKey); err != nil {
-				lastErr = err
-				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
-				continue
-			}
-
-			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
-			return nil
-		}
-	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-	return fmt.Errorf("no ws-capable channel available for warmup")
 }
 
 func extractWSRequestModel(reqBody map[string]json.RawMessage) string {
@@ -348,19 +272,6 @@ func extractWSRequestModel(reqBody map[string]json.RawMessage) string {
 		return ""
 	}
 	return requestModel
-}
-
-func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, usedKey dbmodel.ChannelKey) error {
-	warmupCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-
-	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ChannelKey, usedKey.ID, nil)
-	if pc == nil {
-		return fmt.Errorf("upstream ws unavailable")
-	}
-
-	wsUpstreamPool.Put(pc)
-	return nil
 }
 
 func newWSRelayRequest(

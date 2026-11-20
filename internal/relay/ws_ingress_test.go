@@ -433,3 +433,54 @@ func TestHTTPReplayKeepsRawRequestFields(t *testing.T) {
 		t.Fatalf("replay input = %q, want %q", got, want)
 	}
 }
+
+// 预热（generate:false）在本地应答，不发给上游。它的输入记进存档：
+// 下一轮带着预热 ID 来时，和别的续传一样拼成完整请求。
+func TestWSIngressPrewarmIsAnsweredLocally(t *testing.T) {
+	turnInput := []string{wsIngressUserItem("context"), wsIngressUserItem("hello")}
+	for name, tc := range map[string]struct{ prewarmInput, firstTurnInput []string }{
+		"预热不带输入，第一个请求带全部输入":      {nil, turnInput},
+		"预热带了这一轮的输入，第一个请求的输入是空的": {turnInput, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+
+			events, err := env.turn(3*time.Second, wsIngressCreate(`"generate":false,"instructions":"be brief",`, tc.prewarmInput...))
+			if err != nil {
+				t.Fatalf("prewarm got no terminal event after %d events: %v", len(events), err)
+			}
+			if len(events) != 2 || events[0]["type"] != "response.created" || events[1]["type"] != "response.completed" {
+				t.Fatalf("prewarm events = %v, want response.created then response.completed", events)
+			}
+			response, _ := events[1]["response"].(map[string]any)
+			prewarmID, _ := response["id"].(string)
+			if !strings.HasPrefix(prewarmID, "resp_prewarm_") {
+				t.Fatalf("prewarm response id = %q, want a resp_prewarm_ id", prewarmID)
+			}
+			if n := len(env.upstreamRequests()); n != 0 {
+				t.Fatalf("prewarm must not reach the upstream, got %d requests", n)
+			}
+
+			previousID := env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,"instructions":"be brief",`, prewarmID), tc.firstTurnInput...))
+			env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,"instructions":"be brief",`, previousID), wsIngressUserItem("again")))
+
+			requests := env.upstreamRequests()
+			if len(requests) != 2 {
+				t.Fatalf("expected one upstream request per real turn, got %d requests", len(requests))
+			}
+			for i, want := range []string{
+				"message:context | message:hello",
+				"message:context | message:hello | message:answer 1 | message:again",
+			} {
+				for _, field := range []string{"previous_response_id", "generate"} {
+					if value, ok := requests[i][field]; ok {
+						t.Fatalf("request %d must not send %s upstream: %s", i+1, field, value)
+					}
+				}
+				if got := strings.Join(wsIngressInputTexts(t, requests[i]), " | "); got != want {
+					t.Fatalf("request %d input = %q, want %q", i+1, got, want)
+				}
+			}
+		})
+	}
+}
