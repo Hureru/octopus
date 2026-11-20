@@ -18,8 +18,6 @@ type wsConversationState struct {
 	LastResponseID      string
 	ReplayWindowItems   json.RawMessage
 	Transcript          []transformerModel.Message
-	ReplayAliases       []string
-	ReplayPending       bool
 }
 
 func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
@@ -27,135 +25,6 @@ func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
 		return false
 	}
 	return strings.TrimSpace(s.RequestModel) == strings.TrimSpace(requestModel)
-}
-
-func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil || req == nil {
-		return false
-	}
-	if len(s.ReplayWindowItems) > 0 {
-		if strings.TrimSpace(s.LastResponseID) == "" {
-			return false
-		}
-		prevID := req.OpenAIPreviousResponseID()
-		if prevID == "" {
-			return true
-		}
-		return s.MatchesPreviousResponseID(prevID)
-	}
-	if s.ReplayPending && requestContainsToolOutputs(req) {
-		return false
-	}
-	if strings.TrimSpace(s.LastResponseID) == "" || len(s.Transcript) == 0 {
-		return false
-	}
-	if !requiresUpstreamWSContinuation(req) {
-		return false
-	}
-	prevID := req.OpenAIPreviousResponseID()
-	if prevID == "" {
-		return true
-	}
-	return s.MatchesPreviousResponseID(prevID)
-}
-
-func (s *wsConversationState) MatchesPreviousResponseID(responseID string) bool {
-	if s == nil {
-		return false
-	}
-	responseID = strings.TrimSpace(responseID)
-	if responseID == "" {
-		return false
-	}
-	if responseID == strings.TrimSpace(s.LastResponseID) {
-		return true
-	}
-	for _, alias := range s.ReplayAliases {
-		if responseID == strings.TrimSpace(alias) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *wsConversationState) ShouldRewritePreviousResponseID(responseID string) bool {
-	if s == nil {
-		return false
-	}
-	responseID = strings.TrimSpace(responseID)
-	if responseID == "" || responseID == strings.TrimSpace(s.LastResponseID) {
-		return false
-	}
-	for _, alias := range s.ReplayAliases {
-		if responseID == strings.TrimSpace(alias) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *wsConversationState) ShouldUseNativeContinuation(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil || req == nil {
-		return false
-	}
-	if strings.TrimSpace(req.OpenAIPreviousResponseID()) == "" {
-		return false
-	}
-	if strings.TrimSpace(s.LastResponseID) == "" {
-		return false
-	}
-	return !s.ReplayPending
-}
-
-func (s *wsConversationState) ShouldUseLocalReplay(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil || req == nil {
-		return false
-	}
-	if len(s.ReplayWindowItems) == 0 || strings.TrimSpace(s.LastResponseID) == "" {
-		return false
-	}
-	prevID := req.OpenAIPreviousResponseID()
-	if prevID == "" {
-		return true
-	}
-	return s.MatchesPreviousResponseID(prevID)
-}
-
-func (s *wsConversationState) MarkReplayRecovered(req *transformerModel.InternalLLMRequest) {
-	if s == nil {
-		return
-	}
-	s.ReplayPending = requestContainsToolOutputs(req)
-}
-
-func (s *wsConversationState) MarkNativeContinuationReady() {
-	if s == nil {
-		return
-	}
-	s.ReplayPending = false
-}
-
-func (s *wsConversationState) RememberReplayAlias(responseID string) {
-	if s == nil {
-		return
-	}
-	responseID = strings.TrimSpace(responseID)
-	if responseID == "" || responseID == strings.TrimSpace(s.LastResponseID) {
-		return
-	}
-	filtered := make([]string, 0, len(s.ReplayAliases)+1)
-	filtered = append(filtered, responseID)
-	for _, alias := range s.ReplayAliases {
-		alias = strings.TrimSpace(alias)
-		if alias == "" || alias == responseID {
-			continue
-		}
-		filtered = append(filtered, alias)
-		if len(filtered) >= 8 {
-			break
-		}
-	}
-	s.ReplayAliases = filtered
 }
 
 // BuildReplayRequest transforms a continuation request into a self-contained replay request
@@ -219,8 +88,6 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 		LastResponseID:      strings.TrimSpace(state.LastResponseID),
 		ReplayWindowItems:   append(json.RawMessage(nil), state.ReplayWindowItems...),
 		Transcript:          cloneMessages(state.Transcript),
-		ReplayAliases:       append([]string(nil), state.ReplayAliases...),
-		ReplayPending:       state.ReplayPending,
 	}
 }
 
@@ -368,18 +235,6 @@ func retainInstructionMessages(messages []transformerModel.Message) []transforme
 		}
 	}
 	return kept
-}
-
-func requestContainsToolOutputs(req *transformerModel.InternalLLMRequest) bool {
-	if req == nil {
-		return false
-	}
-	for _, msg := range req.Messages {
-		if msg.Role == "tool" && msg.ToolCallID != nil && strings.TrimSpace(*msg.ToolCallID) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func buildReplayRawInputItems(

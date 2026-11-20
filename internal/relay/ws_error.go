@@ -36,8 +36,9 @@ func classifyWSPublicError(err error, statusCode int) (wsPublicError, bool) {
 	switch {
 	case needsConversationRestart(message):
 		return wsPublicError{
-			Status:            http.StatusConflict,
-			Code:              "conversation_restart_required",
+			Status: http.StatusConflict,
+			// Codex 等客户端认识这个码：收到后会不带 previous_response_id 重发完整请求。
+			Code:              "previous_response_not_found",
 			Message:           "上游连续会话已中断，请重新开启对话后再试",
 			ResetConversation: true,
 		}, true

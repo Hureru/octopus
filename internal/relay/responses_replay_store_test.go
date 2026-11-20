@@ -189,8 +189,6 @@ func TestResponsesReplayStateCloning(t *testing.T) {
 		Transcript: []transformerModel.Message{
 			{Role: "user", Content: transformerModel.MessageContent{Content: stringPtr("hello")}},
 		},
-		ReplayAliases: []string{"alias1"},
-		ReplayPending: false,
 	}
 
 	storeResponsesReplayState(30, 300, "gpt-4", state, time.Minute)
@@ -201,8 +199,6 @@ func TestResponsesReplayStateCloning(t *testing.T) {
 	state.ReplayWindowItems = json.RawMessage(`[{"type":"mutated"}]`)
 	state.Transcript[0].Role = "mutated"
 	state.Transcript = append(state.Transcript, transformerModel.Message{Role: "extra"})
-	state.ReplayAliases[0] = "mutated_alias"
-	state.ReplayAliases = append(state.ReplayAliases, "extra_alias")
 
 	// Load should have original values
 	loaded := loadResponsesReplayState(30, 300, "gpt-4", "resp_original")
@@ -220,9 +216,6 @@ func TestResponsesReplayStateCloning(t *testing.T) {
 	}
 	if len(loaded.Transcript) != 1 || loaded.Transcript[0].Role != "user" {
 		t.Fatalf("expected cloned Transcript to have 1 user message, got %d messages with role %q", len(loaded.Transcript), loaded.Transcript[0].Role)
-	}
-	if len(loaded.ReplayAliases) != 1 || loaded.ReplayAliases[0] != "alias1" {
-		t.Fatalf("expected cloned ReplayAliases to be [alias1], got %v", loaded.ReplayAliases)
 	}
 }
 

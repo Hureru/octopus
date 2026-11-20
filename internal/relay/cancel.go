@@ -6,9 +6,8 @@ import (
 )
 
 var (
-	errLocalRelayBudgetExceeded = errors.New("local relay budget exceeded")
-	errFirstTokenTimeout        = errors.New("first token timeout")
-	errEmptyUpstreamResponse    = errors.New("upstream returned an empty response")
+	errFirstTokenTimeout     = errors.New("first token timeout")
+	errEmptyUpstreamResponse = errors.New("upstream returned an empty response")
 )
 
 func contextError(ctx context.Context) error {
@@ -19,16 +18,6 @@ func contextError(ctx context.Context) error {
 		return cause
 	}
 	return ctx.Err()
-}
-
-func isLocalRelayBudgetExceeded(ctx context.Context, err error) bool {
-	if errors.Is(err, errLocalRelayBudgetExceeded) {
-		return true
-	}
-	if ctx == nil {
-		return false
-	}
-	return errors.Is(context.Cause(ctx), errLocalRelayBudgetExceeded)
 }
 
 func isFirstTokenTimeout(ctx context.Context, err error) bool {
@@ -42,8 +31,7 @@ func isFirstTokenTimeout(ctx context.Context, err error) bool {
 }
 
 func isClientCancellation(ctx context.Context, err error) bool {
-	if isLocalRelayBudgetExceeded(ctx, err) || isLocalRelayBudgetExceeded(ctx, contextError(ctx)) ||
-		isFirstTokenTimeout(ctx, err) || isFirstTokenTimeout(ctx, contextError(ctx)) {
+	if isFirstTokenTimeout(ctx, err) || isFirstTokenTimeout(ctx, contextError(ctx)) {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
