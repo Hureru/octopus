@@ -430,6 +430,29 @@ func TestBuildReplayRequestMessagesCarryConversation(t *testing.T) {
 	}
 }
 
+func TestCollectRawResponsesOutputItems(t *testing.T) {
+	const (
+		created = "data: {\"type\":\"response.created\",\"response\":{\"output\":[]}}\n\n"
+		done    = "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"custom_tool_call\",\"call_id\":\"c1\",\"input\":\"ls\"}}\n\n" +
+			"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"id\":\"m1\"}}\n\n"
+	)
+	for name, tc := range map[string]struct{ stream, want string }{
+		"结束事件的 output 是空的：用逐条收集的，顺序不变": {
+			created + done + "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n",
+			`[{"type":"custom_tool_call","call_id":"c1","input":"ls"},{"type":"message","id":"m1"}]`,
+		},
+		"结束事件自带 output：以它为准": {
+			created + done + "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"id\":\"final\"}]}}\n\n",
+			`[{"type":"message","id":"final"}]`,
+		},
+		"没有输出条目": {created, ""},
+	} {
+		if got := string(collectRawResponsesOutputItems([]byte(tc.stream))); got != tc.want {
+			t.Errorf("%s: got %s, want %s", name, got, tc.want)
+		}
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }

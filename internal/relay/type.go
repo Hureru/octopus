@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -141,6 +142,9 @@ type relayAttempt struct {
 	firstTokenTimeOutSec int
 	firstTokenBudget     *firstTokenBudget
 	retryAfter           time.Duration // forward() 提取后暂存
+
+	// rawOutputItems 是直通时从上游原始事件里收集的 Responses 输出条目，续传回放要原样带回去。
+	rawOutputItems json.RawMessage
 }
 
 // attemptResult 封装单次尝试的结果

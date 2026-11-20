@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
 	"maps"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
+	"github.com/tmaxmax/go-sse"
 )
 
 type wsConversationState struct {
@@ -319,6 +321,79 @@ func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.Inter
 		return base, true
 	}
 	return mergeRawJSONArray(base, outputItems)
+}
+
+// buildRawReplayBody 把客户端的原始请求改成自包含的形式：去掉续传字段，input 换成“存档 + 新输入”，
+// 其余字段原样保留。失败时返回 nil，调用方会退回到经内部结构转换的请求。
+func buildRawReplayBody(clientBody []byte, mergedInput json.RawMessage) []byte {
+	var payload map[string]json.RawMessage
+	if len(mergedInput) == 0 || json.Unmarshal(clientBody, &payload) != nil {
+		return nil
+	}
+	delete(payload, "previous_response_id")
+	delete(payload, "conversation")
+	payload["input"] = mergedInput
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+// responsesOutputCollector 从上游事件里收集模型输出条目的原始 JSON。
+// 续传回放要把它们原样带回去；经内部结构重新生成会丢掉不认识的字段（比如自定义工具调用的 input）。
+type responsesOutputCollector struct {
+	done     []json.RawMessage // response.output_item.done 里的条目，按到达顺序
+	terminal json.RawMessage   // 结束事件自带的非空 output
+}
+
+func (c *responsesOutputCollector) observe(event []byte) {
+	var parsed struct {
+		Type     string          `json:"type"`
+		Item     json.RawMessage `json:"item"`
+		Response struct {
+			Output json.RawMessage `json:"output"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(event, &parsed) != nil {
+		return
+	}
+	switch parsed.Type {
+	case "response.output_item.done":
+		if len(parsed.Item) > 0 {
+			c.done = append(c.done, parsed.Item)
+		}
+	case "response.completed", "response.incomplete":
+		if items, err := decodeRawJSONArray(parsed.Response.Output); err == nil && len(items) > 0 {
+			c.terminal = parsed.Response.Output
+		}
+	}
+}
+
+// items 优先用结束事件自带的 output；有些上游的结束事件里 output 是空的，这时用逐条收集的。
+func (c *responsesOutputCollector) items() json.RawMessage {
+	if len(c.terminal) > 0 {
+		return c.terminal
+	}
+	if len(c.done) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(c.done)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func collectRawResponsesOutputItems(rawStream []byte) json.RawMessage {
+	var collector responsesOutputCollector
+	for ev, err := range sse.Read(bytes.NewReader(rawStream), &sse.ReadConfig{MaxEventSize: maxSSEEventSize}) {
+		if err != nil {
+			break
+		}
+		collector.observe([]byte(ev.Data))
+	}
+	return collector.items()
 }
 
 func mergeRawJSONArray(parts ...json.RawMessage) (json.RawMessage, bool) {

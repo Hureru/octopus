@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -15,6 +16,7 @@ type WSStreamWriter struct {
 	conn    *websocket.Conn
 	ctx     context.Context
 	written bool
+	pending []byte // 还没收到行尾的半行
 	mu      sync.Mutex
 }
 
@@ -29,8 +31,25 @@ func (w *WSStreamWriter) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// 直通转发时，上游的数据块可能从一行中间切开：没收完的半行留到下次再发。
+	lineEnd := bytes.LastIndexByte(data, '\n') + 1
+	if lineEnd == 0 {
+		// 和别处读 SSE 的上限一致：一直不换行的流不能无限攒下去
+		if len(w.pending)+len(data) > maxSSEEventSize {
+			return 0, fmt.Errorf("sse line exceeds %d bytes", maxSSEEventSize)
+		}
+		w.pending = append(w.pending, data...)
+		return len(data), nil
+	}
+	complete := data[:lineEnd]
+	if len(w.pending) > 0 {
+		complete = append(w.pending, complete...)
+	}
+	// complete 可能和 pending 共用内存，所以帧发完才能覆盖 pending
+	defer func() { w.pending = append(w.pending[:0], data[lineEnd:]...) }()
+
 	// Extract JSON data from SSE format "data: {...}\n\n"
-	lines := extractSSEDataLines(data)
+	lines := extractSSEDataLines(complete)
 	wroteFrame := false
 	for _, line := range lines {
 		if len(line) == 0 {
@@ -74,7 +93,7 @@ func (w *WSStreamWriter) WriteHeader(code int) {
 // Returns the raw JSON data for each line (without "data: " prefix).
 func extractSSEDataLines(data []byte) [][]byte {
 	var results [][]byte
-	prefix := []byte("data: ")
+	prefix := []byte("data:") // SSE 允许冒号后面不带空格
 
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		line = bytes.TrimSpace(line)
@@ -82,7 +101,7 @@ func extractSSEDataLines(data []byte) [][]byte {
 			continue
 		}
 		if bytes.HasPrefix(line, prefix) {
-			payload := line[len(prefix):]
+			payload := bytes.TrimSpace(line[len(prefix):])
 			if len(payload) > 0 && !bytes.Equal(payload, []byte("[DONE]")) {
 				results = append(results, payload)
 			}
