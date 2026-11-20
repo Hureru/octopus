@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -33,6 +34,10 @@ func (w *WSStreamWriter) Write(data []byte) (int, error) {
 	// 直通转发时，上游的数据块可能从一行中间切开：没收完的半行留到下次再发。
 	lineEnd := bytes.LastIndexByte(data, '\n') + 1
 	if lineEnd == 0 {
+		// 和别处读 SSE 的上限一致：一直不换行的流不能无限攒下去
+		if len(w.pending)+len(data) > maxSSEEventSize {
+			return 0, fmt.Errorf("sse line exceeds %d bytes", maxSSEEventSize)
+		}
 		w.pending = append(w.pending, data...)
 		return len(data), nil
 	}

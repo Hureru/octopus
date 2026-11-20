@@ -34,3 +34,18 @@ func TestWSStreamWriterJoinsLinesSplitAcrossWrites(t *testing.T) {
 		}
 	}
 }
+
+// 一直不换行的流不能无限攒下去：超过单个 SSE 事件的上限就报错。
+func TestWSStreamWriterBoundsUnfinishedLine(t *testing.T) {
+	limit := maxSSEEventSize
+	maxSSEEventSize = 16
+	t.Cleanup(func() { maxSSEEventSize = limit })
+	writer := NewWSStreamWriter(context.Background(), nil) // 攒半行时不碰连接
+
+	if _, err := writer.Write([]byte("data: {\"a\":")); err != nil {
+		t.Fatalf("a short unfinished line must be kept, got %v", err)
+	}
+	if _, err := writer.Write([]byte("\"0123456789\"")); err == nil {
+		t.Fatalf("expected an error once the unfinished line exceeds the limit")
+	}
+}
