@@ -117,6 +117,9 @@ type relayRequest struct {
 	// streamWriter allows overriding the response writer (nil = use c.Writer)
 	streamWriter StreamWriter
 
+	// clientHeaders 是 WS 入站时客户端握手请求的头（这时 c 是 nil）
+	clientHeaders http.Header
+
 	// heartbeat 管理可选的上游流建立前延迟心跳；默认 no-op。
 	heartbeat *earlyHeartbeat
 

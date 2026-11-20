@@ -35,6 +35,16 @@ type wsIngressEnv struct {
 
 	mu       sync.Mutex
 	requests [][]byte
+	headers  []http.Header // 上游收到的请求头，和 requests 一一对应
+}
+
+// wsIngressClientHeaders 是客户端握手时带的头，照着 Codex 的样子。
+var wsIngressClientHeaders = http.Header{
+	"User-Agent":    {"codex_cli_rs/0.0.0"},
+	"Originator":    {"codex_cli_rs"},
+	"Session_id":    {"sess_1"},
+	"Openai-Beta":   {"responses_websockets=2026-02-06"},
+	"Authorization": {"Bearer sk-octopus-client-key"},
 }
 
 func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
@@ -47,6 +57,7 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 		body, _ := io.ReadAll(r.Body)
 		env.mu.Lock()
 		env.requests = append(env.requests, body)
+		env.headers = append(env.headers, r.Header.Clone())
 		n := len(env.requests)
 		env.mu.Unlock()
 		upstream(n, body, w, r)
@@ -83,7 +94,8 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)
 
-	client, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+	client, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses",
+		&websocket.DialOptions{HTTPHeader: wsIngressClientHeaders})
 	if err != nil {
 		t.Fatalf("ws dial failed: %v", err)
 	}
@@ -296,6 +308,31 @@ func TestWSIngressFullRequestIsNotMergedWithStoredTurns(t *testing.T) {
 	got := strings.Join(wsIngressInputTexts(t, requests[1]), " | ")
 	if want := "message:first | function_call:call_1 | function_call_output:call_1"; got != want {
 		t.Fatalf("full request input = %q, want %q", got, want)
+	}
+}
+
+// 客户端握手时带的头要跟着每个请求到上游（有的上游靠 User-Agent、originator 认客户端）。
+// 握手专用的头和客户端给 Octopus 的凭据不能带过去。
+func TestWSIngressForwardsClientHandshakeHeaders(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.mustComplete(wsIngressCreate("", wsIngressUserItem("hello")))
+
+	env.mu.Lock()
+	got := env.headers[0]
+	env.mu.Unlock()
+	for name, want := range map[string]string{
+		"User-Agent":            "codex_cli_rs/0.0.0",
+		"Originator":            "codex_cli_rs",
+		"Session_id":            "sess_1",
+		"Authorization":         "Bearer upstream-key",
+		"Openai-Beta":           "",
+		"Upgrade":               "",
+		"Sec-Websocket-Key":     "",
+		"Sec-Websocket-Version": "",
+	} {
+		if got.Get(name) != want {
+			t.Errorf("upstream header %s = %q, want %q", name, got.Get(name), want)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ type wsClientSession struct {
 	conn            *websocket.Conn
 	apiKeyID        int
 	supportedModels string
+	headers         http.Header // 握手请求的头，每个请求都带给上游
 	// 每个模型一份对话存档。
 	// shortcut: 存档大小没有上限，随对话变长，连接关闭（最长 60 分钟）才释放；有人拿它占内存时再加上限。
 	states map[string]*wsConversationState
@@ -65,6 +67,7 @@ func HandleWSResponse(c *gin.Context) {
 		conn:            conn,
 		apiKeyID:        apiKeyID,
 		supportedModels: c.GetString("supported_models"),
+		headers:         c.Request.Header,
 		states:          map[string]*wsConversationState{},
 	}
 
@@ -252,6 +255,7 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	}
 	defer req.metrics.DropLive()
 	req.rawBody = relayBody
+	req.clientHeaders = s.headers
 	if replayState != nil {
 		req.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 	}
