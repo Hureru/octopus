@@ -693,8 +693,11 @@ func isContinuationTransportFailure(err error) bool {
 }
 
 func (ra *relayAttempt) clientRequestHeaders() http.Header {
-	if ra == nil || ra.c == nil || ra.c.Request == nil {
+	if ra == nil {
 		return nil
+	}
+	if ra.c == nil || ra.c.Request == nil {
+		return ra.clientHeaders
 	}
 	return ra.c.Request.Header
 }
@@ -955,27 +958,29 @@ func (ra *relayAttempt) applyParamOverride(outboundRequest *http.Request) error 
 
 // copyHeaders 复制请求头，过滤 hop-by-hop 头
 func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
-	if ra.c != nil {
-		for key, values := range ra.c.Request.Header {
-			lowerKey := strings.ToLower(key)
-			if hopByHopHeaders[lowerKey] {
-				continue
-			}
-			// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉
-			// 透传路径预置的 prompt-caching / extended-cache-ttl 基线。
-			if lowerKey == "anthropic-beta" {
-				existing := outboundRequest.Header.Get(key)
-				for _, value := range values {
-					existing = mergeBetaHeader(existing, value)
-				}
-				if existing != "" {
-					outboundRequest.Header.Set(key, existing)
-				}
-				continue
-			}
+	for key, values := range ra.clientRequestHeaders() {
+		lowerKey := strings.ToLower(key)
+		if !shouldProxyUpstreamWSHeader(key) {
+			continue
+		}
+		// WS 握手用的 beta 头不能带进 HTTP 请求
+		if lowerKey == "openai-beta" && strings.Contains(strings.Join(values, ","), "responses_websockets") {
+			continue
+		}
+		// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉
+		// 透传路径预置的 prompt-caching / extended-cache-ttl 基线。
+		if lowerKey == "anthropic-beta" {
+			existing := outboundRequest.Header.Get(key)
 			for _, value := range values {
-				outboundRequest.Header.Set(key, value)
+				existing = mergeBetaHeader(existing, value)
 			}
+			if existing != "" {
+				outboundRequest.Header.Set(key, existing)
+			}
+			continue
+		}
+		for _, value := range values {
+			outboundRequest.Header.Set(key, value)
 		}
 	}
 	if outboundRequest.Header.Get("User-Agent") == "" {
