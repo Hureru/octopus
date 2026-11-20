@@ -2,8 +2,13 @@ package relay
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 // 直通读到的数据块可以从任何位置切开，冒号后面也不一定有空格。
@@ -47,5 +52,32 @@ func TestWSStreamWriterBoundsUnfinishedLine(t *testing.T) {
 	}
 	if _, err := writer.Write([]byte("\"0123456789\"")); err == nil {
 		t.Fatalf("expected an error once the unfinished line exceeds the limit")
+	}
+}
+
+func newTestWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
+	t.Helper()
+	serverConnCh := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		serverConnCh <- conn
+		<-r.Context().Done()
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	t.Cleanup(server.Close)
+	clientConn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial test ws pair failed: %v", err)
+	}
+	select {
+	case serverConn := <-serverConnCh:
+		return clientConn, serverConn
+	case <-time.After(5 * time.Second):
+		clientConn.Close(websocket.StatusNormalClosure, "")
+		t.Fatalf("timed out waiting for server side websocket")
+		return nil, nil
 	}
 }

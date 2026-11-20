@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -25,17 +27,32 @@ const wsIngressModel = "ws-ingress-model"
 
 type wsIngressUpstream func(n int, body []byte, w http.ResponseWriter, r *http.Request)
 
-// wsIngressEnv 把假的 HTTP 上游、真实的 HandleWSResponse 和一个 WS 客户端接在一起，
+// wsIngressWSUpstream 是假上游的 WS 一侧：每收到一条 response.create 调一次。
+// n 是第几个请求（HTTP 和 WS 一起数），handshake 是这条连接握手时的请求头。返回 false 表示关掉这条连接。
+type wsIngressWSUpstream func(n int, handshake http.Header, conn *websocket.Conn) bool
+
+type wsIngressWSRequest struct {
+	dial int // 第几条连接，从 1 开始
+	body map[string]json.RawMessage
+}
+
+// wsIngressEnv 把假的上游、真实的 HandleWSResponse 和一个 WS 客户端接在一起，
 // 端到端测试 WS 入站。
 type wsIngressEnv struct {
 	t       *testing.T
 	ctx     context.Context
 	channel *model.Channel
+	group   *model.Group
+	baseURL string
 	client  *websocket.Conn
 
 	mu       sync.Mutex
 	requests [][]byte
 	headers  []http.Header // 上游收到的请求头，和 requests 一一对应
+
+	wsUpstream wsIngressWSUpstream  // nil：上游不支持 WS，握手回 404
+	wsDials    []http.Header        // 上游收到的每次 WS 握手的请求头，被拒绝的也算
+	wsRequests []wsIngressWSRequest // 上游从 WS 收到的 response.create，按到达顺序
 }
 
 // wsIngressClientHeaders 是客户端握手时带的头，照着 Codex 的样子。
@@ -51,38 +68,33 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
+	// 请求日志的内存缓存是全局的：清掉前面的测试留下的
+	if err := op.RelayLogClear(ctx); err != nil {
+		t.Fatalf("RelayLogClear failed: %v", err)
+	}
 	env := &wsIngressEnv{t: t, ctx: ctx}
 
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Upgrade") != "" {
+			env.serveUpstreamWS(w, r)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		env.mu.Lock()
 		env.requests = append(env.requests, body)
 		env.headers = append(env.headers, r.Header.Clone())
-		n := len(env.requests)
+		n := len(env.requests) + len(env.wsRequests)
 		env.mu.Unlock()
 		upstream(n, body, w, r)
 	}))
 	t.Cleanup(upstreamServer.Close)
+	env.baseURL = upstreamServer.URL + "/v1"
 
-	channel := &model.Channel{
-		Name:     "ws-ingress-channel",
-		Type:     outbound.OutboundTypeOpenAIResponse,
-		Enabled:  true,
-		BaseUrls: []model.BaseUrl{{URL: upstreamServer.URL + "/v1"}},
-		Model:    "gpt-4o",
-		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: "upstream-key"}},
-	}
-	if err := op.ChannelCreate(channel, ctx); err != nil {
-		t.Fatalf("ChannelCreate failed: %v", err)
-	}
-	env.channel = channel
-	group := &model.Group{Name: wsIngressModel, Mode: model.GroupModeFailover, SessionKeepTime: 60}
-	if err := op.GroupCreate(group, ctx); err != nil {
+	env.group = &model.Group{Name: wsIngressModel, Mode: model.GroupModeFailover, SessionKeepTime: 60}
+	if err := op.GroupCreate(env.group, ctx); err != nil {
 		t.Fatalf("GroupCreate failed: %v", err)
 	}
-	if err := op.GroupItemAdd(&model.GroupItem{GroupID: group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: 1, Weight: 1}, ctx); err != nil {
-		t.Fatalf("GroupItemAdd failed: %v", err)
-	}
+	env.channel = env.addChannel("upstream-key")
 
 	engine := gin.New()
 	handlerDone := make(chan struct{})
@@ -111,6 +123,116 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	})
 	env.client = client
 	return env
+}
+
+// addChannel 在同一个假上游上加一个渠道，排在已有渠道后面。上游靠 Key 认出是哪个渠道。
+func (e *wsIngressEnv) addChannel(key string) *model.Channel {
+	e.t.Helper()
+	channel := &model.Channel{
+		Name:     "ws-ingress-channel-" + key,
+		Type:     outbound.OutboundTypeOpenAIResponse,
+		Enabled:  true,
+		BaseUrls: []model.BaseUrl{{URL: e.baseURL}},
+		Model:    "gpt-4o",
+		Keys:     []model.ChannelKey{{Enabled: true, ChannelKey: key}},
+	}
+	if err := op.ChannelCreate(channel, e.ctx); err != nil {
+		e.t.Fatalf("ChannelCreate failed: %v", err)
+	}
+	priority := 1
+	if e.channel != nil {
+		priority = 2
+	}
+	if err := op.GroupItemAdd(&model.GroupItem{GroupID: e.group.ID, ChannelID: channel.ID, ModelName: "gpt-4o", Priority: priority, Weight: 1}, e.ctx); err != nil {
+		e.t.Fatalf("GroupItemAdd failed: %v", err)
+	}
+	return channel
+}
+
+// useUpstreamWS 让 Octopus 用 WS 连上游，并设置假上游的 WS 一侧（nil：握手回 404）。
+func (e *wsIngressEnv) useUpstreamWS(upstream wsIngressWSUpstream) {
+	e.t.Helper()
+	if err := op.SettingSetString(model.SettingKeyResponsesWSEnabled, "true"); err != nil {
+		e.t.Fatalf("enabling upstream ws failed: %v", err)
+	}
+	e.mu.Lock()
+	e.wsUpstream = upstream
+	e.mu.Unlock()
+}
+
+func (e *wsIngressEnv) serveUpstreamWS(w http.ResponseWriter, r *http.Request) {
+	e.mu.Lock()
+	e.wsDials = append(e.wsDials, r.Header.Clone())
+	dial, upstream := len(e.wsDials), e.wsUpstream
+	e.mu.Unlock()
+	if upstream == nil {
+		http.NotFound(w, r)
+		return
+	}
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+	for {
+		// Octopus 关掉它这一头时结束
+		_, data, err := conn.Read(context.Background())
+		if err != nil {
+			return
+		}
+		var body map[string]json.RawMessage
+		_ = json.Unmarshal(data, &body)
+		e.mu.Lock()
+		e.wsRequests = append(e.wsRequests, wsIngressWSRequest{dial: dial, body: body})
+		n := len(e.requests) + len(e.wsRequests)
+		e.mu.Unlock()
+		if !upstream(n, r.Header, conn) {
+			return
+		}
+	}
+}
+
+// upstreamWS 返回假上游的 WS 一侧收到的握手和请求。
+func (e *wsIngressEnv) upstreamWS() ([]http.Header, []wsIngressWSRequest) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]http.Header(nil), e.wsDials...), append([]wsIngressWSRequest(nil), e.wsRequests...)
+}
+
+// relayLogs 等到有 n 条请求日志再返回，按时间先后排。
+// 客户端读到结束事件时，这个回合的日志可能还没记下来，所以要等。
+func (e *wsIngressEnv) relayLogs(n int) []model.RelayLog {
+	e.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		logs, err := op.RelayLogList(e.ctx, nil, nil, nil, 1, 100)
+		if err != nil {
+			e.t.Fatalf("RelayLogList failed: %v", err)
+		}
+		if len(logs) >= n {
+			slices.SortFunc(logs, func(a, b model.RelayLog) int { return cmp.Compare(a.ID, b.ID) })
+			return logs
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("expected %d relay logs, got %d", n, len(logs))
+		}
+	}
+}
+
+// wsIngressWSFrames 是第 n 个回复在 WS 上的全部事件。
+func wsIngressWSFrames(n int) [][]byte {
+	return extractSSEDataLines([]byte(wsIngressSSE(n)))
+}
+
+func wsIngressWSSend(conn *websocket.Conn, frames ...[]byte) {
+	for _, frame := range frames {
+		_ = conn.Write(context.Background(), websocket.MessageText, frame)
+	}
+}
+
+// wsIngressWSAnswers 是正常的 WS 上游：每个请求都完整回复。
+func wsIngressWSAnswers(n int, _ http.Header, conn *websocket.Conn) bool {
+	wsIngressWSSend(conn, wsIngressWSFrames(n)...)
+	return true
 }
 
 // turn 发一条消息，读到结束事件为止；读失败时返回已收到的事件和错误。
@@ -698,5 +820,217 @@ func TestWSIngressUpstreamFailedTurnIsNotRecorded(t *testing.T) {
 	}
 	if got, want := strings.Join(wsIngressInputTexts(t, requests[2]), " | "), "message:first | message:answer 1 | message:second"; got != want {
 		t.Fatalf("retried request input = %q, want %q", got, want)
+	}
+}
+
+// 上游支持 WS：一条客户端连接只用一条上游连接。请求原样发过去，只改 model 和 WS 协议要求的字段；
+// 第二轮在同一条连接上发原生续传，也就是客户端的原始请求。
+func TestWSIngressUpstreamWSContinuesOnTheSameConnection(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.useUpstreamWS(wsIngressWSAnswers)
+	override := `{"service_tier":"priority"}`
+	if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: env.channel.ID, ParamOverride: &override}, env.ctx); err != nil {
+		t.Fatalf("ChannelUpdate failed: %v", err)
+	}
+
+	events, err := env.turn(10*time.Second, wsIngressCreate(`"background":true,"client_metadata":{"origin":"test"},`, wsIngressUserItem("first")))
+	if err != nil || len(events) != 5 || events[4]["type"] != "response.completed" {
+		t.Fatalf("first turn: expected the upstream's five events, got %v (err=%v)", events, err)
+	}
+	// 客户端看到的是它自己用的模型名，不是上游的
+	if response, _ := events[4]["response"].(map[string]any); response["model"] != wsIngressModel {
+		t.Fatalf("client sees model %v, want %s", response["model"], wsIngressModel)
+	}
+	env.mustComplete(wsIngressCreate(`"previous_response_id":"resp_1",`, wsIngressUserItem("second")))
+
+	dials, requests := env.upstreamWS()
+	if len(dials) != 1 || len(requests) != 2 || requests[1].dial != 1 {
+		t.Fatalf("expected both turns on one upstream connection, got %d connections and %d requests", len(dials), len(requests))
+	}
+	if n := len(env.upstreamRequests()); n != 0 {
+		t.Fatalf("expected no HTTP requests to the upstream, got %d", n)
+	}
+	for name, want := range map[string]string{
+		"User-Agent":    "codex_cli_rs/0.0.0",
+		"Originator":    "codex_cli_rs",
+		"Session_id":    "sess_1",
+		"Authorization": "Bearer upstream-key",
+		"Openai-Beta":   "responses_websockets=2026-02-06",
+	} {
+		if got := dials[0].Get(name); got != want {
+			t.Errorf("upstream handshake header %s = %q, want %q", name, got, want)
+		}
+	}
+	for i, request := range requests {
+		for field, want := range map[string]string{"type": `"response.create"`, "stream": "true", "model": `"gpt-4o"`, "service_tier": `"priority"`} {
+			if got := string(request.body[field]); got != want {
+				t.Errorf("request %d %s = %s, want %s", i+1, field, got, want)
+			}
+		}
+		for _, field := range []string{"background", "generate"} {
+			if value, ok := request.body[field]; ok {
+				t.Errorf("request %d must not send %s upstream: %s", i+1, field, value)
+			}
+		}
+	}
+	wsIngressSameJSON(t, "first request client_metadata", requests[0].body["client_metadata"], `{"origin":"test"}`)
+	if got := string(requests[1].body["previous_response_id"]); got != `"resp_1"` {
+		t.Fatalf("second request previous_response_id = %s, want the response this upstream connection just completed", got)
+	}
+	if got := strings.Join(wsIngressInputTexts(t, requests[1].body), " | "); got != "message:second" {
+		t.Fatalf("second request input = %q, want only the new input", got)
+	}
+
+	for i, wantMode := range []model.RelayLogWSMode{model.RelayLogWSModeFresh, model.RelayLogWSModeContinuation} {
+		log := env.relayLogs(2)[i]
+		if !log.Success || !log.UsedWS || log.WSMode == nil || *log.WSMode != wantMode ||
+			log.WSExecMode == nil || *log.WSExecMode != model.RelayLogWSExecModePassthrough {
+			t.Errorf("turn %d log: success=%t used_ws=%t ws_mode=%v ws_exec_mode=%v, want a successful %s passthrough turn",
+				i+1, log.Success, log.UsedWS, log.WSMode, log.WSExecMode, wantMode)
+		}
+		if log.InputTokens != 1 || log.OutputTokens != 1 || log.ActualModelName != "gpt-4o" {
+			t.Errorf("turn %d log: input=%d output=%d model=%q, want the upstream's usage and model",
+				i+1, log.InputTokens, log.OutputTokens, log.ActualModelName)
+		}
+	}
+}
+
+// 上游不支持 WS（握手回 404）：同一次尝试里改走 HTTP，客户端看不出区别。之后不再每个请求都去试握手。
+func TestWSIngressFallsBackToHTTPWhenUpstreamHasNoWS(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.useUpstreamWS(nil)
+
+	firstID := env.mustComplete(wsIngressCreate("", wsIngressUserItem("first")))
+	env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, firstID), wsIngressUserItem("second")))
+
+	dials, wsRequests := env.upstreamWS()
+	if len(dials) != 1 || len(wsRequests) != 0 {
+		t.Fatalf("expected one rejected handshake and no ws requests, got %d handshakes and %d requests", len(dials), len(wsRequests))
+	}
+	requests := env.upstreamRequests()
+	if len(requests) != 2 {
+		t.Fatalf("expected one HTTP request per turn, got %d", len(requests))
+	}
+	if got, want := strings.Join(wsIngressInputTexts(t, requests[1]), " | "), "message:first | message:answer 1 | message:second"; got != want {
+		t.Fatalf("second request input = %q, want %q", got, want)
+	}
+	for i, log := range env.relayLogs(2) {
+		if !log.Success || log.UsedWS || len(log.Attempts) != 1 {
+			t.Errorf("turn %d log: success=%t used_ws=%t attempts=%d, want one successful attempt over HTTP", i+1, log.Success, log.UsedWS, len(log.Attempts))
+		}
+		// 只有真的试过握手的那一轮才标“降级”
+		if downgraded := log.WSRecovery != nil && *log.WSRecovery == model.RelayLogWSRecoveryDowngrade; downgraded != (i == 0) {
+			t.Errorf("turn %d log: ws_recovery=%v", i+1, log.WSRecovery)
+		}
+	}
+}
+
+// 上游在回复中途关闭连接：不管关闭码是什么都算失败。客户端收到 error 事件，它的连接还能接着用。
+func TestWSIngressUpstreamWSClosedMidReplyIsAFailure(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.useUpstreamWS(func(n int, _ http.Header, conn *websocket.Conn) bool {
+		wsIngressWSSend(conn, wsIngressWSFrames(n)[:3]...)
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+		return false
+	})
+
+	request := wsIngressCreate("", wsIngressUserItem("hello"))
+	events, err := env.turn(5*time.Second, request)
+	if err != nil {
+		t.Fatalf("failed turn got no terminal event after %d events: %v", len(events), err)
+	}
+	last := events[len(events)-1]
+	errorBody, _ := last["error"].(map[string]any)
+	if len(events) != 4 || last["type"] != "error" || last["status"] != float64(http.StatusBadGateway) || errorBody["code"] != "upstream_stream_interrupted" {
+		t.Fatalf("expected three partial events and a 502 upstream_stream_interrupted error, got %v", events)
+	}
+	if attempts := env.relayLogs(1)[0].Attempts; len(attempts) != 1 || attempts[0].Status != model.AttemptFailed {
+		t.Fatalf("expected the attempt to be recorded as failed, got %+v", attempts)
+	}
+
+	// 这个渠道的 WS 先歇一会儿：重发的请求走 HTTP
+	env.mustComplete(request)
+	if dials, _ := env.upstreamWS(); len(dials) != 1 || len(env.upstreamRequests()) != 1 {
+		t.Fatalf("expected the retry over HTTP, got %d ws handshakes and %d HTTP requests", len(dials), len(env.upstreamRequests()))
+	}
+}
+
+// 上游 WS 的第一个事件就是错误：客户端还什么都没收到，所以不转发它，直接换下一个渠道。
+func TestWSIngressUpstreamWSFirstEventErrorFailsOver(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.addChannel("second-key")
+	env.useUpstreamWS(func(n int, handshake http.Header, conn *websocket.Conn) bool {
+		if handshake.Get("Authorization") == "Bearer upstream-key" {
+			wsIngressWSSend(conn, []byte(`{"type":"error","status":429,"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"Rate limit reached"}}`))
+			return true
+		}
+		return wsIngressWSAnswers(n, handshake, conn)
+	})
+
+	events, err := env.turn(5*time.Second, wsIngressCreate("", wsIngressUserItem("hello")))
+	if err != nil || len(events) != 5 || events[4]["type"] != "response.completed" {
+		t.Fatalf("expected only the second channel's reply, got %v (err=%v)", events, err)
+	}
+	dials, requests := env.upstreamWS()
+	if len(dials) != 2 || dials[1].Get("Authorization") != "Bearer second-key" || len(requests) != 2 {
+		t.Fatalf("expected one request per channel, got %d handshakes and %d requests", len(dials), len(requests))
+	}
+}
+
+// 上游把空闲的连接关掉了：下一轮换一条新连接、用完整请求重发，客户端看不出来。
+func TestWSIngressUpstreamWSReconnectsAfterIdleClose(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.useUpstreamWS(func(n int, handshake http.Header, conn *websocket.Conn) bool {
+		wsIngressWSAnswers(n, handshake, conn)
+		return n != 1 // 回完第一轮就关掉这条连接
+	})
+
+	firstID := env.mustComplete(wsIngressCreate("", wsIngressUserItem("first")))
+	env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, firstID), wsIngressUserItem("second")))
+
+	dials, requests := env.upstreamWS()
+	if len(dials) != 2 || len(requests) != 2 || requests[1].dial != 2 {
+		t.Fatalf("expected the second turn on a new upstream connection, got %d connections and %d requests", len(dials), len(requests))
+	}
+	if value, ok := requests[1].body["previous_response_id"]; ok {
+		t.Fatalf("a new upstream connection cannot continue the old one, but previous_response_id %s was sent", value)
+	}
+	if got, want := strings.Join(wsIngressInputTexts(t, requests[1].body), " | "), "message:first | message:answer 1 | message:second"; got != want {
+		t.Fatalf("second request input = %q, want %q", got, want)
+	}
+}
+
+// HTTP 入站一律用 HTTP 连上游，带 previous_response_id 也一样。
+// 本地没有存档的续传原样转发；成功之后也不建存档：历史在上游那里，本地只有这一轮，拿来回放会丢掉前面的对话。
+func TestHTTPIngressContinuationIsForwardedOverHTTP(t *testing.T) {
+	env := newWSIngressEnv(t, func(n int, _ []byte, w http.ResponseWriter, _ *http.Request) {
+		// 模仿存着历史的上游（store=true）：认识所有 previous_response_id
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, wsIngressSSE(n))
+	})
+	env.useUpstreamWS(wsIngressWSAnswers)
+
+	previousIDs := []string{"resp_stored", "resp_1"}
+	for i, previousID := range previousIDs {
+		body := wsIngressCreate(fmt.Sprintf(`"stream":true,"previous_response_id":%q,`, previousID), wsIngressUserItem(fmt.Sprintf("turn %d", i+1)))
+		if recorder := env.post(body); recorder.Code != http.StatusOK {
+			t.Fatalf("turn %d status = %d, body %s", i+1, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	if dials, _ := env.upstreamWS(); len(dials) != 0 {
+		t.Fatalf("HTTP ingress must not dial the upstream over ws, got %d handshakes", len(dials))
+	}
+	requests := env.upstreamRequests()
+	if len(requests) != len(previousIDs) {
+		t.Fatalf("expected one HTTP request per turn, got %d", len(requests))
+	}
+	for i, previousID := range previousIDs {
+		if got := string(requests[i]["previous_response_id"]); got != fmt.Sprintf("%q", previousID) {
+			t.Fatalf("request %d previous_response_id = %s, want %q forwarded as is", i+1, got, previousID)
+		}
+		if got, want := strings.Join(wsIngressInputTexts(t, requests[i]), " | "), fmt.Sprintf("message:turn %d", i+1); got != want {
+			t.Fatalf("request %d input = %q, want %q", i+1, got, want)
+		}
 	}
 }

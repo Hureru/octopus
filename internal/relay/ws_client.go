@@ -31,6 +31,7 @@ type wsClientSession struct {
 	apiKeyID        int
 	supportedModels string
 	headers         http.Header // 握手请求的头，每个请求都带给上游
+	upstream        wsUpstream  // 这条连接独占的上游 WS，用到时才建
 	// 每个模型一份对话存档。
 	// shortcut: 存档大小没有上限，随对话变长，连接关闭（最长 60 分钟）才释放；有人拿它占内存时再加上限。
 	states map[string]*wsConversationState
@@ -70,6 +71,7 @@ func HandleWSResponse(c *gin.Context) {
 		headers:         c.Request.Header,
 		states:          map[string]*wsConversationState{},
 	}
+	defer session.upstream.close()
 
 	log.Debugf("ws client connected (apikey=%d)", apiKeyID)
 
@@ -130,7 +132,6 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	// Remove WS-only fields
 	delete(reqBody, "type")
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
-	continuationRequested := wsRequestExplicitlyRequestsContinuation(reqBody)
 	requestedPreviousResponseID := ""
 	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &requestedPreviousResponseID)
@@ -144,16 +145,6 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 		replayState = nil
 	}
 	preferredSticky := responsesReplayStateToSticky(replayState)
-	if preferredSticky == nil && requestedPreviousResponseID != "" {
-		if group, err := op.GroupGetEnabledMap(requestModel, ctx); err == nil {
-			scope := wsAffinityScope{APIKeyID: apiKeyID, GroupID: group.ID, RequestModel: requestModel, ResponseID: requestedPreviousResponseID}
-			if entry, ok := getWSAffinityStore().Get(ctx, scope); ok {
-				preferredSticky = &balancer.SessionEntry{ChannelID: entry.ChannelID, ChannelKeyID: entry.ChannelKeyID, Timestamp: time.Now()}
-				log.Debugf("ws response affinity hit (apikey=%d, group=%d, request_model=%s, previous_response_id=%s, channel=%d, key=%d)",
-					apiKeyID, group.ID, requestModel, requestedPreviousResponseID, entry.ChannelID, entry.ChannelKeyID)
-			}
-		}
-	}
 
 	// 预热（generate:false）：Codex 连上后先发它，等到 response.completed 才发真正的请求。
 	// 这个字段只有 WS 上有，不发给上游。
@@ -210,7 +201,7 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	// 存档只在两种成功之后更新：完整请求（从它重新开始）和接上了存档的请求（追加）。
 	// 原样转发的续传，历史在上游那里，本地记不全，所以不记。
 	remember := func(resp *transformerModel.InternalLLMResponse, attempts []dbmodel.ChannelAttempt) {
-		if replayState == nil && continuationRequested {
+		if replayState == nil && continuesUpstreamHistory(originalRequest) {
 			return
 		}
 		if replayState == nil {
@@ -256,6 +247,9 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	defer req.metrics.DropLive()
 	req.rawBody = relayBody
 	req.clientHeaders = s.headers
+	req.upstream = &s.upstream
+	req.previousResponseID = requestedPreviousResponseID
+	req.continuationBody = bodyBytes
 	if replayState != nil {
 		req.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 	}
@@ -500,26 +494,6 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 	}
 	writeWSError(ctx, conn, 502, "all_channels_failed", "All channels failed")
 	return result
-}
-
-func currentPreviousResponseID(req *transformerModel.InternalLLMRequest) string {
-	return req.OpenAIPreviousResponseID()
-}
-
-func wsRequestExplicitlyRequestsContinuation(reqBody map[string]json.RawMessage) bool {
-	if len(reqBody) == 0 {
-		return false
-	}
-	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
-		var previousResponseID string
-		if err := json.Unmarshal(raw, &previousResponseID); err == nil && strings.TrimSpace(previousResponseID) != "" {
-			return true
-		}
-	}
-	if raw, ok := reqBody["conversation"]; ok && len(raw) > 0 && string(raw) != "null" {
-		return true
-	}
-	return false
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {

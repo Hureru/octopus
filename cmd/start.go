@@ -8,7 +8,6 @@ import (
 	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/op"
-	"github.com/bestruirui/octopus/internal/relay"
 	"github.com/bestruirui/octopus/internal/server"
 	"github.com/bestruirui/octopus/internal/task"
 	"github.com/bestruirui/octopus/internal/utils/log"
@@ -72,10 +71,6 @@ var startCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		shutdown.Register(server.Close)
-		shutdown.Register(func() error {
-			relay.CloseUpstreamWSPool()
-			return nil
-		})
 
 		safe.Go("relay-log-writer", func() {
 			op.RelayLogWriterRun(relayLogWriterCtx)

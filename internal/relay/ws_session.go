@@ -62,6 +62,12 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	return replayed
 }
 
+// continuesUpstreamHistory 报告请求是不是接着上游存着的历史（带 previous_response_id 或 conversation）。
+// 这样的请求原样转发时本地只看得到这一轮，成功了也不能拿它建存档。
+func continuesUpstreamHistory(req *transformerModel.InternalLLMRequest) bool {
+	return req.OpenAIPreviousResponseID() != "" || (len(req.Conversation) > 0 && string(req.Conversation) != "null")
+}
+
 func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.InternalLLMRequest, resp *transformerModel.InternalLLMResponse) {
 	if s == nil || req == nil || resp == nil {
 		return

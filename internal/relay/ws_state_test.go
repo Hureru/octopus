@@ -12,43 +12,20 @@ import (
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
-func TestBuildWSResponseCreateMessageNormalizesWSFields(t *testing.T) {
-	message, err := buildWSResponseCreateMessage(json.RawMessage(`{"model":"gpt-4o","stream":true,"background":true}`))
-	if err != nil {
-		t.Fatalf("buildWSResponseCreateMessage failed: %v", err)
-	}
-
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(message, &payload); err != nil {
-		t.Fatalf("unmarshal merged message failed: %v", err)
-	}
-
-	if got := string(payload["type"]); got != `"response.create"` {
-		t.Fatalf("expected type response.create, got %s", got)
-	}
-	if got := string(payload["stream"]); got != `true` {
-		t.Fatalf("expected stream field to be forced true, got %s in %#v", got, payload)
-	}
-	if _, exists := payload["background"]; exists {
-		t.Fatalf("expected background field to be removed, got %#v", payload)
-	}
-	if _, exists := payload["previous_response_id"]; exists {
-		t.Fatalf("expected no implicit previous_response_id injection, got %#v", payload)
-	}
-}
-
-func TestWSRequestExplicitlyRequestsContinuation(t *testing.T) {
-	if wsRequestExplicitlyRequestsContinuation(nil) {
-		t.Fatalf("expected nil request body to be fresh")
-	}
-	if wsRequestExplicitlyRequestsContinuation(map[string]json.RawMessage{"previous_response_id": json.RawMessage(`""`)}) {
-		t.Fatalf("expected empty previous_response_id to be treated as fresh")
-	}
-	if !wsRequestExplicitlyRequestsContinuation(map[string]json.RawMessage{"previous_response_id": json.RawMessage(`"resp_prev"`)}) {
-		t.Fatalf("expected previous_response_id to request continuation")
-	}
-	if !wsRequestExplicitlyRequestsContinuation(map[string]json.RawMessage{"conversation": json.RawMessage(`{"id":"conv_1"}`)}) {
-		t.Fatalf("expected conversation payload to request continuation")
+func TestContinuesUpstreamHistory(t *testing.T) {
+	for name, tc := range map[string]struct {
+		req  *transformerModel.InternalLLMRequest
+		want bool
+	}{
+		"full request":               {&transformerModel.InternalLLMRequest{}, false},
+		"blank previous_response_id": {&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr(" ")}, false},
+		"null conversation":          {&transformerModel.InternalLLMRequest{Conversation: json.RawMessage(`null`)}, false},
+		"previous_response_id":       {&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_prev")}, true},
+		"conversation":               {&transformerModel.InternalLLMRequest{Conversation: json.RawMessage(`{"id":"conv_1"}`)}, true},
+	} {
+		if got := continuesUpstreamHistory(tc.req); got != tc.want {
+			t.Errorf("%s: got %t, want %t", name, got, tc.want)
+		}
 	}
 }
 
@@ -101,52 +78,6 @@ func TestShouldMarkWSUnsupported(t *testing.T) {
 	}
 	if shouldMarkWSUnsupported(nil, fmt.Errorf("failed handshake: expected handshake response status code 426 but got 426")) {
 		t.Fatalf("expected upgrade required handshake to remain retryable")
-	}
-}
-
-func TestIsUpstreamWSConnectionBroken(t *testing.T) {
-	for _, err := range []error{
-		fmt.Errorf("failed to write frame payload: write: broken pipe"),
-		fmt.Errorf("failed to get reader: failed to read frame header: EOF"),
-		fmt.Errorf("use of closed network connection"),
-	} {
-		if !isUpstreamWSConnectionBroken(err) {
-			t.Fatalf("expected %q to be treated as broken upstream ws", err)
-		}
-	}
-	if isUpstreamWSConnectionBroken(fmt.Errorf("temporary upstream unavailable")) {
-		t.Fatalf("expected unrelated error to not be treated as broken upstream ws")
-	}
-}
-
-func TestRequiresUpstreamWSContinuation(t *testing.T) {
-	if !requiresUpstreamWSContinuation(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_123")}) {
-		t.Fatalf("expected previous_response_id request to require upstream ws continuation")
-	}
-	if !requiresUpstreamWSContinuation(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "tool", ToolCallID: stringPtr("call_123")}}}) {
-		t.Fatalf("expected tool output request to require upstream ws continuation")
-	}
-	replayable := &transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{
-		{
-			Role: "assistant",
-			ToolCalls: []transformerModel.ToolCall{{
-				ID:   "call_123",
-				Type: "function",
-				Function: transformerModel.FunctionCall{
-					Name: "lookup",
-				},
-			}},
-		},
-		{
-			Role:       "tool",
-			ToolCallID: stringPtr("call_123"),
-		},
-	}}
-	if requiresUpstreamWSContinuation(replayable) {
-		t.Fatalf("expected replayable transcript to not require upstream ws continuation")
-	}
-	if requiresUpstreamWSContinuation(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}) {
-		t.Fatalf("expected ordinary request to not require upstream ws continuation")
 	}
 }
 
@@ -208,7 +139,7 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	if replayed.TransformerMetadata[transformerModel.TransformerMetadataWSExecutionMode] != transformerModel.TransformerMetadataWSExecutionModeReplayExact {
 		t.Fatalf("expected replay request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
 	}
-	if requiresUpstreamWSContinuation(replayed) {
+	if continuesUpstreamHistory(replayed) {
 		t.Fatalf("expected replay request to be self-contained")
 	}
 	var rawItems []map[string]any

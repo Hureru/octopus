@@ -389,7 +389,7 @@ Compatible with [bestruirui/octopus](https://github.com/bestruirui/octopus), ~18
 ### 🏗️ New subsystems
 
 - **🌐 Site Management & Site Sync** — full new resource layer (backend `sitesync/` + dedicated frontend modules). Manages aggregator-site accounts: scheduled sync, check-in, balance / today's income, per-site pricing, archive/restore, AnyRouter, route probing, `sub2api`, and projected site channels.
-- **🔌 WebSocket relay** — upstream WS connection pool with health backoff, client-facing WS, DB-backed response affinity, and opt-in OpenAI Responses passthrough for Codex tools.
+- **🔌 WebSocket relay** — client-facing OpenAI Responses WS for Codex. Each client connection gets its own upstream WS (health backoff, automatic HTTP fallback), and requests are passed through as raw JSON.
 - **🖼️ OpenAI Images API forwarding** with body cache.
 - **🩹 Transformer overhaul** — native StreamEvent pipeline across all adapters, Anthropic patching layer, role-alternation normalization, plus a long tail of cross-format fidelity fixes.
 

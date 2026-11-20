@@ -63,6 +63,13 @@ func (w *WSStreamWriter) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+// WriteFrame 给客户端发一帧已经是 JSON 的事件。
+func (w *WSStreamWriter) WriteFrame(frame []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sendFrame(w.ctx, frame)
+}
+
 // sendFrame 发一帧，并记下它是不是回合的结束事件。调用时要持有 mu。
 func (w *WSStreamWriter) sendFrame(ctx context.Context, frame []byte) error {
 	if err := writeWSFrame(ctx, w.conn, frame); err != nil {

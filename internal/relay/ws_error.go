@@ -2,14 +2,8 @@ package relay
 
 import (
 	"errors"
-	"io"
-	"net"
 	"net/http"
 	"strings"
-
-	"github.com/bestruirui/octopus/internal/relay/stream"
-	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
-	"github.com/bestruirui/octopus/internal/utils/log"
 )
 
 type wsPublicError struct {
@@ -102,48 +96,6 @@ func relayErrorMessage(err error) string {
 	return strings.ToLower(err.Error())
 }
 
-func isUpstreamWSConnectionBroken(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Prefer type-based checks for reliable detection across library versions.
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
-	}
-	var netErr *net.OpError
-	if errors.As(err, &netErr) {
-		return true
-	}
-	// Fallback to string matching for errors from libraries that don't export typed errors
-	// (e.g., nhooyr/websocket close frames, gorilla/websocket internal messages).
-	message := relayErrorMessage(err)
-	return strings.Contains(message, "broken pipe") ||
-		strings.Contains(message, "failed to read frame header") ||
-		strings.Contains(message, "use of closed network connection") ||
-		strings.Contains(message, "websocket: close sent") ||
-		strings.Contains(message, "failed to get reader") ||
-		strings.Contains(message, "connection reset by peer")
-}
-
-func shouldReconnectUpstreamWSBeforeReplay(err error) bool {
-	// Empty stream before first event should trigger reconnect
-	if errors.Is(err, stream.ErrEmptyUpstreamStream) {
-		log.Debugf("ws continuation error marked reconnectable before replay: %v", err)
-		return true
-	}
-
-	message := relayErrorMessage(err)
-	if message == "" {
-		return false
-	}
-	shouldReconnect := isUpstreamWSConnectionBroken(err) ||
-		strings.Contains(message, "ws stream ended before first event")
-	if shouldReconnect {
-		log.Debugf("ws continuation error marked reconnectable before replay: %v", err)
-	}
-	return shouldReconnect
-}
-
 func needsConversationRestart(message string) bool {
 	return strings.Contains(message, "please restart the conversation") ||
 		strings.Contains(message, "continuation connection is unavailable") ||
@@ -177,36 +129,4 @@ func isUpstreamQuotaError(message string) bool {
 	return strings.Contains(message, "insufficient_quota") ||
 		strings.Contains(message, "quota exceeded") ||
 		strings.Contains(message, "billing") && strings.Contains(message, "hard limit")
-}
-
-func requiresUpstreamWSContinuation(req *transformerModel.InternalLLMRequest) bool {
-	if req == nil {
-		return false
-	}
-	if req.OpenAIPreviousResponseID() != "" {
-		return true
-	}
-	if len(req.GetOpenAIResponsesOptions().Conversation) > 0 {
-		return true
-	}
-	seenToolCalls := make(map[string]struct{})
-	for _, msg := range req.Messages {
-		if msg.Role == "assistant" {
-			for _, toolCall := range msg.ToolCalls {
-				if toolCallID := strings.TrimSpace(toolCall.ID); toolCallID != "" {
-					seenToolCalls[toolCallID] = struct{}{}
-				}
-			}
-		}
-		if msg.Role != "tool" || msg.ToolCallID == nil {
-			continue
-		}
-		if toolCallID := strings.TrimSpace(*msg.ToolCallID); toolCallID != "" {
-			if _, exists := seenToolCalls[toolCallID]; exists {
-				continue
-			}
-			return true
-		}
-	}
-	return false
 }
