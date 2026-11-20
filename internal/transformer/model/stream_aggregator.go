@@ -46,6 +46,9 @@ func (a *StreamAggregator) Response() *InternalLLMResponse {
 		if chunk.Usage != nil {
 			result.Usage = chunk.Usage
 		}
+		if len(chunk.RawResponsesOutputItems) > 0 {
+			result.RawResponsesOutputItems = chunk.RawResponsesOutputItems
+		}
 		for _, choice := range chunk.Choices {
 			existingChoice := choicesMap[choice.Index]
 			if existingChoice == nil {

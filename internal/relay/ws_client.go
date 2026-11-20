@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -120,26 +119,20 @@ func processWSResponseCreate(
 	// Remove WS-only fields
 	delete(reqBody, "type")
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
-	allowStoredRestore := wsRequestExplicitlyRequestsContinuation(reqBody)
+	continuationRequested := wsRequestExplicitlyRequestsContinuation(reqBody)
 	requestedPreviousResponseID := ""
 	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &requestedPreviousResponseID)
 		requestedPreviousResponseID = strings.TrimSpace(requestedPreviousResponseID)
 	}
-	hadLocalState := conversationState != nil
-	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore, downstreamSessionID)
-	hasResolvedState := conversationState != nil
-	resolvedLastResponseID := ""
-	if conversationState != nil {
-		resolvedLastResponseID = strings.TrimSpace(conversationState.LastResponseID)
+	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, continuationRequested, downstreamSessionID)
+	// 只有接得上存档最后一个回复的请求才用存档拼成完整请求。
+	// 其余情况存档对这个请求来说不完整，绝不拿来回放。
+	replayState := conversationState
+	if replayState != nil && (requestedPreviousResponseID == "" || requestedPreviousResponseID != strings.TrimSpace(replayState.LastResponseID)) {
+		replayState = nil
 	}
-	log.Debugf("ws response.create state resolved (apikey=%d, request_model=%s, requested_prev=%s, explicit_continuation=%t, had_local_state=%t, resolved_state=%t, resolved_last_response_id=%s)",
-		apiKeyID, requestModel, requestedPreviousResponseID, allowStoredRestore, hadLocalState, hasResolvedState, resolvedLastResponseID)
-	if conversationState != nil {
-		conversationState.DownstreamSessionID = downstreamSessionID
-	}
-	rewriteWSPreviousResponseID(reqBody, conversationState)
-	preferredSticky := wsConversationStateToSticky(conversationState)
+	preferredSticky := wsConversationStateToSticky(replayState)
 	if preferredSticky == nil && requestedPreviousResponseID != "" {
 		if group, err := op.GroupGetEnabledMap(requestModel, ctx); err == nil {
 			scope := wsAffinityScope{APIKeyID: apiKeyID, GroupID: group.ID, RequestModel: requestModel, ResponseID: requestedPreviousResponseID}
@@ -168,8 +161,6 @@ func processWSResponseCreate(
 		delete(reqBody, "generate")
 	}
 
-	injectWSPreviousResponseID(reqBody, conversationState)
-
 	// Force stream mode
 	reqBody["stream"] = json.RawMessage("true")
 
@@ -187,21 +178,14 @@ func processWSResponseCreate(
 		return conversationState
 	}
 	originalRequest := cloneInternalRequest(internalRequest)
-	continuationRequested := allowStoredRestore || requestContainsToolOutputs(originalRequest)
-	if !continuationRequested {
-		deleteWSConversationState(apiKeyID, requestModel, downstreamSessionID)
-		conversationState = nil
-		preferredSticky = nil
-	}
+	// 续传只发一次：直接把“存档 + 新输入”拼成不带 previous_response_id 的完整请求。
 	executionRequest := originalRequest
-	if conversationState != nil && continuationRequested {
-		if conversationState.ShouldUseNativeContinuation(originalRequest) {
-			log.Debugf("ws relay using native continuation (apikey=%d, request_model=%s, previous_response_id=%s)", apiKeyID, requestModel, currentPreviousResponseID(originalRequest))
-		} else if conversationState.ShouldUseLocalReplay(originalRequest) {
-			replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-			if replayedRequest != nil {
-				executionRequest = replayedRequest
-			}
+	if replayState != nil {
+		if replayed := replayState.BuildReplayRequest(originalRequest); replayed != nil {
+			executionRequest = replayed
+		} else {
+			replayState = nil
+			preferredSticky = nil
 		}
 	}
 
@@ -233,64 +217,30 @@ func processWSResponseCreate(
 		writeWSError(ctx, conn, status, code, err.Error())
 		return conversationState
 	}
-	defer func() { req.metrics.DropLive() }() // 闭包：req 可能被下面的 replay 请求替换
-
-	autoRestart := conversationState != nil && continuationRequested && conversationState.CanAutoRestart(originalRequest)
-	failedPreviousResponseID := currentPreviousResponseID(originalRequest)
-	log.Debugf("ws relay prepared (apikey=%d, request_model=%s, previous_response_id=%s, auto_replay=%t, preferred_channel=%d, preferred_key=%d)",
-		apiKeyID, requestModel, failedPreviousResponseID, autoRestart,
-		func() int {
-			if preferredSticky == nil {
-				return 0
-			}
-			return preferredSticky.ChannelID
-		}(),
-		func() int {
-			if preferredSticky == nil {
-				return 0
-			}
-			return preferredSticky.ChannelKeyID
-		}())
-	result := runWSRelay(ctx, req, group)
-	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
-		log.Debugf("ws relay switching to replay (apikey=%d, request_model=%s, failed_previous_response_id=%s, reset_conversation=%t)",
-			apiKeyID, requestModel, failedPreviousResponseID, result.ResetConversation)
-		balancer.DeleteSticky(apiKeyID, requestModel)
-		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky, bodyBytes)
-		if replayErr == nil {
-			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
-			replayReq.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
-			// 被替换的请求不会再 Save；沿用它的日志 ID，日志页上那张进行中的卡片才有人收尾
-			replayReq.metrics.logID = req.metrics.logID
-			req = replayReq
-			group = replayGroup
-			result = runWSRelay(ctx, req, group)
-		}
+	defer req.metrics.DropLive()
+	if replayState != nil {
+		req.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 	}
+	log.Debugf("ws relay prepared (apikey=%d, request_model=%s, previous_response_id=%s, replay=%t)",
+		apiKeyID, requestModel, requestedPreviousResponseID, replayState != nil)
 
-	result = finalizeWSRelay(ctx, conn, req, result)
-	if result.Success {
-		if conversationState == nil {
-			conversationState = &wsConversationState{DownstreamSessionID: downstreamSessionID}
+	result := finalizeWSRelay(ctx, conn, req, runWSRelay(ctx, req, group))
+	// 存档只在两种成功之后更新：完整请求（从它重新开始）和接上了存档的请求（追加）。
+	// 原样转发的续传，历史在上游那里，本地记不全，所以不记。
+	if result.Success && (replayState != nil || !continuationRequested) {
+		if replayState == nil {
+			replayState = &wsConversationState{}
 		}
-		conversationState.DownstreamSessionID = downstreamSessionID
+		replayState.DownstreamSessionID = downstreamSessionID
 		if channelID, keyID := finalChannelKey(req.iter.Attempts()); channelID > 0 {
-			conversationState.ChannelID = channelID
-			conversationState.ChannelKeyID = keyID
+			replayState.ChannelID = channelID
+			replayState.ChannelKeyID = keyID
 		}
-		if req.metrics.WSMode != nil && *req.metrics.WSMode == dbmodel.RelayLogWSModeReplay {
-			conversationState.RememberReplayAlias(failedPreviousResponseID)
-			conversationState.MarkReplayRecovered(originalRequest)
-		} else {
-			conversationState.MarkNativeContinuationReady()
-		}
-		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
-		storeWSConversationState(apiKeyID, requestModel, conversationState, wsConversationStateTTL(group.SessionKeepTime))
-		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, ws_mode=%v, ws_recovery=%v, last_response_id=%s, channel=%d, key=%d)",
-			apiKeyID, requestModel, req.metrics.WSMode, req.metrics.WSRecovery,
-			strings.TrimSpace(conversationState.LastResponseID), conversationState.ChannelID, conversationState.ChannelKeyID)
-		return conversationState
+		replayState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
+		storeWSConversationState(apiKeyID, requestModel, replayState, wsConversationStateTTL(group.SessionKeepTime))
+		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, last_response_id=%s, channel=%d, key=%d)",
+			apiKeyID, requestModel, strings.TrimSpace(replayState.LastResponseID), replayState.ChannelID, replayState.ChannelKeyID)
+		return replayState
 	}
 	if result.ResetConversation {
 		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
@@ -298,6 +248,7 @@ func processWSResponseCreate(
 		return nil
 	}
 
+	// 其余情况不动存档：它只会被 previous_response_id 对得上的请求用到。
 	return conversationState
 }
 
@@ -449,23 +400,6 @@ func newWSRelayRequest(
 }
 
 func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) wsRelayResult {
-	replayExact := req != nil && req.internalRequest != nil && req.internalRequest.IsOpenAIExactReplayRequest()
-	relayCtx := ctx
-	if replayExact {
-		budget := 15 * time.Second
-		if deadline, ok := ctx.Deadline(); ok {
-			if remaining := time.Until(deadline); remaining > 0 && remaining < budget {
-				budget = remaining
-			}
-		}
-		var cancel context.CancelFunc
-		relayCtx, cancel = context.WithTimeoutCause(ctx, budget, errLocalRelayBudgetExceeded)
-		defer cancel()
-		if req != nil {
-			req.ctx = relayCtx
-		}
-	}
-
 	maxSameChannelRetries := 1
 	if group.RetryEnabled {
 		maxSameChannelRetries = group.MaxRetries
@@ -476,26 +410,11 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 
 	var lastErr error
 	var lastResult attemptResult
-	maxChannelAttempts := req.iter.Len()
-	if replayExact && maxChannelAttempts > 3 {
-		maxChannelAttempts = 3
-	}
 
 	for req.iter.Next() {
-		if req.iter.Index() >= maxChannelAttempts {
-			break
-		}
 		select {
-		case <-relayCtx.Done():
-			if isLocalRelayBudgetExceeded(relayCtx, contextError(relayCtx)) {
-				publicErr := wsPublicError{
-					Status:  http.StatusGatewayTimeout,
-					Code:    "replay_recovery_timeout",
-					Message: "exact replay 恢复超过本地 15 秒预算，请重试",
-				}
-				return wsRelayResult{Err: contextError(relayCtx), PublicError: &publicErr}
-			}
-			return wsRelayResult{Canceled: true, Err: relayCtx.Err()}
+		case <-ctx.Done():
+			return wsRelayResult{Canceled: true, Err: ctx.Err()}
 		default:
 		}
 
@@ -557,16 +476,8 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			if retryNum > 0 {
 				delay := computeBackoff(retryNum, result.RetryAfter)
 				select {
-				case <-relayCtx.Done():
-					if isLocalRelayBudgetExceeded(relayCtx, contextError(relayCtx)) {
-						publicErr := wsPublicError{
-							Status:  http.StatusGatewayTimeout,
-							Code:    "replay_recovery_timeout",
-							Message: "exact replay 恢复超过本地 15 秒预算，请重试",
-						}
-						return wsRelayResult{Err: contextError(relayCtx), PublicError: &publicErr}
-					}
-					return wsRelayResult{Canceled: true, Err: relayCtx.Err()}
+				case <-ctx.Done():
+					return wsRelayResult{Canceled: true, Err: ctx.Err()}
 				case <-time.After(delay):
 				}
 			}
@@ -586,11 +497,7 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		}
 
 		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
-			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
-			if replayExact && result.StatusCode == http.StatusServiceUnavailable && isNoAvailableAccountError(relayErrorMessage(result.Err)) {
-				failureKind = balancer.FailureHard
-			}
-			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, failureKind)
+			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, circuitFailureKind(group.RetryEnabled, result.StatusCode))
 		}
 
 		if result.Success {
@@ -638,29 +545,6 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 	}
 	writeWSError(ctx, conn, 502, "all_channels_failed", "All channels failed")
 	return result
-}
-
-func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
-	// Local continuation now prefers exact replay over implicit previous_response_id injection.
-	// Explicit client-supplied previous_response_id is still preserved elsewhere.
-}
-
-func rewriteWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
-	if state == nil || len(reqBody) == 0 {
-		return
-	}
-	raw, ok := reqBody["previous_response_id"]
-	if !ok || len(raw) == 0 {
-		return
-	}
-	var previousResponseID string
-	if err := json.Unmarshal(raw, &previousResponseID); err != nil {
-		return
-	}
-	if !state.ShouldRewritePreviousResponseID(previousResponseID) {
-		return
-	}
-	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
 }
 
 func currentPreviousResponseID(req *transformerModel.InternalLLMRequest) string {

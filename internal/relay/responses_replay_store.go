@@ -203,9 +203,6 @@ func estimateStateSize(state *wsConversationState) int {
 	for _, msg := range state.Transcript {
 		size += estimateMessageSize(msg)
 	}
-	for _, alias := range state.ReplayAliases {
-		size += len(alias) + 16
-	}
 	return size
 }
 

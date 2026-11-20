@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
@@ -34,23 +35,6 @@ func TestBuildWSResponseCreateMessageNormalizesWSFields(t *testing.T) {
 	}
 }
 
-func TestInjectWSPreviousResponseIDDoesNotInjectImplicitContinuation(t *testing.T) {
-	reqBody := map[string]json.RawMessage{
-		"model": json.RawMessage(`"gpt-4o"`),
-	}
-
-	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached"})
-	if _, ok := reqBody["previous_response_id"]; ok {
-		t.Fatalf("expected implicit previous_response_id injection to stay disabled, got %#v", reqBody)
-	}
-
-	reqBody["previous_response_id"] = json.RawMessage(`"resp_explicit"`)
-	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached_2"})
-	if got := string(reqBody["previous_response_id"]); got != `"resp_explicit"` {
-		t.Fatalf("expected explicit previous_response_id to be preserved, got %s", got)
-	}
-}
-
 func TestWSRequestExplicitlyRequestsContinuation(t *testing.T) {
 	if wsRequestExplicitlyRequestsContinuation(nil) {
 		t.Fatalf("expected nil request body to be fresh")
@@ -78,8 +62,8 @@ func TestClassifyWSPublicErrorRecognizesConversationRestart(t *testing.T) {
 	if !publicErr.ResetConversation {
 		t.Fatalf("expected conversation restart error to reset cached conversation")
 	}
-	if publicErr.Code != "conversation_restart_required" {
-		t.Fatalf("expected conversation restart code, got %q", publicErr.Code)
+	if publicErr.Code != "previous_response_not_found" {
+		t.Fatalf("expected the code clients resend in full on, got %q", publicErr.Code)
 	}
 }
 
@@ -164,103 +148,6 @@ func TestRequiresUpstreamWSContinuation(t *testing.T) {
 	}
 }
 
-func TestWSConversationStateCanAutoRestart(t *testing.T) {
-	state := &wsConversationState{
-		LastResponseID: "resp_prev",
-		ReplayAliases:  []string{"resp_old"},
-		Transcript: []transformerModel.Message{{
-			Role: "assistant",
-		}},
-	}
-	if !state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_prev")}) {
-		t.Fatalf("expected latest previous_response_id to be auto-restartable")
-	}
-	if !state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_old")}) {
-		t.Fatalf("expected replay alias previous_response_id to be auto-restartable")
-	}
-	if state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_other")}) {
-		t.Fatalf("expected mismatched previous_response_id to skip auto restart")
-	}
-	state.ReplayPending = true
-	if state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_prev"), Messages: []transformerModel.Message{{Role: "tool", ToolCallID: stringPtr("call_123")}}}) {
-		t.Fatalf("expected replay-pending tool output request to skip auto restart")
-	}
-	if !state.CanAutoRestart(&transformerModel.InternalLLMRequest{PreviousResponseID: stringPtr("resp_prev"), Messages: []transformerModel.Message{{Role: "user"}}}) {
-		t.Fatalf("expected replay-pending text request to remain auto-restartable")
-	}
-}
-
-func TestRewriteWSPreviousResponseIDUsesLatestAnchorForReplayAlias(t *testing.T) {
-	reqBody := map[string]json.RawMessage{
-		"previous_response_id": json.RawMessage(`"resp_old"`),
-	}
-
-	rewriteWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_new", ReplayAliases: []string{"resp_old"}})
-	if got := string(reqBody["previous_response_id"]); got != `"resp_new"` {
-		t.Fatalf("expected previous_response_id to be rewritten to latest anchor, got %s", got)
-	}
-}
-
-func TestWSConversationStateRememberReplayAlias(t *testing.T) {
-	state := &wsConversationState{LastResponseID: "resp_new", ReplayAliases: []string{"resp_old_1", "resp_old_2"}}
-	state.RememberReplayAlias("resp_old_2")
-	state.RememberReplayAlias("resp_old_3")
-
-	if len(state.ReplayAliases) != 3 {
-		t.Fatalf("expected replay aliases to stay deduplicated, got %#v", state.ReplayAliases)
-	}
-	if state.ReplayAliases[0] != "resp_old_3" {
-		t.Fatalf("expected newest replay alias to be promoted to front, got %#v", state.ReplayAliases)
-	}
-	if !state.ShouldRewritePreviousResponseID("resp_old_1") {
-		t.Fatalf("expected known replay alias to be rewritten")
-	}
-	state.ReplayPending = true
-	if !state.ShouldRewritePreviousResponseID("resp_old_1") {
-		t.Fatalf("expected replay-pending text continuation to still rewrite replay alias")
-	}
-}
-
-func TestWSConversationStateShouldUseNativeContinuation(t *testing.T) {
-	state := &wsConversationState{LastResponseID: "resp_latest", ReplayWindowItems: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`)}
-	toolReq := &transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "tool", ToolCallID: stringPtr("call_123")}}}
-	if state.ShouldUseNativeContinuation(toolReq) {
-		t.Fatalf("expected pooled native continuation to stay disabled")
-	}
-	if !state.ShouldUseLocalReplay(toolReq) {
-		t.Fatalf("expected exact replay window to handle tool output request")
-	}
-	if !state.ShouldUseLocalReplay(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}) {
-		t.Fatalf("expected exact replay window to also handle plain text continuation")
-	}
-	state.MarkNativeContinuationReady()
-	if state.ReplayPending {
-		t.Fatalf("expected native continuation ready to clear replay-pending flag")
-	}
-	state.MarkReplayRecovered(toolReq)
-	if !state.ReplayPending {
-		t.Fatalf("expected replay recovery with tool outputs to keep replay-pending flag")
-	}
-	state.MarkReplayRecovered(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}})
-	if state.ReplayPending {
-		t.Fatalf("expected replay recovery without tool outputs to clear replay-pending flag")
-	}
-}
-
-func TestInjectWSPreviousResponseIDLeavesReplayPendingToolOutputsUntouched(t *testing.T) {
-	reqBody := map[string]json.RawMessage{
-		"model": json.RawMessage(`"gpt-4o"`),
-		"input": json.RawMessage(`[
-			{"type":"function_call_output","call_id":"call_123","output":"ok"}
-		]`),
-	}
-
-	injectWSPreviousResponseID(reqBody, &wsConversationState{LastResponseID: "resp_cached", ReplayPending: true})
-	if _, ok := reqBody["previous_response_id"]; ok {
-		t.Fatalf("expected replay-pending tool output request to remain without injected previous_response_id")
-	}
-}
-
 func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	state := &wsConversationState{
 		LastResponseID: "resp_prev",
@@ -310,8 +197,8 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	if replayed.Conversation != nil {
 		t.Fatalf("expected replay request to clear conversation state")
 	}
-	if len(replayed.Messages) != 0 {
-		t.Fatalf("expected replay request to rely on raw item window instead of transcript messages, got %d messages", len(replayed.Messages))
+	if len(replayed.Messages) != 2 || replayed.Messages[0].Role != "assistant" || replayed.Messages[1].Role != "tool" {
+		t.Fatalf("expected replay messages to carry the stored turn and the new input, got %#v", replayed.Messages)
 	}
 	if replayed.TransformOptions.ArrayInputs == nil || !*replayed.TransformOptions.ArrayInputs {
 		t.Fatalf("expected replay request to force array input semantics")
@@ -346,13 +233,12 @@ func TestWSConversationStateBuildReplayRequest(t *testing.T) {
 	}
 }
 
-func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *testing.T) {
+func TestWSConversationStateBuildReplayRequestForToolOutput(t *testing.T) {
 	state := &wsConversationState{
 		LastResponseID: "resp_replayed",
 		ReplayWindowItems: json.RawMessage(`[
 			{"type":"function_call","call_id":"call_123","name":"lookup","arguments":"{}"}
 		]`),
-		ReplayPending: true,
 		Transcript: []transformerModel.Message{
 			{
 				Role: "assistant",
@@ -382,12 +268,6 @@ func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *test
 		}},
 	}
 
-	if state.ShouldUseNativeContinuation(req) {
-		t.Fatalf("expected native continuation to stay disabled")
-	}
-	if !state.ShouldUseLocalReplay(req) {
-		t.Fatalf("expected replay window to accept replay-pending tool output request")
-	}
 	replayed := state.BuildReplayRequest(req)
 	if replayed == nil {
 		t.Fatalf("expected replay request to be built")
@@ -395,8 +275,8 @@ func TestWSConversationStateBuildReplayRequestForReplayPendingToolOutput(t *test
 	if replayed.PreviousResponseID != nil {
 		t.Fatalf("expected replay request to clear previous_response_id")
 	}
-	if len(replayed.Messages) != 0 {
-		t.Fatalf("expected replay request to avoid transcript messages once replay window exists, got %d", len(replayed.Messages))
+	if len(replayed.Messages) != 2 || replayed.Messages[0].Role != "assistant" || replayed.Messages[1].Role != "tool" {
+		t.Fatalf("expected replay messages to carry the stored turn and the new input, got %#v", replayed.Messages)
 	}
 	if replayed.TransformerMetadata[transformerModel.TransformerMetadataWSExecutionMode] != transformerModel.TransformerMetadataWSExecutionModeReplayExact {
 		t.Fatalf("expected replay-pending request to be marked replay_exact, got %#v", replayed.TransformerMetadata)
@@ -417,8 +297,10 @@ func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 		Choices: []transformerModel.Choice{{
 			Index: 0,
 			Message: &transformerModel.Message{
-				Role:    "assistant",
-				Content: transformerModel.MessageContent{Content: stringPtr("hi")},
+				Role:               "assistant",
+				Content:            transformerModel.MessageContent{Content: stringPtr("hi")},
+				ReasoningContent:   stringPtr("thinking"),
+				ReasoningSignature: stringPtr("signature of another provider"),
 			},
 		}},
 	}
@@ -435,6 +317,14 @@ func TestWSConversationStateApplySuccessfulTurn(t *testing.T) {
 	}
 	if len(state.Transcript) != 2 {
 		t.Fatalf("expected transcript to contain request and response, got %d messages", len(state.Transcript))
+	}
+	// 这个回复没有原始输出条目（非 Responses 上游）：回放窗口里也要有模型的回复，但不带别家的推理签名
+	var windowItems []map[string]any
+	if err := json.Unmarshal(state.ReplayWindowItems, &windowItems); err != nil || len(windowItems) != 2 || windowItems[1]["role"] != "assistant" {
+		t.Fatalf("expected the replay window to hold the input and the reply without reasoning, got %s", state.ReplayWindowItems)
+	}
+	if state.Transcript[1].ReasoningContent == nil {
+		t.Fatalf("expected the transcript to keep the reasoning for channels of the same provider")
 	}
 }
 
@@ -510,42 +400,33 @@ func TestWSConversationStateApplySuccessfulStreamTurnBuildsReplayWindow(t *testi
 	}
 }
 
-func TestBuildReplayRequestRetainsInstructionMessages(t *testing.T) {
+// 非 Responses 渠道从 Messages 生成请求：回放请求的 Messages 是这一轮的说明加完整对话。
+func TestBuildReplayRequestMessagesCarryConversation(t *testing.T) {
+	text := func(role, content string) transformerModel.Message {
+		return transformerModel.Message{Role: role, Content: transformerModel.MessageContent{Content: stringPtr(content)}}
+	}
 	state := &wsConversationState{
 		LastResponseID:    "resp_prev",
 		ReplayWindowItems: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`),
+		Transcript:        []transformerModel.Message{text("system", "old instructions"), text("user", "hello"), text("assistant", "hi")},
 	}
 	req := &transformerModel.InternalLLMRequest{
 		Model:              "gpt-4o",
 		PreviousResponseID: stringPtr("resp_prev"),
-		Messages: []transformerModel.Message{
-			{Role: "system", Content: transformerModel.MessageContent{Content: stringPtr("keep system")}},
-			{Role: "developer", Content: transformerModel.MessageContent{Content: stringPtr("keep developer")}},
-			{Role: "user", Content: transformerModel.MessageContent{Content: stringPtr("drop from messages")}},
-		},
+		Messages:           []transformerModel.Message{text("system", "new instructions"), text("developer", "keep developer"), text("user", "again")},
 	}
 
 	replayed := state.BuildReplayRequest(req)
 	if replayed == nil {
 		t.Fatalf("expected replay request to be built")
 	}
-	if len(replayed.Messages) != 2 {
-		t.Fatalf("expected replay request to retain only instruction messages, got %#v", replayed.Messages)
+	var got []string
+	for _, msg := range replayed.Messages {
+		got = append(got, msg.Role+":"+*msg.Content.Content)
 	}
-	if replayed.Messages[0].Role != "system" || replayed.Messages[1].Role != "developer" {
-		t.Fatalf("expected replay instruction ordering to be preserved, got %#v", replayed.Messages)
-	}
-}
-
-func TestRequestContainsToolOutputs(t *testing.T) {
-	if requestContainsToolOutputs(nil) {
-		t.Fatalf("expected nil request to not contain tool outputs")
-	}
-	if requestContainsToolOutputs(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "user"}}}) {
-		t.Fatalf("expected plain user request to not contain tool outputs")
-	}
-	if !requestContainsToolOutputs(&transformerModel.InternalLLMRequest{Messages: []transformerModel.Message{{Role: "tool", ToolCallID: stringPtr("call_123")}}}) {
-		t.Fatalf("expected tool output request to be detected")
+	want := "system:new instructions | developer:keep developer | user:hello | assistant:hi | user:again"
+	if strings.Join(got, " | ") != want {
+		t.Fatalf("replay messages = %q, want %q", strings.Join(got, " | "), want)
 	}
 }
 
