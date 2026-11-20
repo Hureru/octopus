@@ -180,9 +180,11 @@ func processWSResponseCreate(
 	originalRequest := cloneInternalRequest(internalRequest)
 	// 续传只发一次：直接把“存档 + 新输入”拼成不带 previous_response_id 的完整请求。
 	executionRequest := originalRequest
+	relayBody := bodyBytes // 同协议直通时发给上游的原始请求
 	if replayState != nil {
 		if replayed := replayState.BuildReplayRequest(originalRequest); replayed != nil {
 			executionRequest = replayed
+			relayBody = buildRawReplayBody(bodyBytes, replayed.OpenAIRawInputItems())
 		} else {
 			replayState = nil
 			preferredSticky = nil
@@ -218,6 +220,7 @@ func processWSResponseCreate(
 		return conversationState
 	}
 	defer req.metrics.DropLive()
+	req.rawBody = relayBody
 	if replayState != nil {
 		req.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 	}
@@ -410,6 +413,9 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 
 	var lastErr error
 	var lastResult attemptResult
+	// 和 HTTP 入站一致：请求里有转换不了的原生工具或条目时，只能走 OpenAI Responses 渠道
+	nativeRequired := req.internalRequest.HasOpenAIResponsesPassthrough()
+	nativeChannelFound := false
 
 	for req.iter.Next() {
 		select {
@@ -429,6 +435,13 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		if !channel.Enabled {
 			req.iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
 			continue
+		}
+		if nativeRequired {
+			if channel.Type != outbound.OutboundTypeOpenAIResponse {
+				req.iter.Skip(channel.ID, 0, channel.Name, "openai responses passthrough required")
+				continue
+			}
+			nativeChannelFound = true
 		}
 
 		outAdapter := outbound.Get(channel.Type)
@@ -520,6 +533,12 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		lastResult = result
 	}
 
+	if nativeRequired && !nativeChannelFound {
+		return wsRelayResult{
+			Err:         fmt.Errorf("openai responses native tools require an openai responses channel"),
+			PublicError: &wsPublicError{Status: 400, Code: "invalid_request", Message: "当前请求包含 OpenAI Responses 原生工具，仅支持 OpenAI Responses 通道直通"},
+		}
+	}
 	if publicErr, ok := classifyWSPublicError(lastErr, lastResult.StatusCode); ok {
 		return wsRelayResult{ResetConversation: publicErr.ResetConversation, Err: lastErr, PublicError: &publicErr}
 	}

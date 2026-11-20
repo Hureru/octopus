@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -185,6 +186,21 @@ func wsIngressInputTexts(t *testing.T, request map[string]json.RawMessage) []str
 	return texts
 }
 
+// wsIngressSameJSON 按内容比较 JSON：转发时键的顺序可以变，内容不能变。
+func wsIngressSameJSON(t *testing.T, what string, got json.RawMessage, want string) {
+	t.Helper()
+	var gotValue, wantValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("%s is not JSON: %s", what, got)
+	}
+	if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
+		t.Fatalf("bad expectation for %s: %v", what, err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("%s = %s, want %s", what, got, want)
+	}
+}
+
 func wsIngressUserItem(text string) string {
 	return fmt.Sprintf(`{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}`, text)
 }
@@ -338,5 +354,82 @@ func TestContinuationOnChatChannelCarriesConversation(t *testing.T) {
 				t.Fatalf("third turn messages = %q, want %q", strings.Join(got, " | "), want)
 			}
 		})
+	}
+}
+
+// 同协议渠道全程用原始 JSON：内部结构不认识的工具、字段和输出条目都不能丢。
+func TestWSIngressKeepsRawRequestAndOutput(t *testing.T) {
+	const (
+		customTool   = `{"type":"custom","name":"apply_patch","description":"patch files","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}}`
+		customCall   = `{"id":"ctc_1","type":"custom_tool_call","status":"completed","call_id":"call_1","name":"apply_patch","input":"*** Begin Patch"}`
+		customOutput = `{"type":"custom_tool_call_output","call_id":"call_1","output":"done"}`
+		extra        = `"client_metadata":{"origin":"test"},"tools":[` + customTool + `],`
+	)
+	env := newWSIngressEnv(t, func(n int, _ []byte, w http.ResponseWriter, _ *http.Request) {
+		// 有些上游的结束事件里 output 是空的，条目只出现在 output_item.done 里
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_%d\",\"object\":\"response\",\"model\":\"gpt-4o\",\"status\":\"in_progress\",\"output\":[]}}\n\n", n)
+		fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":%s}\n\n", customCall)
+		fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_%d\",\"object\":\"response\",\"model\":\"gpt-4o\",\"status\":\"completed\",\"output\":[]}}\n\n", n)
+	})
+
+	firstID := env.mustComplete(wsIngressCreate(extra, wsIngressUserItem("patch it")))
+	env.mustComplete(wsIngressCreate(extra+fmt.Sprintf(`"previous_response_id":%q,`, firstID), customOutput))
+
+	requests := env.upstreamRequests()
+	if len(requests) != 2 {
+		t.Fatalf("expected one upstream request per turn, got %d requests", len(requests))
+	}
+	for i, request := range requests {
+		wsIngressSameJSON(t, fmt.Sprintf("request %d tools", i+1), request["tools"], "["+customTool+"]")
+		wsIngressSameJSON(t, fmt.Sprintf("request %d client_metadata", i+1), request["client_metadata"], `{"origin":"test"}`)
+	}
+	wsIngressSameJSON(t, "continuation input", requests[1]["input"],
+		"["+wsIngressUserItem("patch it")+","+customCall+","+customOutput+"]")
+}
+
+// 带原生工具的请求只能走 OpenAI Responses 渠道，不能被转换成别的协议后丢掉工具。
+func TestWSIngressNativeToolsNeedResponsesChannel(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	chatType := outbound.OutboundTypeOpenAIChat
+	if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: env.channel.ID, Type: &chatType}, env.ctx); err != nil {
+		t.Fatalf("ChannelUpdate failed: %v", err)
+	}
+
+	events, err := env.turn(10*time.Second, wsIngressCreate(`"tools":[{"type":"custom","name":"apply_patch"}],`, wsIngressUserItem("hello")))
+	if err != nil {
+		t.Fatalf("turn failed after %d events: %v", len(events), err)
+	}
+	if last := events[len(events)-1]; last["type"] != "error" || last["status"] != float64(http.StatusBadRequest) {
+		t.Fatalf("expected a 400 error event, got %v", last)
+	}
+	if requests := env.upstreamRequests(); len(requests) != 0 {
+		t.Fatalf("expected the chat channel to be skipped, got %d upstream requests", len(requests))
+	}
+}
+
+// HTTP 入站的回放也用原始请求：续传字段去掉，其余字段原样保留。
+func TestHTTPReplayKeepsRawRequestFields(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	const extra = `"stream":true,"client_metadata":{"origin":"test"},`
+
+	if first := env.post(wsIngressCreate(extra, wsIngressUserItem("first"))); first.Code != http.StatusOK {
+		t.Fatalf("first turn status = %d, body %s", first.Code, first.Body.String())
+	}
+	if second := env.post(wsIngressCreate(extra+`"previous_response_id":"resp_1",`, wsIngressUserItem("second"))); second.Code != http.StatusOK {
+		t.Fatalf("second turn status = %d, body %s", second.Code, second.Body.String())
+	}
+
+	requests := env.upstreamRequests()
+	if len(requests) != 2 {
+		t.Fatalf("expected one upstream request per turn, got %d requests", len(requests))
+	}
+	if _, ok := requests[1]["previous_response_id"]; ok {
+		t.Fatalf("replay must not send previous_response_id upstream: %s", requests[1]["previous_response_id"])
+	}
+	wsIngressSameJSON(t, "replay client_metadata", requests[1]["client_metadata"], `{"origin":"test"}`)
+	got := strings.Join(wsIngressInputTexts(t, requests[1]), " | ")
+	if want := "message:first | message:answer 1 | message:second"; got != want {
+		t.Fatalf("replay input = %q, want %q", got, want)
 	}
 }

@@ -87,6 +87,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	// 当 HTTP 请求携带 previous_response_id 时，尝试从本地加载上一次成功的 replay 状态，
 	// 优先路由到同一渠道/key，并将请求转为自包含形式（合并历史，移除 previous_response_id）。
 	var responsesReplayState *wsConversationState
+	relayBody := rawBody // 同协议直通时发给上游的原始请求
 	if inboundType == inbound.InboundTypeOpenAIResponse && internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 		if prevID := internalRequest.OpenAIPreviousResponseID(); prevID != "" {
 			responsesReplayState = resolveResponsesReplayState(apiKeyID, group.ID, requestModel, internalRequest)
@@ -97,6 +98,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				// BuildReplayRequest 返回 nil 表示合并失败，应保留原始请求
 				if replayed := responsesReplayState.BuildReplayRequest(internalRequest); replayed != nil {
 					internalRequest = replayed
+					relayBody = buildRawReplayBody(rawBody, replayed.OpenAIRawInputItems())
 					log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
 				} else {
 					log.Warnf("HTTP replay history merge failed (apikey=%d, group=%d, model=%s, previous_response_id=%s), keeping original request",
@@ -157,7 +159,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		groupID:         group.ID,
 		groupSessionTTL: group.SessionKeepTime,
 		iter:            iter,
-		rawBody:         rawBody,
+		rawBody:         relayBody,
 		heartbeat:       hb,
 	}
 
@@ -752,21 +754,12 @@ func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *ws
 }
 
 // forwardViaHTTP forwards the request using traditional HTTP.
+// 同协议渠道（如 Anthropic→Anthropic、Responses→Responses）直接转发原始请求，只改 model。
 func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
-	// Check for passthrough capability using interface
 	if pt, ok := ra.outAdapter.(model.PassthroughCapable); ok &&
 		len(ra.rawBody) > 0 &&
 		pt.CanPassthrough(ra.internalRequest.RawAPIFormat) {
-		// Additional checks for OpenAI Responses edge cases
-		if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
-			if ra.c == nil || ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
-				// Fall through to standard path
-			} else {
-				return ra.forwardViaHTTPPassthrough(ctx, pt)
-			}
-		} else {
-			return ra.forwardViaHTTPPassthrough(ctx, pt)
-		}
+		return ra.forwardViaHTTPPassthrough(ctx, pt)
 	}
 
 	return ra.forwardViaHTTPStandard(ctx)
@@ -1160,6 +1153,12 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 	// Buffer for raw stream (for metrics collection)
 	var rawStreamBuf bytes.Buffer
 
+	// WS 客户端收不到 SSE 注释，心跳字节还会落进被切开的半行中间
+	heartbeatInterval := streamHeartbeatInterval()
+	if ra.c == nil {
+		heartbeatInterval = 0
+	}
+
 	// Create StreamProcessor
 	processor := stream.NewStreamProcessor(stream.StreamConfig{
 		Source:            stream.NewRawSource(response.Body, 32*1024),
@@ -1167,7 +1166,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 		Writer:            ra.getStreamWriter(),
 		Context:           ctx,
 		FirstTokenTimeout: firstTokenTimeout,
-		HeartbeatInterval: streamHeartbeatInterval(),
+		HeartbeatInterval: heartbeatInterval,
 		BufferRawStream:   true,
 		TerminalEvents:    cfg.TerminalEvents,
 		OnFirstToken: func() {
@@ -1183,6 +1182,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 
 			// Collect passthrough metrics
 			ra.collectPassthroughMetrics(ctx, rawStream)
+			if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+				ra.rawOutputItems = collectRawResponsesOutputItems(rawStream)
+			}
 
 			// Collect response if configured
 			if cfg.CollectMetrics {
@@ -1368,6 +1370,9 @@ func (ra *relayAttempt) collectResponse() {
 	if internalResponse == nil {
 		log.Debugf("collectResponse: internal response is nil (stream may not be complete)")
 		return
+	}
+	if len(ra.rawOutputItems) > 0 {
+		internalResponse.RawResponsesOutputItems = ra.rawOutputItems
 	}
 
 	actualModel := strings.TrimSpace(internalResponse.Model)
