@@ -217,6 +217,12 @@ func processWSResponseCreate(
 		return replayState
 	}
 	if prewarm {
+		if replayState == nil && requestedPreviousResponseID != "" {
+			// 接不上存档的预热不能在本地应答：下一轮会带着预热 ID 来，而它前面的历史本地没有。
+			writeWSError(ctx, conn, 409, "previous_response_not_found",
+				fmt.Sprintf("Previous response with id '%s' not found.", requestedPreviousResponseID))
+			return conversationState
+		}
 		// 在本地应答，不占用上游。输入记进存档：下一轮带着预热 ID 来时，拼成完整请求发给上游。
 		prewarmID, err := writeWSPrewarmAck(ctx, conn, requestModel)
 		if err != nil {

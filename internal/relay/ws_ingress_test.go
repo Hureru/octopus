@@ -290,19 +290,29 @@ func TestWSIngressFullRequestIsNotMergedWithStoredTurns(t *testing.T) {
 }
 
 func TestWSIngressUnknownPreviousResponseIDIsReported(t *testing.T) {
-	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	for name, tc := range map[string]struct {
+		extra            string
+		upstreamRequests int
+	}{
+		"普通请求原样转发一次，上游说找不到":   {`"previous_response_id":"resp_unknown",`, 1},
+		"预热不在本地应答：它前面的历史本地没有": {`"previous_response_id":"resp_unknown","generate":false,`, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newWSIngressEnv(t, wsIngressStatelessUpstream)
 
-	events, err := env.turn(10*time.Second, wsIngressCreate(`"previous_response_id":"resp_unknown",`, wsIngressUserItem("hello")))
-	if err != nil {
-		t.Fatalf("turn failed after %d events: %v", len(events), err)
-	}
-	last := events[len(events)-1]
-	errorBody, _ := last["error"].(map[string]any)
-	if last["type"] != "error" || errorBody["code"] != "previous_response_not_found" {
-		t.Fatalf("expected previous_response_not_found error event, got %v", last)
-	}
-	if requests := env.upstreamRequests(); len(requests) != 1 {
-		t.Fatalf("expected the request to be forwarded once, got %d requests", len(requests))
+			events, err := env.turn(10*time.Second, wsIngressCreate(tc.extra, wsIngressUserItem("hello")))
+			if err != nil {
+				t.Fatalf("turn failed after %d events: %v", len(events), err)
+			}
+			last := events[len(events)-1]
+			errorBody, _ := last["error"].(map[string]any)
+			if len(events) != 1 || last["type"] != "error" || errorBody["code"] != "previous_response_not_found" {
+				t.Fatalf("expected only a previous_response_not_found error event, got %v", events)
+			}
+			if requests := env.upstreamRequests(); len(requests) != tc.upstreamRequests {
+				t.Fatalf("expected %d upstream requests, got %d", tc.upstreamRequests, len(requests))
+			}
+		})
 	}
 }
 
