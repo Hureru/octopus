@@ -74,7 +74,9 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	}
 
 	engine := gin.New()
+	handlerDone := make(chan struct{})
 	engine.GET("/v1/responses", func(c *gin.Context) {
+		defer close(handlerDone)
 		c.Set("api_key_id", 77)
 		HandleWSResponse(c)
 	})
@@ -86,7 +88,15 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 		t.Fatalf("ws dial failed: %v", err)
 	}
 	client.SetReadLimit(1 << 20)
-	t.Cleanup(func() { client.CloseNow() })
+	// 等处理函数退出再做后面的清理：客户端读到结束事件之后它还在记账，不能和重置熔断器、关数据库同时跑
+	t.Cleanup(func() {
+		client.CloseNow()
+		select {
+		case <-handlerDone:
+		case <-time.After(5 * time.Second):
+			t.Errorf("HandleWSResponse did not return after the client closed the connection")
+		}
+	})
 	env.client = client
 	return env
 }
@@ -306,7 +316,7 @@ func TestWSIngressUnknownPreviousResponseIDIsReported(t *testing.T) {
 			}
 			last := events[len(events)-1]
 			errorBody, _ := last["error"].(map[string]any)
-			if len(events) != 1 || last["type"] != "error" || errorBody["code"] != "previous_response_not_found" {
+			if len(events) != 1 || last["type"] != "error" || errorBody["code"] != "previous_response_not_found" || errorBody["type"] != "invalid_request_error" {
 				t.Fatalf("expected only a previous_response_not_found error event, got %v", events)
 			}
 			if requests := env.upstreamRequests(); len(requests) != tc.upstreamRequests {
@@ -492,5 +502,130 @@ func TestWSIngressPrewarmIsAnsweredLocally(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// 回合失败时客户端一定收到 error 事件：WS 上没有“流关闭”这个信号，不发的话客户端会一直等。
+func TestWSIngressFailedTurnEndsWithErrorEvent(t *testing.T) {
+	full := wsIngressSSE(1)
+	withoutTerminal := full[:strings.Index(full, "event: response.completed")]
+	for name, tc := range map[string]struct {
+		firstReply      func(w http.ResponseWriter)
+		status          float64
+		code, errorType string
+		partialOutput   bool
+	}{
+		"上游中途断开": {func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, withoutTerminal[:strings.Index(withoutTerminal, "event: response.output_item.done")])
+			w.(http.Flusher).Flush()
+			panic(http.ErrAbortHandler)
+		}, 502, "upstream_stream_interrupted", "server_error", true},
+		"上游的流没有结束事件就结束了": {func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, withoutTerminal)
+		}, 502, "upstream_stream_interrupted", "server_error", true},
+		"上游限流": {func(w http.ResponseWriter) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":{"message":"Rate limit reached","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)
+		}, 429, "upstream_rate_limited", "rate_limit_error", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newWSIngressEnv(t, func(n int, body []byte, w http.ResponseWriter, r *http.Request) {
+				if n == 1 {
+					tc.firstReply(w)
+					return
+				}
+				wsIngressStatelessUpstream(n, body, w, r)
+			})
+
+			request := wsIngressCreate("", wsIngressUserItem("hello"))
+			events, err := env.turn(3*time.Second, request)
+			if err != nil {
+				t.Fatalf("failed turn got no terminal event after %d events: %v", len(events), err)
+			}
+			last := events[len(events)-1]
+			errorBody, _ := last["error"].(map[string]any)
+			if last["type"] != "error" || last["status"] != tc.status || errorBody["code"] != tc.code || errorBody["type"] != tc.errorType {
+				t.Fatalf("last event = %v, want an error event with %v %s %s", last, tc.status, tc.code, tc.errorType)
+			}
+			if tc.partialOutput != (len(events) > 1) {
+				t.Fatalf("partial output before the error = %t, want %t (%d events)", len(events) > 1, tc.partialOutput, len(events))
+			}
+			// 连接还能用：把同一个请求重发一次，能完成
+			env.mustComplete(request)
+		})
+	}
+}
+
+// 连接到了时限：客户端先收到 error 事件（Codex 认识这个码，会换一条新连接），然后连接正常关闭。
+func TestWSIngressConnectionLimitIsReported(t *testing.T) {
+	limit := wsClientMaxAge
+	wsClientMaxAge = 300 * time.Millisecond
+	t.Cleanup(func() { wsClientMaxAge = limit })
+
+	for name, midTurn := range map[string]bool{"空闲时": false, "回合进行中": true} {
+		t.Run(name, func(t *testing.T) {
+			env := newWSIngressEnv(t, func(_ int, _ []byte, _ http.ResponseWriter, r *http.Request) {
+				<-r.Context().Done() // 一直不回复，直到 Octopus 取消这个请求
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if midTurn {
+				if err := env.client.Write(ctx, websocket.MessageText, []byte(wsIngressCreate("", wsIngressUserItem("hello")))); err != nil {
+					t.Fatalf("write failed: %v", err)
+				}
+			}
+
+			_, data, err := env.client.Read(ctx)
+			if err != nil {
+				t.Fatalf("expected the connection limit error event, got %v", err)
+			}
+			var event struct {
+				Type  string `json:"type"`
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(data, &event) != nil || event.Type != "error" || event.Error.Code != "websocket_connection_limit_reached" {
+				t.Fatalf("expected the connection limit error event, got %s", data)
+			}
+			if _, _, err := env.client.Read(ctx); websocket.CloseStatus(err) != websocket.StatusNormalClosure {
+				t.Fatalf("expected a normal close after the error event, got %v", err)
+			}
+		})
+	}
+}
+
+// 上游自己用 response.failed 报告失败：客户端已经收到结束事件，不再补 error 事件；
+// 这个回合也不记进存档，客户端带着原来的 previous_response_id 重试时还能接上。
+func TestWSIngressUpstreamFailedTurnIsNotRecorded(t *testing.T) {
+	env := newWSIngressEnv(t, func(n int, body []byte, w http.ResponseWriter, r *http.Request) {
+		if n != 2 {
+			wsIngressStatelessUpstream(n, body, w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, status := range []string{"created", "failed"} {
+			fmt.Fprintf(w, "data: {\"type\":\"response.%s\",\"response\":{\"id\":\"resp_2\",\"object\":\"response\",\"model\":\"gpt-4o\",\"created_at\":1,\"output\":[]}}\n\n", status)
+		}
+	})
+
+	firstID := env.mustComplete(wsIngressCreate("", wsIngressUserItem("first")))
+	second := wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, firstID), wsIngressUserItem("second"))
+	events, err := env.turn(3*time.Second, second)
+	if err != nil || len(events) != 2 || events[1]["type"] != "response.failed" {
+		t.Fatalf("expected the upstream's response.created and response.failed, got %v (err=%v)", events, err)
+	}
+	// 重试：如果上一轮多发了 error 事件，这里会先读到它；如果失败的回合进了存档，这里接不上
+	env.mustComplete(second)
+
+	requests := env.upstreamRequests()
+	if len(requests) != 3 {
+		t.Fatalf("expected one upstream request per turn, got %d requests", len(requests))
+	}
+	if got, want := strings.Join(wsIngressInputTexts(t, requests[2]), " | "), "message:first | message:answer 1 | message:second"; got != want {
+		t.Fatalf("retried request input = %q, want %q", got, want)
 	}
 }

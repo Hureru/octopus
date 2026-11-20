@@ -243,10 +243,9 @@ func (ra *relayAttempt) handleWSPassthroughStream(ctx context.Context, pc *poole
 
 func writeWSPassthroughDownstream(ctx context.Context, writer StreamWriter, out []byte) error {
 	if wsWriter, ok := writer.(*WSStreamWriter); ok {
-		writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
-		writeErr := wsWriter.conn.Write(writeCtx, websocket.MessageText, out)
-		cancel()
-		return writeErr
+		wsWriter.mu.Lock()
+		defer wsWriter.mu.Unlock()
+		return wsWriter.sendFrame(ctx, out)
 	}
 	if _, writeErr := writer.Write([]byte("data: " + string(out) + "\n\n")); writeErr != nil {
 		return writeErr

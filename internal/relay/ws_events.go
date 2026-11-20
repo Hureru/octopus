@@ -9,14 +9,20 @@ import (
 	"github.com/coder/websocket"
 )
 
+// writeWSFrame 给客户端发一帧文本，只受 wsWriteTimeout 限制。
+// 不跟着调用方的 ctx 取消：ctx 过期时（比如连接到了时限）这个库会直接断开连接，最后的错误事件就发不出去了。
+func writeWSFrame(ctx context.Context, conn *websocket.Conn, payload []byte) error {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wsWriteTimeout)
+	defer cancel()
+	return conn.Write(writeCtx, websocket.MessageText, payload)
+}
+
 func writeWSEvent(ctx context.Context, conn *websocket.Conn, event interface{}) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal ws event: %w", err)
 	}
-	writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
-	defer cancel()
-	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+	if err := writeWSFrame(ctx, conn, data); err != nil {
 		return fmt.Errorf("write ws event: %w", err)
 	}
 	return nil
