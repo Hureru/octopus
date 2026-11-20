@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,10 +19,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	wsClientMaxAge    = 60 * time.Minute
-	wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
-)
+const wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
+
+// 是变量，测试里要改短
+var wsClientMaxAge = 60 * time.Minute
 
 type wsRelayResult struct {
 	Success           bool
@@ -57,21 +58,23 @@ func HandleWSResponse(c *gin.Context) {
 	downstreamSessionID := fmt.Sprintf("ws_%d", time.Now().UnixNano())
 	var conversationState *wsConversationState
 
-	// Message loop
-	for {
-		select {
-		case <-ctx.Done():
+	// 连接到了时限：先告诉客户端，再正常关闭。进行中的回合由 ctx 取消。
+	stop := context.AfterFunc(ctx, func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			writeWSError(ctx, conn, 400, "websocket_connection_limit_reached",
 				"Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.")
 			conn.Close(websocket.StatusNormalClosure, "connection limit reached")
-			return
-		default:
 		}
+	})
+	defer stop()
 
-		msgType, data, err := conn.Read(ctx)
+	// Message loop
+	for {
+		// 读客户端不能用带时限的 ctx：时限一到这个库会直接断开连接，上面的通知就发不出去了
+		msgType, data, err := conn.Read(c.Request.Context())
 		if err != nil {
 			closeStatus := websocket.CloseStatus(err)
-			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway {
+			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway || ctx.Err() != nil {
 				log.Debugf("ws client disconnected normally (apikey=%d)", apiKeyID)
 			} else {
 				log.Warnf("ws client read error (apikey=%d): %v", apiKeyID, err)
@@ -462,14 +465,26 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 	return wsRelayResult{Err: lastErr}
 }
 
+// finalizeWSRelay 记录回合的结果，并保证客户端收到结束事件：
+// WS 上没有“流关闭”这个信号，不发的话客户端会一直等。
 func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, result wsRelayResult) wsRelayResult {
+	terminal := req.streamWriter.(*WSStreamWriter).terminalEvent()
+	if result.Success && terminal == "" {
+		result = wsRelayResult{Written: true, Err: errors.New("upstream stream ended without a terminal event")}
+	}
+	req.metrics.SaveWithChannelStats(ctx, result.Success, result.Err, req.iter.Attempts(), false)
 	if result.Success {
-		req.metrics.SaveWithChannelStats(ctx, true, nil, req.iter.Attempts(), false)
+		// 上游自己报告失败（response.failed、error）时客户端已经收到了，但这个回合不能记进存档
+		result.Success = terminal == "response.completed" || terminal == "response.incomplete"
 		return result
 	}
-
-	req.metrics.SaveWithChannelStats(ctx, false, result.Err, req.iter.Attempts(), false)
-	if result.Canceled || result.Written {
+	if terminal != "" || ctx.Err() != nil {
+		// 结束事件已经发过了；或者连接到了时限，由 HandleWSResponse 通知
+		return result
+	}
+	if result.Written {
+		// 已经输出了一部分，不能再换渠道重来。客户端已经断开时这一帧发不出去，没有影响
+		writeWSError(ctx, conn, 502, "upstream_stream_interrupted", "上游在回复完成前中断了，请重试")
 		return result
 	}
 	if result.PublicError != nil {
@@ -504,11 +519,18 @@ func wsRequestExplicitlyRequestsContinuation(reqBody map[string]json.RawMessage)
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {
+	errorType := "invalid_request_error"
+	switch {
+	case status == 429:
+		errorType = "rate_limit_error"
+	case status >= 500:
+		errorType = "server_error"
+	}
 	errEvent := map[string]interface{}{
 		"type":   "error",
 		"status": status,
 		"error": map[string]interface{}{
-			"type":    "invalid_request_error",
+			"type":    errorType,
 			"code":    code,
 			"message": message,
 		},

@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -13,11 +14,12 @@ import (
 // WSStreamWriter implements StreamWriter for WebSocket clients.
 // It converts SSE "data: {...}\n\n" formatted bytes to bare JSON WebSocket text frames.
 type WSStreamWriter struct {
-	conn    *websocket.Conn
-	ctx     context.Context
-	written bool
-	pending []byte // 还没收到行尾的半行
-	mu      sync.Mutex
+	conn     *websocket.Conn
+	ctx      context.Context
+	written  bool
+	terminal string // 已经发给客户端的结束事件的类型，空表示这个回合还没有结束事件
+	pending  []byte // 还没收到行尾的半行
+	mu       sync.Mutex
 }
 
 func NewWSStreamWriter(ctx context.Context, conn *websocket.Conn) *WSStreamWriter {
@@ -50,23 +52,38 @@ func (w *WSStreamWriter) Write(data []byte) (int, error) {
 
 	// Extract JSON data from SSE format "data: {...}\n\n"
 	lines := extractSSEDataLines(complete)
-	wroteFrame := false
 	for _, line := range lines {
 		if len(line) == 0 {
 			continue
 		}
-		writeCtx, cancel := context.WithTimeout(w.ctx, wsWriteTimeout)
-		err := w.conn.Write(writeCtx, websocket.MessageText, line)
-		cancel()
-		if err != nil {
+		if err := w.sendFrame(w.ctx, line); err != nil {
 			return 0, err
 		}
-		wroteFrame = true
-	}
-	if wroteFrame {
-		w.written = true
 	}
 	return len(data), nil
+}
+
+// sendFrame 发一帧，并记下它是不是回合的结束事件。调用时要持有 mu。
+func (w *WSStreamWriter) sendFrame(ctx context.Context, frame []byte) error {
+	if err := writeWSFrame(ctx, w.conn, frame); err != nil {
+		return err
+	}
+	w.written = true
+	var event struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(frame, &event)
+	if _, ok := responsesPassthroughTerminalEvents[event.Type]; ok {
+		w.terminal = event.Type
+	}
+	return nil
+}
+
+// terminalEvent 返回已经发给客户端的结束事件的类型，还没有时返回空。
+func (w *WSStreamWriter) terminalEvent() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.terminal
 }
 
 func (w *WSStreamWriter) Flush() {
