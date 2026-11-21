@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/coder/websocket"
@@ -41,9 +43,11 @@ type wsIngressWSRequest struct {
 type wsIngressEnv struct {
 	t       *testing.T
 	ctx     context.Context
+	apiKey  *model.APIKey // 客户端用的 Key，就是 wsIngressClientHeaders 里那把
 	channel *model.Channel
 	group   *model.Group
 	baseURL string
+	url     string // 客户端连 Octopus 的地址
 	client  *websocket.Conn
 
 	mu       sync.Mutex
@@ -64,7 +68,8 @@ var wsIngressClientHeaders = http.Header{
 	"Authorization": {"Bearer sk-octopus-client-key"},
 }
 
-func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
+// keyOptions 在建客户端的 Key 之前改它（比如加上每分钟次数的限制）。
+func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream, keyOptions ...func(*model.APIKey)) *wsIngressEnv {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	ctx := setupRelayTestDB(t)
@@ -96,18 +101,28 @@ func newWSIngressEnv(t *testing.T, upstream wsIngressUpstream) *wsIngressEnv {
 	}
 	env.channel = env.addChannel("upstream-key")
 
+	env.apiKey = &model.APIKey{Name: "ws-ingress-key", APIKey: "sk-octopus-client-key", Enabled: true}
+	for _, option := range keyOptions {
+		option(env.apiKey)
+	}
+	if err := op.APIKeyCreate(env.apiKey, ctx); err != nil {
+		t.Fatalf("APIKeyCreate failed: %v", err)
+	}
+	// 每分钟次数按 Key ID 记在内存里，而每个测试的 Key 都是 ID 1：清掉前面的测试留下的
+	op.RateLimitDel(env.apiKey.ID)
+
 	engine := gin.New()
 	handlerDone := make(chan struct{})
-	engine.GET("/v1/responses", func(c *gin.Context) {
+	// 握手走真实的鉴权中间件，和线上一样
+	engine.GET("/v1/responses", middleware.APIKeyAuth(), func(c *gin.Context) {
 		defer close(handlerDone)
-		c.Set("api_key_id", 77)
 		HandleWSResponse(c)
 	})
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)
 
-	client, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses",
-		&websocket.DialOptions{HTTPHeader: wsIngressClientHeaders})
+	env.url = "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/responses"
+	client, _, err := websocket.Dial(context.Background(), env.url, &websocket.DialOptions{HTTPHeader: wsIngressClientHeaders})
 	if err != nil {
 		t.Fatalf("ws dial failed: %v", err)
 	}
@@ -279,7 +294,7 @@ func (e *wsIngressEnv) mustComplete(payload string) string {
 func (e *wsIngressEnv) post(body string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Set("api_key_id", 77)
+	c.Set("api_key_id", e.apiKey.ID)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	Handler(inbound.InboundTypeOpenAIResponse, c)
@@ -1046,5 +1061,110 @@ func TestHTTPIngressContinuationIsForwardedOverHTTP(t *testing.T) {
 		if got, want := strings.Join(wsIngressInputTexts(t, requests[i]), " | "), fmt.Sprintf("message:turn %d", i+1); got != want {
 			t.Fatalf("request %d input = %q, want %q", i+1, got, want)
 		}
+	}
+}
+
+// wsIngressRejected 跑一个回合，要求只收到一条这样的 error 事件，并返回它。
+func (e *wsIngressEnv) wsIngressRejected(payload string, status int, code string) map[string]any {
+	e.t.Helper()
+	events, err := e.turn(5*time.Second, payload)
+	if err != nil {
+		e.t.Fatalf("turn failed after %d events: %v", len(events), err)
+	}
+	last := events[len(events)-1]
+	errorBody, _ := last["error"].(map[string]any)
+	if len(events) != 1 || last["type"] != "error" || last["status"] != float64(status) || errorBody["code"] != code {
+		e.t.Fatalf("expected only a %d %s error event, got %v", status, code, events)
+	}
+	return last
+}
+
+// 一条连接最长能开 60 分钟。Key 在这期间被停用、改了可用模型、被删掉，下一条消息就要生效，
+// 和 HTTP 每个请求都检查一样。被拒绝的消息不发给上游，连接还能接着用。
+func TestWSIngressChecksTheKeyOnEveryMessage(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	request := wsIngressCreate("", wsIngressUserItem("hello"))
+	updateKey := func(change func(*model.APIKey)) {
+		t.Helper()
+		key := *env.apiKey
+		change(&key)
+		if err := op.APIKeyUpdate(&key, env.ctx); err != nil {
+			t.Fatalf("APIKeyUpdate failed: %v", err)
+		}
+	}
+
+	env.mustComplete(request)
+
+	updateKey(func(key *model.APIKey) { key.Enabled = false })
+	env.wsIngressRejected(request, http.StatusUnauthorized, "auth.api_key_disabled")
+	// 预热在本地应答，但也要先过这一关
+	env.wsIngressRejected(wsIngressCreate(`"generate":false,`, wsIngressUserItem("hello")), http.StatusUnauthorized, "auth.api_key_disabled")
+
+	updateKey(func(key *model.APIKey) { key.ExpireAt = time.Now().Add(-time.Minute).Unix() })
+	env.wsIngressRejected(request, http.StatusUnauthorized, "auth.api_key_expired")
+
+	updateKey(func(key *model.APIKey) { key.SupportedModels = "another-model" })
+	env.wsIngressRejected(request, http.StatusBadRequest, "invalid_request")
+
+	// 费用上限：先留出余量，再把用量记到超过它
+	used := op.StatsAPIKeyGet(env.apiKey.ID).StatsMetrics
+	updateKey(func(key *model.APIKey) { key.MaxCost = used.InputCost + used.OutputCost + 1 })
+	env.mustComplete(request)
+	if err := op.StatsAPIKeyUpdate(env.apiKey.ID, model.StatsMetrics{InputCost: 2}); err != nil {
+		t.Fatalf("StatsAPIKeyUpdate failed: %v", err)
+	}
+	env.wsIngressRejected(request, http.StatusUnauthorized, "auth.api_key_cost_exceeded")
+
+	updateKey(func(*model.APIKey) {}) // 改回原样
+	env.mustComplete(request)
+
+	if err := op.APIKeyDelete(env.apiKey.ID, env.ctx); err != nil {
+		t.Fatalf("APIKeyDelete failed: %v", err)
+	}
+	env.wsIngressRejected(request, http.StatusUnauthorized, "auth.invalid_token")
+
+	if n := len(env.upstreamRequests()); n != 3 {
+		t.Fatalf("expected only the three accepted turns to reach the upstream, got %d requests", n)
+	}
+}
+
+// 每分钟次数：握手时算的那一次抵掉连接上的第一个请求，预热不发给上游所以不算。
+// 这样 WS 和 HTTP 一样，一分钟正好能发 MaxRPM 个请求。
+// 超了的那一条收到 429，事件里带 retry-after（Codex 像读 HTTP 响应头一样读它）。
+func TestWSIngressCountsRequestsTowardsTheRateLimit(t *testing.T) {
+	// 计数在每个自然分钟开始时清零：离整分钟太近就等一下，免得中途清零
+	if second := time.Now().Second(); second >= 57 {
+		time.Sleep(time.Duration(61-second) * time.Second)
+	}
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream, func(key *model.APIKey) { key.MaxRPM = 2 })
+	request := wsIngressCreate("", wsIngressUserItem("hello"))
+
+	if events, err := env.turn(5*time.Second, wsIngressCreate(`"generate":false,`, wsIngressUserItem("hello"))); err != nil || events[len(events)-1]["type"] != "response.completed" {
+		t.Fatalf("expected the prewarm to be answered, got %v (err=%v)", events, err)
+	}
+	env.mustComplete(request)
+	env.mustComplete(request)
+	rejected := env.wsIngressRejected(request, http.StatusTooManyRequests, "auth.api_key_rate_limited")
+
+	if errorBody, _ := rejected["error"].(map[string]any); errorBody["type"] != "rate_limit_error" {
+		t.Errorf("error type = %v, want rate_limit_error", errorBody["type"])
+	}
+	headers, _ := rejected["headers"].(map[string]any)
+	retryAfter, _ := headers["retry-after"].(string)
+	if seconds, err := strconv.Atoi(retryAfter); err != nil || seconds < 1 || seconds > 60 {
+		t.Errorf("headers.retry-after = %q, want the seconds until the next minute", retryAfter)
+	}
+	if n := len(env.upstreamRequests()); n != 2 {
+		t.Fatalf("expected exactly MaxRPM=2 requests to reach the upstream, got %d", n)
+	}
+
+	// 这时再握手也被拒绝。握手和 HTTP 请求走的是同一个中间件：429 加 Retry-After 响应头
+	conn, response, err := websocket.Dial(context.Background(), env.url, &websocket.DialOptions{HTTPHeader: wsIngressClientHeaders})
+	if err == nil {
+		conn.CloseNow()
+		t.Fatalf("expected a new handshake to be rejected while over the rate limit")
+	}
+	if response == nil || response.StatusCode != http.StatusTooManyRequests || response.Header.Get("Retry-After") == "" {
+		t.Fatalf("expected the handshake to fail with 429 and a Retry-After header, got %v (err=%v)", response, err)
 	}
 }

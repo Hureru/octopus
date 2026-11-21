@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
@@ -27,11 +31,11 @@ var wsClientMaxAge = 60 * time.Minute
 
 // wsClientSession 是一条客户端 WS 连接自己的东西，连接关闭时一起释放。
 type wsClientSession struct {
-	conn            *websocket.Conn
-	apiKeyID        int
-	supportedModels string
-	headers         http.Header // 握手请求的头，每个请求都带给上游
-	upstream        wsUpstream  // 这条连接独占的上游 WS，用到时才建
+	conn        *websocket.Conn
+	apiKeyID    int
+	requestSeen bool        // 这条连接上已经有过通过 Key 检查的请求（预热不算）
+	headers     http.Header // 握手请求的头，每个请求都带给上游
+	upstream    wsUpstream  // 这条连接独占的上游 WS，用到时才建
 	// 每个模型一份对话存档。
 	// shortcut: 存档大小没有上限，随对话变长，连接关闭（最长 60 分钟）才释放；有人拿它占内存时再加上限。
 	states map[string]*wsConversationState
@@ -65,11 +69,10 @@ func HandleWSResponse(c *gin.Context) {
 
 	apiKeyID := c.GetInt("api_key_id")
 	session := &wsClientSession{
-		conn:            conn,
-		apiKeyID:        apiKeyID,
-		supportedModels: c.GetString("supported_models"),
-		headers:         c.Request.Header,
-		states:          map[string]*wsConversationState{},
+		conn:     conn,
+		apiKeyID: apiKeyID,
+		headers:  c.Request.Header,
+		states:   map[string]*wsConversationState{},
 	}
 	defer session.upstream.close()
 
@@ -151,6 +154,26 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	prewarm := string(reqBody["generate"]) == "false"
 	delete(reqBody, "generate")
 
+	// 一条连接最长开 60 分钟：Key 的状态、限额和可用模型每条消息都重新查，和 HTTP 每个请求都查一样。
+	apiKey, err := op.APIKeyGet(apiKeyID, ctx)
+	if err != nil {
+		writeWSError(ctx, conn, http.StatusUnauthorized, apperror.CodeAuthInvalidToken, resp.ErrUnauthorized)
+		return
+	}
+	// 每分钟次数：握手时算过的那一次抵这条连接上的第一个请求；预热在本地应答，不算。
+	if retryAfter, err := op.APIKeyCheck(apiKey, !prewarm && s.requestSeen); err != nil {
+		event := wsErrorEvent(apperror.Status(err), apperror.Code(err), apperror.Message(err))
+		if retryAfter > 0 {
+			// 相当于 HTTP 的 Retry-After 响应头，Codex 从这里读
+			event["headers"] = map[string]string{"retry-after": strconv.Itoa(retryAfter)}
+		}
+		if err := writeWSEvent(ctx, conn, event); err != nil {
+			log.Debugf("ws error event write failed: %v", err)
+		}
+		return
+	}
+	s.requestSeen = s.requestSeen || !prewarm
+
 	// Force stream mode
 	reqBody["stream"] = json.RawMessage("true")
 
@@ -182,19 +205,9 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	}
 
 	// Check supported models
-	if s.supportedModels != "" {
-		supportedModelsArray := strings.Split(s.supportedModels, ",")
-		found := false
-		for _, m := range supportedModelsArray {
-			if m == executionRequest.Model {
-				found = true
-				break
-			}
-		}
-		if !found {
-			writeWSError(ctx, conn, 400, "invalid_request", "model not supported")
-			return
-		}
+	if apiKey.SupportedModels != "" && !slices.Contains(strings.Split(apiKey.SupportedModels, ","), executionRequest.Model) {
+		writeWSError(ctx, conn, 400, "invalid_request", "model not supported")
+		return
 	}
 
 	requestModel = executionRequest.Model
@@ -497,6 +510,12 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 }
 
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {
+	if err := writeWSEvent(ctx, conn, wsErrorEvent(status, code, message)); err != nil {
+		log.Debugf("ws error event write failed: %v", err)
+	}
+}
+
+func wsErrorEvent(status int, code, message string) map[string]any {
 	errorType := "invalid_request_error"
 	switch {
 	case status == 429:
@@ -504,17 +523,14 @@ func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, m
 	case status >= 500:
 		errorType = "server_error"
 	}
-	errEvent := map[string]interface{}{
+	return map[string]any{
 		"type":   "error",
 		"status": status,
-		"error": map[string]interface{}{
+		"error": map[string]any{
 			"type":    errorType,
 			"code":    code,
 			"message": message,
 		},
-	}
-	if err := writeWSEvent(ctx, conn, errEvent); err != nil {
-		log.Debugf("ws error event write failed: %v", err)
 	}
 }
 
