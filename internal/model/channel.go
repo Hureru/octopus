@@ -42,22 +42,21 @@ func ParseAutoGroupSettingValue(value string) (AutoGroupType, bool) {
 	return mode, mode.Valid()
 }
 
+// ChannelWSMode 是渠道的“上游 WebSocket”开关：客户端用 WS 连进来时，要不要也用 WS 连这个上游。
+// 客户端用 HTTP 连进来时不看它。
 type ChannelWSMode string
 
 const (
-	ChannelWSModeInherit     ChannelWSMode = "inherit"
-	ChannelWSModeOff         ChannelWSMode = "off"
-	ChannelWSModePassthrough ChannelWSMode = "passthrough"
-	ChannelWSModeTransform   ChannelWSMode = "transform"
+	ChannelWSModeAuto ChannelWSMode = "auto" // 优先用 WS，上游不支持时改用 HTTP
+	ChannelWSModeOff  ChannelWSMode = "off"  // 始终用 HTTP
 )
 
+// Normalize 把 off 以外的值都当成 auto：空值，以及旧版本的 inherit、passthrough、transform。
 func (m ChannelWSMode) Normalize() ChannelWSMode {
-	switch m {
-	case ChannelWSModeOff, ChannelWSModePassthrough, ChannelWSModeTransform:
-		return m
-	default:
-		return ChannelWSModeInherit
+	if m == ChannelWSModeOff {
+		return ChannelWSModeOff
 	}
+	return ChannelWSModeAuto
 }
 
 type Channel struct {
@@ -75,7 +74,7 @@ type Channel struct {
 	AutoSync      bool                  `json:"auto_sync" gorm:"default:false"`
 	AutoGroup     AutoGroupType         `json:"auto_group" gorm:"default:0"`
 	CustomHeader  []CustomHeader        `json:"custom_header" gorm:"serializer:json"`
-	WSMode        ChannelWSMode         `json:"ws_mode" gorm:"type:varchar(16);not null;default:'inherit'"`
+	WSMode        ChannelWSMode         `json:"ws_mode" gorm:"type:varchar(16);not null;default:'auto'"`
 	ParamOverride *string               `json:"param_override"`
 	ChannelProxy  *string               `json:"-" gorm:"column:channel_proxy"`
 	Stats         *StatsChannel         `json:"stats,omitempty" gorm:"foreignKey:ChannelID"`

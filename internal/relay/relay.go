@@ -508,11 +508,11 @@ func parseRequest(inboundType inbound.InboundType, c *gin.Context) ([]byte, *mod
 // forward 转发请求到上游服务
 func (ra *relayAttempt) forward() (int, error) {
 	ctx := ra.requestContext()
-	// 只有 WS 入站（upstream 不为 nil）才用 WS 连上游，而且只对同协议的渠道。
+	// 只有 WS 入站（upstream 不为 nil）才用 WS 连上游，而且只对同协议、没有关掉“上游 WebSocket”的渠道。
 	// 这个渠道现在用不了 WS 时，同一次尝试里改走 HTTP。
 	if ra.upstream != nil && ra.channel.Type == outbound.OutboundTypeOpenAIResponse &&
 		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse &&
-		shouldEnableResponsesWS(ra.channel) && effectiveResponsesWSMode(ra.channel) != responsesWSModeOff {
+		ra.channel.WSMode != dbmodel.ChannelWSModeOff {
 		if statusCode, err, handled := ra.forwardViaUpstreamWS(ctx); handled {
 			return statusCode, err
 		}

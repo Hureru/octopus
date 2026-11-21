@@ -1,30 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Activity, Globe, Link, Network, Radio, Shield, X } from 'lucide-react';
+import { Activity, Globe, Link, Network, Shield, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';
-import { toast } from '@/components/common/Toast';
-import type { ApiError } from '@/api/types';
+import { SettingKey } from '@/api/endpoints/setting';
 import { SettingCard, SettingRow, useSettingField } from './shared';
 
 // SSE 心跳间隔与流建立前首次心跳延迟统一为一个值（通常配置相同），回显以心跳间隔为准
 const SSE_MIRROR_KEYS = [SettingKey.SSEPreStreamHeartbeatDelay] as const;
-
-// enabled + defaultMode 两个 key 收敛为四个有效状态：
-// enabled=false 时 mode 无意义；enabled=true 时 mode 为渠道未覆盖时的默认值
-const WS_MODES = ['disabled', 'defaultOff', 'passthrough', 'transform'] as const;
-type WSMode = (typeof WS_MODES)[number];
-
-function toWSMode(enabled: boolean, rawMode: string): WSMode {
-    if (!enabled) return 'disabled';
-    if (rawMode === 'off') return 'defaultOff';
-    if (rawMode === 'transform') return 'transform';
-    return 'passthrough';
-}
 
 // 逗号/换行/中文逗号分隔的输入 → 去重后的 origin 列表
 function parseCorsOrigins(raw: string): string[] {
@@ -36,49 +21,6 @@ function parseCorsOrigins(raw: string): string[] {
     ));
 }
 
-function useResponsesWSMode() {
-    const t = useTranslations('setting');
-    const { data: settings } = useSettingList();
-    const setSetting = useSetSetting();
-
-    const [mode, setMode] = useState<WSMode>('disabled');
-    const initial = useRef<WSMode>('disabled');
-    const initialized = useRef(false);
-
-    useEffect(() => {
-        if (!settings || initialized.current) return;
-        const enabled = settings.find((s) => s.key === SettingKey.ResponsesWSEnabled)?.value === 'true';
-        const rawMode = settings.find((s) => s.key === SettingKey.ResponsesWSDefaultMode)?.value || 'passthrough';
-        const v = toWSMode(enabled, rawMode);
-        queueMicrotask(() => setMode(v));
-        initial.current = v;
-        initialized.current = true;
-    }, [settings]);
-
-    const change = useCallback(async (v: WSMode) => {
-        setMode(v);
-        try {
-            await setSetting.mutateAsync({
-                key: SettingKey.ResponsesWSEnabled,
-                value: v === 'disabled' ? 'false' : 'true',
-            });
-            if (v !== 'disabled') {
-                await setSetting.mutateAsync({
-                    key: SettingKey.ResponsesWSDefaultMode,
-                    value: v === 'defaultOff' ? 'off' : v,
-                });
-            }
-            toast.success(t('saved'));
-            initial.current = v;
-        } catch (error) {
-            setMode(initial.current);
-            toast.error(t('saveFailed'), { description: (error as ApiError)?.message });
-        }
-    }, [setSetting, t]);
-
-    return { mode, change };
-}
-
 export function SettingNetwork() {
     const t = useTranslations('setting');
 
@@ -86,7 +28,6 @@ export function SettingNetwork() {
     const apiBaseUrl = useSettingField(SettingKey.ApiBaseUrl);
     const cors = useSettingField(SettingKey.CORSAllowOrigins);
     const sseHeartbeat = useSettingField(SettingKey.SSEHeartbeatInterval, SSE_MIRROR_KEYS);
-    const responsesWS = useResponsesWSMode();
 
     const [corsInputValue, setCorsInputValue] = useState('');
 
@@ -225,22 +166,6 @@ export function SettingNetwork() {
                     placeholder={t('sseHeartbeat.placeholder')}
                     className="w-48 rounded-xl"
                 />
-            </SettingRow>
-
-            {/* Responses WebSocket：开关 + 默认模式收敛为单个下拉 */}
-            <SettingRow icon={Radio} label={t('responsesWS.label')} tooltip={t('responsesWS.description')}>
-                <Select value={responsesWS.mode} onValueChange={(v) => responsesWS.change(v as WSMode)}>
-                    <SelectTrigger className="w-48 rounded-xl">
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                        {WS_MODES.map((m) => (
-                            <SelectItem key={m} value={m} className="rounded-xl">
-                                {t(`responsesWS.mode.${m}`)}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
             </SettingRow>
         </SettingCard>
     );

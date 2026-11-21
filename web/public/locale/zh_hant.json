@@ -202,16 +202,6 @@
             "hint": "為空禁止跨網域，* 允許所有",
             "example": "只允許指定域名: https://example.com,https://example2.com"
         },
-        "responsesWS": {
-            "label": "OpenAI Responses WebSocket",
-            "description": "為客戶端 WebSocket /v1/responses 入站啟用上游 WebSocket。「啟用 · 預設關閉」表示能力開啟但預設不使用，渠道可單獨開啟；直通/轉換為渠道未覆蓋時的預設模式。",
-            "mode": {
-                "disabled": "禁用",
-                "defaultOff": "啟用 · 預設關閉",
-                "passthrough": "啟用 · 直通",
-                "transform": "啟用 · 轉換"
-            }
-        },
         "sseHeartbeat": {
             "label": "SSE 心跳間隔（秒）",
             "description": "同時作為流中心跳間隔與上游流建立前的首次心跳延遲；設定為 0 禁用。Cloudflare 反代場景建議 30-60 秒。",
@@ -928,11 +918,10 @@
             "autoGroupFuzzy": "模糊比對",
             "autoGroupExact": "準確比對",
             "autoGroupRegex": "正規比對",
-            "wsMode": "Responses WS 模式",
-            "wsModeInherit": "跟隨全域",
-            "wsModePassthrough": "直通",
-            "wsModeTransform": "轉換",
+            "wsMode": "上游 WebSocket",
+            "wsModeAuto": "自動（預設）",
             "wsModeOff": "關閉",
+            "wsModeHint": "自動：用戶端用 WebSocket 連線時，Octopus 也優先用 WebSocket 連線這個上游；上游不支援時自動改用 HTTP。\n關閉：這個渠道始終用 HTTP。\n用戶端用 HTTP 連線時，不受此項影響。",
             "matchRegex": "匹配正規",
             "matchRegexPlaceholder": "可選：用於匹配請求模型名稱的正規表示式",
             "remark": "備註"

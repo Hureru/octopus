@@ -414,7 +414,7 @@ Key fields:
 | Channel Type | OpenAI Chat / OpenAI Response / Anthropic / Gemini / Volcengine / OpenAI Embedding |
 | Base URLs | Only the base address — the program auto-appends `/chat/completions`, `/responses`, `/messages`, etc. based on type; multiple endpoints enable "lowest latency selection" |
 | API Key | **Can add multiple Keys** (enabling multi-Key rotation, see FAQ Q6) |
-| Advanced Settings | Custom Headers, channel proxy, parameter override (JSON), auto-sync, auto-group, Responses WS mode, match regex, notes |
+| Advanced Settings | Custom Headers, channel proxy, parameter override (JSON), auto-sync, auto-group, upstream WebSocket (auto / off, OpenAI Responses channels only), match regex, notes |
 
 After adding a manual channel, **you still need to add its models to a group on the Groups page** before it can be used externally.
 
@@ -466,7 +466,7 @@ Each log entry can be expanded to see: error message, **time to first token**, t
 
 | Panel | Key Items |
 |-------|-----------|
-| **System** | Proxy address, **Statistics save interval (minutes)**, CORS whitelist, Responses WebSocket (default mode: passthrough/convert/off), SSE heartbeat, **Group health check** toggle |
+| **System** | Proxy address, **Statistics save interval (minutes)**, CORS whitelist, SSE heartbeat, **Group health check** toggle |
 | **Circuit Breaker** | Trigger threshold, base cooldown, max cooldown (exponential backoff) |
 | **Passive Outlier Retirement** | Site projected channels only, disabled by default. Includes failure rate / min samples / consecutive failures / window parameters |
 | **Channel Sync** | Auto-sync interval (hours), manual sync |

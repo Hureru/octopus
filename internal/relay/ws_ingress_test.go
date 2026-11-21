@@ -149,12 +149,8 @@ func (e *wsIngressEnv) addChannel(key string) *model.Channel {
 	return channel
 }
 
-// useUpstreamWS 让 Octopus 用 WS 连上游，并设置假上游的 WS 一侧（nil：握手回 404）。
+// useUpstreamWS 设置假上游的 WS 一侧。不调用它时上游不支持 WS，握手回 404。
 func (e *wsIngressEnv) useUpstreamWS(upstream wsIngressWSUpstream) {
-	e.t.Helper()
-	if err := op.SettingSetString(model.SettingKeyResponsesWSEnabled, "true"); err != nil {
-		e.t.Fatalf("enabling upstream ws failed: %v", err)
-	}
 	e.mu.Lock()
 	e.wsUpstream = upstream
 	e.mu.Unlock()
@@ -898,7 +894,6 @@ func TestWSIngressUpstreamWSContinuesOnTheSameConnection(t *testing.T) {
 // 上游不支持 WS（握手回 404）：同一次尝试里改走 HTTP，客户端看不出区别。之后不再每个请求都去试握手。
 func TestWSIngressFallsBackToHTTPWhenUpstreamHasNoWS(t *testing.T) {
 	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
-	env.useUpstreamWS(nil)
 
 	firstID := env.mustComplete(wsIngressCreate("", wsIngressUserItem("first")))
 	env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, firstID), wsIngressUserItem("second")))
@@ -922,6 +917,25 @@ func TestWSIngressFallsBackToHTTPWhenUpstreamHasNoWS(t *testing.T) {
 		if downgraded := log.WSRecovery != nil && *log.WSRecovery == model.RelayLogWSRecoveryDowngrade; downgraded != (i == 0) {
 			t.Errorf("turn %d log: ws_recovery=%v", i+1, log.WSRecovery)
 		}
+	}
+}
+
+// 渠道的“上游 WebSocket”设为关闭：上游支持 WS 也不去握手，始终用 HTTP。
+func TestWSIngressChannelWithUpstreamWSOffUsesHTTP(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.useUpstreamWS(wsIngressWSAnswers)
+	off := model.ChannelWSModeOff
+	if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{ID: env.channel.ID, WSMode: &off}, env.ctx); err != nil {
+		t.Fatalf("ChannelUpdate failed: %v", err)
+	}
+
+	env.mustComplete(wsIngressCreate("", wsIngressUserItem("hello")))
+
+	if dials, _ := env.upstreamWS(); len(dials) != 0 || len(env.upstreamRequests()) != 1 {
+		t.Fatalf("expected one HTTP request and no ws handshake, got %d handshakes and %d HTTP requests", len(dials), len(env.upstreamRequests()))
+	}
+	if log := env.relayLogs(1)[0]; !log.Success || log.UsedWS || log.WSRecovery != nil {
+		t.Fatalf("log: success=%t used_ws=%t ws_recovery=%v, want a plain HTTP turn", log.Success, log.UsedWS, log.WSRecovery)
 	}
 }
 

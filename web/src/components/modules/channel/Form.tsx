@@ -478,30 +478,26 @@ export function ChannelForm({
                         {t('advanced')}
                     </AccordionTrigger>
                     <AccordionContent className="pt-4 px-4 pb-4 space-y-4 border-t">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {formData.type === ChannelType.OpenAIResponse ? (
-                                <div className="space-y-2">
-                                    <label htmlFor={`${idPrefix}-ws-mode`} className="text-sm font-medium text-card-foreground">
-                                        {t('wsMode')}
-                                    </label>
-                                    <Select
-                                        value={formData.ws_mode ?? 'inherit'}
-                                        onValueChange={(value) => onFormDataChange({ ...formData, ws_mode: value as ChannelWSMode })}
-                                    >
-                                        <SelectTrigger id={`${idPrefix}-ws-mode`} className="rounded-xl w-full border border-border px-4 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className='rounded-xl'>
-                                            <SelectItem className='rounded-xl' value="inherit">{t('wsModeInherit')}</SelectItem>
-                                            <SelectItem className='rounded-xl' value="passthrough">{t('wsModePassthrough')}</SelectItem>
-                                            <SelectItem className='rounded-xl' value="transform">{t('wsModeTransform')}</SelectItem>
-                                            <SelectItem className='rounded-xl' value="off">{t('wsModeOff')}</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            ) : null}
-
-                        </div>
+                        {formData.type === ChannelType.OpenAIResponse ? (
+                            <div className="space-y-2">
+                                <label htmlFor={`${idPrefix}-ws-mode`} className="text-sm font-medium text-card-foreground">
+                                    {t('wsMode')}
+                                </label>
+                                <Select
+                                    value={formData.ws_mode}
+                                    onValueChange={(value) => onFormDataChange({ ...formData, ws_mode: value as ChannelWSMode })}
+                                >
+                                    <SelectTrigger id={`${idPrefix}-ws-mode`} className="rounded-xl w-full border border-border px-4 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className='rounded-xl'>
+                                        <SelectItem className='rounded-xl' value="auto">{t('wsModeAuto')}</SelectItem>
+                                        <SelectItem className='rounded-xl' value="off">{t('wsModeOff')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground/70 whitespace-pre-line">{t('wsModeHint')}</p>
+                            </div>
+                        ) : null}
 
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
