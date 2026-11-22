@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
 func TestParseWSUpstreamEventParsesErrorEnvelope(t *testing.T) {
@@ -54,5 +56,41 @@ func TestNormalizeWSUpstreamErrorCode(t *testing.T) {
 	}
 	if got := normalizeWSUpstreamErrorCode(payload.Code); got != "429" {
 		t.Fatalf("expected numeric code to normalize to 429, got %q", got)
+	}
+}
+
+// 只把协议里的模型名（response.model）换回客户端用的那个，其余的值不变：
+// 调用方自己的 metadata 不改，超出 float64 精度的整数不丢精度。
+func TestRewriteWSPassthroughDownstreamModel(t *testing.T) {
+	ra := &relayAttempt{relayRequest: &relayRequest{
+		requestModel:    "my-alias",
+		internalRequest: &transformerModel.InternalLLMRequest{Model: "gpt-4o"},
+	}}
+	for name, tc := range map[string]struct{ in, want string }{
+		"response.model": {
+			`{"type":"response.created","response":{"id":"resp_1","model":"gpt-4o","seed":9007199254740993}}`,
+			`{"response":{"id":"resp_1","model":"my-alias","seed":9007199254740993},"type":"response.created"}`,
+		},
+		"response is null": {
+			`{"type":"error","response":null,"model":"gpt-4o"}`,
+			`{"type":"error","response":null,"model":"gpt-4o"}`,
+		},
+		"caller metadata is kept": {
+			`{"type":"response.completed","response":{"model":"gpt-4o","metadata":{"model":"gpt-4o"}}}`,
+			`{"response":{"metadata":{"model":"gpt-4o"},"model":"my-alias"},"type":"response.completed"}`,
+		},
+		"another model is kept": {
+			`{"type":"response.created","response":{"model":"o3"}}`,
+			`{"type":"response.created","response":{"model":"o3"}}`,
+		},
+		"no model": {
+			`{"type":"response.output_text.delta","delta":"gpt-4o"}`,
+			`{"type":"response.output_text.delta","delta":"gpt-4o"}`,
+		},
+		"not json": {`not json`, `not json`},
+	} {
+		if got := string(ra.rewriteWSPassthroughDownstreamModel([]byte(tc.in))); got != tc.want {
+			t.Errorf("%s: got %s, want %s", name, got, tc.want)
+		}
 	}
 }

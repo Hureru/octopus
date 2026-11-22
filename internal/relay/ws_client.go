@@ -236,6 +236,11 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 			preferredSticky = nil
 		}
 	}
+	// 本地没有存档的续传，历史在上游那里。刚完成那个回复的上游连接还在的话，回到它所在的渠道，
+	// 不看共用的会话保持：用同一个 Key 的别的客户端可能已经把它改到别的渠道了。
+	if preferredSticky == nil && requestedPreviousResponseID != "" && s.upstream.conn != nil && s.upstream.lastResponseID == requestedPreviousResponseID {
+		preferredSticky = &balancer.SessionEntry{ChannelID: s.upstream.channelID, ChannelKeyID: s.upstream.keyID, Timestamp: time.Now()}
+	}
 
 	// Check supported models
 	if apiKey.SupportedModels != "" && !slices.Contains(strings.Split(apiKey.SupportedModels, ","), executionRequest.Model) {
@@ -528,8 +533,6 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 	}
 	req.metrics.SaveWithChannelStats(ctx, result.Success, result.Err, req.iter.Attempts(), false)
 	if result.Success {
-		// 上游自己报告失败（response.failed、error）时客户端已经收到了，但这个回合不能记进存档
-		result.Success = terminal == "response.completed" || terminal == "response.incomplete"
 		return result
 	}
 	if terminal != "" || ctx.Err() != nil {

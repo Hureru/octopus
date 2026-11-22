@@ -276,7 +276,7 @@ func wsConversationStateTTL(sessionKeepTimeSec int) time.Duration {
 }
 
 func resetResponsesReplayStore() {
-	responsesReplayStore = sync.Map{}
+	responsesReplayStore.Clear() // 不能换一个新的 Map：后台的清理协程可能正在用它
 	responsesReplayStoreStats.entries.Store(0)
 	responsesReplayStoreStats.totalSize.Store(0)
 }

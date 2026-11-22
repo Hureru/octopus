@@ -58,20 +58,24 @@ func TestWSStreamWriterBoundsUnfinishedLine(t *testing.T) {
 func newTestWSConnPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	t.Helper()
 	serverConnCh := make(chan *websocket.Conn, 1)
+	// 连接被接管之后，请求的 context 要等处理函数返回才取消，所以不能靠它来结束处理函数
+	testDone := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
 		serverConnCh <- conn
-		<-r.Context().Done()
-		_ = conn.Close(websocket.StatusNormalClosure, "")
+		<-testDone
+		_ = conn.CloseNow()
 	}))
 	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(testDone) })
 	clientConn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
 		t.Fatalf("dial test ws pair failed: %v", err)
 	}
+	t.Cleanup(func() { _ = clientConn.CloseNow() })
 	select {
 	case serverConn := <-serverConnCh:
 		return clientConn, serverConn

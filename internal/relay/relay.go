@@ -405,6 +405,13 @@ func (ra *relayAttempt) attempt() attemptResult {
 
 	// 转发请求
 	statusCode, fwdErr := ra.forward()
+	// WS 入站：上游在流里自己报告了失败（response.failed、error 事件）。
+	// 客户端已经收到，所以不重发、不换渠道，但这一次不能记成成功。
+	if writer, ok := ra.streamWriter.(*WSStreamWriter); ok && fwdErr == nil {
+		if failedStatus, failure := writer.reportedFailure(); failure != nil {
+			statusCode, fwdErr = failedStatus, failure
+		}
+	}
 
 	// 更新 channel key 状态
 	ra.usedKey.StatusCode = statusCode

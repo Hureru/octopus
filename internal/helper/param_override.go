@@ -34,7 +34,7 @@ func ApplyParamOverride(request *http.Request, paramOverride *string) error {
 }
 
 // MergeParamOverride merges a JSON-object override into a JSON request body: an override key replaces
-// the body's key, everything else is kept byte for byte.
+// the body's key. The other values are not decoded, so they keep their exact value (big integers too).
 // Empty overrides, and bodies or overrides that are not JSON objects, leave the body unchanged.
 func MergeParamOverride(body []byte, paramOverride *string) ([]byte, error) {
 	if paramOverride == nil || strings.TrimSpace(*paramOverride) == "" {

@@ -3,7 +3,6 @@ package relay
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -17,8 +16,8 @@ type WSStreamWriter struct {
 	conn     *websocket.Conn
 	ctx      context.Context
 	written  bool
-	terminal string // 已经发给客户端的结束事件的类型，空表示这个回合还没有结束事件
-	pending  []byte // 还没收到行尾的半行
+	terminal wsUpstreamEvent // 已经发给客户端的结束事件；Type 为空表示这个回合还没有结束事件
+	pending  []byte          // 还没收到行尾的半行
 	mu       sync.Mutex
 }
 
@@ -76,12 +75,9 @@ func (w *WSStreamWriter) sendFrame(ctx context.Context, frame []byte) error {
 		return err
 	}
 	w.written = true
-	var event struct {
-		Type string `json:"type"`
-	}
-	_ = json.Unmarshal(frame, &event)
+	event := parseWSUpstreamEvent(frame)
 	if _, ok := responsesPassthroughTerminalEvents[event.Type]; ok {
-		w.terminal = event.Type
+		w.terminal = event
 	}
 	return nil
 }
@@ -90,7 +86,18 @@ func (w *WSStreamWriter) sendFrame(ctx context.Context, frame []byte) error {
 func (w *WSStreamWriter) terminalEvent() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.terminal
+	return w.terminal.Type
+}
+
+// reportedFailure：发给客户端的结束事件是上游报告的失败（response.failed、error）时，
+// 返回这次尝试该记的状态码和错误；否则返回 0 和 nil。
+func (w *WSStreamWriter) reportedFailure() (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.terminal.Type != "response.failed" && w.terminal.Type != "error" {
+		return 0, nil
+	}
+	return wsUpstreamFailure(w.terminal)
 }
 
 func (w *WSStreamWriter) Flush() {

@@ -19,6 +19,7 @@ import (
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/outlierwindow"
+	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
@@ -804,7 +805,7 @@ func TestWSIngressConnectionLimitIsReported(t *testing.T) {
 }
 
 // 上游自己用 response.failed 报告失败：客户端已经收到结束事件，不再补 error 事件；
-// 这个回合也不记进存档，客户端带着原来的 previous_response_id 重试时还能接上。
+// 这个回合记成失败，也不记进存档，客户端带着原来的 previous_response_id 重试时还能接上。
 func TestWSIngressUpstreamFailedTurnIsNotRecorded(t *testing.T) {
 	env := newWSIngressEnv(t, func(n int, body []byte, w http.ResponseWriter, r *http.Request) {
 		if n != 2 {
@@ -822,6 +823,10 @@ func TestWSIngressUpstreamFailedTurnIsNotRecorded(t *testing.T) {
 	events, err := env.turn(3*time.Second, second)
 	if err != nil || len(events) != 2 || events[1]["type"] != "response.failed" {
 		t.Fatalf("expected the upstream's response.created and response.failed, got %v (err=%v)", events, err)
+	}
+	// 这一轮记成失败，不能算这个渠道成功了一次
+	if log := env.relayLogs(2)[1]; log.Success || len(log.Attempts) != 1 || log.Attempts[0].Status != model.AttemptFailed {
+		t.Errorf("failed turn log: success=%t attempts=%+v, want one failed attempt", log.Success, log.Attempts)
 	}
 	// 重试：如果上一轮多发了 error 事件，这里会先读到它；如果失败的回合进了存档，这里接不上
 	env.mustComplete(second)
@@ -1322,5 +1327,100 @@ func TestWSIngressFirstTokenTimeoutSwitchesChannelWithoutRetrying(t *testing.T) 
 	}
 	if got := outlierwindow.Evaluate(second.ID, now); got.Samples != 1 || got.Failures != 0 {
 		t.Errorf("second channel's outlier window: %d samples, %d failures, want 1 and 0", got.Samples, got.Failures)
+	}
+}
+
+// 复用的上游连接可能已经被中间设备悄悄丢掉了：请求发得出去，却什么都等不回来。
+// 等到超时后换一条新连接、用完整请求重发一次，客户端看不出来，也不算这个渠道的失败。
+func TestWSIngressUpstreamWSReconnectsWhenAReusedConnectionGoesSilent(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.useUpstreamWS(func(n int, handshake http.Header, conn *websocket.Conn) bool {
+		if n == 2 {
+			return true // 第二个请求收到了却不回复，连接也不关
+		}
+		return wsIngressWSAnswers(n, handshake, conn)
+	})
+	firstTokenTimeout := 1
+	if _, err := op.GroupUpdate(&model.GroupUpdateRequest{ID: env.group.ID, FirstTokenTimeOut: &firstTokenTimeout}, env.ctx); err != nil {
+		t.Fatalf("GroupUpdate failed: %v", err)
+	}
+
+	firstID := env.mustComplete(wsIngressCreate("", wsIngressUserItem("first")))
+	env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, firstID), wsIngressUserItem("second")))
+
+	dials, requests := env.upstreamWS()
+	if len(dials) != 2 || len(requests) != 3 || requests[1].dial != 1 || requests[2].dial != 2 {
+		t.Fatalf("expected the second turn to be sent again on a new upstream connection, got %d connections and %d requests", len(dials), len(requests))
+	}
+	if value, ok := requests[2].body["previous_response_id"]; ok {
+		t.Fatalf("a new upstream connection cannot continue the old one, but previous_response_id %s was sent", value)
+	}
+	if got, want := strings.Join(wsIngressInputTexts(t, requests[2].body), " | "), "message:first | message:answer 1 | message:second"; got != want {
+		t.Fatalf("resent request input = %q, want %q", got, want)
+	}
+	log := env.relayLogs(2)[1]
+	if !log.Success || len(log.Attempts) != 1 || log.WSRecovery == nil || *log.WSRecovery != model.RelayLogWSRecoveryReconnect {
+		t.Errorf("second turn log: success=%t attempts=%d ws_recovery=%v, want one successful attempt marked as a reconnect", log.Success, len(log.Attempts), log.WSRecovery)
+	}
+	if !wsUpstreamAvailable(env.channel.ID) {
+		t.Errorf("the channel's upstream ws must not be paused because one idle connection went bad")
+	}
+}
+
+// 上游用 response.failed 报告失败：事件照样转给客户端，不再补 error 事件；
+// 但这一轮要记成失败，不能算这个渠道成功了一次。客户端已经收到东西，所以不重发、不换渠道。
+func TestWSIngressUpstreamWSReportedFailureIsNotASuccess(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.addChannel("second-key")
+	env.useUpstreamWS(func(n int, handshake http.Header, conn *websocket.Conn) bool {
+		if n != 1 {
+			return wsIngressWSAnswers(n, handshake, conn)
+		}
+		wsIngressWSSend(conn,
+			[]byte(`{"type":"response.created","response":{"id":"resp_1","object":"response","model":"gpt-4o","status":"in_progress","output":[]}}`),
+			[]byte(`{"type":"response.failed","response":{"id":"resp_1","object":"response","model":"gpt-4o","status":"failed","output":[],"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-4o"}}}`))
+		return true
+	})
+	request := wsIngressCreate("", wsIngressUserItem("hello"))
+
+	events, err := env.turn(5*time.Second, request)
+	if err != nil || len(events) != 2 || events[1]["type"] != "response.failed" {
+		t.Fatalf("expected the upstream's response.created and response.failed, got %v (err=%v)", events, err)
+	}
+	log := env.relayLogs(1)[0]
+	if log.Success || len(log.Attempts) != 1 || log.Attempts[0].Status != model.AttemptFailed || !strings.Contains(log.Error, "Rate limit reached for gpt-4o") {
+		t.Errorf("log: success=%t attempts=%+v error=%q, want one failed attempt carrying the upstream's message", log.Success, log.Attempts, log.Error)
+	}
+	if _, requests := env.upstreamWS(); len(requests) != 1 || len(env.upstreamRequests()) != 0 {
+		t.Errorf("a turn the client already saw must not be sent again, got %d ws requests and %d HTTP requests", len(requests), len(env.upstreamRequests()))
+	}
+
+	// 如果上一轮多发了 error 事件，这里会先读到它。出过错的上游连接不再用：这一轮换一条新的
+	env.mustComplete(request)
+	if dials, _ := env.upstreamWS(); len(dials) != 2 || dials[1].Get("Authorization") != "Bearer upstream-key" {
+		t.Errorf("expected the next turn on a new connection to the same channel, got %d handshakes", len(dials))
+	}
+}
+
+// 本地没有存档的续传（历史在上游那里）要回到刚完成那个回复的上游连接上，
+// 即使用同一个 Key 的另一个客户端把共用的会话保持改到了别的渠道。
+func TestWSIngressContinuationPrefersTheLiveUpstreamConnection(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	second := env.addChannel("second-key")
+	env.useUpstreamWS(wsIngressWSAnswers)
+
+	// 这条连接上的第一个请求就是续传：本地没有存档，原样转发
+	env.mustComplete(wsIngressCreate(`"previous_response_id":"resp_stored",`, wsIngressUserItem("first")))
+	// 另一个客户端刚在第二个渠道上成功了一次
+	balancer.SetSticky(env.apiKey.ID, wsIngressModel, second.ID, second.Keys[0].ID)
+
+	env.mustComplete(wsIngressCreate(`"previous_response_id":"resp_1",`, wsIngressUserItem("second")))
+
+	dials, requests := env.upstreamWS()
+	if len(dials) != 1 || len(requests) != 2 || requests[1].dial != 1 {
+		t.Fatalf("expected both turns on the first channel's connection, got %d connections and %d requests", len(dials), len(requests))
+	}
+	if got := string(requests[1].body["previous_response_id"]); got != `"resp_1"` {
+		t.Fatalf("second request previous_response_id = %s, want the response this upstream connection just completed", got)
 	}
 }

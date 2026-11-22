@@ -29,7 +29,7 @@ var wsUpstreamIdleTimeout = 300 * time.Second
 // wsUpstream 是一条客户端连接独占的上游 WS，客户端连接关闭时一起关掉。
 // 一条客户端连接上同一时刻只有一个请求，所以不用加锁。
 // shortcut: 两个回合之间不读这条连接，所以上游的 ping 得不到回应，也发现不了连接已经断了。
-// 上游关掉空闲连接时，下一个回合会换新连接并发完整请求；连接被中间设备悄悄丢掉时，要等到首字超时才发现。
+// 上游关掉空闲连接时，下一个回合会换新连接并发完整请求；连接被中间设备悄悄丢掉时，要等到首字超时才发现，然后同样换新连接重发。
 // 原生续传因此老是用不上、或者回合因此卡住时，再加空闲时的读循环。
 type wsUpstream struct {
 	conn           *websocket.Conn // nil：还没有连接
@@ -287,7 +287,7 @@ func (ra *relayAttempt) dialUpstreamWS(ctx context.Context) bool {
 
 // upstreamWSTurn 在上游 WS 上跑一个回合：发请求，把事件原样转给客户端，读到结束事件为止。
 // 回合没有正常完成时关掉这条连接。
-// stale 为真表示复用的连接在第一个事件之前就失败了，换一条新连接可能就好。
+// stale 为真表示复用的连接在第一个事件之前就失败了（断了，或者一直没有回音），换一条新连接可能就好。
 func (ra *relayAttempt) upstreamWSTurn(ctx context.Context, reused bool) (statusCode int, err error, stale bool) {
 	u := ra.upstream
 	// 原生续传（客户端的原始请求）：只有这条连接刚完成的回复正是请求要接的那个，上游才接得上。
@@ -335,10 +335,12 @@ func (ra *relayAttempt) upstreamWSTurn(ctx context.Context, reused bool) (status
 				// 结束事件之前连接断了：不管关闭码是什么都算失败
 				return ra.upstreamWSBroken(ctx, reused && first, fmt.Errorf("upstream ws closed before the terminal event: %v", err))
 			case awaitingFirstToken:
+				// 复用的连接什么都等不到，多半是空闲时被中间设备悄悄丢掉了（请求发得出去，没有回音）：
+				// 和读失败一样，换一条新连接再试一次
 				u.close()
-				return 0, ra.firstTokenTimeoutError(), false
+				return 0, ra.firstTokenTimeoutError(), reused
 			default:
-				return ra.upstreamWSBroken(ctx, false, fmt.Errorf("upstream ws sent nothing for %s", timeout))
+				return ra.upstreamWSBroken(ctx, reused && first, fmt.Errorf("upstream ws sent nothing for %s", timeout))
 			}
 		}
 		if msgType != websocket.MessageText {
@@ -349,11 +351,8 @@ func (ra *relayAttempt) upstreamWSTurn(ctx context.Context, reused bool) (status
 		if first && event.Error != nil {
 			// 客户端还什么都没收到：不转发这个错误，交给重试和换渠道。连接上的状态说不准了，不再用它
 			u.close()
-			status := event.Error.Status
-			if status == 0 {
-				status = http.StatusBadGateway
-			}
-			return normalizeUpstreamStatusCode(status, event.Error.Error()), event.Error, reused
+			statusCode, err := wsUpstreamFailure(event)
+			return statusCode, err, reused
 		}
 		if first {
 			first = false
@@ -379,11 +378,23 @@ func (ra *relayAttempt) upstreamWSTurn(ctx context.Context, reused bool) (status
 			u.lastResponseID = event.ResponseID
 			recordWSUpstreamSuccess(ra.channel.ID)
 		} else {
-			// 上游自己报告了失败，客户端已经收到。连接上的状态说不准了，不再用它
+			// 上游自己报告了失败，客户端已经收到（attempt 会把这一次记成失败）。连接上的状态说不准了，不再用它
 			u.close()
 		}
 		return http.StatusOK, nil, false
 	}
+}
+
+// wsUpstreamFailure 把上游在事件里报告的失败变成这次尝试的状态码和错误。
+func wsUpstreamFailure(event wsUpstreamEvent) (int, error) {
+	if event.Error == nil {
+		return http.StatusBadGateway, fmt.Errorf("upstream reported %s", event.Type)
+	}
+	status := event.Error.Status
+	if status == 0 {
+		status = http.StatusBadGateway
+	}
+	return normalizeUpstreamStatusCode(status, event.Error.Error()), event.Error
 }
 
 // upstreamWSBroken 处理上游连接本身的失败：关掉它。
@@ -499,49 +510,22 @@ func normalizeWSUpstreamErrorCode(code any) string {
 	}
 }
 
-// rewriteWSPassthroughDownstreamModel 把上游事件里的模型名换回客户端用的那个。
+// rewriteWSPassthroughDownstreamModel 把上游事件里的模型名（response.model）换回客户端用的那个。
+// 别的值都不解析，所以调用方自己的数据（比如 metadata 里的 model）不会被改，数字也不会丢精度。
 func (ra *relayAttempt) rewriteWSPassthroughDownstreamModel(data []byte) []byte {
 	if ra == nil || ra.internalRequest == nil || strings.TrimSpace(ra.requestModel) == "" || strings.TrimSpace(ra.internalRequest.Model) == strings.TrimSpace(ra.requestModel) {
 		return data
 	}
-	var payload any
-	if err := json.Unmarshal(data, &payload); err != nil {
+	var event, response map[string]json.RawMessage
+	var model string
+	if json.Unmarshal(data, &event) != nil || json.Unmarshal(event["response"], &response) != nil ||
+		json.Unmarshal(response["model"], &model) != nil || model != ra.internalRequest.Model {
 		return data
 	}
-	if replaceModelInJSONValue(payload, ra.internalRequest.Model, ra.requestModel) {
-		if rewritten, err := json.Marshal(payload); err == nil {
-			return rewritten
-		}
+	response["model"], _ = json.Marshal(ra.requestModel)
+	event["response"], _ = json.Marshal(response)
+	if rewritten, err := json.Marshal(event); err == nil {
+		return rewritten
 	}
 	return data
-}
-
-func replaceModelInJSONValue(value any, upstreamModel, downstreamModel string) bool {
-	switch v := value.(type) {
-	case map[string]any:
-		changed := false
-		for key, child := range v {
-			if key == "model" {
-				if s, ok := child.(string); ok && s == upstreamModel {
-					v[key] = downstreamModel
-					changed = true
-				}
-				continue
-			}
-			if replaceModelInJSONValue(child, upstreamModel, downstreamModel) {
-				changed = true
-			}
-		}
-		return changed
-	case []any:
-		changed := false
-		for _, child := range v {
-			if replaceModelInJSONValue(child, upstreamModel, downstreamModel) {
-				changed = true
-			}
-		}
-		return changed
-	default:
-		return false
-	}
 }
