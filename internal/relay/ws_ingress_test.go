@@ -18,6 +18,7 @@ import (
 
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/outlierwindow"
 	"github.com/bestruirui/octopus/internal/server/middleware"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
@@ -1282,5 +1283,44 @@ func TestWSIngressClientDisconnectCancelsTheUpstreamRequest(t *testing.T) {
 				t.Errorf("the channel's upstream ws must not be paused for a client that went away")
 			}
 		})
+	}
+}
+
+// WS 入站的渠道循环和 HTTP 入站的一样处理失败：首字超时后不在同一个渠道上原地重试，直接换下一个；
+// 每个渠道的成败都报给离群检测的滚动窗口。
+func TestWSIngressFirstTokenTimeoutSwitchesChannelWithoutRetrying(t *testing.T) {
+	env := newWSIngressEnv(t, func(n int, body []byte, w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer upstream-key" {
+			<-r.Context().Done() // 第一个渠道一直不回复，直到 Octopus 放弃这个请求
+			return
+		}
+		wsIngressStatelessUpstream(n, body, w, r)
+	})
+	second := env.addChannel("second-key")
+	firstTokenTimeout, retryEnabled, maxRetries := 1, true, 3
+	if _, err := op.GroupUpdate(&model.GroupUpdateRequest{
+		ID: env.group.ID, FirstTokenTimeOut: &firstTokenTimeout, RetryEnabled: &retryEnabled, MaxRetries: &maxRetries,
+	}, env.ctx); err != nil {
+		t.Fatalf("GroupUpdate failed: %v", err)
+	}
+	// 滚动窗口是全局的，按渠道 ID 记，而每个测试的渠道 ID 都从 1 开始
+	outlierwindow.Clear(env.channel.ID)
+	outlierwindow.Clear(second.ID)
+
+	env.mustComplete(wsIngressCreate("", wsIngressUserItem("hello")))
+
+	if n := len(env.upstreamRequests()); n != 2 {
+		t.Fatalf("expected one request per channel, got %d requests", n)
+	}
+	attempts := env.relayLogs(1)[0].Attempts
+	if len(attempts) != 2 || attempts[0].Status != model.AttemptFailed || attempts[1].Status != model.AttemptSuccess {
+		t.Fatalf("expected a failed attempt on the first channel and a successful one on the second, got %+v", attempts)
+	}
+	now := time.Now()
+	if got := outlierwindow.Evaluate(env.channel.ID, now); got.Samples != 1 || got.Failures != 1 {
+		t.Errorf("first channel's outlier window: %d samples, %d failures, want 1 and 1", got.Samples, got.Failures)
+	}
+	if got := outlierwindow.Evaluate(second.ID, now); got.Samples != 1 || got.Failures != 0 {
+		t.Errorf("second channel's outlier window: %d samples, %d failures, want 1 and 0", got.Samples, got.Failures)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/bestruirui/octopus/internal/apperror"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/outlierwindow"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
 	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
@@ -456,6 +457,9 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 					return wsRelayResult{Canceled: true, Err: ctx.Err()}
 				case <-time.After(delay):
 				}
+
+				// 重建 outAdapter 以重置流式状态（toolIndex, toolCalls 等）
+				outAdapter = outbound.Get(channel.Type)
 			}
 
 			ra := &relayAttempt{
@@ -467,16 +471,23 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			}
 
 			result = ra.attempt()
-			if result.Success || result.Written || result.Canceled || result.ResetConversation || !isRetryableStatus(result.StatusCode) {
+			if result.Success || result.Written || result.Canceled || result.ResetConversation || result.FirstTokenTimeout || !isRetryableStatus(result.StatusCode) {
 				break
 			}
 		}
 
+		// 下面这一段和 HTTP 入站的 Handler 一样
 		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
-			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, circuitFailureKind(group.RetryEnabled, result.StatusCode))
+			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
+			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, failureKind)
+			outlierwindow.Report(channel.ID, false, result.StatusCode, time.Now())
+			if failureKind == balancer.FailureHard {
+				maybeLearnManagedRoute(ctx, channel.ID, req.internalRequest.Model, inbound.InboundTypeOpenAIResponse, result.Err)
+			}
 		}
 
 		if result.Success {
+			outlierwindow.Report(channel.ID, true, result.StatusCode, time.Now())
 			var respID string
 			if req.metrics.InternalResponse != nil {
 				respID = req.metrics.InternalResponse.ID
