@@ -20,11 +20,17 @@ import (
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
 
-const wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
+const (
+	wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
+	// 回合进行中客户端又发来的消息先排在这里，最多这么多条（每条不超过 wsClientReadLimit）。
+	// 正常的客户端一个回合里最多多发一条（比如打断）。
+	wsClientQueueSize = 4
+)
 
 // 是变量，测试里要改短
 var wsClientMaxAge = 60 * time.Minute
@@ -88,22 +94,42 @@ func HandleWSResponse(c *gin.Context) {
 	})
 	defer stop()
 
-	// Message loop
-	for {
-		// 读客户端不能用带时限的 ctx：时限一到这个库会直接断开连接，上面的通知就发不出去了
-		msgType, data, err := conn.Read(c.Request.Context())
-		if err != nil {
-			closeStatus := websocket.CloseStatus(err)
-			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway || ctx.Err() != nil {
-				log.Debugf("ws client disconnected normally (apikey=%d)", apiKeyID)
-			} else {
-				log.Warnf("ws client read error (apikey=%d): %v", apiKeyID, err)
+	// 读协程：回合进行中也一直读客户端。这样客户端的 ping 有人回，它一断开进行中的请求马上取消。
+	// 读到的消息排队交给下面的循环，一次处理一条。
+	// shortcut: 队列排满（客户端在一个回合里连发好几条消息）时读协程停下来等，这期间和以前一样不回 ping、也发现不了断开；
+	// 真有客户端这样用时再把队列加大。
+	messages := make(chan []byte, wsClientQueueSize)
+	// 读客户端不能用带时限的 ctx：时限一到这个库会直接断开连接，上面的通知就发不出去了
+	readCtx := c.Request.Context()
+	safe.Go("ws-client-reader", func() {
+		defer close(messages)
+		defer cancel() // 客户端走了：取消进行中的回合
+		for {
+			msgType, data, err := conn.Read(readCtx)
+			if err != nil {
+				closeStatus := websocket.CloseStatus(err)
+				if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway || ctx.Err() != nil {
+					log.Debugf("ws client disconnected normally (apikey=%d)", apiKeyID)
+				} else {
+					log.Warnf("ws client read error (apikey=%d): %v", apiKeyID, err)
+				}
+				return
 			}
-			return
+			if msgType != websocket.MessageText {
+				continue
+			}
+			select {
+			case messages <- data:
+			case <-readCtx.Done():
+				return // 处理函数已经返回（比如它 panic 了），没人再收消息
+			}
 		}
+	})
 
-		if msgType != websocket.MessageText {
-			continue
+	// Message loop：读协程退出（连接断了）才结束
+	for data := range messages {
+		if ctx.Err() != nil {
+			continue // 客户端已经走了，或者连接到了时限：还排着的消息不处理
 		}
 
 		var msg struct {
@@ -114,6 +140,12 @@ func HandleWSResponse(c *gin.Context) {
 			continue
 		}
 
+		if msg.Type == "response.interrupt" {
+			// Codex 用它打断进行中的回复，这里读到时那个回合已经结束了。
+			// shortcut: 不执行也不回应，回合照常跑完；Codex 要放弃回合时等不到确认会自己断开，读协程随即取消请求。
+			// 不能回 error：Codex 会把它当成下一个回合的结果。要省下被打断的回合的用量时，再把它转给上游。
+			continue
+		}
 		if msg.Type != "response.create" {
 			writeWSError(ctx, conn, 400, "invalid_request",
 				fmt.Sprintf("Unknown message type: %s", msg.Type))
@@ -490,7 +522,7 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 		return result
 	}
 	if terminal != "" || ctx.Err() != nil {
-		// 结束事件已经发过了；或者连接到了时限，由 HandleWSResponse 通知
+		// 结束事件已经发过了；或者客户端已经走了；或者连接到了时限，由 HandleWSResponse 通知
 		return result
 	}
 	if result.Written {

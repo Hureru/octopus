@@ -1168,3 +1168,119 @@ func TestWSIngressCountsRequestsTowardsTheRateLimit(t *testing.T) {
 		t.Fatalf("expected the handshake to fail with 429 and a Retry-After header, got %v (err=%v)", response, err)
 	}
 }
+
+// eventually 等到 cond 成立，超时就让测试失败。
+func (e *wsIngressEnv) eventually(what string, cond func() bool) {
+	e.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			e.t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+// upstreamRequestCount 是上游到现在收到的请求数，HTTP 和 WS 一起数。
+func (e *wsIngressEnv) upstreamRequestCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.requests) + len(e.wsRequests)
+}
+
+// 回合进行中也要读客户端。不读的话：
+//   - 客户端的 ping 得不到回应，会定时 ping 的客户端遇到长回合就自己断开了；
+//   - Codex 中途发来的 response.interrupt 要等回合结束才读到，回它的那条 error 事件会被下一个回合当成自己的结果。
+func TestWSIngressReadsTheClientDuringATurn(t *testing.T) {
+	release := make(chan struct{})
+	env := newWSIngressEnv(t, func(n int, body []byte, w http.ResponseWriter, r *http.Request) {
+		if n == 1 {
+			<-release // 第一个回合卡在这里，等测试放行
+		}
+		wsIngressStatelessUpstream(n, body, w, r)
+	})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseOnce)
+
+	request := wsIngressCreate("", wsIngressUserItem("hello"))
+	type turnResult struct {
+		events []map[string]any
+		err    error
+	}
+	done := make(chan turnResult, 1)
+	go func() {
+		events, err := env.turn(10*time.Second, request)
+		done <- turnResult{events, err}
+	}()
+	env.eventually("the request to reach the upstream", func() bool { return env.upstreamRequestCount() == 1 })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := env.client.Ping(ctx); err != nil {
+		t.Errorf("no pong while the turn is in progress: %v", err)
+	}
+	interrupt := `{"type":"response.interrupt","response_id":"resp_1","mode":"discard_partial_items"}`
+	if err := env.client.Write(context.Background(), websocket.MessageText, []byte(interrupt)); err != nil {
+		t.Fatalf("sending response.interrupt failed: %v", err)
+	}
+
+	releaseOnce()
+	result := <-done
+	if result.err != nil || len(result.events) != 5 || result.events[4]["type"] != "response.completed" {
+		t.Fatalf("expected the interrupted turn to finish with the upstream's five events, got %v (err=%v)", result.events, result.err)
+	}
+	// 打断没有换来 error 事件：下一个回合读到的第一条就是它自己的
+	env.mustComplete(request)
+}
+
+// 客户端中途断开：马上取消发给上游的请求，不等到下一次给客户端写东西才发现。
+func TestWSIngressClientDisconnectCancelsTheUpstreamRequest(t *testing.T) {
+	for _, upstreamWS := range []bool{false, true} {
+		t.Run(fmt.Sprintf("上游 WS=%t", upstreamWS), func(t *testing.T) {
+			cancelled := make(chan struct{})
+			markCancelled := sync.OnceFunc(func() { close(cancelled) })
+			// 上游收到请求后什么都不回，所以 Octopus 没有机会靠“写客户端失败”发现它走了
+			env := newWSIngressEnv(t, func(_ int, _ []byte, _ http.ResponseWriter, r *http.Request) {
+				select {
+				case <-r.Context().Done():
+					markCancelled()
+				case <-time.After(10 * time.Second):
+				}
+			})
+			if upstreamWS {
+				env.useUpstreamWS(func(_ int, _ http.Header, conn *websocket.Conn) bool {
+					readCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					// Octopus 关掉这条上游连接时返回
+					if _, _, err := conn.Read(readCtx); err != nil && readCtx.Err() == nil {
+						markCancelled()
+					}
+					return false
+				})
+			}
+			// 渠道的统计是全局缓存，可能带着前面的测试留下的数
+			failedBefore := op.StatsChannelGet(env.channel.ID).RequestFailed
+
+			if err := env.client.Write(context.Background(), websocket.MessageText, []byte(wsIngressCreate("", wsIngressUserItem("hello")))); err != nil {
+				t.Fatalf("sending the request failed: %v", err)
+			}
+			env.eventually("the request to reach the upstream", func() bool { return env.upstreamRequestCount() == 1 })
+			env.client.CloseNow()
+
+			select {
+			case <-cancelled:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("the upstream request was not cancelled after the client went away")
+			}
+			// 是客户端自己走的：记一次失败的请求，但不算渠道的错
+			log := env.relayLogs(1)[0]
+			if log.Success || len(log.Attempts) != 1 || !strings.Contains(log.Error, context.Canceled.Error()) {
+				t.Errorf("log: success=%t attempts=%d error=%q, want one cancelled attempt", log.Success, len(log.Attempts), log.Error)
+			}
+			if failed := op.StatsChannelGet(env.channel.ID).RequestFailed - failedBefore; failed != 0 {
+				t.Errorf("the channel got %d failed requests for a client that went away, want 0", failed)
+			}
+			if upstreamWS && !wsUpstreamAvailable(env.channel.ID) {
+				t.Errorf("the channel's upstream ws must not be paused for a client that went away")
+			}
+		})
+	}
+}
