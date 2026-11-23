@@ -34,7 +34,9 @@ func isClientCancellation(ctx context.Context, err error) bool {
 	if isFirstTokenTimeout(ctx, err) || isFirstTokenTimeout(ctx, contextError(ctx)) {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	// 不看 err 是不是 DeadlineExceeded：连不上上游、上游读超时的错误也长这样，
+	// 那时请求还活着，要换渠道。请求自己的时限到了，下面的 ctx.Err() 会认出来。
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
 	if ctx == nil {
