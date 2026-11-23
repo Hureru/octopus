@@ -25,7 +25,7 @@ export enum AutoGroupType {
     Regex = 3,  // 正则匹配
 }
 
-export type ChannelWSMode = 'inherit' | 'off' | 'passthrough' | 'transform';
+export type ChannelWSMode = 'auto' | 'off';
 
 export type BaseUrl = {
     url: string;
@@ -167,7 +167,7 @@ export function useChannelList() {
                 managed_source: item.managed_source ?? null,
                 base_urls: item.base_urls ?? [],
                 custom_header: item.custom_header ?? [],
-                ws_mode: item.ws_mode ?? 'inherit',
+                ws_mode: item.ws_mode === 'off' ? 'off' : 'auto',
                 keys: item.keys ?? [],
                 proxy_mode: item.proxy_mode ?? 'direct',
                 proxy_config_id: item.proxy_config_id ?? null,

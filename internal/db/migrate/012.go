@@ -18,5 +18,5 @@ func migrateChannelWSMode(db *gorm.DB) error {
 	}
 	return db.Model(&model.Channel{}).
 		Where("ws_mode IS NULL OR ws_mode = ''").
-		Update("ws_mode", string(model.ChannelWSModeInherit)).Error
+		Update("ws_mode", string(model.ChannelWSModeAuto)).Error
 }

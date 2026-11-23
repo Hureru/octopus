@@ -198,13 +198,10 @@ func estimateStateSize(state *wsConversationState) int {
 		return 0
 	}
 	size := 256
-	size += len(state.DownstreamSessionID) + len(state.RequestModel) + len(state.LastResponseID)
+	size += len(state.RequestModel) + len(state.LastResponseID)
 	size += len(state.ReplayWindowItems)
 	for _, msg := range state.Transcript {
 		size += estimateMessageSize(msg)
-	}
-	for _, alias := range state.ReplayAliases {
-		size += len(alias) + 16
 	}
 	return size
 }
@@ -267,8 +264,19 @@ func responsesReplayStateToSticky(state *wsConversationState) *balancer.SessionE
 	}
 }
 
+func wsConversationStateTTL(sessionKeepTimeSec int) time.Duration {
+	if sessionKeepTimeSec <= 0 {
+		return wsClientMaxAge
+	}
+	ttl := time.Duration(sessionKeepTimeSec) * time.Second
+	if ttl > wsClientMaxAge {
+		return wsClientMaxAge
+	}
+	return ttl
+}
+
 func resetResponsesReplayStore() {
-	responsesReplayStore = sync.Map{}
+	responsesReplayStore.Clear() // 不能换一个新的 Map：后台的清理协程可能正在用它
 	responsesReplayStoreStats.entries.Store(0)
 	responsesReplayStoreStats.totalSize.Store(0)
 }

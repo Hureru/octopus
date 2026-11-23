@@ -2,7 +2,7 @@ package relay
 
 import (
 	"context"
-	"io"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -24,7 +24,6 @@ import (
 var maxSSEEventSize = 32 * 1024 * 1024
 
 const wsWriteTimeout = 10 * time.Second
-const wsPassthroughDrainTimeout = 5 * time.Second
 
 func init() {
 	if raw := strings.TrimSpace(os.Getenv(strings.ToUpper(conf.APP_NAME) + "_RELAY_MAX_SSE_EVENT_SIZE")); raw != "" {
@@ -84,19 +83,6 @@ type StreamWriter interface {
 	WriteHeader(code int)
 }
 
-// UpstreamReader abstracts reading events from upstream (SSE or WebSocket).
-type UpstreamReader interface {
-	// ReadEvent reads the next event data. Returns io.EOF at end of stream.
-	ReadEvent(ctx context.Context) ([]byte, error)
-	// StatusCode returns the HTTP status code (for error handling).
-	StatusCode() int
-	// Headers returns the response headers.
-	Headers() http.Header
-	// Body returns the raw response body for non-stream scenarios.
-	Body() io.ReadCloser
-	Close() error
-}
-
 type relayRequest struct {
 	c               *gin.Context
 	ctx             context.Context // used when c is nil (WebSocket mode)
@@ -115,6 +101,16 @@ type relayRequest struct {
 
 	// streamWriter allows overriding the response writer (nil = use c.Writer)
 	streamWriter StreamWriter
+
+	// clientHeaders 是 WS 入站时客户端握手请求的头（这时 c 是 nil）
+	clientHeaders http.Header
+
+	// upstream 是 WS 入站时这条客户端连接独占的上游 WS；nil 表示 HTTP 入站，一律用 HTTP 连上游。
+	upstream *wsUpstream
+	// previousResponseID 和 continuationBody 是客户端原本的续传请求：
+	// 只有上游 WS 刚完成的回复正是 previousResponseID 时才发它，其余情况发 rawBody。
+	previousResponseID string
+	continuationBody   []byte
 
 	// heartbeat 管理可选的上游流建立前延迟心跳；默认 no-op。
 	heartbeat *earlyHeartbeat
@@ -141,6 +137,9 @@ type relayAttempt struct {
 	firstTokenTimeOutSec int
 	firstTokenBudget     *firstTokenBudget
 	retryAfter           time.Duration // forward() 提取后暂存
+
+	// rawOutputItems 是直通时从上游原始事件里收集的 Responses 输出条目，续传回放要原样带回去。
+	rawOutputItems json.RawMessage
 }
 
 // attemptResult 封装单次尝试的结果

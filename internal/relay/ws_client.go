@@ -3,26 +3,51 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/op"
+	"github.com/bestruirui/octopus/internal/outlierwindow"
 	"github.com/bestruirui/octopus/internal/relay/balancer"
+	"github.com/bestruirui/octopus/internal/server/resp"
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
 	"github.com/bestruirui/octopus/internal/utils/log"
+	"github.com/bestruirui/octopus/internal/utils/safe"
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 )
 
 const (
-	wsClientMaxAge    = 60 * time.Minute
 	wsClientReadLimit = 16 * 1024 * 1024 // 16MB per message
+	// 回合进行中客户端又发来的消息先排在这里，最多这么多条（每条不超过 wsClientReadLimit）。
+	// 正常的客户端一个回合里最多多发一条（比如打断）。
+	wsClientQueueSize = 4
 )
+
+// 是变量，测试里要改短
+var wsClientMaxAge = 60 * time.Minute
+
+// wsClientSession 是一条客户端 WS 连接自己的东西，连接关闭时一起释放。
+type wsClientSession struct {
+	conn        *websocket.Conn
+	apiKeyID    int
+	requestSeen bool        // 这条连接上已经有过通过 Key 检查的请求（预热不算）
+	openedAt    time.Time   // 握手的时间
+	headers     http.Header // 握手请求的头，每个请求都带给上游
+	upstream    wsUpstream  // 这条连接独占的上游 WS，用到时才建
+	// 每个模型一份对话存档。
+	// shortcut: 存档大小没有上限，随对话变长，连接关闭（最长 60 分钟）才释放；有人拿它占内存时再加上限。
+	states map[string]*wsConversationState
+}
 
 type wsRelayResult struct {
 	Success           bool
@@ -51,37 +76,63 @@ func HandleWSResponse(c *gin.Context) {
 	defer cancel()
 
 	apiKeyID := c.GetInt("api_key_id")
-	supportedModels := c.GetString("supported_models")
+	session := &wsClientSession{
+		conn:     conn,
+		apiKeyID: apiKeyID,
+		headers:  c.Request.Header,
+		states:   map[string]*wsConversationState{},
+		openedAt: time.Now(),
+	}
+	defer session.upstream.close()
 
 	log.Debugf("ws client connected (apikey=%d)", apiKeyID)
 
-	downstreamSessionID := fmt.Sprintf("ws_%d", time.Now().UnixNano())
-	var conversationState *wsConversationState
-
-	// Message loop
-	for {
-		select {
-		case <-ctx.Done():
+	// 连接到了时限：先告诉客户端，再正常关闭。进行中的回合由 ctx 取消。
+	stop := context.AfterFunc(ctx, func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			writeWSError(ctx, conn, 400, "websocket_connection_limit_reached",
 				"Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.")
 			conn.Close(websocket.StatusNormalClosure, "connection limit reached")
-			return
-		default:
 		}
+	})
+	defer stop()
 
-		msgType, data, err := conn.Read(ctx)
-		if err != nil {
-			closeStatus := websocket.CloseStatus(err)
-			if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway {
-				log.Debugf("ws client disconnected normally (apikey=%d)", apiKeyID)
-			} else {
-				log.Warnf("ws client read error (apikey=%d): %v", apiKeyID, err)
+	// 读协程：回合进行中也一直读客户端。这样客户端的 ping 有人回，它一断开进行中的请求马上取消。
+	// 读到的消息排队交给下面的循环，一次处理一条。
+	// shortcut: 队列排满（客户端在一个回合里连发好几条消息）时读协程停下来等，这期间和以前一样不回 ping、也发现不了断开；
+	// 真有客户端这样用时再把队列加大。
+	messages := make(chan []byte, wsClientQueueSize)
+	// 读客户端不能用带时限的 ctx：时限一到这个库会直接断开连接，上面的通知就发不出去了
+	readCtx := c.Request.Context()
+	safe.Go("ws-client-reader", func() {
+		defer close(messages)
+		defer cancel() // 客户端走了：取消进行中的回合
+		for {
+			msgType, data, err := conn.Read(readCtx)
+			if err != nil {
+				closeStatus := websocket.CloseStatus(err)
+				if closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway || ctx.Err() != nil {
+					log.Debugf("ws client disconnected normally (apikey=%d)", apiKeyID)
+				} else {
+					log.Warnf("ws client read error (apikey=%d): %v", apiKeyID, err)
+				}
+				return
 			}
-			return
+			if msgType != websocket.MessageText {
+				continue
+			}
+			select {
+			case messages <- data:
+			case <-readCtx.Done():
+				return // 处理函数已经返回（比如它 panic 了），没人再收消息
+			}
 		}
+	})
 
-		if msgType != websocket.MessageText {
-			continue
+	// Message loop：读协程退出（连接断了）才结束
+	for data := range messages {
+		if ctx.Err() != nil {
+			continue // 客户端已经走了，或者连接到了时限：还排着的消息不处理
 		}
 
 		var msg struct {
@@ -92,83 +143,73 @@ func HandleWSResponse(c *gin.Context) {
 			continue
 		}
 
+		if msg.Type == "response.interrupt" {
+			// Codex 用它打断进行中的回复，这里读到时那个回合已经结束了。
+			// shortcut: 不执行也不回应，回合照常跑完；Codex 要放弃回合时等不到确认会自己断开，读协程随即取消请求。
+			// 不能回 error：Codex 会把它当成下一个回合的结果。要省下被打断的回合的用量时，再把它转给上游。
+			continue
+		}
 		if msg.Type != "response.create" {
 			writeWSError(ctx, conn, 400, "invalid_request",
 				fmt.Sprintf("Unknown message type: %s", msg.Type))
 			continue
 		}
 
-		conversationState = processWSResponseCreate(ctx, conn, data, apiKeyID, supportedModels, downstreamSessionID, conversationState)
+		session.processWSResponseCreate(ctx, data)
 	}
 }
 
-func processWSResponseCreate(
-	ctx context.Context,
-	conn *websocket.Conn,
-	data []byte,
-	apiKeyID int,
-	supportedModels string,
-	downstreamSessionID string,
-	conversationState *wsConversationState,
-) *wsConversationState {
+func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []byte) {
+	conn, apiKeyID := s.conn, s.apiKeyID
 	var reqBody map[string]json.RawMessage
 	if err := json.Unmarshal(data, &reqBody); err != nil {
 		writeWSError(ctx, conn, 400, "invalid_request", "Failed to parse request body")
-		return conversationState
+		return
 	}
 
 	// Remove WS-only fields
 	delete(reqBody, "type")
 	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
-	allowStoredRestore := wsRequestExplicitlyRequestsContinuation(reqBody)
 	requestedPreviousResponseID := ""
 	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &requestedPreviousResponseID)
 		requestedPreviousResponseID = strings.TrimSpace(requestedPreviousResponseID)
 	}
-	hadLocalState := conversationState != nil
-	conversationState = resolveWSConversationState(apiKeyID, requestModel, conversationState, allowStoredRestore, downstreamSessionID)
-	hasResolvedState := conversationState != nil
-	resolvedLastResponseID := ""
-	if conversationState != nil {
-		resolvedLastResponseID = strings.TrimSpace(conversationState.LastResponseID)
+	stateKey := requestModel
+	// 只有接得上存档最后一个回复的请求才用存档拼成完整请求。
+	// 其余情况存档对这个请求来说不完整，绝不拿来回放。
+	replayState := s.states[stateKey]
+	if replayState != nil && (requestedPreviousResponseID == "" || requestedPreviousResponseID != strings.TrimSpace(replayState.LastResponseID)) {
+		replayState = nil
 	}
-	log.Debugf("ws response.create state resolved (apikey=%d, request_model=%s, requested_prev=%s, explicit_continuation=%t, had_local_state=%t, resolved_state=%t, resolved_last_response_id=%s)",
-		apiKeyID, requestModel, requestedPreviousResponseID, allowStoredRestore, hadLocalState, hasResolvedState, resolvedLastResponseID)
-	if conversationState != nil {
-		conversationState.DownstreamSessionID = downstreamSessionID
-	}
-	rewriteWSPreviousResponseID(reqBody, conversationState)
-	preferredSticky := wsConversationStateToSticky(conversationState)
-	if preferredSticky == nil && requestedPreviousResponseID != "" {
-		if group, err := op.GroupGetEnabledMap(requestModel, ctx); err == nil {
-			scope := wsAffinityScope{APIKeyID: apiKeyID, GroupID: group.ID, RequestModel: requestModel, ResponseID: requestedPreviousResponseID}
-			if entry, ok := getWSAffinityStore().Get(ctx, scope); ok {
-				preferredSticky = &balancer.SessionEntry{ChannelID: entry.ChannelID, ChannelKeyID: entry.ChannelKeyID, Timestamp: time.Now()}
-				log.Debugf("ws response affinity hit (apikey=%d, group=%d, request_model=%s, previous_response_id=%s, channel=%d, key=%d)",
-					apiKeyID, group.ID, requestModel, requestedPreviousResponseID, entry.ChannelID, entry.ChannelKeyID)
-			}
-		}
-	}
+	preferredSticky := responsesReplayStateToSticky(replayState)
 
-	// Check for generate: false (warmup). Codex-style clients use this as a
-	// prewarm probe and do not expect a synthetic completed response turn.
-	// Acknowledging it locally caused some clients to wait forever for a normal
-	// response lifecycle. Prime the upstream pool best-effort, then stay silent.
-	if genRaw, ok := reqBody["generate"]; ok {
-		var generate bool
-		if json.Unmarshal(genRaw, &generate) == nil && !generate {
-			if err := bestEffortWarmupUpstreamWS(ctx, apiKeyID, supportedModels, reqBody); err != nil {
-				log.Warnf("ws warmup failed (apikey=%d): %v", apiKeyID, err)
-			} else {
-				log.Debugf("ws warmup ready (apikey=%d)", apiKeyID)
-			}
-			return conversationState
-		}
-		delete(reqBody, "generate")
-	}
+	// 预热（generate:false）：Codex 连上后先发它，等到 response.completed 才发真正的请求。
+	// 这个字段只有 WS 上有，不发给上游。
+	prewarm := string(reqBody["generate"]) == "false"
+	delete(reqBody, "generate")
 
-	injectWSPreviousResponseID(reqBody, conversationState)
+	// 一条连接最长开 60 分钟：Key 的状态、限额和可用模型每条消息都重新查，和 HTTP 每个请求都查一样。
+	apiKey, err := op.APIKeyGet(apiKeyID, ctx)
+	if err != nil {
+		writeWSError(ctx, conn, http.StatusUnauthorized, apperror.CodeAuthInvalidToken, resp.ErrUnauthorized)
+		return
+	}
+	// 每分钟次数：握手时算过的那一次抵这条连接上的第一个请求；预热在本地应答，不算。
+	// 只在握手的那一分钟里抵：限流按整分钟计数，过了这一分钟那一次已经清零了。
+	handshakeCounts := !s.requestSeen && time.Now().Unix()/60 == s.openedAt.Unix()/60
+	if retryAfter, err := op.APIKeyCheck(apiKey, !prewarm && !handshakeCounts); err != nil {
+		event := wsErrorEvent(apperror.Status(err), apperror.Code(err), apperror.Message(err))
+		if retryAfter > 0 {
+			// 相当于 HTTP 的 Retry-After 响应头，Codex 从这里读
+			event["headers"] = map[string]string{"retry-after": strconv.Itoa(retryAfter)}
+		}
+		if err := writeWSEvent(ctx, conn, event); err != nil {
+			log.Debugf("ws error event write failed: %v", err)
+		}
+		return
+	}
+	s.requestSeen = s.requestSeen || !prewarm
 
 	// Force stream mode
 	reqBody["stream"] = json.RawMessage("true")
@@ -176,7 +217,7 @@ func processWSResponseCreate(
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		writeWSError(ctx, conn, 500, "server_error", "Failed to build request")
-		return conversationState
+		return
 	}
 
 	// Parse request
@@ -184,44 +225,74 @@ func processWSResponseCreate(
 	internalRequest, err := inAdapter.TransformRequest(ctx, bodyBytes)
 	if err != nil {
 		writeWSError(ctx, conn, 400, "invalid_request", err.Error())
-		return conversationState
+		return
 	}
 	originalRequest := cloneInternalRequest(internalRequest)
-	continuationRequested := allowStoredRestore || requestContainsToolOutputs(originalRequest)
-	if !continuationRequested {
-		deleteWSConversationState(apiKeyID, requestModel, downstreamSessionID)
-		conversationState = nil
-		preferredSticky = nil
-	}
+	// 续传只发一次：直接把“存档 + 新输入”拼成不带 previous_response_id 的完整请求。
 	executionRequest := originalRequest
-	if conversationState != nil && continuationRequested {
-		if conversationState.ShouldUseNativeContinuation(originalRequest) {
-			log.Debugf("ws relay using native continuation (apikey=%d, request_model=%s, previous_response_id=%s)", apiKeyID, requestModel, currentPreviousResponseID(originalRequest))
-		} else if conversationState.ShouldUseLocalReplay(originalRequest) {
-			replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-			if replayedRequest != nil {
-				executionRequest = replayedRequest
-			}
+	relayBody := bodyBytes // 同协议直通时发给上游的原始请求
+	if replayState != nil {
+		if replayed := replayState.BuildReplayRequest(originalRequest); replayed != nil {
+			executionRequest = replayed
+			relayBody = buildRawReplayBody(bodyBytes, replayed.OpenAIRawInputItems())
+		} else {
+			replayState = nil
+			preferredSticky = nil
 		}
+	}
+	// 本地没有存档的续传，历史在上游那里。刚完成那个回复的上游连接还在的话，回到它所在的渠道，
+	// 不看共用的会话保持：用同一个 Key 的别的客户端可能已经把它改到别的渠道了。
+	if preferredSticky == nil && requestedPreviousResponseID != "" && s.upstream.conn != nil && s.upstream.lastResponseID == requestedPreviousResponseID {
+		preferredSticky = &balancer.SessionEntry{ChannelID: s.upstream.channelID, ChannelKeyID: s.upstream.keyID, Timestamp: time.Now()}
 	}
 
 	// Check supported models
-	if supportedModels != "" {
-		supportedModelsArray := strings.Split(supportedModels, ",")
-		found := false
-		for _, m := range supportedModelsArray {
-			if m == executionRequest.Model {
-				found = true
-				break
-			}
-		}
-		if !found {
-			writeWSError(ctx, conn, 400, "invalid_request", "model not supported")
-			return conversationState
-		}
+	if apiKey.SupportedModels != "" && !slices.Contains(strings.Split(apiKey.SupportedModels, ","), executionRequest.Model) {
+		writeWSError(ctx, conn, 400, "invalid_request", "model not supported")
+		return
 	}
 
 	requestModel = executionRequest.Model
+	// 存档只在两种成功之后更新：完整请求（从它重新开始）和接上了存档的请求（追加）。
+	// 原样转发的续传，历史在上游那里，本地记不全，所以不记。
+	remember := func(resp *transformerModel.InternalLLMResponse, attempts []dbmodel.ChannelAttempt) {
+		if replayState == nil && continuesUpstreamHistory(originalRequest) {
+			return
+		}
+		if replayState == nil {
+			replayState = &wsConversationState{}
+		}
+		if channelID, keyID := finalChannelKey(attempts); channelID > 0 {
+			replayState.ChannelID = channelID
+			replayState.ChannelKeyID = keyID
+		}
+		replayState.ApplySuccessfulTurn(originalRequest, resp)
+		s.states[stateKey] = replayState
+		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, last_response_id=%s, channel=%d, key=%d)",
+			apiKeyID, requestModel, strings.TrimSpace(replayState.LastResponseID), replayState.ChannelID, replayState.ChannelKeyID)
+	}
+	if prewarm {
+		if len(originalRequest.Conversation) > 0 && string(originalRequest.Conversation) != "null" {
+			// 历史在上游的 conversation 里，本地给不出下一轮接得上的 ID
+			writeWSError(ctx, conn, 400, "invalid_request", "generate:false is not supported together with conversation")
+			return
+		}
+		if replayState == nil && requestedPreviousResponseID != "" {
+			// 接不上存档的预热不能在本地应答：下一轮会带着预热 ID 来，而它前面的历史本地没有。
+			writeWSError(ctx, conn, 409, "previous_response_not_found",
+				fmt.Sprintf("Previous response with id '%s' not found.", requestedPreviousResponseID))
+			return
+		}
+		// 在本地应答，不占用上游。输入记进存档：下一轮带着预热 ID 来时，拼成完整请求发给上游。
+		prewarmID, err := writeWSPrewarmAck(ctx, conn, requestModel)
+		if err != nil {
+			log.Debugf("ws prewarm ack write failed (apikey=%d): %v", apiKeyID, err)
+			return
+		}
+		remember(&transformerModel.InternalLLMResponse{ID: prewarmID}, nil)
+		return
+	}
+
 	req, group, err := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, cloneInternalRequest(executionRequest), originalRequest, preferredSticky, bodyBytes)
 	if err != nil {
 		status := 404
@@ -231,154 +302,29 @@ func processWSResponseCreate(
 			code = "no_available_channel"
 		}
 		writeWSError(ctx, conn, status, code, err.Error())
-		return conversationState
+		return
 	}
-	defer func() { req.metrics.DropLive() }() // 闭包：req 可能被下面的 replay 请求替换
-
-	autoRestart := conversationState != nil && continuationRequested && conversationState.CanAutoRestart(originalRequest)
-	failedPreviousResponseID := currentPreviousResponseID(originalRequest)
-	log.Debugf("ws relay prepared (apikey=%d, request_model=%s, previous_response_id=%s, auto_replay=%t, preferred_channel=%d, preferred_key=%d)",
-		apiKeyID, requestModel, failedPreviousResponseID, autoRestart,
-		func() int {
-			if preferredSticky == nil {
-				return 0
-			}
-			return preferredSticky.ChannelID
-		}(),
-		func() int {
-			if preferredSticky == nil {
-				return 0
-			}
-			return preferredSticky.ChannelKeyID
-		}())
-	result := runWSRelay(ctx, req, group)
-	if result.ResetConversation && autoRestart && !req.streamWriter.Written() {
-		log.Debugf("ws relay switching to replay (apikey=%d, request_model=%s, failed_previous_response_id=%s, reset_conversation=%t)",
-			apiKeyID, requestModel, failedPreviousResponseID, result.ResetConversation)
-		balancer.DeleteSticky(apiKeyID, requestModel)
-		replayedRequest := conversationState.BuildReplayRequest(originalRequest)
-		replayReq, replayGroup, replayErr := newWSRelayRequest(ctx, conn, inAdapter, apiKeyID, requestModel, replayedRequest, originalRequest, preferredSticky, bodyBytes)
-		if replayErr == nil {
-			replayReq.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
-			replayReq.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReplay)
-			// 被替换的请求不会再 Save；沿用它的日志 ID，日志页上那张进行中的卡片才有人收尾
-			replayReq.metrics.logID = req.metrics.logID
-			req = replayReq
-			group = replayGroup
-			result = runWSRelay(ctx, req, group)
-		}
+	defer req.metrics.DropLive()
+	req.rawBody = relayBody
+	req.clientHeaders = s.headers
+	req.upstream = &s.upstream
+	req.previousResponseID = requestedPreviousResponseID
+	req.continuationBody = bodyBytes
+	if replayState != nil {
+		req.metrics.SetWSMode(dbmodel.RelayLogWSModeReplay)
 	}
+	log.Debugf("ws relay prepared (apikey=%d, request_model=%s, previous_response_id=%s, replay=%t)",
+		apiKeyID, requestModel, requestedPreviousResponseID, replayState != nil)
 
-	result = finalizeWSRelay(ctx, conn, req, result)
+	result := finalizeWSRelay(ctx, conn, req, runWSRelay(ctx, req, group))
 	if result.Success {
-		if conversationState == nil {
-			conversationState = &wsConversationState{DownstreamSessionID: downstreamSessionID}
-		}
-		conversationState.DownstreamSessionID = downstreamSessionID
-		if channelID, keyID := finalChannelKey(req.iter.Attempts()); channelID > 0 {
-			conversationState.ChannelID = channelID
-			conversationState.ChannelKeyID = keyID
-		}
-		if req.metrics.WSMode != nil && *req.metrics.WSMode == dbmodel.RelayLogWSModeReplay {
-			conversationState.RememberReplayAlias(failedPreviousResponseID)
-			conversationState.MarkReplayRecovered(originalRequest)
-		} else {
-			conversationState.MarkNativeContinuationReady()
-		}
-		conversationState.ApplySuccessfulTurn(originalRequest, req.metrics.InternalResponse)
-		storeWSConversationState(apiKeyID, requestModel, conversationState, wsConversationStateTTL(group.SessionKeepTime))
-		log.Debugf("ws relay success state stored (apikey=%d, request_model=%s, ws_mode=%v, ws_recovery=%v, last_response_id=%s, channel=%d, key=%d)",
-			apiKeyID, requestModel, req.metrics.WSMode, req.metrics.WSRecovery,
-			strings.TrimSpace(conversationState.LastResponseID), conversationState.ChannelID, conversationState.ChannelKeyID)
-		return conversationState
-	}
-	if result.ResetConversation {
+		remember(req.metrics.InternalResponse, req.iter.Attempts())
+	} else if result.ResetConversation && replayState != nil {
+		// 只清这个请求用到的存档：上游说找不到的是别的回复时，存档还接得上它自己的那个回复
 		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
-		deleteWSConversationState(apiKeyID, requestModel, downstreamSessionID)
-		return nil
+		delete(s.states, stateKey)
 	}
-
-	return conversationState
-}
-
-func bestEffortWarmupUpstreamWS(
-	ctx context.Context,
-	apiKeyID int,
-	supportedModels string,
-	reqBody map[string]json.RawMessage,
-) error {
-	requestModel := strings.TrimSpace(extractWSRequestModel(reqBody))
-	if requestModel == "" {
-		return fmt.Errorf("warmup request missing model")
-	}
-
-	if supportedModels != "" {
-		supportedModelsArray := strings.Split(supportedModels, ",")
-		found := false
-		for _, modelName := range supportedModelsArray {
-			if modelName == requestModel {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("model not supported")
-		}
-	}
-
-	group, err := op.GroupGetEnabledMap(requestModel, ctx)
-	if err != nil {
-		return fmt.Errorf("model not found")
-	}
-
-	iter := balancer.NewIterator(group, apiKeyID, requestModel)
-	if iter.Len() == 0 {
-		return fmt.Errorf("no available channel")
-	}
-
-	var lastErr error
-	for iter.Next() {
-		item := iter.Item()
-
-		channel, err := op.ChannelGet(item.ChannelID, ctx)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if !channel.Enabled || channel.Type != outbound.OutboundTypeOpenAIResponse {
-			continue
-		}
-
-		selectOpts := dbmodel.ChannelKeySelectOptions{
-			ExcludeKeyIDs:  make(map[int]struct{}),
-			PreferredKeyID: iter.StickyKeyID(),
-		}
-
-		for {
-			usedKey := channel.GetChannelKey(selectOpts)
-			if usedKey.ChannelKey == "" {
-				break
-			}
-			if iter.SkipCircuitBreak(channel.ID, usedKey.ID, channel.Name) {
-				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
-				continue
-			}
-
-			if err := warmupUpstreamWSConnection(ctx, channel, usedKey); err != nil {
-				lastErr = err
-				selectOpts.ExcludeKeyIDs[usedKey.ID] = struct{}{}
-				continue
-			}
-
-			balancer.SetSticky(apiKeyID, requestModel, channel.ID, usedKey.ID)
-			return nil
-		}
-	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-	return fmt.Errorf("no ws-capable channel available for warmup")
+	// 其余情况不动存档：它只会被 previous_response_id 对得上的请求用到。
 }
 
 func extractWSRequestModel(reqBody map[string]json.RawMessage) string {
@@ -394,19 +340,6 @@ func extractWSRequestModel(reqBody map[string]json.RawMessage) string {
 		return ""
 	}
 	return requestModel
-}
-
-func warmupUpstreamWSConnection(ctx context.Context, channel *dbmodel.Channel, usedKey dbmodel.ChannelKey) error {
-	warmupCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-
-	pc := TryUpstreamWS(warmupCtx, channel, channel.GetBaseUrl(), usedKey.ChannelKey, usedKey.ID, nil)
-	if pc == nil {
-		return fmt.Errorf("upstream ws unavailable")
-	}
-
-	wsUpstreamPool.Put(pc)
-	return nil
 }
 
 func newWSRelayRequest(
@@ -449,23 +382,6 @@ func newWSRelayRequest(
 }
 
 func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) wsRelayResult {
-	replayExact := req != nil && req.internalRequest != nil && req.internalRequest.IsOpenAIExactReplayRequest()
-	relayCtx := ctx
-	if replayExact {
-		budget := 15 * time.Second
-		if deadline, ok := ctx.Deadline(); ok {
-			if remaining := time.Until(deadline); remaining > 0 && remaining < budget {
-				budget = remaining
-			}
-		}
-		var cancel context.CancelFunc
-		relayCtx, cancel = context.WithTimeoutCause(ctx, budget, errLocalRelayBudgetExceeded)
-		defer cancel()
-		if req != nil {
-			req.ctx = relayCtx
-		}
-	}
-
 	maxSameChannelRetries := 1
 	if group.RetryEnabled {
 		maxSameChannelRetries = group.MaxRetries
@@ -476,26 +392,14 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 
 	var lastErr error
 	var lastResult attemptResult
-	maxChannelAttempts := req.iter.Len()
-	if replayExact && maxChannelAttempts > 3 {
-		maxChannelAttempts = 3
-	}
+	// 和 HTTP 入站一致：请求里有转换不了的原生工具或条目时，只能走 OpenAI Responses 渠道
+	nativeRequired := req.internalRequest.HasOpenAIResponsesPassthrough()
+	nativeChannelFound := false
 
 	for req.iter.Next() {
-		if req.iter.Index() >= maxChannelAttempts {
-			break
-		}
 		select {
-		case <-relayCtx.Done():
-			if isLocalRelayBudgetExceeded(relayCtx, contextError(relayCtx)) {
-				publicErr := wsPublicError{
-					Status:  http.StatusGatewayTimeout,
-					Code:    "replay_recovery_timeout",
-					Message: "exact replay 恢复超过本地 15 秒预算，请重试",
-				}
-				return wsRelayResult{Err: contextError(relayCtx), PublicError: &publicErr}
-			}
-			return wsRelayResult{Canceled: true, Err: relayCtx.Err()}
+		case <-ctx.Done():
+			return wsRelayResult{Canceled: true, Err: ctx.Err()}
 		default:
 		}
 
@@ -510,6 +414,13 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		if !channel.Enabled {
 			req.iter.Skip(channel.ID, 0, channel.Name, "channel disabled")
 			continue
+		}
+		if nativeRequired {
+			if channel.Type != outbound.OutboundTypeOpenAIResponse {
+				req.iter.Skip(channel.ID, 0, channel.Name, "openai responses passthrough required")
+				continue
+			}
+			nativeChannelFound = true
 		}
 
 		outAdapter := outbound.Get(channel.Type)
@@ -557,18 +468,13 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			if retryNum > 0 {
 				delay := computeBackoff(retryNum, result.RetryAfter)
 				select {
-				case <-relayCtx.Done():
-					if isLocalRelayBudgetExceeded(relayCtx, contextError(relayCtx)) {
-						publicErr := wsPublicError{
-							Status:  http.StatusGatewayTimeout,
-							Code:    "replay_recovery_timeout",
-							Message: "exact replay 恢复超过本地 15 秒预算，请重试",
-						}
-						return wsRelayResult{Err: contextError(relayCtx), PublicError: &publicErr}
-					}
-					return wsRelayResult{Canceled: true, Err: relayCtx.Err()}
+				case <-ctx.Done():
+					return wsRelayResult{Canceled: true, Err: ctx.Err()}
 				case <-time.After(delay):
 				}
+
+				// 重建 outAdapter 以重置流式状态（toolIndex, toolCalls 等）
+				outAdapter = outbound.Get(channel.Type)
 			}
 
 			ra := &relayAttempt{
@@ -580,20 +486,23 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 			}
 
 			result = ra.attempt()
-			if result.Success || result.Written || result.Canceled || result.ResetConversation || !isRetryableStatus(result.StatusCode) {
+			if result.Success || result.Written || result.Canceled || result.ResetConversation || result.FirstTokenTimeout || !isRetryableStatus(result.StatusCode) {
 				break
 			}
 		}
 
+		// 下面这一段和 HTTP 入站的 Handler 一样
 		if !result.Success && !result.Written && !result.Canceled && !result.ResetConversation {
 			failureKind := circuitFailureKind(group.RetryEnabled, result.StatusCode)
-			if replayExact && result.StatusCode == http.StatusServiceUnavailable && isNoAvailableAccountError(relayErrorMessage(result.Err)) {
-				failureKind = balancer.FailureHard
-			}
 			balancer.RecordFailure(channel.ID, usedKey.ID, req.internalRequest.Model, failureKind)
+			outlierwindow.Report(channel.ID, false, result.StatusCode, time.Now())
+			if failureKind == balancer.FailureHard {
+				maybeLearnManagedRoute(ctx, channel.ID, req.internalRequest.Model, inbound.InboundTypeOpenAIResponse, result.Err)
+			}
 		}
 
 		if result.Success {
+			outlierwindow.Report(channel.ID, true, result.StatusCode, time.Now())
 			var respID string
 			if req.metrics.InternalResponse != nil {
 				respID = req.metrics.InternalResponse.ID
@@ -613,20 +522,33 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 		lastResult = result
 	}
 
+	if nativeRequired && !nativeChannelFound {
+		return wsRelayResult{
+			Err:         fmt.Errorf("openai responses native tools require an openai responses channel"),
+			PublicError: &wsPublicError{Status: 400, Code: "invalid_request", Message: "当前请求包含 OpenAI Responses 原生工具，仅支持 OpenAI Responses 通道直通"},
+		}
+	}
 	if publicErr, ok := classifyWSPublicError(lastErr, lastResult.StatusCode); ok {
 		return wsRelayResult{ResetConversation: publicErr.ResetConversation, Err: lastErr, PublicError: &publicErr}
 	}
 	return wsRelayResult{Err: lastErr}
 }
 
+// finalizeWSRelay 记录回合的结果，并保证客户端收到结束事件：
+// WS 上没有“流关闭”这个信号，不发的话客户端会一直等。
 func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, result wsRelayResult) wsRelayResult {
+	terminal := req.streamWriter.(*WSStreamWriter).terminalEvent()
+	req.metrics.SaveWithChannelStats(ctx, result.Success, result.Err, req.iter.Attempts(), false)
 	if result.Success {
-		req.metrics.SaveWithChannelStats(ctx, true, nil, req.iter.Attempts(), false)
 		return result
 	}
-
-	req.metrics.SaveWithChannelStats(ctx, false, result.Err, req.iter.Attempts(), false)
-	if result.Canceled || result.Written {
+	if terminal != "" || ctx.Err() != nil {
+		// 结束事件已经发过了；或者客户端已经走了；或者连接到了时限，由 HandleWSResponse 通知
+		return result
+	}
+	if result.Written {
+		// 已经输出了一部分，不能再换渠道重来。客户端已经断开时这一帧发不出去，没有影响
+		writeWSError(ctx, conn, 502, "upstream_stream_interrupted", "上游在回复完成前中断了，请重试")
 		return result
 	}
 	if result.PublicError != nil {
@@ -640,61 +562,28 @@ func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayReques
 	return result
 }
 
-func injectWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
-	// Local continuation now prefers exact replay over implicit previous_response_id injection.
-	// Explicit client-supplied previous_response_id is still preserved elsewhere.
-}
-
-func rewriteWSPreviousResponseID(reqBody map[string]json.RawMessage, state *wsConversationState) {
-	if state == nil || len(reqBody) == 0 {
-		return
-	}
-	raw, ok := reqBody["previous_response_id"]
-	if !ok || len(raw) == 0 {
-		return
-	}
-	var previousResponseID string
-	if err := json.Unmarshal(raw, &previousResponseID); err != nil {
-		return
-	}
-	if !state.ShouldRewritePreviousResponseID(previousResponseID) {
-		return
-	}
-	reqBody["previous_response_id"] = json.RawMessage(fmt.Sprintf("%q", state.LastResponseID))
-}
-
-func currentPreviousResponseID(req *transformerModel.InternalLLMRequest) string {
-	return req.OpenAIPreviousResponseID()
-}
-
-func wsRequestExplicitlyRequestsContinuation(reqBody map[string]json.RawMessage) bool {
-	if len(reqBody) == 0 {
-		return false
-	}
-	if raw, ok := reqBody["previous_response_id"]; ok && len(raw) > 0 {
-		var previousResponseID string
-		if err := json.Unmarshal(raw, &previousResponseID); err == nil && strings.TrimSpace(previousResponseID) != "" {
-			return true
-		}
-	}
-	if raw, ok := reqBody["conversation"]; ok && len(raw) > 0 && string(raw) != "null" {
-		return true
-	}
-	return false
-}
-
 func writeWSError(ctx context.Context, conn *websocket.Conn, status int, code, message string) {
-	errEvent := map[string]interface{}{
+	if err := writeWSEvent(ctx, conn, wsErrorEvent(status, code, message)); err != nil {
+		log.Debugf("ws error event write failed: %v", err)
+	}
+}
+
+func wsErrorEvent(status int, code, message string) map[string]any {
+	errorType := "invalid_request_error"
+	switch {
+	case status == 429:
+		errorType = "rate_limit_error"
+	case status >= 500:
+		errorType = "server_error"
+	}
+	return map[string]any{
 		"type":   "error",
 		"status": status,
-		"error": map[string]interface{}{
-			"type":    "invalid_request_error",
+		"error": map[string]any{
+			"type":    errorType,
 			"code":    code,
 			"message": message,
 		},
-	}
-	if err := writeWSEvent(ctx, conn, errEvent); err != nil {
-		log.Debugf("ws error event write failed: %v", err)
 	}
 }
 

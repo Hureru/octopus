@@ -442,7 +442,7 @@ func TestHTTPReplayFailedMergeKeepsOriginalRequest(t *testing.T) {
 	storeResponsesReplayState(apiKeyID, groupID, requestModel, state, time.Minute)
 
 	// Request with previous_response_id but NO current messages or raw input items
-	// This will cause buildRequestInputItems to fail and return ok=false
+	// With no stored history and no new input there is nothing to replay
 	req := &transformerModel.InternalLLMRequest{
 		Model:              requestModel,
 		PreviousResponseID: stringPtr("resp_empty"),

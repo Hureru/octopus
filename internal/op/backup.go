@@ -210,6 +210,7 @@ func DBImportIncremental(ctx context.Context, dump *model.DBDump) (*model.DBImpo
 			ch.ID = 0
 			ch.Keys = nil
 			ch.Stats = nil
+			ch.WSMode = ch.WSMode.Normalize() // 旧备份里可能还是 inherit、passthrough、transform
 			remapProxyConfigID(&ch.ProxyMode, &ch.ProxyConfigID, proxyConfigIDMap)
 
 			var existing model.Channel

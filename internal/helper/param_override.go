@@ -20,40 +20,36 @@ func ApplyParamOverride(request *http.Request, paramOverride *string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
-
-	restoreBody := func() {
-		request.Body = io.NopCloser(bytes.NewReader(body))
-		request.ContentLength = int64(len(body))
-		request.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(body)), nil
-		}
+	// 合并失败时也要把读走的请求体放回去
+	merged, mergeErr := MergeParamOverride(body, paramOverride)
+	if mergeErr != nil {
+		merged = body
 	}
-
-	var bodyMap map[string]any
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		restoreBody()
-		return nil
+	request.Body = io.NopCloser(bytes.NewReader(merged))
+	request.ContentLength = int64(len(merged))
+	request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(merged)), nil
 	}
+	return mergeErr
+}
 
-	var override map[string]any
-	if err := json.Unmarshal([]byte(*paramOverride), &override); err != nil {
-		restoreBody()
-		return nil
+// MergeParamOverride merges a JSON-object override into a JSON request body: an override key replaces
+// the body's key. The other values are not decoded, so they keep their exact value (big integers too).
+// Empty overrides, and bodies or overrides that are not JSON objects, leave the body unchanged.
+func MergeParamOverride(body []byte, paramOverride *string) ([]byte, error) {
+	if paramOverride == nil || strings.TrimSpace(*paramOverride) == "" {
+		return body, nil
 	}
-
+	var bodyMap, override map[string]json.RawMessage
+	if json.Unmarshal(body, &bodyMap) != nil || json.Unmarshal([]byte(*paramOverride), &override) != nil || bodyMap == nil || override == nil {
+		return body, nil
+	}
 	for key, value := range override {
 		bodyMap[key] = value
 	}
-
-	modifiedBody, err := json.Marshal(bodyMap)
+	merged, err := json.Marshal(bodyMap)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request body with param override: %w", err)
+		return nil, fmt.Errorf("failed to marshal request body with param override: %w", err)
 	}
-
-	request.Body = io.NopCloser(bytes.NewReader(modifiedBody))
-	request.ContentLength = int64(len(modifiedBody))
-	request.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(modifiedBody)), nil
-	}
-	return nil
+	return merged, nil
 }

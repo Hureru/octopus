@@ -65,6 +65,7 @@ func ChannelCreate(channel *model.Channel, ctx context.Context) error {
 	} else {
 		channel.ProxyConfigID = nil
 	}
+	channel.WSMode = channel.WSMode.Normalize()
 	if err := db.GetDB().WithContext(ctx).Create(channel).Error; err != nil {
 		return err
 	}

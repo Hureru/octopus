@@ -3,7 +3,10 @@ package op
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
+	"github.com/bestruirui/octopus/internal/apperror"
 	"github.com/bestruirui/octopus/internal/db"
 	"github.com/bestruirui/octopus/internal/model"
 	"github.com/bestruirui/octopus/internal/utils/cache"
@@ -56,6 +59,28 @@ func APIKeyGetByAPIKey(apiKey string, ctx context.Context) (model.APIKey, error)
 		return model.APIKey{}, fmt.Errorf("API key not found")
 	}
 	return APIKeyGet(id, ctx)
+}
+
+// APIKeyCheck 检查这把 Key 现在还能不能发请求：启用状态、过期时间、费用上限、每分钟次数。
+// countRequest 为真时把这一次算进每分钟次数，超了就不通过；为假时不看每分钟次数。
+// 不通过时返回带状态码的原因；retryAfter 只在超过每分钟次数时大于 0，单位是秒。
+func APIKeyCheck(apiKey model.APIKey, countRequest bool) (retryAfter int, err error) {
+	if !apiKey.Enabled {
+		return 0, apperror.New(apperror.CodeAuthAPIKeyDisabled, "API key is disabled").WithStatus(http.StatusUnauthorized)
+	}
+	if apiKey.ExpireAt > 0 && apiKey.ExpireAt < time.Now().Unix() {
+		return 0, apperror.New(apperror.CodeAuthAPIKeyExpired, "API key has expired").WithStatus(http.StatusUnauthorized)
+	}
+	used := StatsAPIKeyGet(apiKey.ID).StatsMetrics
+	if apiKey.MaxCost > 0 && apiKey.MaxCost < used.OutputCost+used.InputCost {
+		return 0, apperror.New(apperror.CodeAuthAPIKeyCostExceeded, "API key has reached the max cost").WithStatus(http.StatusUnauthorized)
+	}
+	if countRequest {
+		if allowed, wait := RateLimitCheck(apiKey.ID, apiKey.MaxRPM); !allowed {
+			return wait, apperror.New(apperror.CodeAuthAPIKeyRateLimited, "API key has exceeded the rate limit").WithStatus(http.StatusTooManyRequests)
+		}
+	}
+	return 0, nil
 }
 
 func APIKeyDelete(id int, ctx context.Context) error {

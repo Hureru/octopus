@@ -28,6 +28,7 @@ const (
 const (
 	TransformerMetadataOpenAIResponsesPassthroughRequired = "octopus_openai_responses_passthrough_required"
 	TransformerMetadataOpenAIResponsesPassthroughReason   = "octopus_openai_responses_passthrough_reason"
+	TransformerMetadataOpenAIResponsesInstructions        = "octopus_openai_responses_instructions" // 第一条消息来自顶层的 instructions
 	TransformerMetadataWSExecutionMode                    = "octopus_ws_execution_mode"
 	TransformerMetadataWSExecutionModeReplayExact         = "replay_exact"
 	TransformerMetadataAnthropicUserID                    = "anthropic_user_id"

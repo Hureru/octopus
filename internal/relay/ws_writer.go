@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -12,10 +13,12 @@ import (
 // WSStreamWriter implements StreamWriter for WebSocket clients.
 // It converts SSE "data: {...}\n\n" formatted bytes to bare JSON WebSocket text frames.
 type WSStreamWriter struct {
-	conn    *websocket.Conn
-	ctx     context.Context
-	written bool
-	mu      sync.Mutex
+	conn     *websocket.Conn
+	ctx      context.Context
+	written  bool
+	terminal wsUpstreamEvent // 已经发给客户端的结束事件；Type 为空表示这个回合还没有结束事件
+	pending  []byte          // 还没收到行尾的半行
+	mu       sync.Mutex
 }
 
 func NewWSStreamWriter(ctx context.Context, conn *websocket.Conn) *WSStreamWriter {
@@ -29,25 +32,76 @@ func (w *WSStreamWriter) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// 直通转发时，上游的数据块可能从一行中间切开：没收完的半行留到下次再发。
+	lineEnd := bytes.LastIndexByte(data, '\n') + 1
+	if lineEnd == 0 {
+		// 和别处读 SSE 的上限一致：一直不换行的流不能无限攒下去
+		if len(w.pending)+len(data) > maxSSEEventSize {
+			return 0, fmt.Errorf("sse line exceeds %d bytes", maxSSEEventSize)
+		}
+		w.pending = append(w.pending, data...)
+		return len(data), nil
+	}
+	// 每一行都不能超过上限：接在 pending 后面的第一行，和留到下次的最后半行
+	if len(w.pending)+bytes.IndexByte(data, '\n') > maxSSEEventSize || len(data)-lineEnd > maxSSEEventSize {
+		return 0, fmt.Errorf("sse line exceeds %d bytes", maxSSEEventSize)
+	}
+	complete := data[:lineEnd]
+	if len(w.pending) > 0 {
+		complete = append(w.pending, complete...)
+	}
+	// complete 可能和 pending 共用内存，所以帧发完才能覆盖 pending
+	defer func() { w.pending = append(w.pending[:0], data[lineEnd:]...) }()
+
 	// Extract JSON data from SSE format "data: {...}\n\n"
-	lines := extractSSEDataLines(data)
-	wroteFrame := false
+	lines := extractSSEDataLines(complete)
 	for _, line := range lines {
 		if len(line) == 0 {
 			continue
 		}
-		writeCtx, cancel := context.WithTimeout(w.ctx, wsWriteTimeout)
-		err := w.conn.Write(writeCtx, websocket.MessageText, line)
-		cancel()
-		if err != nil {
+		if err := w.sendFrame(w.ctx, line); err != nil {
 			return 0, err
 		}
-		wroteFrame = true
-	}
-	if wroteFrame {
-		w.written = true
 	}
 	return len(data), nil
+}
+
+// WriteFrame 给客户端发一帧已经是 JSON 的事件。
+func (w *WSStreamWriter) WriteFrame(frame []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sendFrame(w.ctx, frame)
+}
+
+// sendFrame 发一帧，并记下它是不是回合的结束事件。调用时要持有 mu。
+func (w *WSStreamWriter) sendFrame(ctx context.Context, frame []byte) error {
+	if err := writeWSFrame(ctx, w.conn, frame); err != nil {
+		return err
+	}
+	w.written = true
+	event := parseWSUpstreamEvent(frame)
+	if _, ok := responsesPassthroughTerminalEvents[event.Type]; ok {
+		w.terminal = event
+	}
+	return nil
+}
+
+// terminalEvent 返回已经发给客户端的结束事件的类型，还没有时返回空。
+func (w *WSStreamWriter) terminalEvent() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.terminal.Type
+}
+
+// reportedFailure：发给客户端的结束事件是上游报告的失败（response.failed、error）时，
+// 返回这次尝试该记的状态码和错误；否则返回 0 和 nil。
+func (w *WSStreamWriter) reportedFailure() (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.terminal.Type != "response.failed" && w.terminal.Type != "error" {
+		return 0, nil
+	}
+	return wsUpstreamFailure(w.terminal)
 }
 
 func (w *WSStreamWriter) Flush() {
@@ -74,7 +128,7 @@ func (w *WSStreamWriter) WriteHeader(code int) {
 // Returns the raw JSON data for each line (without "data: " prefix).
 func extractSSEDataLines(data []byte) [][]byte {
 	var results [][]byte
-	prefix := []byte("data: ")
+	prefix := []byte("data:") // SSE 允许冒号后面不带空格
 
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		line = bytes.TrimSpace(line)
@@ -82,7 +136,7 @@ func extractSSEDataLines(data []byte) [][]byte {
 			continue
 		}
 		if bytes.HasPrefix(line, prefix) {
-			payload := line[len(prefix):]
+			payload := bytes.TrimSpace(line[len(prefix):])
 			if len(payload) > 0 && !bytes.Equal(payload, []byte("[DONE]")) {
 				results = append(results, payload)
 			}

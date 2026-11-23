@@ -87,7 +87,3 @@ func InvalidCredentials(c *gin.Context) {
 func APIKeyMissing(c *gin.Context) {
 	ErrorWithAppError(c, http.StatusUnauthorized, apperror.New(apperror.CodeAuthAPIKeyMissing, "API key is missing").WithStatus(http.StatusUnauthorized))
 }
-
-func APIKeyExpired(c *gin.Context) {
-	ErrorWithAppError(c, http.StatusUnauthorized, apperror.New(apperror.CodeAuthAPIKeyExpired, "API key has expired").WithStatus(http.StatusUnauthorized))
-}

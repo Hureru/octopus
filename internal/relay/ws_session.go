@@ -1,161 +1,25 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
 	"maps"
 	"net/url"
+	"slices"
 	"strings"
 
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
+	"github.com/tmaxmax/go-sse"
 )
 
 type wsConversationState struct {
-	DownstreamSessionID string
-	RequestModel        string
-	ChannelID           int
-	ChannelKeyID        int
-	LastResponseID      string
-	ReplayWindowItems   json.RawMessage
-	Transcript          []transformerModel.Message
-	ReplayAliases       []string
-	ReplayPending       bool
-}
-
-func (s *wsConversationState) MatchesRequestModel(requestModel string) bool {
-	if s == nil {
-		return false
-	}
-	return strings.TrimSpace(s.RequestModel) == strings.TrimSpace(requestModel)
-}
-
-func (s *wsConversationState) CanAutoRestart(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil || req == nil {
-		return false
-	}
-	if len(s.ReplayWindowItems) > 0 {
-		if strings.TrimSpace(s.LastResponseID) == "" {
-			return false
-		}
-		prevID := req.OpenAIPreviousResponseID()
-		if prevID == "" {
-			return true
-		}
-		return s.MatchesPreviousResponseID(prevID)
-	}
-	if s.ReplayPending && requestContainsToolOutputs(req) {
-		return false
-	}
-	if strings.TrimSpace(s.LastResponseID) == "" || len(s.Transcript) == 0 {
-		return false
-	}
-	if !requiresUpstreamWSContinuation(req) {
-		return false
-	}
-	prevID := req.OpenAIPreviousResponseID()
-	if prevID == "" {
-		return true
-	}
-	return s.MatchesPreviousResponseID(prevID)
-}
-
-func (s *wsConversationState) MatchesPreviousResponseID(responseID string) bool {
-	if s == nil {
-		return false
-	}
-	responseID = strings.TrimSpace(responseID)
-	if responseID == "" {
-		return false
-	}
-	if responseID == strings.TrimSpace(s.LastResponseID) {
-		return true
-	}
-	for _, alias := range s.ReplayAliases {
-		if responseID == strings.TrimSpace(alias) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *wsConversationState) ShouldRewritePreviousResponseID(responseID string) bool {
-	if s == nil {
-		return false
-	}
-	responseID = strings.TrimSpace(responseID)
-	if responseID == "" || responseID == strings.TrimSpace(s.LastResponseID) {
-		return false
-	}
-	for _, alias := range s.ReplayAliases {
-		if responseID == strings.TrimSpace(alias) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *wsConversationState) ShouldUseNativeContinuation(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil || req == nil {
-		return false
-	}
-	if strings.TrimSpace(req.OpenAIPreviousResponseID()) == "" {
-		return false
-	}
-	if strings.TrimSpace(s.LastResponseID) == "" {
-		return false
-	}
-	return !s.ReplayPending
-}
-
-func (s *wsConversationState) ShouldUseLocalReplay(req *transformerModel.InternalLLMRequest) bool {
-	if s == nil || req == nil {
-		return false
-	}
-	if len(s.ReplayWindowItems) == 0 || strings.TrimSpace(s.LastResponseID) == "" {
-		return false
-	}
-	prevID := req.OpenAIPreviousResponseID()
-	if prevID == "" {
-		return true
-	}
-	return s.MatchesPreviousResponseID(prevID)
-}
-
-func (s *wsConversationState) MarkReplayRecovered(req *transformerModel.InternalLLMRequest) {
-	if s == nil {
-		return
-	}
-	s.ReplayPending = requestContainsToolOutputs(req)
-}
-
-func (s *wsConversationState) MarkNativeContinuationReady() {
-	if s == nil {
-		return
-	}
-	s.ReplayPending = false
-}
-
-func (s *wsConversationState) RememberReplayAlias(responseID string) {
-	if s == nil {
-		return
-	}
-	responseID = strings.TrimSpace(responseID)
-	if responseID == "" || responseID == strings.TrimSpace(s.LastResponseID) {
-		return
-	}
-	filtered := make([]string, 0, len(s.ReplayAliases)+1)
-	filtered = append(filtered, responseID)
-	for _, alias := range s.ReplayAliases {
-		alias = strings.TrimSpace(alias)
-		if alias == "" || alias == responseID {
-			continue
-		}
-		filtered = append(filtered, alias)
-		if len(filtered) >= 8 {
-			break
-		}
-	}
-	s.ReplayAliases = filtered
+	RequestModel      string
+	ChannelID         int
+	ChannelKeyID      int
+	LastResponseID    string
+	ReplayWindowItems json.RawMessage
+	Transcript        []transformerModel.Message
 }
 
 // BuildReplayRequest transforms a continuation request into a self-contained replay request
@@ -174,7 +38,10 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	responsesOptions.RawInputItems = nil
 	replayed.SetOpenAIResponsesOptions(responsesOptions)
 	replayed.SetOpenAIRawInputItems(nil)
-	replayed.Messages = retainInstructionMessages(req.Messages)
+	// Responses 渠道用下面合并好的原始条目；其他渠道从 Messages 生成请求，所以 Messages 也要是完整对话。
+	// 顶层的 instructions 只用这一轮的（上一轮的不会带到下一轮），放在最前面。
+	instructions, input := splitInstructions(req)
+	replayed.Messages = cloneMessages(slices.Concat(instructions, s.Transcript, input))
 
 	// Merge historical replay window and current request into raw input items
 	mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.OpenAIRawInputItems(), req.Messages)
@@ -192,6 +59,12 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	return replayed
 }
 
+// continuesUpstreamHistory 报告请求是不是接着上游存着的历史（带 previous_response_id 或 conversation）。
+// 这样的请求原样转发时本地只看得到这一轮，成功了也不能拿它建存档。
+func continuesUpstreamHistory(req *transformerModel.InternalLLMRequest) bool {
+	return req.OpenAIPreviousResponseID() != "" || (len(req.Conversation) > 0 && string(req.Conversation) != "null")
+}
+
 func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.InternalLLMRequest, resp *transformerModel.InternalLLMResponse) {
 	if s == nil || req == nil || resp == nil {
 		return
@@ -200,7 +73,12 @@ func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.Internal
 	if replayWindowItems, ok := buildNextReplayWindow(s.ReplayWindowItems, req, resp); ok {
 		s.ReplayWindowItems = replayWindowItems
 	}
-	s.Transcript = append(s.Transcript, cloneMessages(req.Messages)...)
+	if req.IsOpenAIExactReplayRequest() {
+		// 回放请求（HTTP 入站传进来的是它）的 Messages 已经是完整对话，不能再接在旧记录后面
+		s.Transcript = nil
+	}
+	_, input := splitInstructions(req) // instructions 不是对话的一部分，不记
+	s.Transcript = append(s.Transcript, cloneMessages(input)...)
 	s.Transcript = append(s.Transcript, assistantMessagesFromResponse(resp)...)
 	if respID := strings.TrimSpace(resp.ID); respID != "" {
 		s.LastResponseID = respID
@@ -212,15 +90,12 @@ func cloneWSConversationState(state *wsConversationState) *wsConversationState {
 		return nil
 	}
 	return &wsConversationState{
-		DownstreamSessionID: strings.TrimSpace(state.DownstreamSessionID),
-		RequestModel:        strings.TrimSpace(state.RequestModel),
-		ChannelID:           state.ChannelID,
-		ChannelKeyID:        state.ChannelKeyID,
-		LastResponseID:      strings.TrimSpace(state.LastResponseID),
-		ReplayWindowItems:   append(json.RawMessage(nil), state.ReplayWindowItems...),
-		Transcript:          cloneMessages(state.Transcript),
-		ReplayAliases:       append([]string(nil), state.ReplayAliases...),
-		ReplayPending:       state.ReplayPending,
+		RequestModel:      strings.TrimSpace(state.RequestModel),
+		ChannelID:         state.ChannelID,
+		ChannelKeyID:      state.ChannelKeyID,
+		LastResponseID:    strings.TrimSpace(state.LastResponseID),
+		ReplayWindowItems: append(json.RawMessage(nil), state.ReplayWindowItems...),
+		Transcript:        cloneMessages(state.Transcript),
 	}
 }
 
@@ -357,29 +232,13 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-func retainInstructionMessages(messages []transformerModel.Message) []transformerModel.Message {
-	if len(messages) == 0 {
-		return nil
+// splitInstructions 把请求的消息分成两段：顶层 instructions 变成的那一条（没有就是空的），和输入条目变成的其余消息。
+// 输入条目里的 system / developer 消息属于后一段，它们是对话的一部分。
+func splitInstructions(req *transformerModel.InternalLLMRequest) (instructions, input []transformerModel.Message) {
+	if len(req.Messages) > 0 && req.TransformerMetadata[transformerModel.TransformerMetadataOpenAIResponsesInstructions] == "true" {
+		return req.Messages[:1], req.Messages[1:]
 	}
-	kept := make([]transformerModel.Message, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Role == "system" || msg.Role == "developer" {
-			kept = append(kept, cloneMessage(msg))
-		}
-	}
-	return kept
-}
-
-func requestContainsToolOutputs(req *transformerModel.InternalLLMRequest) bool {
-	if req == nil {
-		return false
-	}
-	for _, msg := range req.Messages {
-		if msg.Role == "tool" && msg.ToolCallID != nil && strings.TrimSpace(*msg.ToolCallID) != "" {
-			return true
-		}
-	}
-	return false
+	return nil, req.Messages
 }
 
 func buildReplayRawInputItems(
@@ -411,11 +270,9 @@ func buildRequestInputItems(currentRawInputItems json.RawMessage, currentMessage
 	if len(currentRawInputItems) > 0 {
 		return append(json.RawMessage(nil), currentRawInputItems...), true
 	}
+	// 没有新输入不算失败：预热之后的第一个请求只带预热 ID，输入是空的。
 	currentItems, err := openaiOutbound.MarshalResponsesInputItems(currentMessages)
-	if err != nil || len(currentItems) == 0 {
-		return nil, false
-	}
-	return currentItems, true
+	return currentItems, err == nil
 }
 
 func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.InternalLLMRequest, resp *transformerModel.InternalLLMResponse) (json.RawMessage, bool) {
@@ -441,10 +298,105 @@ func buildNextReplayWindow(existing json.RawMessage, req *transformerModel.Inter
 	if len(base) == 0 {
 		return nil, false
 	}
-	if len(resp.RawResponsesOutputItems) == 0 {
+	outputItems := resp.RawResponsesOutputItems
+	if len(outputItems) == 0 {
+		// 非 Responses 上游没有原始输出条目：用回复内容生成，否则下一轮的历史里没有模型的回复。
+		// 推理内容不带：别家的推理签名发给 Responses 上游会被拒绝。
+		replies := assistantMessagesFromResponse(resp)
+		for i := range replies {
+			replies[i].ReasoningContent = nil
+		}
+		outputItems, _ = openaiOutbound.MarshalResponsesInputItems(replies)
+	}
+	if len(outputItems) == 0 {
 		return base, true
 	}
-	return mergeRawJSONArray(base, resp.RawResponsesOutputItems)
+	return mergeRawJSONArray(base, outputItems)
+}
+
+// buildRawReplayBody 把客户端的原始请求改成自包含的形式：去掉续传字段，input 换成“存档 + 新输入”，
+// 其余字段原样保留。失败时返回 nil，调用方会退回到经内部结构转换的请求。
+func buildRawReplayBody(clientBody []byte, mergedInput json.RawMessage) []byte {
+	var payload map[string]json.RawMessage
+	if len(mergedInput) == 0 || json.Unmarshal(clientBody, &payload) != nil {
+		return nil
+	}
+	delete(payload, "previous_response_id")
+	delete(payload, "conversation")
+	payload["input"] = mergedInput
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+// responsesOutputCollector 从上游事件里收集模型输出条目的原始 JSON。
+// 续传回放要把它们原样带回去；经内部结构重新生成会丢掉不认识的字段（比如自定义工具调用的 input）。
+type responsesOutputCollector struct {
+	done     []json.RawMessage // response.output_item.done 里的条目，按 output_index 排
+	indexes  []int             // done 里每一条的 output_index；上游没给时是它到达的次序
+	terminal json.RawMessage   // 结束事件自带的非空 output
+}
+
+func (c *responsesOutputCollector) observe(event []byte) {
+	var parsed struct {
+		Type     string          `json:"type"`
+		Item     json.RawMessage `json:"item"`
+		Index    *int            `json:"output_index"`
+		Response struct {
+			Output json.RawMessage `json:"output"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(event, &parsed) != nil {
+		return
+	}
+	switch parsed.Type {
+	case "response.output_item.done":
+		if len(parsed.Item) > 0 {
+			index := len(c.done)
+			if parsed.Index != nil {
+				index = *parsed.Index
+			}
+			// 条目几乎总是按顺序到的，所以从后往前找位置
+			at := len(c.done)
+			for at > 0 && c.indexes[at-1] > index {
+				at--
+			}
+			c.done = slices.Insert(c.done, at, parsed.Item)
+			c.indexes = slices.Insert(c.indexes, at, index)
+		}
+	case "response.completed", "response.incomplete":
+		if items, err := decodeRawJSONArray(parsed.Response.Output); err == nil && len(items) > 0 {
+			c.terminal = parsed.Response.Output
+		}
+	}
+}
+
+// items 优先用结束事件自带的 output；有些上游的结束事件里 output 是空的，这时用逐条收集的。
+func (c *responsesOutputCollector) items() json.RawMessage {
+	if len(c.terminal) > 0 {
+		return c.terminal
+	}
+	if len(c.done) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(c.done)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func collectRawResponsesOutputItems(rawStream []byte) json.RawMessage {
+	var collector responsesOutputCollector
+	for ev, err := range sse.Read(bytes.NewReader(rawStream), &sse.ReadConfig{MaxEventSize: maxSSEEventSize}) {
+		if err != nil {
+			break
+		}
+		collector.observe([]byte(ev.Data))
+	}
+	return collector.items()
 }
 
 func mergeRawJSONArray(parts ...json.RawMessage) (json.RawMessage, bool) {

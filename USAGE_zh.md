@@ -414,7 +414,7 @@ base_url = "http://127.0.0.1:8080/v1"
 | 渠道类型 | OpenAI Chat / OpenAI Response / Anthropic / Gemini / 火山引擎 / OpenAI Embedding |
 | Base URLs | 只填基础地址，程序按类型自动补 `/chat/completions`、`/responses`、`/messages` 等；可填多个端点做"最低延迟优选" |
 | API Key | **可加多个 Key**（实现多 Key 轮询，见 FAQ Q6） |
-| 高级设置 | 自定义 Header、渠道代理、参数覆盖（JSON）、自动同步、自动分组、Responses WS 模式、匹配正则、备注 |
+| 高级设置 | 自定义 Header、渠道代理、参数覆盖（JSON）、自动同步、自动分组、上游 WebSocket（自动 / 关闭，仅 OpenAI Responses 渠道）、匹配正则、备注 |
 
 加完普通渠道后，**同样要去分组页把它的模型加进某个分组**，才能对外使用。
 
@@ -466,7 +466,7 @@ Octopus 支持 **OpenAI Chat / OpenAI Responses / Anthropic** 三种格式互相
 
 | 面板 | 关键项 |
 |------|--------|
-| **系统** | 代理地址、**统计保存周期（分钟）**、CORS 跨域白名单、Responses WebSocket（含默认模式 直通/转换/关闭）、SSE 心跳、**分组健康检查** 开关 |
+| **系统** | 代理地址、**统计保存周期（分钟）**、CORS 跨域白名单、SSE 心跳、**分组健康检查** 开关 |
 | **熔断器** | 熔断触发阈值、基础冷却、最大冷却（指数退避） |
 | **被动离群退役** | 仅站点投影渠道、默认关闭，含失败率/最小样本/连续失败/窗口等参数 |
 | **渠道同步** | 自动同步间隔（小时）、手动同步 |

@@ -440,6 +440,31 @@ func TestTransformStreamMatchesStreamEventsProjection(t *testing.T) {
 	}
 }
 
+// 结束事件平时等用量到了再发。上游没发用量就结束时，[DONE] 到了也要发，而且只发一次。
+func TestStreamTerminalEventWithoutUsage(t *testing.T) {
+	text := chunkWithDelta("gpt", &model.Message{Content: model.MessageContent{Content: lo.ToPtr("hi")}})
+	finish := chunkWithFinish("gpt", "stop")
+	finish.Usage = nil
+	usage := &model.InternalLLMResponse{ID: "resp_test", Model: "gpt", Object: "chat.completion.chunk", Usage: &model.Usage{TotalTokens: 30}}
+	done := &model.InternalLLMResponse{Object: "[DONE]"}
+
+	for name, chunks := range map[string][]*model.InternalLLMResponse{
+		"上游没发用量":     {text, finish, done},
+		"用量在结束之后单独到": {text, finish, usage, done},
+	} {
+		types := eventTypes(feedStream(t, chunks))
+		completed := 0
+		for _, eventType := range types {
+			if eventType == "response.completed" {
+				completed++
+			}
+		}
+		if completed != 1 || types[len(types)-1] != "response.completed" {
+			t.Errorf("%s: want exactly one response.completed, as the last event; got %v", name, types)
+		}
+	}
+}
+
 func TestStreamTextThenRefusal(t *testing.T) {
 	chunks := []*model.InternalLLMResponse{
 		chunkWithDelta("claude", &model.Message{

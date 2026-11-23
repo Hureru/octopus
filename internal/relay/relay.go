@@ -22,7 +22,6 @@ import (
 	"github.com/bestruirui/octopus/internal/transformer/inbound"
 	"github.com/bestruirui/octopus/internal/transformer/model"
 	"github.com/bestruirui/octopus/internal/transformer/outbound"
-	openaiOutbound "github.com/bestruirui/octopus/internal/transformer/outbound/openai"
 	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/gin-gonic/gin"
 	"github.com/tmaxmax/go-sse"
@@ -87,6 +86,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 	// 当 HTTP 请求携带 previous_response_id 时，尝试从本地加载上一次成功的 replay 状态，
 	// 优先路由到同一渠道/key，并将请求转为自包含形式（合并历史，移除 previous_response_id）。
 	var responsesReplayState *wsConversationState
+	relayBody := rawBody // 同协议直通时发给上游的原始请求
 	if inboundType == inbound.InboundTypeOpenAIResponse && internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
 		if prevID := internalRequest.OpenAIPreviousResponseID(); prevID != "" {
 			responsesReplayState = resolveResponsesReplayState(apiKeyID, group.ID, requestModel, internalRequest)
@@ -97,6 +97,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 				// BuildReplayRequest 返回 nil 表示合并失败，应保留原始请求
 				if replayed := responsesReplayState.BuildReplayRequest(internalRequest); replayed != nil {
 					internalRequest = replayed
+					relayBody = buildRawReplayBody(rawBody, replayed.OpenAIRawInputItems())
 					log.Debugf("HTTP replay request transformed (apikey=%d, removed previous_response_id, merged history)", apiKeyID)
 				} else {
 					log.Warnf("HTTP replay history merge failed (apikey=%d, group=%d, model=%s, previous_response_id=%s), keeping original request",
@@ -157,7 +158,7 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 		groupID:         group.ID,
 		groupSessionTTL: group.SessionKeepTime,
 		iter:            iter,
-		rawBody:         rawBody,
+		rawBody:         relayBody,
 		heartbeat:       hb,
 	}
 
@@ -304,8 +305,10 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 			// 成功后，如果是 OpenAI Responses HTTP 请求，保存 replay 状态供后续续接
 			// 注意：exact replay 请求成功后也需要保存新状态，否则只能续接一轮
 			// 优先使用 metrics.InternalResponse（streaming 安全），避免二次 GetInternalResponse 消耗聚合器
+			// 原样转发的续传不建存档：历史在上游那里，本地只有这一轮，下次拿来回放会丢掉前面的对话
 			if inboundType == inbound.InboundTypeOpenAIResponse &&
-				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+				req.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse &&
+				!continuesUpstreamHistory(req.internalRequest) {
 				internalResponse := metrics.InternalResponse
 				if internalResponse == nil {
 					var err error
@@ -402,6 +405,16 @@ func (ra *relayAttempt) attempt() attemptResult {
 
 	// 转发请求
 	statusCode, fwdErr := ra.forward()
+	// WS 入站：上游在流里自己报告了失败（response.failed、error 事件）。
+	// 客户端已经收到，所以不重发、不换渠道，但这一次不能记成成功。
+	if writer, ok := ra.streamWriter.(*WSStreamWriter); ok && fwdErr == nil {
+		if failedStatus, failure := writer.reportedFailure(); failure != nil {
+			statusCode, fwdErr = failedStatus, failure
+		} else if writer.terminalEvent() == "" {
+			// 流正常结束了，却没有结束事件：回复是残缺的
+			fwdErr = errors.New("upstream stream ended without a terminal event")
+		}
+	}
 
 	// 更新 channel key 状态
 	ra.usedKey.StatusCode = statusCode
@@ -505,268 +518,35 @@ func parseRequest(inboundType inbound.InboundType, c *gin.Context) ([]byte, *mod
 // forward 转发请求到上游服务
 func (ra *relayAttempt) forward() (int, error) {
 	ctx := ra.requestContext()
-
-	// 尝试上游 WebSocket（仅 OpenAI Response outbound 类型；必须是客户端 WS 入站且新开关显式启用）
-	if ra.channel.Type == outbound.OutboundTypeOpenAIResponse &&
-		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
-
-		shouldTryWS := false
-		// Passthrough is now handled by forwardViaHTTP via PassthroughCapable interface
-		if ra.internalRequest.IsOpenAIExactReplayRequest() {
-			shouldTryWS = false
-		} else if ra.c == nil {
-			wsMode := effectiveResponsesWSMode(ra.channel)
-			shouldTryWS = shouldEnableResponsesWS(ra.channel) && wsMode != responsesWSModeOff
-		} else if requiresUpstreamWSContinuation(ra.internalRequest) {
-			// Safety: HTTP ingress must not proactively use upstream WS for fresh requests,
-			// but an explicit continuation cannot be safely failovered as ordinary HTTP.
-			shouldTryWS = true
-		}
-
-		if shouldTryWS {
-			statusCode, err := ra.forwardViaWS(ctx)
-			if statusCode != -1 {
-				return statusCode, err
-			}
-			if requiresUpstreamWSContinuation(ra.internalRequest) {
-				balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
-				return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
-			}
-			ra.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryDowngrade)
-			// statusCode == -1 means WS not available, fall through to HTTP
+	// 只有 WS 入站（upstream 不为 nil）才用 WS 连上游，而且只对同协议、没有关掉“上游 WebSocket”的渠道。
+	// 这个渠道现在用不了 WS 时，同一次尝试里改走 HTTP。
+	if ra.upstream != nil && ra.channel.Type == outbound.OutboundTypeOpenAIResponse &&
+		ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse &&
+		ra.channel.WSMode != dbmodel.ChannelWSModeOff {
+		if statusCode, err, handled := ra.forwardViaUpstreamWS(ctx); handled {
+			return statusCode, err
 		}
 	}
-
 	return ra.forwardViaHTTP(ctx)
 }
 
-// forwardViaWS attempts to forward via upstream WebSocket.
-// Returns statusCode=-1 if WS is not available (caller should fall through to HTTP).
-func (ra *relayAttempt) forwardViaWS(ctx context.Context) (int, error) {
-	if ra.c == nil && effectiveResponsesWSMode(ra.channel) == responsesWSModePassthrough && !ra.internalRequest.IsOpenAIExactReplayRequest() {
-		return ra.forwardViaWSPassthrough(ctx)
-	}
-	continuation := requiresUpstreamWSContinuation(ra.internalRequest)
-	preferredConnID := ""
-	if continuation {
-		preferredConnID, _ = getWSResponseConn(currentPreviousResponseID(ra.internalRequest))
-	}
-	pc := TryUpstreamWSWithPreference(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, ra.clientRequestHeaders(), preferredConnID)
-	if pc == nil {
-		log.Debugf("upstream WS unavailable for channel %s (key=%d, continuation=%t)", ra.channel.Name, ra.usedKey.ID, continuation)
-		return -1, nil // WS not available
-	}
-
-	log.Debugf("using upstream WebSocket for channel %s (key=%d)", ra.channel.Name, ra.usedKey.ID)
-	log.Debugf("upstream WS selected (channel=%s, key=%d, continuation=%t, previous_response_id=%s)",
-		ra.channel.Name, ra.usedKey.ID, continuation, currentPreviousResponseID(ra.internalRequest))
-
-	// Build the Responses API request body
-	responsesReq := openaiOutbound.ConvertToResponsesRequest(ra.internalRequest)
-	reqBody, err := json.Marshal(responsesReq)
-	if err != nil {
-		wsUpstreamPool.Put(pc)
-		return -1, nil // fall through to HTTP
-	}
-	ra.metrics.SetTransportRequestPayload(reqBody, ra.internalRequest.Model)
-
-	// Send response.create message
-	if err := wsUpstreamPool.SendResponseCreate(ctx, pc, reqBody); err != nil {
-		log.Warnf("upstream WS send failed for channel %s: %v", ra.channel.Name, err)
-		log.Debugf("upstream WS send failed before stream start (channel=%s, key=%d, continuation=%t, err=%v)",
-			ra.channel.Name, ra.usedKey.ID, continuation, err)
-		wsUpstreamPool.RemoveConn(pc)
-		if isUpstreamWSConnectionBroken(err) {
-			log.Debugf("upstream WS send failure eligible for redial (channel=%s, key=%d, continuation=%t)",
-				ra.channel.Name, ra.usedKey.ID, continuation)
-			statusCode, redialErr, recovered := ra.retryViaFreshUpstreamWS(ctx, reqBody)
-			if recovered || redialErr != nil {
-				return statusCode, redialErr
-			}
-			if requiresUpstreamWSContinuation(ra.internalRequest) {
-				balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
-				return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
-			}
-		}
-		wsUpstreamPool.RecordWSFailure(ra.channel.ID)
-		return -1, nil // fall through to HTTP
-	}
-
-	// Read events from WS and process through the transform pipeline
-	ra.metrics.UsedWS = true
-	ra.metrics.SetWSExecMode(dbmodel.RelayLogWSExecModeTransform)
-	if ra.metrics.WSMode == nil {
-		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
-	}
-	reader := newWSUpstreamReader(pc, ra.channel.ID, ra.usedKey.ID)
-	err = ra.handleWSStreamResponseV2(ctx, reader)
-	if err != nil {
-		reader.CloseWithError()
-		log.Debugf("upstream WS stream failed (channel=%s, key=%d, continuation=%t, written=%t, status=%d, err=%v)",
-			ra.channel.Name, ra.usedKey.ID, continuation, ra.getStreamWriter().Written(), reader.StatusCode(), err)
-		if requiresUpstreamWSContinuation(ra.internalRequest) && !ra.streamPayloadWritten.Load() && shouldReconnectUpstreamWSBeforeReplay(err) {
-			log.Debugf("upstream WS stream failure eligible for reconnect before replay (channel=%s, key=%d, previous_response_id=%s)",
-				ra.channel.Name, ra.usedKey.ID, currentPreviousResponseID(ra.internalRequest))
-			statusCode, redialErr, recovered := ra.retryViaFreshUpstreamWS(ctx, reqBody)
-			if recovered || redialErr != nil {
-				return statusCode, redialErr
-			}
-		}
-		if requiresUpstreamWSContinuation(ra.internalRequest) && isContinuationTransportFailure(err) {
-			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
-			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation")
-		}
-		if ra.requestContext().Err() == nil {
-			wsUpstreamPool.RecordWSFailure(ra.channel.ID)
-		}
-		return reader.StatusCode(), err
-	}
-
-	reader.Close()
-	wsUpstreamPool.RecordWSSuccess(ra.channel.ID)
-	ra.recordSuccessfulWSAffinity(pc)
-	return 200, nil
-}
-
-func (ra *relayAttempt) retryViaFreshUpstreamWS(ctx context.Context, reqBody []byte) (int, error, bool) {
-	log.Debugf("attempting fresh upstream WS redial (channel=%s, key=%d, previous_response_id=%s)",
-		ra.channel.Name, ra.usedKey.ID, currentPreviousResponseID(ra.internalRequest))
-	redialed := TryUpstreamWS(ctx, ra.channel, ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey, ra.usedKey.ID, ra.clientRequestHeaders(), true)
-	if redialed == nil {
-		log.Debugf("fresh upstream WS redial unavailable (channel=%s, key=%d)", ra.channel.Name, ra.usedKey.ID)
-		return 0, nil, false
-	}
-
-	retryErr := wsUpstreamPool.SendResponseCreate(ctx, redialed, reqBody)
-	if retryErr != nil {
-		log.Warnf("upstream WS redial send failed for channel %s: %v", ra.channel.Name, retryErr)
-		log.Debugf("fresh upstream WS redial send failed (channel=%s, key=%d, err=%v)", ra.channel.Name, ra.usedKey.ID, retryErr)
-		wsUpstreamPool.RemoveConn(redialed)
-		wsUpstreamPool.RecordWSFailure(ra.channel.ID)
-		if requiresUpstreamWSContinuation(ra.internalRequest) {
-			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
-			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation"), true
-		}
-		return -1, nil, true
-	}
-
-	ra.metrics.UsedWS = true
-	ra.metrics.SetWSExecMode(dbmodel.RelayLogWSExecModeTransform)
-	if ra.metrics.WSMode == nil {
-		ra.metrics.SetWSMode(defaultWSModeForRequest(ra.internalRequest))
-	}
-	ra.metrics.SetWSRecovery(dbmodel.RelayLogWSRecoveryReconnect)
-	reader := newWSUpstreamReader(redialed, ra.channel.ID, ra.usedKey.ID)
-	streamErr := ra.handleWSStreamResponseV2(ctx, reader)
-	if streamErr != nil {
-		reader.CloseWithError()
-		log.Debugf("fresh upstream WS redial stream failed (channel=%s, key=%d, status=%d, err=%v)",
-			ra.channel.Name, ra.usedKey.ID, reader.StatusCode(), streamErr)
-		if requiresUpstreamWSContinuation(ra.internalRequest) && isContinuationTransportFailure(streamErr) {
-			balancer.DeleteSticky(ra.apiKeyID, ra.requestModel)
-			return http.StatusConflict, fmt.Errorf("upstream continuation transport unavailable; please restart the conversation"), true
-		}
-		if ra.requestContext().Err() == nil {
-			wsUpstreamPool.RecordWSFailure(ra.channel.ID)
-		}
-		return reader.StatusCode(), streamErr, true
-	}
-	log.Debugf("fresh upstream WS redial succeeded (channel=%s, key=%d, previous_response_id=%s)",
-		ra.channel.Name, ra.usedKey.ID, currentPreviousResponseID(ra.internalRequest))
-	reader.Close()
-	wsUpstreamPool.RecordWSSuccess(ra.channel.ID)
-	ra.recordSuccessfulWSAffinity(redialed)
-	return http.StatusOK, nil, true
-}
-
-func isContinuationTransportFailure(err error) bool {
-	// Check for empty stream error (both old message and new error type)
-	if errors.Is(err, stream.ErrEmptyUpstreamStream) {
-		return true
-	}
-	message := relayErrorMessage(err)
-	return isUpstreamWSConnectionBroken(err) ||
-		needsConversationRestart(message) ||
-		strings.Contains(message, "ws stream ended before first event")
-}
-
 func (ra *relayAttempt) clientRequestHeaders() http.Header {
-	if ra == nil || ra.c == nil || ra.c.Request == nil {
+	if ra == nil {
 		return nil
+	}
+	if ra.c == nil || ra.c.Request == nil {
+		return ra.clientHeaders
 	}
 	return ra.c.Request.Header
 }
 
-func (ra *relayAttempt) handleWSStreamResponseV2(ctx context.Context, reader *wsUpstreamReader) error {
-	defer ra.closeFirstTokenBudget()
-
-	// Hand off early heartbeat
-	ra.heartbeat.Hand()
-
-	// Build transform function
-	transform := func(ctx context.Context, data []byte) ([]byte, error) {
-		return ra.transformStreamData(ctx, string(data))
-	}
-
-	// Determine first token timeout
-	var firstTokenTimeout time.Duration
-	if ra.firstTokenTimeOutSec > 0 && ra.firstTokenBudget == nil {
-		firstTokenTimeout = time.Duration(ra.firstTokenTimeOutSec) * time.Second
-	}
-
-	// Create StreamProcessor
-	processor := stream.NewStreamProcessor(stream.StreamConfig{
-		Source:            stream.NewWSSource(reader),
-		Transform:         transform,
-		Writer:            ra.getStreamWriter(),
-		Context:           ctx,
-		FirstTokenTimeout: firstTokenTimeout,
-		HeartbeatInterval: streamHeartbeatInterval(),
-		OnFirstToken: func() {
-			ra.metrics.SetFirstTokenTime(time.Now())
-			ra.stopFirstTokenTimer()
-		},
-	})
-
-	// Run processor
-	err := processor.Run()
-
-	// Track payload written for metrics collection
-	if processor.PayloadWritten() {
-		ra.streamPayloadWritten.Store(true)
-	}
-
-	// Handle first token timeout specifically
-	if err != nil && strings.Contains(err.Error(), "first token timeout") {
-		return ra.firstTokenTimeoutError()
-	}
-
-	// Check for context cancellation with first token timeout
-	if err != nil {
-		if timeoutErr := ra.firstTokenTimeoutIfNeeded(ctx, err); timeoutErr != nil {
-			return timeoutErr
-		}
-	}
-
-	return err
-}
-
 // forwardViaHTTP forwards the request using traditional HTTP.
+// 同协议渠道（如 Anthropic→Anthropic、Responses→Responses）直接转发原始请求，只改 model。
 func (ra *relayAttempt) forwardViaHTTP(ctx context.Context) (int, error) {
-	// Check for passthrough capability using interface
 	if pt, ok := ra.outAdapter.(model.PassthroughCapable); ok &&
 		len(ra.rawBody) > 0 &&
 		pt.CanPassthrough(ra.internalRequest.RawAPIFormat) {
-		// Additional checks for OpenAI Responses edge cases
-		if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
-			if ra.c == nil || ra.internalRequest.IsOpenAIExactReplayRequest() || requiresUpstreamWSContinuation(ra.internalRequest) {
-				// Fall through to standard path
-			} else {
-				return ra.forwardViaHTTPPassthrough(ctx, pt)
-			}
-		} else {
-			return ra.forwardViaHTTPPassthrough(ctx, pt)
-		}
+		return ra.forwardViaHTTPPassthrough(ctx, pt)
 	}
 
 	return ra.forwardViaHTTPStandard(ctx)
@@ -913,13 +693,6 @@ func (ra *relayAttempt) forwardViaHTTPStandard(ctx context.Context) (int, error)
 	return response.StatusCode, nil
 }
 
-func defaultWSModeForRequest(req *model.InternalLLMRequest) dbmodel.RelayLogWSMode {
-	if requiresUpstreamWSContinuation(req) {
-		return dbmodel.RelayLogWSModeContinuation
-	}
-	return dbmodel.RelayLogWSModeFresh
-}
-
 func readOutboundRequestBody(req *http.Request) ([]byte, error) {
 	if req == nil || req.Body == nil {
 		return nil, nil
@@ -962,27 +735,34 @@ func (ra *relayAttempt) applyParamOverride(outboundRequest *http.Request) error 
 
 // copyHeaders 复制请求头，过滤 hop-by-hop 头
 func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
-	if ra.c != nil {
-		for key, values := range ra.c.Request.Header {
-			lowerKey := strings.ToLower(key)
-			if hopByHopHeaders[lowerKey] {
-				continue
+	for key, values := range ra.clientRequestHeaders() {
+		lowerKey := strings.ToLower(key)
+		if !shouldProxyUpstreamWSHeader(key) {
+			continue
+		}
+		// WS 握手用的 beta 标记不能带进 HTTP 请求，其余的标记照常转发
+		if lowerKey == "openai-beta" {
+			flags := strings.FieldsFunc(strings.Join(values, ","), func(r rune) bool { return r == ',' || r == ' ' })
+			flags = slices.DeleteFunc(flags, func(flag string) bool { return strings.HasPrefix(flag, "responses_websockets") })
+			if len(flags) > 0 {
+				outboundRequest.Header.Set(key, strings.Join(flags, ","))
 			}
-			// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉
-			// 透传路径预置的 prompt-caching / extended-cache-ttl 基线。
-			if lowerKey == "anthropic-beta" {
-				existing := outboundRequest.Header.Get(key)
-				for _, value := range values {
-					existing = mergeBetaHeader(existing, value)
-				}
-				if existing != "" {
-					outboundRequest.Header.Set(key, existing)
-				}
-				continue
-			}
+			continue
+		}
+		// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉
+		// 透传路径预置的 prompt-caching / extended-cache-ttl 基线。
+		if lowerKey == "anthropic-beta" {
+			existing := outboundRequest.Header.Get(key)
 			for _, value := range values {
-				outboundRequest.Header.Set(key, value)
+				existing = mergeBetaHeader(existing, value)
 			}
+			if existing != "" {
+				outboundRequest.Header.Set(key, existing)
+			}
+			continue
+		}
+		for _, value := range values {
+			outboundRequest.Header.Set(key, value)
 		}
 	}
 	if outboundRequest.Header.Get("User-Agent") == "" {
@@ -1160,6 +940,12 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 	// Buffer for raw stream (for metrics collection)
 	var rawStreamBuf bytes.Buffer
 
+	// WS 客户端收不到 SSE 注释，心跳字节还会落进被切开的半行中间
+	heartbeatInterval := streamHeartbeatInterval()
+	if ra.c == nil {
+		heartbeatInterval = 0
+	}
+
 	// Create StreamProcessor
 	processor := stream.NewStreamProcessor(stream.StreamConfig{
 		Source:            stream.NewRawSource(response.Body, 32*1024),
@@ -1167,7 +953,7 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 		Writer:            ra.getStreamWriter(),
 		Context:           ctx,
 		FirstTokenTimeout: firstTokenTimeout,
-		HeartbeatInterval: streamHeartbeatInterval(),
+		HeartbeatInterval: heartbeatInterval,
 		BufferRawStream:   true,
 		TerminalEvents:    cfg.TerminalEvents,
 		OnFirstToken: func() {
@@ -1183,6 +969,9 @@ func (ra *relayAttempt) handleStreamResponsePassthroughV2(ctx context.Context, r
 
 			// Collect passthrough metrics
 			ra.collectPassthroughMetrics(ctx, rawStream)
+			if ra.internalRequest.RawAPIFormat == model.APIFormatOpenAIResponse {
+				ra.rawOutputItems = collectRawResponsesOutputItems(rawStream)
+			}
 
 			// Collect response if configured
 			if cfg.CollectMetrics {
@@ -1231,34 +1020,30 @@ func (ra *relayAttempt) collectPassthroughMetrics(ctx context.Context, rawStream
 	if len(rawStream) == 0 {
 		return
 	}
-
-	// Try stream event adapter first (preferred)
-	outEventAdapter, outOk := ra.outAdapter.(model.OutboundStreamEventTransformer)
-	inEventAdapter, inOk := ra.inAdapter.(model.InboundStreamEventTransformer)
-	if outOk && inOk {
-		readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
-		for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
-			if err != nil {
-				log.Debugf("passthrough metrics parse skipped: %v", err)
-				return
-			}
-			if events, terr := outEventAdapter.TransformStreamEvent(ctx, []byte(ev.Data)); terr == nil && len(events) > 0 {
-				_, _ = inEventAdapter.TransformStreamEvents(ctx, events)
-			}
-		}
-		return
-	}
-
-	// Fallback to traditional stream transformer
 	readCfg := &sse.ReadConfig{MaxEventSize: maxSSEEventSize}
 	for ev, err := range sse.Read(bytes.NewReader(rawStream), readCfg) {
 		if err != nil {
 			log.Debugf("passthrough metrics parse skipped: %v", err)
 			return
 		}
-		if chunk, terr := ra.outAdapter.TransformStream(ctx, []byte(ev.Data)); terr == nil && chunk != nil {
-			_, _ = ra.inAdapter.TransformStream(ctx, chunk)
+		ra.collectPassthroughEvent(ctx, []byte(ev.Data))
+	}
+}
+
+// collectPassthroughEvent 把一个原样转发的上游事件交给统计用的聚合器（用量、模型、回复内容），不影响发给客户端的内容。
+func (ra *relayAttempt) collectPassthroughEvent(ctx context.Context, data []byte) {
+	// Try stream event adapter first (preferred)
+	outEventAdapter, outOk := ra.outAdapter.(model.OutboundStreamEventTransformer)
+	inEventAdapter, inOk := ra.inAdapter.(model.InboundStreamEventTransformer)
+	if outOk && inOk {
+		if events, terr := outEventAdapter.TransformStreamEvent(ctx, data); terr == nil && len(events) > 0 {
+			_, _ = inEventAdapter.TransformStreamEvents(ctx, events)
 		}
+		return
+	}
+	// Fallback to traditional stream transformer
+	if chunk, terr := ra.outAdapter.TransformStream(ctx, data); terr == nil && chunk != nil {
+		_, _ = ra.inAdapter.TransformStream(ctx, chunk)
 	}
 }
 
@@ -1368,6 +1153,9 @@ func (ra *relayAttempt) collectResponse() {
 	if internalResponse == nil {
 		log.Debugf("collectResponse: internal response is nil (stream may not be complete)")
 		return
+	}
+	if len(ra.rawOutputItems) > 0 {
+		internalResponse.RawResponsesOutputItems = ra.rawOutputItems
 	}
 
 	actualModel := strings.TrimSpace(internalResponse.Model)
