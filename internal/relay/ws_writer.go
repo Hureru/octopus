@@ -42,6 +42,10 @@ func (w *WSStreamWriter) Write(data []byte) (int, error) {
 		w.pending = append(w.pending, data...)
 		return len(data), nil
 	}
+	// 每一行都不能超过上限：接在 pending 后面的第一行，和留到下次的最后半行
+	if len(w.pending)+bytes.IndexByte(data, '\n') > maxSSEEventSize || len(data)-lineEnd > maxSSEEventSize {
+		return 0, fmt.Errorf("sse line exceeds %d bytes", maxSSEEventSize)
+	}
 	complete := data[:lineEnd]
 	if len(w.pending) > 0 {
 		complete = append(w.pending, complete...)

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
+	dbmodel "github.com/bestruirui/octopus/internal/model"
 	transformerModel "github.com/bestruirui/octopus/internal/transformer/model"
 )
 
@@ -92,5 +94,62 @@ func TestRewriteWSPassthroughDownstreamModel(t *testing.T) {
 		if got := string(ra.rewriteWSPassthroughDownstreamModel([]byte(tc.in))); got != tc.want {
 			t.Errorf("%s: got %s, want %s", name, got, tc.want)
 		}
+	}
+}
+
+// 渠道的参数覆盖可以改普通字段，但改不掉 WS 协议要求的那几个。
+func TestBuildUpstreamWSPayloadKeepsTheWSEnvelope(t *testing.T) {
+	override := `{"stream":false,"background":true,"type":"other","service_tier":"flex"}`
+	ra := &relayAttempt{
+		relayRequest: &relayRequest{internalRequest: &transformerModel.InternalLLMRequest{Model: "gpt-4o"}},
+		channel:      &dbmodel.Channel{ParamOverride: &override},
+	}
+	payload, err := ra.buildUpstreamWSPayload([]byte(`{"model":"alias","input":"hi"}`))
+	if err != nil {
+		t.Fatalf("buildUpstreamWSPayload failed: %v", err)
+	}
+	want := `{"input":"hi","model":"gpt-4o","service_tier":"flex","stream":true,"type":"response.create"}`
+	if string(payload) != want {
+		t.Fatalf("payload = %s, want %s", payload, want)
+	}
+}
+
+// “上游不支持 WS”的 30 分钟暂停，不能被同时发生的普通失败缩短，也不能被别的连接上的成功清掉。
+func TestWSUpstreamHealthKeepsTheLongerPause(t *testing.T) {
+	resetWSUpstreamHealth()
+	t.Cleanup(resetWSUpstreamHealth)
+	remaining := func() time.Duration {
+		wsUpstreamHealth.Lock()
+		defer wsUpstreamHealth.Unlock()
+		return time.Until(wsUpstreamHealth.channels[1].skipUntil)
+	}
+
+	recordWSUpstreamFailure(1, true)
+	recordWSUpstreamFailure(1, false)
+	if got := remaining(); got < wsUnsupportedRecheck-time.Minute {
+		t.Fatalf("an ordinary failure shortened the pause to %s", got)
+	}
+	recordWSUpstreamSuccess(1)
+	if got := remaining(); got < wsUnsupportedRecheck-time.Minute {
+		t.Fatalf("a success on another connection shortened the pause to %s", got)
+	}
+
+	// 没有暂停时，成功照常把失败次数清掉
+	recordWSUpstreamSuccess(2)
+	if !wsUpstreamAvailable(2) {
+		t.Fatalf("a channel without a pause must stay available")
+	}
+}
+
+// 上游用错误码说“找不到上一个回复”时，不管文字怎么写，客户端都要拿到能让它重发完整请求的那个码。
+func TestPreviousResponseNotFoundIsRecognizedByCode(t *testing.T) {
+	body := `{"error":{"message":"Unknown response ID","type":"invalid_request_error","code":"previous_response_not_found"}}`
+	if got := normalizeUpstreamStatusCode(http.StatusBadRequest, body); got != http.StatusConflict {
+		t.Fatalf("HTTP upstream: status = %d, want 409", got)
+	}
+	event := parseWSUpstreamEvent([]byte(`{"type":"error","status":400,"error":{"code":"previous_response_not_found","type":"invalid_request_error","message":"Unknown response ID"}}`))
+	publicErr, ok := classifyWSPublicError(event.Error, event.Error.Status)
+	if !ok || publicErr.Code != "previous_response_not_found" || !publicErr.ResetConversation {
+		t.Fatalf("WS upstream: public error = %#v ok=%t", publicErr, ok)
 	}
 }

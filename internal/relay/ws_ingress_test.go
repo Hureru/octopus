@@ -522,6 +522,32 @@ func TestWSIngressUnknownPreviousResponseIDIsReported(t *testing.T) {
 	}
 }
 
+// 上游说找不到的是别的回复：本地给上一个回复留的存档不受影响，接着它的请求照常拼成完整请求。
+func TestWSIngressUnknownPreviousResponseIDKeepsTheStoredConversation(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	first := env.mustComplete(wsIngressCreate("", wsIngressUserItem("hello")))
+
+	events, err := env.turn(10*time.Second, wsIngressCreate(`"previous_response_id":"resp_unknown",`, wsIngressUserItem("lost")))
+	if err != nil || events[len(events)-1]["type"] != "error" {
+		t.Fatalf("expected an error event for the unknown id, got %v (err=%v)", events, err)
+	}
+
+	env.mustComplete(wsIngressCreate(fmt.Sprintf(`"previous_response_id":%q,`, first), wsIngressUserItem("again")))
+	requests := env.upstreamRequests()
+	if _, forwarded := requests[len(requests)-1]["previous_response_id"]; len(requests) != 3 || forwarded {
+		t.Fatalf("expected the third request to be one self-contained request, got %d requests, last %s", len(requests), requests[len(requests)-1])
+	}
+}
+
+// 带 conversation 的预热不能在本地应答：历史在上游，本地给不出下一轮接得上的 ID。
+func TestWSIngressPrewarmWithConversationIsRejected(t *testing.T) {
+	env := newWSIngressEnv(t, wsIngressStatelessUpstream)
+	env.wsIngressRejected(wsIngressCreate(`"conversation":"conv_1","generate":false,`, wsIngressUserItem("hello")), 400, "invalid_request")
+	if n := env.upstreamRequestCount(); n != 0 {
+		t.Fatalf("a rejected prewarm reached the upstream %d times", n)
+	}
+}
+
 // wsIngressChatUpstream 是 Chat Completions 上游：第 n 个回复的内容是 "answer n"。
 // usage 为空时模仿不理会 include_usage 的上游：结束之后直接发 [DONE]。
 func wsIngressChatUpstream(usage string) wsIngressUpstream {
@@ -555,7 +581,12 @@ func TestContinuationOnChatChannelCarriesConversation(t *testing.T) {
 				if n > 0 {
 					extra += fmt.Sprintf(`"previous_response_id":"chatcmpl-%d",`, n)
 				}
-				payload := wsIngressCreate(extra, wsIngressUserItem(text))
+				items := []string{wsIngressUserItem(text)}
+				if n == 0 {
+					// 输入条目里的 developer 消息是对话的一部分，后面的回合要带着；顶层的 instructions 每轮只用当轮的
+					items = append([]string{`{"type":"message","role":"developer","content":[{"type":"input_text","text":"rules"}]}`}, items...)
+				}
+				payload := wsIngressCreate(extra, items...)
 				if ingress == "ws" {
 					env.mustComplete(payload)
 				} else if recorder := env.post(payload); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"type":"response.completed"`) {
@@ -575,7 +606,7 @@ func TestContinuationOnChatChannelCarriesConversation(t *testing.T) {
 			for _, message := range messages {
 				got = append(got, message.Role+":"+message.Content)
 			}
-			want := "system:be brief | user:first | assistant:answer 1 | user:second | assistant:answer 2 | user:third"
+			want := "system:be brief | developer:rules | user:first | assistant:answer 1 | user:second | assistant:answer 2 | user:third"
 			if strings.Join(got, " | ") != want {
 				t.Fatalf("third turn messages = %q, want %q", strings.Join(got, " | "), want)
 			}
@@ -758,6 +789,10 @@ func TestWSIngressFailedTurnEndsWithErrorEvent(t *testing.T) {
 			}
 			if tc.partialOutput != (len(events) > 1) {
 				t.Fatalf("partial output before the error = %t, want %t (%d events)", len(events) > 1, tc.partialOutput, len(events))
+			}
+			// 客户端看到的是失败，记账也得是失败：不然这个渠道会被记成功，还会被会话保持选中
+			if log := env.relayLogs(1)[0]; log.Success || log.Attempts[len(log.Attempts)-1].Status != model.AttemptFailed {
+				t.Fatalf("log: success=%t attempts=%+v, want a failed attempt", log.Success, log.Attempts)
 			}
 			// 连接还能用：把同一个请求重发一次，能完成
 			env.mustComplete(request)
@@ -1269,6 +1304,9 @@ func TestWSIngressClientDisconnectCancelsTheUpstreamRequest(t *testing.T) {
 				t.Fatalf("sending the request failed: %v", err)
 			}
 			env.eventually("the request to reach the upstream", func() bool { return env.upstreamRequestCount() == 1 })
+			if _, wsRequests := env.upstreamWS(); (len(wsRequests) == 1) != upstreamWS {
+				t.Fatalf("the request reached the upstream over ws=%t, want ws=%t", len(wsRequests) == 1, upstreamWS)
+			}
 			env.client.CloseNow()
 
 			select {

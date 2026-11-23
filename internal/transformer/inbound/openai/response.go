@@ -1247,6 +1247,7 @@ func convertToInternalRequest(req *ResponsesRequest) (*model.InternalLLMRequest,
 	// Convert instructions to system message
 	messages := make([]model.Message, 0)
 	if req.Instructions != "" {
+		chatReq.SetTransformerMetadataValue(model.TransformerMetadataOpenAIResponsesInstructions, "true")
 		messages = append(messages, model.Message{
 			Role: "system",
 			Content: model.MessageContent{

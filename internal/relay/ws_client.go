@@ -41,6 +41,7 @@ type wsClientSession struct {
 	conn        *websocket.Conn
 	apiKeyID    int
 	requestSeen bool        // 这条连接上已经有过通过 Key 检查的请求（预热不算）
+	openedAt    time.Time   // 握手的时间
 	headers     http.Header // 握手请求的头，每个请求都带给上游
 	upstream    wsUpstream  // 这条连接独占的上游 WS，用到时才建
 	// 每个模型一份对话存档。
@@ -80,6 +81,7 @@ func HandleWSResponse(c *gin.Context) {
 		apiKeyID: apiKeyID,
 		headers:  c.Request.Header,
 		states:   map[string]*wsConversationState{},
+		openedAt: time.Now(),
 	}
 	defer session.upstream.close()
 
@@ -194,7 +196,9 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 		return
 	}
 	// 每分钟次数：握手时算过的那一次抵这条连接上的第一个请求；预热在本地应答，不算。
-	if retryAfter, err := op.APIKeyCheck(apiKey, !prewarm && s.requestSeen); err != nil {
+	// 只在握手的那一分钟里抵：限流按整分钟计数，过了这一分钟那一次已经清零了。
+	handshakeCounts := !s.requestSeen && time.Now().Unix()/60 == s.openedAt.Unix()/60
+	if retryAfter, err := op.APIKeyCheck(apiKey, !prewarm && !handshakeCounts); err != nil {
 		event := wsErrorEvent(apperror.Status(err), apperror.Code(err), apperror.Message(err))
 		if retryAfter > 0 {
 			// 相当于 HTTP 的 Retry-After 响应头，Codex 从这里读
@@ -268,6 +272,11 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 			apiKeyID, requestModel, strings.TrimSpace(replayState.LastResponseID), replayState.ChannelID, replayState.ChannelKeyID)
 	}
 	if prewarm {
+		if len(originalRequest.Conversation) > 0 && string(originalRequest.Conversation) != "null" {
+			// 历史在上游的 conversation 里，本地给不出下一轮接得上的 ID
+			writeWSError(ctx, conn, 400, "invalid_request", "generate:false is not supported together with conversation")
+			return
+		}
 		if replayState == nil && requestedPreviousResponseID != "" {
 			// 接不上存档的预热不能在本地应答：下一轮会带着预热 ID 来，而它前面的历史本地没有。
 			writeWSError(ctx, conn, 409, "previous_response_not_found",
@@ -310,7 +319,8 @@ func (s *wsClientSession) processWSResponseCreate(ctx context.Context, data []by
 	result := finalizeWSRelay(ctx, conn, req, runWSRelay(ctx, req, group))
 	if result.Success {
 		remember(req.metrics.InternalResponse, req.iter.Attempts())
-	} else if result.ResetConversation {
+	} else if result.ResetConversation && replayState != nil {
+		// 只清这个请求用到的存档：上游说找不到的是别的回复时，存档还接得上它自己的那个回复
 		log.Debugf("ws relay clearing conversation state (apikey=%d, request_model=%s, err=%v)", apiKeyID, requestModel, result.Err)
 		delete(s.states, stateKey)
 	}
@@ -528,9 +538,6 @@ func runWSRelay(ctx context.Context, req *relayRequest, group *dbmodel.Group) ws
 // WS 上没有“流关闭”这个信号，不发的话客户端会一直等。
 func finalizeWSRelay(ctx context.Context, conn *websocket.Conn, req *relayRequest, result wsRelayResult) wsRelayResult {
 	terminal := req.streamWriter.(*WSStreamWriter).terminalEvent()
-	if result.Success && terminal == "" {
-		result = wsRelayResult{Written: true, Err: errors.New("upstream stream ended without a terminal event")}
-	}
 	req.metrics.SaveWithChannelStats(ctx, result.Success, result.Err, req.iter.Attempts(), false)
 	if result.Success {
 		return result

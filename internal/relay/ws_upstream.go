@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type wsUpstream struct {
 	conn           *websocket.Conn // nil：还没有连接
 	channelID      int
 	keyID          int
+	baseURL        string // 拨号时用的渠道地址
 	lastResponseID string // 这条连接上刚完成的回复：只有接着它的请求才能发原生续传
 }
 
@@ -75,7 +77,10 @@ func recordWSUpstreamFailure(channelID int, unsupported bool) {
 		health.failures++
 		backoff = wsFailureBackoff(health.failures)
 	}
-	health.skipUntil = time.Now().Add(backoff)
+	// 同时有几次失败时留最晚的那个：普通失败不能把“不支持”的长暂停改短
+	if until := time.Now().Add(backoff); until.After(health.skipUntil) {
+		health.skipUntil = until
+	}
 	wsUpstreamHealth.channels[channelID] = health
 	log.Debugf("upstream ws for channel %d paused for %s (unsupported=%t)", channelID, backoff, unsupported)
 }
@@ -83,7 +88,10 @@ func recordWSUpstreamFailure(channelID int, unsupported bool) {
 func recordWSUpstreamSuccess(channelID int) {
 	wsUpstreamHealth.Lock()
 	defer wsUpstreamHealth.Unlock()
-	delete(wsUpstreamHealth.channels, channelID)
+	// 还在暂停期里的不动：那是别的连接握手失败留下的，这条老连接上的成功说明不了新握手能成
+	if !time.Now().Before(wsUpstreamHealth.channels[channelID].skipUntil) {
+		delete(wsUpstreamHealth.channels, channelID)
+	}
 }
 
 func resetWSUpstreamHealth() {
@@ -247,7 +255,9 @@ func shouldMarkWSUnsupported(response *http.Response, err error) bool {
 // handled 为假表示这个渠道现在用不了 WS，调用方在同一次尝试里改走 HTTP。
 func (ra *relayAttempt) forwardViaUpstreamWS(ctx context.Context) (statusCode int, err error, handled bool) {
 	u := ra.upstream
-	if u.conn != nil && u.channelID == ra.channel.ID && u.keyID == ra.usedKey.ID {
+	// 渠道的地址被改掉以后，连着旧地址的连接不再用
+	sameURL := slices.ContainsFunc(ra.channel.BaseUrls, func(b dbmodel.BaseUrl) bool { return b.URL == u.baseURL })
+	if u.conn != nil && u.channelID == ra.channel.ID && u.keyID == ra.usedKey.ID && sameURL {
 		statusCode, err, stale := ra.upstreamWSTurn(ctx, true)
 		if !stale {
 			return statusCode, err, true
@@ -271,7 +281,8 @@ func (ra *relayAttempt) dialUpstreamWS(ctx context.Context) bool {
 		return false
 	}
 	headers := buildUpstreamWSHeaders(ra.clientRequestHeaders(), ra.channel, ra.usedKey.ChannelKey)
-	conn, unsupported, err := dialWSUpstream(ctx, ra.channel, ra.channel.GetBaseUrl(), headers)
+	baseURL := ra.channel.GetBaseUrl()
+	conn, unsupported, err := dialWSUpstream(ctx, ra.channel, baseURL, headers)
 	if err != nil {
 		// 客户端自己走了造成的失败不算渠道的
 		if ctx.Err() == nil {
@@ -281,7 +292,7 @@ func (ra *relayAttempt) dialUpstreamWS(ctx context.Context) bool {
 		}
 		return false
 	}
-	*ra.upstream = wsUpstream{conn: conn, channelID: ra.channel.ID, keyID: ra.usedKey.ID}
+	*ra.upstream = wsUpstream{conn: conn, channelID: ra.channel.ID, keyID: ra.usedKey.ID, baseURL: baseURL}
 	return true
 }
 
@@ -352,7 +363,9 @@ func (ra *relayAttempt) upstreamWSTurn(ctx context.Context, reused bool) (status
 			// 客户端还什么都没收到：不转发这个错误，交给重试和换渠道。连接上的状态说不准了，不再用它
 			u.close()
 			statusCode, err := wsUpstreamFailure(event)
-			return statusCode, err, reused
+			// 只有这两种错是这条连接自己的问题，换一条新连接能好；限流之类的照常交给调用方
+			connectionProblem := event.Error.Code == "previous_response_not_found" || event.Error.Code == "websocket_connection_limit_reached"
+			return statusCode, err, reused && connectionProblem
 		}
 		if first {
 			first = false
@@ -412,21 +425,28 @@ func (ra *relayAttempt) upstreamWSBroken(ctx context.Context, stale bool, err er
 }
 
 // buildUpstreamWSPayload 把请求体变成上游 WS 的 response.create 消息：
-// 只改 model 和 WS 协议要求的几个字段，其余原样。渠道的参数覆盖最后应用，和走 HTTP 时一样。
+// 只改 model 和 WS 协议要求的几个字段，其余原样。渠道的参数覆盖和走 HTTP 时一样能改 model，
+// 但改不掉 WS 协议要求的那几个字段。
 func (ra *relayAttempt) buildUpstreamWSPayload(body []byte) ([]byte, error) {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
 	payload["model"], _ = json.Marshal(ra.internalRequest.Model)
-	payload["type"] = json.RawMessage(`"response.create"`)
-	payload["stream"] = json.RawMessage(`true`)
-	delete(payload, "background") // WS 上没有后台模式
 	message, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	return helper.MergeParamOverride(message, ra.channel.ParamOverride)
+	if message, err = helper.MergeParamOverride(message, ra.channel.ParamOverride); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(message, &payload); err != nil {
+		return nil, err
+	}
+	payload["type"] = json.RawMessage(`"response.create"`)
+	payload["stream"] = json.RawMessage(`true`)
+	delete(payload, "background") // WS 上没有后台模式
+	return json.Marshal(payload)
 }
 
 // wsUpstreamEvent 是转发上游 WS 事件时要看的几样东西。

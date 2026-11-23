@@ -21,6 +21,7 @@ func TestMergeParamOverride(t *testing.T) {
 		"override wins":          {body, override(`{"model":"o3","service_tier":"priority"}`), `{"model":"o3","seed":9007199254740993,"service_tier":"priority","tools":[{"type":"custom"}]}`},
 		"null override":          {`{"a":1}`, override(`{"a":null}`), `{"a":null}`},
 		"override not an object": {body, override(`["x"]`), body},
+		"override is null":       {`{ "z": 1, "a": 2 }`, override(`null`), `{ "z": 1, "a": 2 }`},
 		"body not an object":     {`["x"]`, override(`{"a":1}`), `["x"]`},
 		"body null":              {`null`, override(`{"a":1}`), `null`},
 		"body not json":          {`not json`, override(`{"a":1}`), `not json`},

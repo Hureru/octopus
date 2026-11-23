@@ -100,6 +100,7 @@ func needsConversationRestart(message string) bool {
 	return strings.Contains(message, "please restart the conversation") ||
 		strings.Contains(message, "continuation connection is unavailable") ||
 		strings.Contains(message, "no tool call found for function call output with call_id") ||
+		strings.Contains(message, "previous_response_not_found") || // 上游给的错误码，文字说明各家不一样
 		strings.Contains(message, "previous response") && strings.Contains(message, "not found")
 }
 

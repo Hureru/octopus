@@ -410,6 +410,9 @@ func (ra *relayAttempt) attempt() attemptResult {
 	if writer, ok := ra.streamWriter.(*WSStreamWriter); ok && fwdErr == nil {
 		if failedStatus, failure := writer.reportedFailure(); failure != nil {
 			statusCode, fwdErr = failedStatus, failure
+		} else if writer.terminalEvent() == "" {
+			// 流正常结束了，却没有结束事件：回复是残缺的
+			fwdErr = errors.New("upstream stream ended without a terminal event")
 		}
 	}
 
@@ -737,8 +740,13 @@ func (ra *relayAttempt) copyHeaders(outboundRequest *http.Request) {
 		if !shouldProxyUpstreamWSHeader(key) {
 			continue
 		}
-		// WS 握手用的 beta 头不能带进 HTTP 请求
-		if lowerKey == "openai-beta" && strings.Contains(strings.Join(values, ","), "responses_websockets") {
+		// WS 握手用的 beta 标记不能带进 HTTP 请求，其余的标记照常转发
+		if lowerKey == "openai-beta" {
+			flags := strings.FieldsFunc(strings.Join(values, ","), func(r rune) bool { return r == ',' || r == ' ' })
+			flags = slices.DeleteFunc(flags, func(flag string) bool { return strings.HasPrefix(flag, "responses_websockets") })
+			if len(flags) > 0 {
+				outboundRequest.Header.Set(key, strings.Join(flags, ","))
+			}
 			continue
 		}
 		// anthropic-beta 需要与出站默认值合并去重，避免覆盖掉

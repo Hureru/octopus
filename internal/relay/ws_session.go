@@ -39,12 +39,9 @@ func (s *wsConversationState) BuildReplayRequest(req *transformerModel.InternalL
 	replayed.SetOpenAIResponsesOptions(responsesOptions)
 	replayed.SetOpenAIRawInputItems(nil)
 	// Responses 渠道用下面合并好的原始条目；其他渠道从 Messages 生成请求，所以 Messages 也要是完整对话。
-	// 说明性消息只用这一轮的（上一轮的 instructions 不会带到下一轮），放在最前面。
-	replayed.Messages = slices.Concat(
-		pickMessages(req.Messages, true),
-		pickMessages(s.Transcript, false),
-		pickMessages(req.Messages, false),
-	)
+	// 顶层的 instructions 只用这一轮的（上一轮的不会带到下一轮），放在最前面。
+	instructions, input := splitInstructions(req)
+	replayed.Messages = cloneMessages(slices.Concat(instructions, s.Transcript, input))
 
 	// Merge historical replay window and current request into raw input items
 	mergedRawInputItems, ok := buildReplayRawInputItems(s.ReplayWindowItems, s.Transcript, req.OpenAIRawInputItems(), req.Messages)
@@ -80,7 +77,8 @@ func (s *wsConversationState) ApplySuccessfulTurn(req *transformerModel.Internal
 		// 回放请求（HTTP 入站传进来的是它）的 Messages 已经是完整对话，不能再接在旧记录后面
 		s.Transcript = nil
 	}
-	s.Transcript = append(s.Transcript, cloneMessages(req.Messages)...)
+	_, input := splitInstructions(req) // instructions 不是对话的一部分，不记
+	s.Transcript = append(s.Transcript, cloneMessages(input)...)
 	s.Transcript = append(s.Transcript, assistantMessagesFromResponse(resp)...)
 	if respID := strings.TrimSpace(resp.ID); respID != "" {
 		s.LastResponseID = respID
@@ -234,15 +232,13 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-// pickMessages 返回说明性消息（system / developer），或者除它们以外的消息，都是副本。
-func pickMessages(messages []transformerModel.Message, instructions bool) []transformerModel.Message {
-	var picked []transformerModel.Message
-	for _, msg := range messages {
-		if (msg.Role == "system" || msg.Role == "developer") == instructions {
-			picked = append(picked, cloneMessage(msg))
-		}
+// splitInstructions 把请求的消息分成两段：顶层 instructions 变成的那一条（没有就是空的），和输入条目变成的其余消息。
+// 输入条目里的 system / developer 消息属于后一段，它们是对话的一部分。
+func splitInstructions(req *transformerModel.InternalLLMRequest) (instructions, input []transformerModel.Message) {
+	if len(req.Messages) > 0 && req.TransformerMetadata[transformerModel.TransformerMetadataOpenAIResponsesInstructions] == "true" {
+		return req.Messages[:1], req.Messages[1:]
 	}
-	return picked
+	return nil, req.Messages
 }
 
 func buildReplayRawInputItems(
@@ -338,7 +334,8 @@ func buildRawReplayBody(clientBody []byte, mergedInput json.RawMessage) []byte {
 // responsesOutputCollector 从上游事件里收集模型输出条目的原始 JSON。
 // 续传回放要把它们原样带回去；经内部结构重新生成会丢掉不认识的字段（比如自定义工具调用的 input）。
 type responsesOutputCollector struct {
-	done     []json.RawMessage // response.output_item.done 里的条目，按到达顺序
+	done     []json.RawMessage // response.output_item.done 里的条目，按 output_index 排
+	indexes  []int             // done 里每一条的 output_index；上游没给时是它到达的次序
 	terminal json.RawMessage   // 结束事件自带的非空 output
 }
 
@@ -346,6 +343,7 @@ func (c *responsesOutputCollector) observe(event []byte) {
 	var parsed struct {
 		Type     string          `json:"type"`
 		Item     json.RawMessage `json:"item"`
+		Index    *int            `json:"output_index"`
 		Response struct {
 			Output json.RawMessage `json:"output"`
 		} `json:"response"`
@@ -356,7 +354,17 @@ func (c *responsesOutputCollector) observe(event []byte) {
 	switch parsed.Type {
 	case "response.output_item.done":
 		if len(parsed.Item) > 0 {
-			c.done = append(c.done, parsed.Item)
+			index := len(c.done)
+			if parsed.Index != nil {
+				index = *parsed.Index
+			}
+			// 条目几乎总是按顺序到的，所以从后往前找位置
+			at := len(c.done)
+			for at > 0 && c.indexes[at-1] > index {
+				at--
+			}
+			c.done = slices.Insert(c.done, at, parsed.Item)
+			c.indexes = slices.Insert(c.indexes, at, index)
 		}
 	case "response.completed", "response.incomplete":
 		if items, err := decodeRawJSONArray(parsed.Response.Output); err == nil && len(items) > 0 {

@@ -41,7 +41,7 @@ func MergeParamOverride(body []byte, paramOverride *string) ([]byte, error) {
 		return body, nil
 	}
 	var bodyMap, override map[string]json.RawMessage
-	if json.Unmarshal(body, &bodyMap) != nil || json.Unmarshal([]byte(*paramOverride), &override) != nil || bodyMap == nil {
+	if json.Unmarshal(body, &bodyMap) != nil || json.Unmarshal([]byte(*paramOverride), &override) != nil || bodyMap == nil || override == nil {
 		return body, nil
 	}
 	for key, value := range override {

@@ -341,13 +341,14 @@ func TestBuildReplayRequestMessagesCarryConversation(t *testing.T) {
 	state := &wsConversationState{
 		LastResponseID:    "resp_prev",
 		ReplayWindowItems: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]`),
-		Transcript:        []transformerModel.Message{text("system", "old instructions"), text("user", "hello"), text("assistant", "hi")},
+		Transcript:        []transformerModel.Message{text("developer", "old developer"), text("user", "hello"), text("assistant", "hi")},
 	}
 	req := &transformerModel.InternalLLMRequest{
 		Model:              "gpt-4o",
 		PreviousResponseID: stringPtr("resp_prev"),
 		Messages:           []transformerModel.Message{text("system", "new instructions"), text("developer", "keep developer"), text("user", "again")},
 	}
+	req.SetTransformerMetadataValue(transformerModel.TransformerMetadataOpenAIResponsesInstructions, "true")
 
 	replayed := state.BuildReplayRequest(req)
 	if replayed == nil {
@@ -357,7 +358,7 @@ func TestBuildReplayRequestMessagesCarryConversation(t *testing.T) {
 	for _, msg := range replayed.Messages {
 		got = append(got, msg.Role+":"+*msg.Content.Content)
 	}
-	want := "system:new instructions | developer:keep developer | user:hello | assistant:hi | user:again"
+	want := "system:new instructions | developer:old developer | user:hello | assistant:hi | developer:keep developer | user:again"
 	if strings.Join(got, " | ") != want {
 		t.Fatalf("replay messages = %q, want %q", strings.Join(got, " | "), want)
 	}
